@@ -1,0 +1,63 @@
+============================= test session starts ==============================
+platform linux -- Python 3.11.14, pytest-9.0.1, pluggy-1.6.0 -- /usr/local/bin/python3
+cachedir: .pytest_cache
+rootdir: /home/user/shoccs/python-migration
+configfile: pytest.ini
+collecting ... collected 47 items
+
+tests/test_stencils.py::TestInteriorStencils::test_centered_diff_1st_order2_coefficients PASSED [  2%]
+tests/test_stencils.py::TestInteriorStencils::test_centered_diff_2nd_order2_coefficients PASSED [  4%]
+tests/test_stencils.py::TestInteriorStencils::test_centered_diff_1st_order4_coefficients PASSED [  6%]
+tests/test_stencils.py::TestInteriorStencils::test_centered_diff_2nd_order4_coefficients PASSED [  8%]
+tests/test_stencils.py::TestInteriorStencils::test_1st_derivative_constant_function PASSED [ 10%]
+tests/test_stencils.py::TestInteriorStencils::test_1st_derivative_linear_function PASSED [ 12%]
+tests/test_stencils.py::TestInteriorStencils::test_1st_derivative_quadratic_function PASSED [ 14%]
+tests/test_stencils.py::TestInteriorStencils::test_2nd_derivative_linear_function PASSED [ 17%]
+tests/test_stencils.py::TestInteriorStencils::test_2nd_derivative_quadratic_function PASSED [ 19%]
+tests/test_stencils.py::TestInteriorStencils::test_2nd_derivative_cubic_function PASSED [ 21%]
+tests/test_stencils.py::TestInteriorStencils::test_4th_order_1st_derivative_cubic PASSED [ 23%]
+tests/test_stencils.py::TestInteriorStencils::test_4th_order_2nd_derivative_quartic PASSED [ 25%]
+tests/test_stencils.py::TestInteriorStencils::test_stencils_are_numba_compiled PASSED [ 27%]
+tests/test_stencils.py::TestE2PolyStencils::test_e2_poly_stencil_creation PASSED [ 29%]
+tests/test_stencils.py::TestE2PolyStencils::test_e2_poly_stencil_padding PASSED [ 31%]
+tests/test_stencils.py::TestE2PolyStencils::test_e2_poly_interior_stencil PASSED [ 34%]
+tests/test_stencils.py::TestE2PolyStencils::test_e2_poly_interior_linear_function PASSED [ 36%]
+tests/test_stencils.py::TestE2PolyStencils::test_e2_poly_interp_interior_zero_offset PASSED [ 38%]
+tests/test_stencils.py::TestE2PolyStencils::test_e2_poly_interp_interior_positive_offset PASSED [ 40%]
+tests/test_stencils.py::TestE2PolyStencils::test_e2_poly_interp_interior_negative_offset PASSED [ 42%]
+tests/test_stencils.py::TestE2PolyStencils::test_e2_poly_interp_interior_sum_to_one PASSED [ 44%]
+tests/test_stencils.py::TestE2PolyStencils::test_e2_poly_nbs_floating_shape PASSED [ 46%]
+tests/test_stencils.py::TestE2PolyStencils::test_e2_poly_nbs_dirichlet_shape PASSED [ 48%]
+tests/test_stencils.py::TestE2PolyStencils::test_e2_poly_nbs_floating_nonzero PASSED [ 51%]
+tests/test_stencils.py::TestE2PolyStencils::test_e2_poly_nbs_dirichlet_nonzero PASSED [ 53%]
+tests/test_stencils.py::TestE2PolyStencils::test_make_e2_poly_stencil_factory PASSED [ 55%]
+tests/test_stencils.py::TestE2PolyStencils::test_e2_poly_functions_are_numba_compiled PASSED [ 57%]
+tests/test_stencils.py::TestStencilIntegration::test_comparison_2nd_and_4th_order_convergence PASSED [ 59%]
+tests/test_cpp_reference.py::TestPolyE2_1ReferenceComparison::test_interior_h_1_0 PASSED [ 61%]
+tests/test_cpp_reference.py::TestPolyE2_1ReferenceComparison::test_dirichlet_nbs_h_1_0_psi_0_001_left PASSED [ 63%]
+tests/test_cpp_reference.py::TestPolyE2_1ReferenceComparison::test_coefficient_sum_properties PASSED [ 65%]
+tests/test_cpp_reference.py::TestPolyE2_1ReferenceComparison::test_symmetry_properties PASSED [ 68%]
+tests/test_cpp_reference.py::TestNumericalStability::test_small_h_stability PASSED [ 70%]
+tests/test_cpp_reference.py::TestNumericalStability::test_large_h_stability PASSED [ 72%]
+tests/test_cpp_reference.py::TestNumericalStability::test_psi_near_zero PASSED [ 74%]
+tests/test_cpp_reference.py::TestNumericalStability::test_psi_near_one PASSED [ 76%]
+tests/test_cpp_reference.py::TestPolynomialReproduction::test_interior_constant_function PASSED [ 78%]
+tests/test_cpp_reference.py::TestPolynomialReproduction::test_interior_linear_function PASSED [ 80%]
+tests/test_cpp_reference.py::TestPolynomialReproduction::test_interior_quadratic_function PASSED [ 82%]
+tests/test_cpp_reference.py::TestOperatorReadiness::test_coefficient_array_sizes PASSED [ 85%]
+tests/test_cpp_reference.py::TestOperatorReadiness::test_left_right_boundary_consistency PASSED [ 87%]
+tests/test_cpp_reference.py::TestOperatorReadiness::test_no_catastrophic_cancellation PASSED [ 89%]
+tests/test_convergence.py::TestConvergenceRates::test_2nd_order_1st_derivative_convergence_rate PASSED [ 91%]
+tests/test_convergence.py::TestConvergenceRates::test_2nd_order_2nd_derivative_convergence_rate PASSED [ 93%]
+tests/test_convergence.py::TestConvergenceRates::test_4th_order_1st_derivative_convergence_rate PASSED [ 95%]
+tests/test_convergence.py::TestConvergenceRates::test_4th_order_2nd_derivative_convergence_rate PASSED [ 97%]
+tests/test_convergence.py::TestConvergenceRates::test_error_reduction_ratios PASSED [100%]
+
+=============================== warnings summary ===============================
+../../../../usr/local/lib/python3.11/dist-packages/_pytest/config/__init__.py:1397
+  /usr/local/lib/python3.11/dist-packages/_pytest/config/__init__.py:1397: PytestConfigWarning: Unknown config option: python_paths
+  
+    self._warn_or_fail_if_strict(f"Unknown config option: {key}\n")
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+======================== 47 passed, 1 warning in 3.44s =========================

@@ -1,0 +1,90 @@
+{
+  "metadata": {
+    "description": "Minimal reference data from C++ SHOCCS test files for Python validation",
+    "source": "Manually extracted from E2_1.t.cpp and polyE2_1.t.cpp",
+    "precision": "double (IEEE 754)",
+    "note": "Run build_and_generate.sh to generate complete reference data"
+  },
+  "E2_1": {
+    "alpha": [1.0, 2.0, 3.0, -1.0],
+    "interior": [
+      {
+        "name": "h=0.1",
+        "h": 0.1,
+        "coefficients": [-5.0, 0.0, 5.0]
+      },
+      {
+        "name": "h=1.0",
+        "h": 1.0,
+        "coefficients": [-0.5, 0.0, 0.5]
+      },
+      {
+        "name": "h=2.0",
+        "h": 2.0,
+        "coefficients": [-0.25, 0.0, 0.25]
+      }
+    ],
+    "floating": [
+      {
+        "name": "h=2.0_psi=1.0_ray_inside",
+        "h": 2.0,
+        "psi": 1.0,
+        "ray_outside": false,
+        "bc_type": "floating",
+        "r": 4,
+        "t": 5,
+        "coefficients": [
+          3.0, -5.0, 0.5, 1.5, 0.0,
+          -0.5, 0.0, 1.0, -0.5, 0.0,
+          0.02631578947368421, -0.32894736842105265, 0.07894736842105263, 0.2236842105263158, 0.0,
+          0.0, 0.0, -0.25, 0.0, 0.25
+        ]
+      }
+    ],
+    "dirichlet": [
+      {
+        "name": "h=0.5_psi=0.0_ray_outside",
+        "h": 0.5,
+        "psi": 0.0,
+        "ray_outside": true,
+        "bc_type": "dirichlet",
+        "r": 3,
+        "t": 5,
+        "coefficients": [
+          -0.8947368421052632, -0.3157894736842105, 1.3157894736842106,
+          -0.10526315789473684, 0.0,
+          2.0, -4.0, 0.0, 2.0, 0.0,
+          -6.0, -2.0, 20.0, 0.0, -12.0
+        ]
+      }
+    ]
+  },
+  "polyE2_1": {
+    "floating_alpha": [0.1, 0.2, 0.3, 0.4, 0.5, 0.6],
+    "dirichlet_alpha": [0.12, 0.13, 0.14],
+    "interpolant_alpha": [0.15, 0.25, 0.35, 0.45],
+    "interior": [
+      {
+        "name": "h=1.0",
+        "h": 1.0,
+        "coefficients": [-0.5, 0.0, 0.5]
+      }
+    ],
+    "floating": [],
+    "dirichlet": [
+      {
+        "name": "h=1.0_psi=0.001_ray_inside",
+        "h": 1.0,
+        "psi": 0.001,
+        "ray_outside": false,
+        "bc_type": "dirichlet",
+        "r": 2,
+        "t": 4,
+        "coefficients": [
+          -0.4395604395604396, -0.4166369491239419, 0.7128343378083233, 0.14336305087605816,
+          -0.4295704295704296, -0.435, 0.7295704295704296, 0.135
+        ]
+      }
+    ]
+  }
+}
