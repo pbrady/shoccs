@@ -34,150 +34,150 @@ TEST_CASE("planes construction")
 TEST_CASE("planes extraction")
 {
     index_extents i{.extents = int3{2, 3, 4}};
-    auto t = tuple{vs::iota(0, 2 * 3 * 4)};
+    auto t = tuple{std::views::iota(0, 2 * 3 * 4)};
 
-    REQUIRE(rs::equal(t | sel::xmin(i), vs::iota(0, 12)));
-    REQUIRE(rs::equal(t | sel::xmax(i), vs::iota(12, 24)));
+    REQUIRE(std::ranges::equal(t | sel::xmin(i), std::views::iota(0, 12)));
+    REQUIRE(std::ranges::equal(t | sel::xmax(i), std::views::iota(12, 24)));
     // == doesn't work with ymin/max selector...
-    REQUIRE(rs::equal(t | sel::ymin(i), tuple{std::vector{0, 1, 2, 3, 12, 13, 14, 15}}));
+    REQUIRE(std::ranges::equal(t | sel::ymin(i), tuple{std::vector{0, 1, 2, 3, 12, 13, 14, 15}}));
     REQUIRE(
-        rs::equal(t | sel::ymax(i), tuple{std::vector{8, 9, 10, 11, 20, 21, 22, 23}}));
-    REQUIRE(rs::equal(t | sel::zmin(i), std::vector{0, 4, 8, 12, 16, 20}));
-    REQUIRE(rs::equal(t | sel::zmax(i), tuple{std::vector{3, 7, 11, 15, 19, 23}}));
+        std::ranges::equal(t | sel::ymax(i), tuple{std::vector{8, 9, 10, 11, 20, 21, 22, 23}}));
+    REQUIRE(std::ranges::equal(t | sel::zmin(i), std::vector{0, 4, 8, 12, 16, 20}));
+    REQUIRE(std::ranges::equal(t | sel::zmax(i), tuple{std::vector{3, 7, 11, 15, 19, 23}}));
 
-    auto u = tuple<std::vector<int>>{vs::iota(24, 48)};
-    REQUIRE(rs::equal(get<0>(t | sel::xmin(i)).apply(u), u | sel::xmin(i)));
-    REQUIRE(rs::equal(get<0>(t | sel::ymax(i)).apply(u), u | sel::ymax(i)));
-    REQUIRE(rs::equal(get<0>(t | sel::zmin(i)).apply(u), u | sel::zmin(i)));
+    auto u = tuple<std::vector<int>>{std::views::iota(24, 48)};
+    REQUIRE(std::ranges::equal(get<0>(t | sel::xmin(i)).apply(u), u | sel::xmin(i)));
+    REQUIRE(std::ranges::equal(get<0>(t | sel::ymax(i)).apply(u), u | sel::ymax(i)));
+    REQUIRE(std::ranges::equal(get<0>(t | sel::zmin(i)).apply(u), u | sel::zmin(i)));
 }
 
 TEST_CASE("planes assignment")
 {
     using T = std::vector<int>;
     index_extents i{.extents = int3{2, 3, 4}};
-    auto t = tuple<T>{vs::iota(0, 2 * 3 * 4)};
+    auto t = tuple<T>{std::views::iota(0, 2 * 3 * 4)};
 
     t | sel::xmin(i) = -1;
 
-    REQUIRE((t | sel::xmin(i)) == tuple{vs::repeat_n(-1, 12)});
-    REQUIRE((t | sel::xmax(i)) == tuple{vs::iota(12, 24)});
+    REQUIRE(((t | sel::xmin(i)) == tuple{std::vector<int>(12, -1)}));
+    REQUIRE(((t | sel::xmax(i)) == tuple{std::views::iota(12, 24)}));
 
     t | sel::xmax(i) = -2;
 
-    REQUIRE((t | sel::xmin(i)) == tuple{vs::repeat_n(-1, 12)});
-    REQUIRE((t | sel::xmax(i)) == tuple{vs::repeat_n(-2, 12)});
+    REQUIRE(((t | sel::xmin(i)) == tuple{std::vector<int>(12, -1)}));
+    REQUIRE(((t | sel::xmax(i)) == tuple{std::vector<int>(12, -2)}));
 
-    t | sel::zmin(i) = vs::iota(0) | vs::stride(4) | vs::take_exactly(6);
-    REQUIRE((t | sel::zmin(i)) == tuple{std::vector{0, 4, 8, 12, 16, 20}});
+    t | sel::zmin(i) = std::vector{0, 4, 8, 12, 16, 20};
+    REQUIRE(((t | sel::zmin(i)) == tuple{std::vector{0, 4, 8, 12, 16, 20}}));
 
     t | sel::ymax(i) = -3;
-    REQUIRE((t | sel::zmin(i)) == tuple{std::vector{0, 4, -3, 12, 16, -3}});
-    REQUIRE(rs::equal(t | sel::ymax(i), vs::repeat_n(-3, 8)));
+    REQUIRE(((t | sel::zmin(i)) == tuple{std::vector{0, 4, -3, 12, 16, -3}}));
+    REQUIRE(std::ranges::equal(t | sel::ymax(i), std::vector<int>(8, -3)));
 }
 
 TEST_CASE("planes scalar extraction")
 {
     using T = std::vector<int>;
     index_extents i{.extents = int3{2, 3, 4}};
-    scalar<T> s{tuple{vs::iota(0, 24)}, tuple{0, 0, 0}};
+    scalar<T> s{tuple{std::views::iota(0, 24)}, tuple{0, 0, 0}};
 
-    REQUIRE((s | sel::xmin(i)) == tuple{vs::iota(0, 12)});
-    REQUIRE((s | sel::xmax(i)) == tuple{vs::iota(12, 24)});
+    REQUIRE(((s | sel::xmin(i)) == tuple{std::views::iota(0, 12)}));
+    REQUIRE(((s | sel::xmax(i)) == tuple{std::views::iota(12, 24)}));
     // == doesn't work with ymin/max selector...
-    REQUIRE(rs::equal(s | sel::ymin(i), tuple{T{0, 1, 2, 3, 12, 13, 14, 15}}));
-    REQUIRE(rs::equal(s | sel::ymax(i), tuple{T{8, 9, 10, 11, 20, 21, 22, 23}}));
-    REQUIRE((s | sel::zmin(i)) == tuple{T{0, 4, 8, 12, 16, 20}});
-    REQUIRE((s | sel::zmax(i)) == tuple{T{3, 7, 11, 15, 19, 23}});
+    REQUIRE(std::ranges::equal(s | sel::ymin(i), tuple{T{0, 1, 2, 3, 12, 13, 14, 15}}));
+    REQUIRE(std::ranges::equal(s | sel::ymax(i), tuple{T{8, 9, 10, 11, 20, 21, 22, 23}}));
+    REQUIRE(((s | sel::zmin(i)) == tuple{T{0, 4, 8, 12, 16, 20}}));
+    REQUIRE(((s | sel::zmax(i)) == tuple{T{3, 7, 11, 15, 19, 23}}));
 
-    scalar<T> v{tuple{vs::iota(24, 48)}, tuple{0, 0, 0}};
+    scalar<T> v{tuple{std::views::iota(24, 48)}, tuple{0, 0, 0}};
 
-    REQUIRE(rs::equal(get<0>(s | sel::xmin(i)).apply(v), v | sel::xmin(i)));
-    REQUIRE(rs::equal(get<0>(s | sel::ymax(i)).apply(v), v | sel::ymax(i)));
-    REQUIRE(rs::equal(get<0>(s | sel::zmin(i)).apply(v), v | sel::zmin(i)));
+    REQUIRE(std::ranges::equal(get<0>(s | sel::xmin(i)).apply(v), v | sel::xmin(i)));
+    REQUIRE(std::ranges::equal(get<0>(s | sel::ymax(i)).apply(v), v | sel::ymax(i)));
+    REQUIRE(std::ranges::equal(get<0>(s | sel::zmin(i)).apply(v), v | sel::zmin(i)));
 }
 
 TEST_CASE("planes scalar assignment")
 {
     using T = std::vector<int>;
     index_extents i{.extents = int3{2, 3, 4}};
-    scalar<T> s{tuple{vs::iota(0, 24)}, tuple{0, 0, 0}};
+    scalar<T> s{tuple{std::views::iota(0, 24)}, tuple{0, 0, 0}};
 
     s | sel::xmin(i) = -1;
 
-    REQUIRE((s | sel::xmin(i)) == tuple{vs::repeat_n(-1, 12)});
-    REQUIRE((s | sel::xmax(i)) == tuple{vs::iota(12, 24)});
+    REQUIRE(((s | sel::xmin(i)) == tuple{std::vector<int>(12, -1)}));
+    REQUIRE(((s | sel::xmax(i)) == tuple{std::views::iota(12, 24)}));
 
     s | sel::xmax(i) = -2;
 
-    REQUIRE((s | sel::xmin(i)) == tuple{vs::repeat_n(-1, 12)});
-    REQUIRE((s | sel::xmax(i)) == tuple{vs::repeat_n(-2, 12)});
+    REQUIRE(((s | sel::xmin(i)) == tuple{std::vector<int>(12, -1)}));
+    REQUIRE(((s | sel::xmax(i)) == tuple{std::vector<int>(12, -2)}));
 
-    s | sel::zmin(i) = vs::iota(0) | vs::stride(4) | vs::take_exactly(6);
-    REQUIRE((s | sel::zmin(i)) == tuple{T{0, 4, 8, 12, 16, 20}});
+    s | sel::zmin(i) = std::vector{0, 4, 8, 12, 16, 20};
+    REQUIRE(((s | sel::zmin(i)) == tuple{T{0, 4, 8, 12, 16, 20}}));
 
     s | sel::ymax(i) = -3;
-    REQUIRE((s | sel::zmin(i)) == tuple{T{0, 4, -3, 12, 16, -3}});
-    REQUIRE(rs::equal(s | sel::ymax(i), vs::repeat_n(-3, 8)));
+    REQUIRE(((s | sel::zmin(i)) == tuple{T{0, 4, -3, 12, 16, -3}}));
+    REQUIRE(std::ranges::equal(s | sel::ymax(i), std::vector<int>(8, -3)));
 
-    scalar<T> v{tuple{vs::iota(24, 48)}, tuple{0, 0, 0}};
+    scalar<T> v{tuple{std::views::iota(24, 48)}, tuple{0, 0, 0}};
     s | sel::xmin(i) = v;
 
-    REQUIRE((s | sel::xmin(i)) == tuple{vs::iota(24, 36)});
-    REQUIRE((s | sel::zmin(i)) == tuple{T{24, 28, 32, 12, 16, -3}});
+    REQUIRE(((s | sel::xmin(i)) == tuple{std::views::iota(24, 36)}));
+    REQUIRE(((s | sel::zmin(i)) == tuple{T{24, 28, 32, 12, 16, -3}}));
 }
 
 TEST_CASE("planes vector extraction")
 {
     using T = std::vector<int>;
     index_extents i{.extents = int3{2, 3, 4}};
-    vector<T> v{tuple{tuple{vs::iota(0, 24)}, tuple{0, 0, 0}},
-                tuple{tuple{vs::iota(24, 48)}, tuple{0, 0, 0}},
-                tuple{tuple{vs::iota(48, 72)}, tuple{0, 0, 0}}};
+    vector<T> v{tuple{tuple{std::views::iota(0, 24)}, tuple{0, 0, 0}},
+                tuple{tuple{std::views::iota(24, 48)}, tuple{0, 0, 0}},
+                tuple{tuple{std::views::iota(48, 72)}, tuple{0, 0, 0}}};
 
-    REQUIRE(get<0>(v | sel::xmin(i)) == tuple{vs::iota(0, 12)});
-    REQUIRE(get<1>(v | sel::xmax(i)) == tuple{vs::iota(36, 48)});
-    REQUIRE(rs::equal(get<2>(v | sel::ymin(i)), T{48, 49, 50, 51, 60, 61, 62, 63}));
-    REQUIRE(rs::equal(get<0>(v | sel::ymax(i)), T{8, 9, 10, 11, 20, 21, 22, 23}));
+    REQUIRE((get<0>(v | sel::xmin(i)) == tuple{std::views::iota(0, 12)}));
+    REQUIRE((get<1>(v | sel::xmax(i)) == tuple{std::views::iota(36, 48)}));
+    REQUIRE(std::ranges::equal(get<2>(v | sel::ymin(i)), T{48, 49, 50, 51, 60, 61, 62, 63}));
+    REQUIRE(std::ranges::equal(get<0>(v | sel::ymax(i)), T{8, 9, 10, 11, 20, 21, 22, 23}));
     REQUIRE((get<1>(v | sel::zmin(i)) == tuple{T{24, 28, 32, 36, 40, 44}}));
     REQUIRE((get<2>(v | sel::zmax(i)) == tuple{T{51, 55, 59, 63, 67, 71}}));
 
-    vector<T> u{tuple{tuple{vs::iota(48, 72)}, tuple{0, 0, 0}},
-                tuple{tuple{vs::iota(0, 24)}, tuple{0, 0, 0}},
-                tuple{tuple{vs::iota(24, 48)}, tuple{0, 0, 0}}};
+    vector<T> u{tuple{tuple{std::views::iota(48, 72)}, tuple{0, 0, 0}},
+                tuple{tuple{std::views::iota(0, 24)}, tuple{0, 0, 0}},
+                tuple{tuple{std::views::iota(24, 48)}, tuple{0, 0, 0}}};
 
-    REQUIRE(rs::equal(get<0>(v | sel::xmin(i)).apply(u), get<0>(u | sel::xmin(i))));
-    REQUIRE(rs::equal(get<1>(v | sel::ymax(i)).apply(u), get<1>(u | sel::ymax(i))));
-    REQUIRE(rs::equal(get<2>(v | sel::zmin(i)).apply(u), get<2>(u | sel::zmin(i))));
+    REQUIRE(std::ranges::equal(get<0>(v | sel::xmin(i)).apply(u), get<0>(u | sel::xmin(i))));
+    REQUIRE(std::ranges::equal(get<1>(v | sel::ymax(i)).apply(u), get<1>(u | sel::ymax(i))));
+    REQUIRE(std::ranges::equal(get<2>(v | sel::zmin(i)).apply(u), get<2>(u | sel::zmin(i))));
 }
 
 TEST_CASE("planes vector assignment")
 {
     using T = std::vector<int>;
     index_extents i{.extents = int3{2, 3, 4}};
-    vector<T> v{tuple{tuple{vs::iota(0, 24)}, tuple{0, 0, 0}},
-                tuple{tuple{vs::iota(24, 48)}, tuple{0, 0, 0}},
-                tuple{tuple{vs::iota(48, 72)}, tuple{0, 0, 0}}};
+    vector<T> v{tuple{tuple{std::views::iota(0, 24)}, tuple{0, 0, 0}},
+                tuple{tuple{std::views::iota(24, 48)}, tuple{0, 0, 0}},
+                tuple{tuple{std::views::iota(48, 72)}, tuple{0, 0, 0}}};
 
     v | sel::xmin(i) = -1;
 
-    REQUIRE(get<0>(v | sel::xmin(i)) == tuple{vs::repeat_n(-1, 12)});
-    REQUIRE(get<1>(v | sel::xmax(i)) == tuple{vs::iota(36, 48)});
-    REQUIRE(get<2>(v | sel::xmin(i)) == tuple{vs::repeat_n(-1, 12)});
+    REQUIRE((get<0>(v | sel::xmin(i)) == tuple{std::vector<int>(12, -1)}));
+    REQUIRE((get<1>(v | sel::xmax(i)) == tuple{std::views::iota(36, 48)}));
+    REQUIRE((get<2>(v | sel::xmin(i)) == tuple{std::vector<int>(12, -1)}));
 
-    vector<T> u{tuple{tuple{vs::iota(48, 72)}, tuple{0, 0, 0}},
-                tuple{tuple{vs::iota(0, 24)}, tuple{0, 0, 0}},
-                tuple{tuple{vs::iota(24, 48)}, tuple{0, 0, 0}}};
+    vector<T> u{tuple{tuple{std::views::iota(48, 72)}, tuple{0, 0, 0}},
+                tuple{tuple{std::views::iota(0, 24)}, tuple{0, 0, 0}},
+                tuple{tuple{std::views::iota(24, 48)}, tuple{0, 0, 0}}};
 
     auto w = v | sel::ymin(i);
     static_assert(!SimilarTuples<decltype(w), vector<T>>);
 
     v | sel::ymin(i) = u;
 
-    REQUIRE(rs::equal(get<0>(v | sel::ymin(i)), get<0>(u | sel::ymin(i))));
-    REQUIRE(rs::equal(get<1>(v | sel::ymin(i)), get<1>(u | sel::ymin(i))));
-    REQUIRE(rs::equal(get<2>(v | sel::ymin(i)), get<2>(u | sel::ymin(i))));
+    REQUIRE(std::ranges::equal(get<0>(v | sel::ymin(i)), get<0>(u | sel::ymin(i))));
+    REQUIRE(std::ranges::equal(get<1>(v | sel::ymin(i)), get<1>(u | sel::ymin(i))));
+    REQUIRE(std::ranges::equal(get<2>(v | sel::ymin(i)), get<2>(u | sel::ymin(i))));
 
-    REQUIRE(get<1>(v | sel::zmin(i)) == tuple{T{0, -1, -1, 12, 40, 44}});
+    REQUIRE((get<1>(v | sel::zmin(i)) == tuple{T{0, -1, -1, 12, 40, 44}}));
 }
 
 TEST_CASE("multi_slice construction")

@@ -352,13 +352,14 @@ Migrate test files to remove `#include <range/v3/all.hpp>` and all `rs::`/`vs::`
   - `rs::equal(a, b)` → `std::ranges::equal(a, b)`, `rs::size(r)` → `std::ranges::size(r)`
   - `ViewClosure<...>` static_asserts (lines 26–31, 188) remain valid since selector closures use `ccs::view_closure` after migration
 
-  - [ ] **1.20e1** Migrate plane selector tests (lines 1–181, ~61 `rs::`/`vs::` occurrences): Tests for `planes construction`, `planes extraction`, `planes assignment`, `planes scalar extraction/assignment`, `planes vector extraction/assignment`.
-    - Replace `vs::stride(n) | vs::take_exactly(n)` → `ccs::stride(rng, n)` piped to `std::views::take(n)` (lines 70, 115).
-    - Replace `vs::repeat_n` in REQUIRE comparisons → `std::vector<int>(n, v)`.
-    - Replace `vs::iota` → `std::views::iota`.
-    - Replace `rs::equal` → `std::ranges::equal` (~20 occurrences in this section).
+  - [x] **1.20e1** Migrate plane selector tests (lines 1–181, ~61 `rs::`/`vs::` occurrences): Tests for `planes construction`, `planes extraction`, `planes assignment`, `planes scalar extraction/assignment`, `planes vector extraction/assignment`.
+    - Replaced `vs::iota(0) | vs::stride(4) | vs::take_exactly(6)` → `std::vector{0, 4, 8, 12, 16, 20}` (lines 70, 115).
+    - Replaced `vs::repeat_n(v, n)` → `std::vector<int>(n, v)` (~10 occurrences).
+    - Replaced `vs::iota(a, b)` → `std::views::iota(a, b)` (~25 occurrences).
+    - Replaced `rs::equal(a, b)` → `std::ranges::equal(a, b)` (~20 occurrences).
+    - Added double parentheses `REQUIRE((expr == expr))` around all `ccs::tuple` `==` comparisons to prevent Catch2 `ExprLhs` decomposition triggering C++20 ambiguous reversed operator== errors (~24 lines).
     - Files: `src/fields/selector.t.cpp` (lines 1–181)
-    - Test: `ctest --test-dir build -R t-selector`
+    - Test: `t-selector` still won't compile until 1.20e2+e3 complete. All 6 downstream field targets build and pass.
 
   - [ ] **1.20e2** Migrate multi_slice tests (lines 183–461, ~127 `rs::`/`vs::` occurrences): Tests for `multi_slice construction`, `multi_slice extraction`, `multi_slice assignment`, `multi_slice scalar extraction/assignment`, `multi_slice vector extraction/assignment`, `default operators`.
     - This section has the heaviest `vs::concat(vs::repeat_n(...), vs::iota(...), ...)` nesting. Each `vs::concat(...)` should be replaced with the computed `std::vector<int>{...}` literal. For example: `vs::concat(vs::repeat_n(-1, 1), vs::repeat_n(-2, 7), vs::repeat_n(-1, 14), vs::repeat_n(-2, 2))` → `std::vector<int>{-1, -2,-2,-2,-2,-2,-2,-2, -1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1, -2,-2}` (or use a helper).
