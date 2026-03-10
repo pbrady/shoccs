@@ -116,7 +116,7 @@ inline void copy_zero_padded(std::span<const real> src, std::span<real> dst) {
     - `rs::copy(vs::concat(fa_, vs::repeat(0.0)) | vs::take(fa.size()), rs::begin(fa));` → `copy_zero_padded(fa_, fa);`
     - `rs::copy(vs::concat(da_, vs::repeat(0.0)) | vs::take(da.size()), rs::begin(da));` → `copy_zero_padded(da_, da);`
     - `rs::copy(vs::concat(ia_, vs::repeat(0.0)) | vs::take(ia.size()), rs::begin(ia));` → `copy_zero_padded(ia_, ia);`
-  - Replace 2 `ranges::reverse(c)` → `std::ranges::reverse(c)` (in `nbs_floating` line 209, `nbs_dirichlet` line 253).
+  - Replace 2 `ranges::reverse(c)` → `std::ranges::reverse(c)` (in `nbs_floating` line 209, `nbs_dirichlet` line 254).
   - Test: `ctest --test-dir build -R t-polyE2_1`
 
 - [ ] **3.8** Migrate `E2_1.cpp` (2509 lines — largest file, but simple range-v3 usage).
