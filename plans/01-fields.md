@@ -63,7 +63,7 @@ These project-local utilities replace range-v3 internal APIs that have no C++20 
   - Test: `cmake --build build` (header-only, compilation test).
   - Must come before: 1.2c, 1.4, 1.8, 1.13, 1.15.
 
-- [ ] **1.2c** Fix `zip_transform_view` to propagate iterator category and support `sized_range` in `src/fields/lazy_views.hpp`:
+- [x] **1.2c** Fix `zip_transform_view` to propagate iterator category and support `sized_range` in `src/fields/lazy_views.hpp`:
   - **Problem:** The current `zip_transform_iterator` hardcodes `iterator_category = std::input_iterator_tag` and lacks `operator--`, `operator+=`/`-=`/`[]`/`+`/`-`/`<=>`. Downstream production code depends on `sized_range` and `random_access_range` when base ranges support them: `field.hpp:90,92` (`nscalars()`/`nvectors()` require `sized_range`), `field.hpp:103,120` (`scalars(i)` requires `random_access_range`), and `tuple_math.t.cpp:219` (`.size()` on view math results). The range-v3 `zip_with` and C++23 `zip_transform_view` both propagate the weakest category from base ranges.
   - Compute `iterator_concept` as the weakest iterator concept among all base range iterators (input/forward/bidirectional/random-access).
   - Add conditional `operator--` (when all bases are bidirectional), `operator+=`/`-=`/`[]`/`+`/`-`/`<=>` (when all bases are random-access) to `zip_transform_iterator`, guarded by `requires` clauses.

@@ -1,6 +1,8 @@
 #pragma once
 
+#include <algorithm>
 #include <cstddef>
+#include <initializer_list>
 #include <iterator>
 #include <ranges>
 #include <type_traits>
@@ -13,7 +15,8 @@ namespace ccs
 // zip_transform_view<F, Rngs...>
 //
 // Lazy view that yields f(*it1, *it2, ...).
-// Models std::ranges::view_interface. Supports at least input iteration.
+// Models std::ranges::view_interface. Propagates the weakest iterator
+// category from base ranges (like C++23 zip_transform_view).
 // ===========================================================================
 namespace detail
 {
@@ -25,6 +28,11 @@ class zip_transform_iterator
     tuple_of_iters iters_;
     const F* f_;
 
+    static constexpr bool all_bidir =
+        (std::ranges::bidirectional_range<Rngs> && ...);
+    static constexpr bool all_random =
+        (std::ranges::random_access_range<Rngs> && ...);
+
 public:
     using difference_type = std::ptrdiff_t;
     using value_type =
@@ -32,7 +40,16 @@ public:
                                                   std::ranges::range_reference_t<Rngs>...>>;
     using reference =
         std::invoke_result_t<const F&, std::ranges::range_reference_t<Rngs>...>;
-    using iterator_category = std::input_iterator_tag;
+    using iterator_concept = std::conditional_t<
+        all_random,
+        std::random_access_iterator_tag,
+        std::conditional_t<
+            all_bidir,
+            std::bidirectional_iterator_tag,
+            std::conditional_t<(std::ranges::forward_range<Rngs> && ...),
+                               std::forward_iterator_tag,
+                               std::input_iterator_tag>>>;
+    using iterator_category = iterator_concept;
 
     zip_transform_iterator() = default;
 
@@ -48,6 +65,8 @@ public:
             [this](const auto&... its) -> reference { return (*f_)(*its...); }, iters_);
     }
 
+    // -- forward --
+
     constexpr zip_transform_iterator& operator++()
     {
         std::apply([](auto&... its) { (++its, ...); }, iters_);
@@ -61,11 +80,90 @@ public:
         return tmp;
     }
 
+    // -- bidirectional --
+
+    constexpr zip_transform_iterator& operator--()
+        requires all_bidir
+    {
+        std::apply([](auto&... its) { (--its, ...); }, iters_);
+        return *this;
+    }
+
+    constexpr zip_transform_iterator operator--(int)
+        requires all_bidir
+    {
+        auto tmp = *this;
+        --*this;
+        return tmp;
+    }
+
+    // -- random access --
+
+    constexpr zip_transform_iterator& operator+=(difference_type n)
+        requires all_random
+    {
+        std::apply([n](auto&... its) { ((its += n), ...); }, iters_);
+        return *this;
+    }
+
+    constexpr zip_transform_iterator& operator-=(difference_type n)
+        requires all_random
+    {
+        return *this += -n;
+    }
+
+    constexpr reference operator[](difference_type n) const
+        requires all_random
+    {
+        return *(*this + n);
+    }
+
+    friend constexpr zip_transform_iterator operator+(zip_transform_iterator it,
+                                                      difference_type n)
+        requires all_random
+    {
+        it += n;
+        return it;
+    }
+
+    friend constexpr zip_transform_iterator operator+(difference_type n,
+                                                      zip_transform_iterator it)
+        requires all_random
+    {
+        it += n;
+        return it;
+    }
+
+    friend constexpr zip_transform_iterator operator-(zip_transform_iterator it,
+                                                      difference_type n)
+        requires all_random
+    {
+        it -= n;
+        return it;
+    }
+
+    friend constexpr difference_type operator-(const zip_transform_iterator& a,
+                                               const zip_transform_iterator& b)
+        requires all_random
+    {
+        return std::get<0>(a.iters_) - std::get<0>(b.iters_);
+    }
+
+    // -- comparison --
+
     friend constexpr bool operator==(const zip_transform_iterator& a,
                                      const zip_transform_iterator& b)
     {
         // Equal if ANY pair of iterators matches (like zip semantics)
         return eq_impl(a.iters_, b.iters_, std::index_sequence_for<Rngs...>{});
+    }
+
+    friend constexpr auto operator<=>(const zip_transform_iterator& a,
+                                      const zip_transform_iterator& b)
+        requires all_random
+    {
+        auto diff = std::get<0>(a.iters_) - std::get<0>(b.iters_);
+        return diff <=> decltype(diff){0};
     }
 
 private:
@@ -129,6 +227,28 @@ public:
         return std::apply(
             [this](const auto&... rngs) {
                 return iterator{&f_, std::ranges::end(rngs)...};
+            },
+            rngs_);
+    }
+
+    constexpr auto size()
+        requires(std::ranges::sized_range<Rngs> && ...)
+    {
+        return std::apply(
+            [](auto&... rngs) {
+                return std::ranges::min(
+                    {static_cast<std::size_t>(std::ranges::size(rngs))...});
+            },
+            rngs_);
+    }
+
+    constexpr auto size() const
+        requires(std::ranges::sized_range<const Rngs> && ...)
+    {
+        return std::apply(
+            [](const auto&... rngs) {
+                return std::ranges::min(
+                    {static_cast<std::size_t>(std::ranges::size(rngs))...});
             },
             rngs_);
     }
