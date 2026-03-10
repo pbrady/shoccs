@@ -805,40 +805,30 @@ namespace detail
 {
 // optional_view is used to make a range appear as zero sized
 template <typename Rng, typename Fn>
-class optional_view : public rs::view_adaptor<optional_view<Rng, Fn>, Rng>
+class optional_view : public std::ranges::view_interface<optional_view<Rng, Fn>>
 {
-    friend rs::range_access;
+    Rng base_;
+    bool keep_bounds_;
 
-    bool keep_bounds;
-
-    rs::semiregular_box_t<Fn> f;
-
-    class adaptor : public rs::adaptor_base
-    {
-        bool keep_bounds;
-
-    public:
-        adaptor() = default;
-        adaptor(bool keep_bounds) : keep_bounds{keep_bounds} {}
-
-        template <typename R>
-        constexpr auto begin(R& rng)
-        {
-            return keep_bounds ? rs::begin(rng.base()) : rs::end(rng.base());
-        }
-    };
-
-    adaptor begin_adaptor() { return {keep_bounds}; }
-
-    adaptor end_adaptor() { return {}; }
+    ccs::semiregular_box<Fn> f;
 
 public:
     optional_view() = default;
 
     explicit constexpr optional_view(Rng&& rng, bool keep_bounds, Fn f)
-        : optional_view::view_adaptor{FWD(rng)}, keep_bounds{keep_bounds}, f{MOVE(f)}
+        : base_{FWD(rng)}, keep_bounds_{keep_bounds}, f{MOVE(f)}
     {
     }
+
+    constexpr auto begin()
+    {
+        return keep_bounds_ ? std::ranges::begin(base_) : std::ranges::end(base_);
+    }
+
+    constexpr auto end() { return std::ranges::end(base_); }
+
+    constexpr auto& base() & { return base_; }
+    constexpr const auto& base() const& { return base_; }
 
     template <typename U>
     constexpr auto apply(U&& u) const
@@ -850,15 +840,6 @@ public:
         }
         else { return f(FWD(u)); }
     }
-
-    // template <typename U>
-    //     requires std::invocable<Fn, U>
-    // constexpr auto apply(U&& u) const { return f(FWD(u)); }
-
-    // template <typename U>
-    //     requires requires(optional_view o, U u) { o.base().apply(u); }
-    // // std::invocable<decltype(std::declval<optional_view>().base().apply), U>)
-    // constexpr auto apply(U&& u) const { return f(this->base().apply(FWD(u))); }
 };
 
 template <typename Rng, typename Fn>

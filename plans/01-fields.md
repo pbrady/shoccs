@@ -240,15 +240,15 @@ All selector items depend on: 1.2a (ccs_range_utils.hpp) and 1.3 (tuple_fwd.hpp 
   - Files: `src/fields/selector.hpp`
   - Test: `t-selector` test file still uses range-v3 (will compile after 1.20e). All downstream targets (t-field, t-field_utils, t-field_math, t-single_view, t-container_tuple, t-algorithms) build and pass.
 
-- [ ] **1.17** Replace `optional_view` in `src/fields/selector.hpp`:
-  - Currently: Inherits `rs::view_adaptor<optional_view<Rng, Fn>, Rng>` with a simple adaptor that returns `begin` or `end` based on a bool.
-  - Replace: Rewrite as a class inheriting from `std::ranges::view_interface<optional_view<Rng, Fn>>`. Implement:
-    - `begin()`: returns `keep_bounds ? std::ranges::begin(base) : std::ranges::end(base)`.
-    - `end()`: returns `std::ranges::end(base)`.
-    - This is a very simple view — ~30 lines of replacement code.
-  - Replace `rs::semiregular_box_t` → `ccs::semiregular_box`.
-  - Files: `src/fields/selector.hpp` (lines 676–764)
-  - Test: `ctest --test-dir build -R t-selector`
+- [x] **1.17** Replace `optional_view` in `src/fields/selector.hpp`:
+  - Rewrote as a class inheriting from `std::ranges::view_interface<optional_view<Rng, Fn>>` with explicit `begin()`, `end()`, and `base()` methods.
+  - `begin()` returns `keep_bounds ? std::ranges::begin(base_) : std::ranges::end(base_)` (empty range when `keep_bounds` is false).
+  - `end()` returns `std::ranges::end(base_)`.
+  - Added `base()` accessor (needed by `apply()` for nested view composition).
+  - Replaced `rs::view_adaptor` → `std::ranges::view_interface`, `rs::semiregular_box_t` → `ccs::semiregular_box`.
+  - Removed `adaptor` inner class, `friend rs::range_access`, `begin_adaptor`/`end_adaptor` methods.
+  - Files: `src/fields/selector.hpp`
+  - Test: `t-selector` test file still uses range-v3 (will compile after 1.20e). All downstream targets (t-field, t-field_utils, t-field_math, t-single_view, t-container_tuple, t-algorithms) build and pass.
 
 - [ ] **1.18** Replace `predicate_view` in `src/fields/selector.hpp`:
   - Currently: Inherits `rs::view_adaptor<predicate_view<Rng, Pred, Fn>, Rng>` with filter-style iteration (lines 780–877).
