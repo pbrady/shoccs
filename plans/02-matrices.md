@@ -237,7 +237,7 @@ Common range-v3 → std/C++20 replacement patterns used across test files:
   - Test: `ctest --test-dir build -R "t-dense|t-circulant"`
   - Must come after: 2.2, 2.3, 2.4
 
-- [ ] **2.9c** Migrate CSR test file: `csr.t.cpp`.
+- [x] **2.9c** Migrate CSR test file: `csr.t.cpp`.
   - Files: `src/matrices/csr.t.cpp`
   - Remove all 4 `<range/v3/...>` includes (`equal`, `shuffle`, `conversion`, `generate_n`). Add `<algorithm>`, `<random>`.
   - Note: `<range/v3/algorithm/equal.hpp>` (line 10) is an unused include — just remove it.
@@ -287,7 +287,7 @@ Common range-v3 → std/C++20 replacement patterns used across test files:
  ├── 2.3 (dense.hpp)  [DONE] ──┐
  ├── 2.2 (dense.cpp)  [DONE] ──┤── 2.9b (dense + circulant tests) [DONE] ──┐
  ├── 2.4 (circulant.cpp) [DONE]┤── 2.9d (inner_block + block tests) ├── 2.10 (verification)
- ├── 2.6 (csr.hpp) [DONE] ── 2.5 (csr.cpp) [DONE] ── 2.9c (csr tests) ──┤
+ ├── 2.6 (csr.hpp) [DONE] ── 2.5 (csr.cpp) [DONE] ── 2.9c (csr tests) [DONE] ──┤
  ├── 2.7 (coefficient_visitor.cpp) [DONE]┐── 2.9a (visitor tests) [DONE] ┘
  └── 2.8 (unit_stride_visitor) [DONE]┘
 ```
