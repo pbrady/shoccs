@@ -73,7 +73,7 @@ ctest --test-dir build -L matrices
 
 - [ ] **2.4** Migrate `circulant.cpp`: Replace the convolution `operator()` with explicit loops.
   - Files: `src/matrices/circulant.cpp`
-  - Remove includes: all 8 range-v3 includes (`copy`, `inner_product`, `concepts`, `drop`, `repeat_n`, `sliding`, `stride`, `zip`, `zip_with`)
+  - Remove includes: all 9 range-v3 includes (`copy`, `inner_product`, `concepts`, `drop`, `repeat_n`, `sliding`, `stride`, `zip`, `zip_with`)
   - Add include: `<numeric>` (for `std::inner_product`)
   - `circulant.hpp` has no range-v3 usage — no changes needed there.
   - Replace `st == 1` branch: `vs::zip_with(inner_product, repeat_n(v, rows), sliding(x, size))` + `vs::zip(b, rng)` → explicit row loop:
@@ -156,12 +156,12 @@ ctest --test-dir build -L matrices
   - `visit(const csr&)`: Replace `vs::zip(mapped_span, column_coefficients)` → index loop over both spans.
   - Test: `ctest --test-dir build -R t-coefficient_visitor`
 
-- [ ] **2.8** Migrate `unit_stride_visitor.hpp`: Replace `rs::size` and `rs::begin`/`rs::end` with std equivalents.
-  - Files: `src/matrices/unit_stride_visitor.hpp` (`.cpp` has no range-v3 usage)
-  - Add include: `<ranges>` (if not already transitively included)
-  - Replace `rs::size(rx)`, `rs::size(ry)`, `rs::size(rz)` → `std::ranges::size(rx)` etc. (3 occurrences in constructor, lines 49-50)
-  - Replace `rs::begin(rx)`, `rs::end(rx)`, `rs::begin(ry)`, `rs::end(ry)`, `rs::begin(rz)`, `rs::end(rz)` → `std::ranges::begin(...)`, `std::ranges::end(...)` (6 occurrences, lines 57-59)
-  - Note: `unit_stride_visitor.cpp` has NO range-v3 usage — no changes needed there.
+- [ ] **2.8** Migrate `unit_stride_visitor.hpp` and `unit_stride_visitor.cpp`: Replace `rs::size` and `rs::begin`/`rs::end` with std equivalents.
+  - Files: `src/matrices/unit_stride_visitor.hpp`, `src/matrices/unit_stride_visitor.cpp`
+  - `.hpp`: Add include: `<ranges>` (if not already transitively included)
+  - `.hpp`: Replace `rs::size(rx)`, `rs::size(ry)`, `rs::size(rz)` → `std::ranges::size(rx)` etc. (3 occurrences in constructor, lines 49-50)
+  - `.hpp`: Replace `rs::begin(rx)`, `rs::end(rx)`, `rs::begin(ry)`, `rs::end(ry)`, `rs::begin(rz)`, `rs::end(rz)` → `std::ranges::begin(...)`, `std::ranges::end(...)` (6 occurrences, lines 57-59)
+  - `.cpp`: Replace `rs::size(row_skip)`, `rs::size(col_skip)` → `std::ranges::size(...)` or `.size()` (2 occurrences, lines 122-123)
   - Test: `ctest --test-dir build -R t-unit_stride_visitor`
 
 ### Test Migration
@@ -244,13 +244,11 @@ Common range-v3 → std/C++20 replacement patterns used across test files:
 ```
 2.1 (D6 decision)
  ├── 2.3 (dense.hpp)  ──┐
- ├── 2.2 (dense.cpp)  ──┤── 2.9b (dense + circulant tests)
- ├── 2.4 (circulant.cpp)┘
- ├── 2.6 (csr.hpp) ── 2.5 (csr.cpp) ── 2.9c (csr tests)
- ├── 2.7 (coefficient_visitor.cpp) ──┐── 2.9a (visitor tests)
- └── 2.8 (unit_stride_visitor.hpp) ──┘
-                                         └── 2.9d (inner_block + block tests)
-                                              └── 2.10 (verification)
+ ├── 2.2 (dense.cpp)  ──┤── 2.9b (dense + circulant tests) ──┐
+ ├── 2.4 (circulant.cpp)┤── 2.9d (inner_block + block tests) ├── 2.10 (verification)
+ ├── 2.6 (csr.hpp) ── 2.5 (csr.cpp) ── 2.9c (csr tests) ────┤
+ ├── 2.7 (coefficient_visitor.cpp) ──┐── 2.9a (visitor tests) ┘
+ └── 2.8 (unit_stride_visitor.hpp/.cpp)┘
 ```
 
 Items 2.2–2.8 have no inter-dependencies (except 2.5 depends on 2.6) and can be done in parallel after 2.1.
