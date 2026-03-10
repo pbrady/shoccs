@@ -400,19 +400,19 @@ public:
 
 template <typename Rng>
 using z_plane_t =
-    decltype(std::declval<Rng>() | vs::drop_exactly(int{}) | vs::stride(integer{}));
+    decltype(ccs::stride(std::declval<Rng>() | std::views::drop(int{}), integer{}));
 
 template <typename Rng, typename Fn>
 class plane_view<2, Rng, Fn> : public z_plane_t<Rng>
 {
     using base = z_plane_t<Rng>;
 
-    rs::semiregular_box_t<Fn> f;
+    ccs::semiregular_box<Fn> f;
 
 public:
     plane_view() = default;
     explicit constexpr plane_view(Rng&& rng, index_extents extents, int k, Fn f)
-        : base{FWD(rng) | vs::drop_exactly(k) | vs::stride(extents[2])}, f{MOVE(f)}
+        : base{ccs::stride(FWD(rng) | std::views::drop(k), extents[2])}, f{MOVE(f)}
     {
     }
 

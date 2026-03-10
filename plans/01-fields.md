@@ -223,13 +223,12 @@ All selector items depend on: 1.2a (ccs_range_utils.hpp) and 1.3 (tuple_fwd.hpp 
   - Files: `src/fields/selector.hpp` (lines 208–393)
   - Test: `t-selector` test file still uses range-v3 (will compile after 1.20e). All downstream targets (t-field, t-field_utils, t-field_math, t-single_view, t-container_tuple, t-algorithms) build and pass.
 
-- [ ] **1.15** Replace `plane_view<2>` (Z-plane) in `src/fields/selector.hpp`:
-  - Currently: `z_plane_t<Rng>` = `decltype(rng | vs::drop_exactly(k) | vs::stride(n))`. Inherits from this type.
-  - Replace: Change `z_plane_t<Rng>` to use `std::views::drop(k)` piped into `ccs::stride(rng, n)`. Or define `z_plane_t<Rng>` using the project-local `ccs::stride_view`.
-  - Replace `rs::semiregular_box_t<Fn>` → `ccs::semiregular_box<Fn>`.
-  - Depends on: 1.2b (stride_view)
-  - Files: `src/fields/selector.hpp` (lines 332–356)
-  - Test: `ctest --test-dir build -R t-selector`
+- [x] **1.15** Replace `plane_view<2>` (Z-plane) in `src/fields/selector.hpp`:
+  - Changed `z_plane_t<Rng>` type alias: `vs::drop_exactly(int{}) | vs::stride(integer{})` → `ccs::stride(rng | std::views::drop(int{}), integer{})`.
+  - Changed constructor: `FWD(rng) | vs::drop_exactly(k) | vs::stride(extents[2])` → `ccs::stride(FWD(rng) | std::views::drop(k), extents[2])`.
+  - Replaced `rs::semiregular_box_t<Fn>` → `ccs::semiregular_box<Fn>`.
+  - Files: `src/fields/selector.hpp` (lines 401–425)
+  - Test: `t-selector` test file still uses range-v3 (will compile after 1.20e). All downstream targets (t-field, t-field_utils, t-field_math, t-single_view, t-container_tuple, t-algorithms) build and pass.
 
 - [ ] **1.16** Replace `multi_slice_view` in `src/fields/selector.hpp`:
   - Currently: Inherits `rs::view_adaptor<multi_slice_view<Rng, Fn>, Rng>` with a custom `adaptor` class (~135 lines, lines 459–614).
