@@ -234,12 +234,12 @@ template <>
 struct plane_fn<0> {
     constexpr auto operator()(const int3& extents) const
     {
-        return vs::take_exactly(extents[1] * extents[2]);
+        return std::views::take(extents[1] * extents[2]);
     }
 
     constexpr auto operator()(const int3& extents, int i) const
     {
-        return vs::drop_exactly(i * extents[1] * extents[2]) | (*this)(extents);
+        return std::views::drop(i * extents[1] * extents[2]) | (*this)(extents);
     }
 };
 
@@ -255,12 +255,16 @@ template <>
 struct plane_fn<2> {
     constexpr auto operator()(const int3& extents) const
     {
-        return vs::stride(extents[2]);
+        return ccs::make_view_closure([n = extents[2]](auto&& rng) {
+            return ccs::stride(FWD(rng), n);
+        });
     }
 
     constexpr auto operator()(const int3& extents, int k) const
     {
-        return vs::drop_exactly(k) | (*this)(extents);
+        return ccs::make_view_closure([n = extents[2], k](auto&& rng) {
+            return ccs::stride(std::views::drop(FWD(rng), k), n);
+        });
     }
 };
 

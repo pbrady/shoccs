@@ -136,7 +136,7 @@ Note: `shoccs-mesh` does not link `range-v3::range-v3` in `src/mesh/CMakeLists.t
     - Add `#include "fields/ccs_range_utils.hpp"` to selections.hpp.
     - File: `src/mesh/selections.hpp` lines 26–163.
     - Estimated diff: ~180 lines (remove ~125 lines, add ~180 lines).
-  - **7.2b** Replace `plane_fn<0>` and `plane_fn<2>` range-v3 adaptors (lines 170–202):
+  - [x] **7.2b** Replace `plane_fn<0>` and `plane_fn<2>` range-v3 adaptors (lines 170–202): **DONE** — replaced `vs::take_exactly` with `std::views::take`, `vs::drop_exactly` with `std::views::drop`, `vs::stride` with `ccs::make_view_closure` + `ccs::stride`. For `plane_fn<2>` two-arg overload, combined drop+stride into a single `ccs::make_view_closure` since `std::views::drop` (standard closure) can't compose with `ccs::view_closure` (custom) via `|`. `#include "fields/lazy_views.hpp"` was already present from 7.2a.
     - `plane_fn<0>` line 174: Replace `vs::take_exactly(n)` with `std::views::take(n)`.
     - `plane_fn<0>` line 179: Replace `vs::drop_exactly(n)` with `std::views::drop(n)`.
     - `plane_fn<2>` line 195: Replace `vs::stride(n)` with a pipeable adaptor using `ccs::stride`:
