@@ -410,7 +410,7 @@ Migrate test files to remove `#include <range/v3/all.hpp>` and all `rs::`/`vs::`
                               ├── 1.15 (z-plane stride_view)
                               └── 1.19h (selector includes)
 
-1.3 (tuple_fwd.hpp) ─────────┬── 1.4–1.12 (all downstream headers)
+1.3 (tuple_fwd.hpp) ─────────┬── 1.4–1.12b (all downstream headers)
                               └── 1.13–1.19 (selectors)
 
 1.4 (tuple_utils.hpp) ───────── 1.6, 1.7, 1.8, 1.9 (all include tuple_utils)
