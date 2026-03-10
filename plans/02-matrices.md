@@ -30,8 +30,8 @@ ctest --test-dir build -L matrices
 
 ### Resolve Decisions
 
-- [ ] **2.1** Resolve Decision D6: Choose **(b) Write all custom loops (no KokkosKernels dependency).**
-  - Update `plans/meta.md` with the decision and rationale.
+- [x] **2.1** Resolve Decision D6: Choose **(b) Write all custom loops (no KokkosKernels dependency).**
+  - D6 is already recorded in `plans/meta.md` with full rationale. No action needed.
   - Rationale: Per D1 (host-only) and D4 (keep std::vector), matrices are small per-line operators (not global sparse systems). Replace range-v3 view pipelines in `operator()` with explicit `for` loops using `std::inner_product` for dot products. No Kokkos kernels this phase; they can be added in a future GPU phase.
   - Phase 1 utilities (`ccs::stride`, `ccs::zip_transform`, `ccs::repeat_n` from `fields/lazy_views.hpp`) are available but explicit loops are simpler and clearer for these small matrix operations.
 
@@ -152,16 +152,34 @@ ctest --test-dir build -L matrices
     for (integer i = 0; i < (integer)ind.size(); i++)
         m[ind[i]] = d[i];
     ```
-  - `visit(const circulant&)`: Replace `vs::zip(mapped_span, mat.data())` → index loop over both spans.
-  - `visit(const csr&)`: Replace `vs::zip(mapped_span, column_coefficients)` → index loop over both spans.
+  - `visit(const circulant&)`: Replace `vs::zip(v.mapped(...), mat.data())` inner loop → index loop over both spans:
+    ```cpp
+    for (integer row = 0; row < r_n; row++) {
+        auto mapped = v.mapped(row + r_off, 1, c_off + row, mat.size());
+        auto data = mat.data();
+        for (integer k = 0; k < (integer)mapped.size(); k++)
+            m[mapped[k]] = data[k];
+    }
+    ```
+  - `visit(const csr&)`: Replace `vs::zip(v.mapped(row, mat), mat.column_coefficients(row))` inner loop → index loop:
+    ```cpp
+    for (integer row = 0; row < mat.rows(); row++) {
+        auto mapped = v.mapped(row, mat);
+        auto coeffs = mat.column_coefficients(row);
+        for (integer k = 0; k < (integer)mapped.size(); k++)
+            if (mapped[k] != -1) m[mapped[k]] = coeffs[k];
+    }
+    ```
   - Test: `ctest --test-dir build -R t-coefficient_visitor`
 
 - [ ] **2.8** Migrate `unit_stride_visitor.hpp` and `unit_stride_visitor.cpp`: Replace `rs::size` and `rs::begin`/`rs::end` with std equivalents.
   - Files: `src/matrices/unit_stride_visitor.hpp`, `src/matrices/unit_stride_visitor.cpp`
-  - `.hpp`: Add include: `<ranges>` (if not already transitively included)
+  - Note: Neither file has explicit `#include <range/v3/...>` lines. The `rs::` calls resolve through `types.hpp` (`namespace rs = ranges;`) via transitive range-v3 includes from other translation units. After migration, `<ranges>` must be included explicitly.
+  - `.hpp`: Add include: `<ranges>`
   - `.hpp`: Replace `rs::size(rx)`, `rs::size(ry)`, `rs::size(rz)` → `std::ranges::size(rx)` etc. (3 occurrences in constructor, lines 49-50)
   - `.hpp`: Replace `rs::begin(rx)`, `rs::end(rx)`, `rs::begin(ry)`, `rs::end(ry)`, `rs::begin(rz)`, `rs::end(rz)` → `std::ranges::begin(...)`, `std::ranges::end(...)` (6 occurrences, lines 57-59)
-  - `.cpp`: Replace `rs::size(row_skip)`, `rs::size(col_skip)` → `std::ranges::size(...)` or `.size()` (2 occurrences, lines 122-123)
+  - `.cpp`: No range-v3 includes to remove. Add `<ranges>` if needed (may get it transitively from `.hpp`).
+  - `.cpp`: Replace `rs::size(row_skip)`, `rs::size(col_skip)` → `std::ranges::size(...)` or `.size()` (2 occurrences, lines 122-123). Note: `row_skip`/`col_skip` are `const std::vector<bool>&` so `.size()` is simpler.
   - Test: `ctest --test-dir build -R t-unit_stride_visitor`
 
 ### Test Migration
@@ -184,8 +202,12 @@ Common range-v3 → std/C++20 replacement patterns used across test files:
   - Files: `src/matrices/unit_stride_visitor.t.cpp`, `src/matrices/coefficient_visitor.t.cpp`
   - `unit_stride_visitor.t.cpp`:
     - Remove `<range/v3/all.hpp>`. Add `<algorithm>`, `<ranges>`, `<vector>`.
-    - Replace `vs::repeat(0.0)` (infinite range used in dense constructors) → `std::vector<real>(rows * cols, 0.0)` of appropriate size per call. The dense constructor only reads `rows * columns` elements.
-    - Replace `rs::equal(a, b)` → `std::ranges::equal(a, b)` (5 occurrences).
+    - Replace `vs::repeat(0.0)` (infinite range used in dense constructors) → `std::vector<real>(N, 0.0)` of appropriate size per call (4 occurrences):
+      - "no boundary with holes" (line 22): `auto t = std::vector<real>(12, 0.0);` (max of dense{2,3}=6, dense{3,4}=12)
+      - "dirichlet" (line 46): `auto t = std::vector<real>(8, 0.0);` (max of dense{2,3}=6, dense{2,4}=8)
+      - "inner_block" (line 69): `auto u = std::vector<real>(6, 0.0);` (dense{2,3}=6)
+      - "csr" (line 96): `auto u = std::vector<real>(4, 0.0);` (dense{2,2}=4)
+    - Replace `rs::equal(a, b)` → `std::ranges::equal(a, b)` (9 occurrences: lines 31, 38, 39, 55, 62, 63, 83, 84, 85).
   - `coefficient_visitor.t.cpp`:
     - Remove `<range/v3/all.hpp>`. Add `<algorithm>`, `<ranges>`, `<numeric>`.
     - Replace `vs::iota(25, 50) | rs::to<T>()` → `T` from `std::views::iota`: e.g. `auto r = std::views::iota(25, 50); T imat(std::ranges::begin(r), std::ranges::end(r));`
@@ -217,15 +239,15 @@ Common range-v3 → std/C++20 replacement patterns used across test files:
   - Files: `src/matrices/inner_block.t.cpp`, `src/matrices/block.t.cpp`
   - `inner_block.t.cpp`: Same patterns as 2.9b (iota, transform, drop, stride, take, generate_n, to<T>).
   - `block.t.cpp` (most complex test file):
-    - Replace `vs::concat(vs::single(0.0), rhs_, vs::repeat_n(0.0, 4), rhs_) | rs::to<T>()` → eager vector concatenation:
+    - Replace `vs::concat(vs::single(0.0), rhs_, vs::repeat_n(0.0, 4), rhs_) | rs::to<T>()` → eager vector concatenation (2 occurrences: lines 136 and 158):
       ```cpp
       T x{0.0};
       x.insert(x.end(), rhs_.begin(), rhs_.end());
       x.insert(x.end(), 4, 0.0);
       x.insert(x.end(), rhs_.begin(), rhs_.end());
       ```
-    - Replace `rs::equal` → `std::ranges::equal`.
-    - Replace `vs::iota | rs::to<T>()`, `vs::generate_n | rs::to<T>()`, `vs::transform | rs::to<T>()` etc.
+    - Replace `vs::iota | rs::to<T>()` (lines 174, 176, 204), `vs::generate_n | rs::to<T>()` (line 62), `vs::transform | rs::to<T>()` (lines 73, 158), `vs::drop | vs::stride | vs::take | rs::to<T>()` (lines 217-218, 222-223).
+    - No `rs::equal` usage in this file (uses `REQUIRE_THAT` + `Approx` instead).
   - Remove all `<range/v3/...>` includes. Add `<algorithm>`, `<ranges>`, `<numeric>`, `"fields/lazy_views.hpp"`.
   - Test: `ctest --test-dir build -R "t-inner_block|t-block"`
   - Must come after: 2.2, 2.3, 2.4
@@ -242,7 +264,7 @@ Common range-v3 → std/C++20 replacement patterns used across test files:
 ## Ordering Summary
 
 ```
-2.1 (D6 decision)
+2.1 (D6 decision) [DONE]
  ├── 2.3 (dense.hpp)  ──┐
  ├── 2.2 (dense.cpp)  ──┤── 2.9b (dense + circulant tests) ──┐
  ├── 2.4 (circulant.cpp)┤── 2.9d (inner_block + block tests) ├── 2.10 (verification)
@@ -251,7 +273,7 @@ Common range-v3 → std/C++20 replacement patterns used across test files:
  └── 2.8 (unit_stride_visitor.hpp/.cpp)┘
 ```
 
-Items 2.2–2.8 have no inter-dependencies (except 2.5 depends on 2.6) and can be done in parallel after 2.1.
+Items 2.2–2.8 have no inter-dependencies (except 2.5 depends on 2.6) and can be done in parallel (2.1 is already complete).
 
 ---
 
