@@ -2,7 +2,7 @@
 
 #include "tuple_utils.hpp"
 
-#include <range/v3/view/view.hpp>
+#include "ccs_range_utils.hpp"
 
 namespace ccs::detail
 {
@@ -51,7 +51,7 @@ private:
 
     template <typename ViewFn, TupleLike U>
         requires std::derived_from<std::remove_cvref_t<U>, Type>
-    friend constexpr auto operator|(vs::view_closure<ViewFn> f, U&& u)
+    friend constexpr auto operator|(ccs::view_closure<ViewFn> f, U&& u)
     {
         return transform([f](auto&& e) { return f | FWD(e); }, FWD(u));
     }
@@ -60,8 +60,8 @@ private:
     // rather than recursively on the components
     template <TupleLike U, typename ViewFn>
         requires(std::derived_from<std::remove_cvref_t<U>, Type> &&
-                 !PipeableOver<vs::view_closure<ViewFn>, U>)
-    friend constexpr auto operator|(U&& u, vs::view_closure<ViewFn> f)
+                 !PipeableOver<ccs::view_closure<ViewFn>, U>)
+    friend constexpr auto operator|(U&& u, ccs::view_closure<ViewFn> f)
     {
         return f(FWD(u));
     }

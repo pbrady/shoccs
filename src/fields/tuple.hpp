@@ -151,9 +151,9 @@ tuple(Args&&...) -> tuple<viewable_range_by_value<Args>...>;
 
 // need to caputre view closures by value to meet range-v3 concepts
 template <typename... ViewFn>
-tuple(vs::view_closure<ViewFn>&...) -> tuple<vs::view_closure<ViewFn>...>;
+tuple(ccs::view_closure<ViewFn>&...) -> tuple<ccs::view_closure<ViewFn>...>;
 template <typename... ViewFn>
-tuple(const vs::view_closure<ViewFn>&...) -> tuple<vs::view_closure<ViewFn>...>;
+tuple(const ccs::view_closure<ViewFn>&...) -> tuple<ccs::view_closure<ViewFn>...>;
 
 template <std::size_t I, Tuple C>
 constexpr decltype(auto) get(C&& c)

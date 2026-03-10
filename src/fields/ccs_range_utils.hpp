@@ -90,12 +90,14 @@ struct view_closure : Fn {
 
     // rng | closure  =>  closure(rng)
     template <std::ranges::viewable_range Rng>
+        requires std::invocable<Fn const&, Rng>
     friend constexpr auto operator|(Rng&& rng, view_closure const& vc)
     {
         return static_cast<Fn const&>(vc)(std::forward<Rng>(rng));
     }
 
     template <std::ranges::viewable_range Rng>
+        requires std::invocable<Fn, Rng>
     friend constexpr auto operator|(Rng&& rng, view_closure&& vc)
     {
         return static_cast<Fn&&>(vc)(std::forward<Rng>(rng));

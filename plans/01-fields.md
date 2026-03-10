@@ -155,21 +155,19 @@ These project-local utilities replace range-v3 internal APIs that have no C++20 
   - **Infrastructure fix:** Wrapped `F` in `ccs::semiregular_box<F>` inside `zip_transform_view` (`lazy_views.hpp`). Lambdas (non-assignable) passed as `F` prevented `zip_transform_view` from satisfying `std::ranges::view` (which requires `movable`). Range-v3's `zip_with` handled this automatically via `semiregular_box_t<F>`.
   - Test: `t-tuple_math` fails to compile because test file still uses range-v3 types (will be fixed in 1.20c). All previously-passing downstream targets still pass (t-field, t-field_math, t-field_utils, t-single_view, t-container_tuple, t-algorithms).
 
-- [ ] **1.9** Migrate `src/fields/tuple_pipe.hpp`:
-  - Replace `vs::view_closure<ViewFn>` with `ccs::view_closure<ViewFn>` in the two `operator|` overloads that accept/match view closures (lines 53, 63). Remove `#include <range/v3/view/view.hpp>`.
-  - **IMPORTANT ordering constraint:** This MUST be done after or concurrently with items 1.19a–1.19h (selector function objects), because `selector.hpp` currently creates `ranges::views::view_closure` instances via `rs::make_view_closure()`. If `tuple_pipe.hpp` is changed to `ccs::view_closure` before the selector is migrated, the selector's view closures won't match the pipe operator overloads.
-  - Depends on: 1.2a, 1.19 (selector utility fn migration)
+- [x] **1.9** Migrate `src/fields/tuple_pipe.hpp`:
+  - Replaced `vs::view_closure<ViewFn>` with `ccs::view_closure<ViewFn>` in the two `operator|` overloads (lines 54, 63–64). Replaced `#include <range/v3/view/view.hpp>` with `#include "ccs_range_utils.hpp"`.
+  - Done concurrently with 1.19 (selector utility fn migration).
   - Files: `src/fields/tuple_pipe.hpp`
-  - Test: `ctest --test-dir build -R t-tuple_pipe`
+  - Test: `t-tuple_pipe` test file still uses range-v3 types (will compile after 1.20h2). All downstream targets (t-field, t-field_utils, t-field_math, t-single_view, t-container_tuple, t-algorithms) build and pass.
 
 ### Tuple Type
 
-- [ ] **1.9a** Migrate `src/fields/tuple.hpp`:
-  - Replace `vs::view_closure<ViewFn>` → `ccs::view_closure<ViewFn>` in deduction guides (lines 153–155).
-  - **Same ordering constraint as 1.9:** Must be done after or concurrently with 1.19, since selector code creates `vs::view_closure` instances that are used with tuple deduction guides.
-  - Depends on: 1.2a, 1.19
+- [x] **1.9a** Migrate `src/fields/tuple.hpp`:
+  - Replaced `vs::view_closure<ViewFn>` → `ccs::view_closure<ViewFn>` in deduction guides (lines 153–156).
+  - Done concurrently with 1.19 (selector utility fn migration).
   - Files: `src/fields/tuple.hpp`
-  - Test: `ctest --test-dir build -R t-tuple`
+  - Test: `t-tuple` test file still uses range-v3 types (will compile after 1.20f). All downstream targets build and pass.
 
 ### Field Type
 
@@ -267,24 +265,18 @@ All selector items depend on: 1.2a (ccs_range_utils.hpp) and 1.3 (tuple_fwd.hpp 
   - Files: `src/fields/selector.hpp`
   - Test: `cmake --build build` — all 6 downstream field targets compile and pass.
 
-- [ ] **1.19** Replace range-v3 utility usage in selector function objects (`selection`, `plane_selection_fn`, `multi_slice_fn`, `optional_view_fn`, `predicate_view_fn`):
-  - [ ] **1.19a** In `selection<L,R,Fn>` struct (line 48): Replace `rs::semiregular_box_t<Fn>` → `ccs::semiregular_box<Fn>`.
-    - Files: `src/fields/selector.hpp`
-  - [ ] **1.19b** In `selection_view` (line 123): Replace `rs::make_view_closure(...)` → `ccs::make_view_closure(...)`.
-    - Files: `src/fields/selector.hpp`
-  - [ ] **1.19c** In `plane_selection_base_fn` (lines 370–391): Replace `rs::bind_back(...)` → `ccs::bind_back(...)` and `rs::compose(...)` → `ccs::compose(...)`.
-    - Files: `src/fields/selector.hpp`
-  - [ ] **1.19d** In `plane_selection_fn::operator()` (lines 415–416, 420): Replace `rs::make_view_closure(rs::bind_back(...))` → `ccs::make_view_closure(ccs::bind_back(...))` on lines 415–416. Also replace `rs::bind_back(*this, plane_coord)` → `ccs::bind_back(*this, plane_coord)` on line 420.
-    - Files: `src/fields/selector.hpp`
-  - [ ] **1.19e** In `multi_slice_fn::operator()` (line 647) and `multi_slice_base_fn` (lines 652–665): Replace `rs::make_view_closure`, `rs::bind_back`, `rs::compose` → `ccs::` equivalents.
-    - Files: `src/fields/selector.hpp`
-  - [ ] **1.19f** In `optional_view_fn` (lines 738–764): Replace `rs::bind_back` → `ccs::bind_back`, `rs::make_view_closure` → `ccs::make_view_closure`.
-    - Files: `src/fields/selector.hpp`
-  - [ ] **1.19g** In `predicate_view_fn` and `predicate_view_base_fn` (lines 882–938): Replace `rs::bind_back`, `rs::compose`, `rs::make_view_closure` → `ccs::` equivalents.
-    - Files: `src/fields/selector.hpp`
-  - [ ] **1.19h** Remove `#include <range/v3/view/drop_exactly.hpp>`, `#include <range/v3/view/stride.hpp>`, `#include <range/v3/view/take_exactly.hpp>` from `selector.hpp`. Add `#include <ranges>`, `#include "ccs_range_utils.hpp"`, `#include "lazy_views.hpp"`.
-    - Files: `src/fields/selector.hpp`
-  - Test: `ctest --test-dir build -R t-selector`
+- [x] **1.19** Replace range-v3 utility usage in selector function objects (`selection`, `plane_selection_fn`, `multi_slice_fn`, `optional_view_fn`, `predicate_view_fn`):
+  - [x] **1.19a** Replaced `rs::semiregular_box_t<Fn>` → `ccs::semiregular_box<Fn>` in `selection` struct.
+  - [x] **1.19b** Replaced `rs::make_view_closure(...)` → `ccs::make_view_closure(...)` in `selection_view`.
+  - [x] **1.19c** Replaced `rs::bind_back(...)` → `ccs::bind_back(...)` and `rs::compose(...)` → `ccs::compose(...)` in `plane_selection_base_fn`.
+  - [x] **1.19d** Replaced `rs::make_view_closure(rs::bind_back(...))` → `ccs::make_view_closure(ccs::bind_back(...))` and `rs::bind_back(*this, plane_coord)` → `ccs::bind_back(*this, plane_coord)` in `plane_selection_fn::operator()`.
+  - [x] **1.19e** Replaced `rs::make_view_closure`, `rs::bind_back`, `rs::compose` → `ccs::` equivalents in `multi_slice_fn` and `multi_slice_base_fn`.
+  - [x] **1.19f** Replaced `rs::bind_back` → `ccs::bind_back`, `rs::make_view_closure` → `ccs::make_view_closure` in `optional_view_fn`.
+  - [x] **1.19g** Replaced `rs::bind_back`, `rs::compose`, `rs::make_view_closure` → `ccs::` equivalents in `predicate_view_fn` and `predicate_view_base_fn`.
+  - [x] **1.19h** Removed 3 range-v3 includes. Added `#include <ranges>`, `#include "ccs_range_utils.hpp"`, `#include "lazy_views.hpp"`.
+  - **Infrastructure fix:** Added `std::invocable<Fn const&, Rng>` / `std::invocable<Fn, Rng>` constraints to `ccs::view_closure::operator|` in `ccs_range_utils.hpp`. Without this, the unconstrained `operator|` made `is_pipeable` return true for leaf ranges (e.g., `std::vector<double>`) that can't actually be called by the closure's inner function, causing the wrong `tuple_pipe` overload to be selected.
+  - Files: `src/fields/selector.hpp`, `src/fields/ccs_range_utils.hpp`
+  - Test: `t-selector` test file still uses range-v3 (will compile after 1.20e). All 6 downstream field test targets build and pass.
 
 ### Test Migration
 

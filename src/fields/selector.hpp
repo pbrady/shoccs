@@ -12,9 +12,10 @@
 
 #include "index_extents.hpp"
 
-#include <range/v3/view/drop_exactly.hpp>
-#include <range/v3/view/stride.hpp>
-#include <range/v3/view/take_exactly.hpp>
+#include <ranges>
+
+#include "ccs_range_utils.hpp"
+#include "lazy_views.hpp"
 
 namespace ccs
 {
@@ -46,7 +47,7 @@ using selection_fn_index = detail::selection_fn_index_impl<T>::type;
 template <ListIndex I, Tuple R, typename Fn>
 struct selection : R {
     using index = I;
-    rs::semiregular_box_t<Fn> f;
+    ccs::semiregular_box<Fn> f;
 
     selection() = default; // default construction needed for semi-regular concept
 
@@ -121,7 +122,7 @@ struct selection_view_fn {
 
 template <typename... Lists>
 inline constexpr auto
-    selection_view = rs::make_view_closure(detail::selection_view_fn<Lists...>{});
+    selection_view = ccs::make_view_closure(detail::selection_view_fn<Lists...>{});
 
 //
 // selectors for main components of scalars and vectors
@@ -445,7 +446,7 @@ struct plane_selection_base_fn {
             FWD(r),
             extents,
             plane_coord,
-            rs::bind_back(plane_selection_fn<I>{}, extents, plane_coord));
+            ccs::bind_back(plane_selection_fn<I>{}, extents, plane_coord));
     }
 
     template <Range R, typename F>
@@ -455,8 +456,8 @@ struct plane_selection_base_fn {
             FWD(r),
             extents,
             plane_coord,
-            rs::compose(rs::bind_back(plane_selection_fn<I>{}, extents, plane_coord),
-                        FWD(f)));
+            ccs::compose(ccs::bind_back(plane_selection_fn<I>{}, extents, plane_coord),
+                         FWD(f)));
     }
 };
 
@@ -482,12 +483,12 @@ struct plane_selection_fn : plane_selection_base_fn<I> {
 
     constexpr auto operator()(index_extents extents, int plane_coord) const
     {
-        return rs::make_view_closure(rs::bind_back(*this, MOVE(extents), plane_coord));
+        return ccs::make_view_closure(ccs::bind_back(*this, MOVE(extents), plane_coord));
     }
 
     constexpr auto operator()(int plane_coord) const
     {
-        return rs::bind_back(*this, plane_coord);
+        return ccs::bind_back(*this, plane_coord);
     }
 };
 } // namespace detail
@@ -774,7 +775,7 @@ struct multi_slice_fn : multi_slice_base_fn {
 
     constexpr auto operator()(std::span<const index_slice> slices) const
     {
-        return rs::make_view_closure(rs::bind_back(*this, MOVE(slices)));
+        return ccs::make_view_closure(ccs::bind_back(*this, MOVE(slices)));
     }
 };
 
@@ -782,7 +783,7 @@ template <typename Rng>
 constexpr auto multi_slice_base_fn::operator()(Rng&& rng,
                                                std::span<const index_slice> slices) const
 {
-    return multi_slice_view(FWD(rng), slices, rs::bind_back(multi_slice_fn{}, slices));
+    return multi_slice_view(FWD(rng), slices, ccs::bind_back(multi_slice_fn{}, slices));
 }
 
 template <typename Rng, typename F>
@@ -791,7 +792,7 @@ constexpr auto multi_slice_base_fn::operator()(Rng&& rng,
                                                F&& f) const
 {
     return multi_slice_view(
-        FWD(rng), slices, rs::compose(rs::bind_back(multi_slice_fn{}, slices), FWD(f)));
+        FWD(rng), slices, ccs::compose(ccs::bind_back(multi_slice_fn{}, slices), FWD(f)));
 }
 
 } // namespace detail
@@ -852,7 +853,7 @@ struct optional_view_fn {
     constexpr auto operator()(U&& u, bool keep_bounds) const
     {
         return tuple{
-            optional_view(FWD(u), keep_bounds, rs::bind_back(*this, keep_bounds))};
+            optional_view(FWD(u), keep_bounds, ccs::bind_back(*this, keep_bounds))};
     }
 
     template <TupleLike U>
@@ -863,14 +864,14 @@ struct optional_view_fn {
             [keep_bounds](auto&& rng) {
                 return optional_view(FWD(rng),
                                      keep_bounds,
-                                     rs::bind_back(optional_view_fn{}, keep_bounds));
+                                     ccs::bind_back(optional_view_fn{}, keep_bounds));
             },
             FWD(u));
     }
 
     constexpr auto operator()(bool keep_bounds) const
     {
-        return rs::make_view_closure(rs::bind_back(*this, keep_bounds));
+        return ccs::make_view_closure(ccs::bind_back(*this, keep_bounds));
     }
 };
 } // namespace detail
@@ -1075,21 +1076,21 @@ struct predicate_view_fn : predicate_view_base_fn {
     template <typename P>
     constexpr auto operator()(P&& p) const
     {
-        return rs::make_view_closure(rs::bind_back(*this, FWD(p)));
+        return ccs::make_view_closure(ccs::bind_back(*this, FWD(p)));
     }
 };
 
 template <typename Rng, typename Pred>
 constexpr auto predicate_view_base_fn::operator()(Rng&& rng, Pred&& pred) const
 {
-    return predicate_view(FWD(rng), pred, rs::bind_back(predicate_view_fn{}, pred));
+    return predicate_view(FWD(rng), pred, ccs::bind_back(predicate_view_fn{}, pred));
 }
 
 template <typename Rng, typename Pred, typename F>
 constexpr auto predicate_view_base_fn::operator()(Rng&& rng, Pred&& pred, F&& f) const
 {
     return predicate_view(
-        FWD(rng), pred, rs::compose(rs::bind_back(predicate_view_fn{}, pred), FWD(f)));
+        FWD(rng), pred, ccs::compose(ccs::bind_back(predicate_view_fn{}, pred), FWD(f)));
 }
 
 } // namespace detail
