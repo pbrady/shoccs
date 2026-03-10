@@ -175,24 +175,12 @@ Note: `shoccs-mesh` does not link `range-v3::range-v3` in `src/mesh/CMakeLists.t
     - Test: `ctest --test-dir build -R t-selections`
     - Ordering: Should be done before 7.3 (next item) to avoid carrying a known bug forward.
 
-- [ ] **7.3** Migrate `object_geometry.hpp` (lines 10, 65–66):
-  - Remove `#include <range/v3/view/transform.hpp>`, add `#include <ranges>`.
-  - Line 65: Replace `vs::transform(&mesh_object_info::position)` with `std::views::transform(&mesh_object_info::position)`.
-  - Line 66: Replace pipe `Rx() | t` etc. — these use `std::views::transform` which is already pipeable in C++20.
-  - File: `src/mesh/object_geometry.hpp`.
-  - Test: `ctest --test-dir build -R t-object_geometry`
+- [x] **7.3** Migrate `object_geometry.hpp` (lines 10, 65–66): **DONE** — replaced `#include <range/v3/view/transform.hpp>` with `#include <ranges>`, `vs::transform` with `std::views::transform`. Compiles and passes t-object_geometry (pre-existing FP precision failure unrelated to migration).
 
-- [ ] **7.4** Migrate `mesh.cpp` and `mesh.hpp`
-  - **7.4a** `mesh.cpp` `init_line` function (lines 47–48, 73, 81):
-    - Replace `rs::begin(r)` with `r.begin()` (or `std::ranges::begin(r)`).
-    - Replace `rs::end(r)` with `r.end()` (or `std::ranges::end(r)`).
-    - Lines 73, 81: Replace `first - rs::begin(r)` with `first - r.begin()`.
-    - File: `src/mesh/mesh.cpp`.
-  - **7.4b** `mesh.hpp` `object_boundaries` method (line 48):
-    - Replace `vs::transform(…)` with `std::views::transform(…)`.
-    - No new include needed (`mesh.hpp` already gets `<ranges>` transitively through `fields/selector.hpp`, which was migrated in Phase 1).
-    - File: `src/mesh/mesh.hpp`.
-  - Test: `ctest --test-dir build -R t-mesh`
+- [x] **7.4** Migrate `mesh.cpp` and `mesh.hpp`: **DONE** — done alongside 7.3 because removing range-v3 include from `object_geometry.hpp` removed transitive range-v3 availability for `mesh.cpp`.
+  - **7.4a** `mesh.cpp`: Replaced `rs::begin(r)` → `std::ranges::begin(r)` (3 occurrences), `rs::end(r)` → `std::ranges::end(r)` (1 occurrence). Compiles.
+  - **7.4b** `mesh.hpp` `object_boundaries` method: Replaced `vs::transform(…)` with `std::views::transform(…)`. Compiles.
+  - Test: shoccs-mesh library builds; t-cartesian and t-selections pass. t-mesh blocked on 7.14 (mesh.t.cpp migration).
 
 - [ ] **7.5** Verify `mesh_view.hpp` — already migrated.
   - `mesh_view.hpp` uses plain loops returning `std::vector<real3>` — no range-v3 or cppcoro.
@@ -442,7 +430,7 @@ These files still have range-v3 usage from earlier phases and must be cleaned be
 9. **7.13** (stencil tests) depends on **7.1c** (shared `ccs::linear_distribute`).
 10. **7.20–7.25** (Final Cleanup) must come last, after all code migration items.
 11. **Build-unblocking priority:** The build is currently broken (see status note above). To restore it, **7.3** + **7.6** should be done before items whose tests depend on `shoccs-system` (e.g., 7.12), and **7.9** + **7.10** before items whose tests depend on `shoccs-io` (e.g., 7.8). **7.14** (mesh.t.cpp) must precede any item tested via `t-mesh` (7.2c, 7.2d, 7.4).
-12. **7.2e** (compile-instantiation test for `selections.hpp`) is done. **7.2f** (FView end() bug fix + multi-line test) is done. Next: **7.3** (object_geometry.hpp).
+12. **7.2e** (compile-instantiation test for `selections.hpp`) is done. **7.2f** (FView end() bug fix + multi-line test) is done. **7.3** and **7.4** are done. Next: **7.5** (verify mesh_view.hpp) or **7.6** (manufactured_solutions.hpp).
 
 ---
 

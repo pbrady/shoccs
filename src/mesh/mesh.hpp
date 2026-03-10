@@ -45,7 +45,7 @@ class mesh
     template <typename Fn>
     auto object_boundaries(Fn cmp) const
     {
-        auto t = vs::transform([cmp = MOVE(cmp)](auto&& info) { return cmp(FWD(info)); });
+        auto t = std::views::transform([cmp = MOVE(cmp)](auto&& info) { return cmp(FWD(info)); });
 
         return tuple{sel::Rx, sel::Ry, sel::Rz} | tuple{sel::predicate(Rx() | t),
                                                         sel::predicate(Ry() | t),

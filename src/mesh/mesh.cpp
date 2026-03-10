@@ -44,8 +44,8 @@ void init_line(std::vector<line>& v, int3 extents, std::span<const mesh_object_i
     integer nf = extents[F];
 
     v.reserve(ns * nf + r.size());
-    auto first = rs::begin(r);
-    auto last = rs::end(r);
+    auto first = std::ranges::begin(r);
+    auto last = std::ranges::end(r);
 
     int3 left{};
     int3 right{};
@@ -70,7 +70,7 @@ void init_line(std::vector<line>& v, int3 extents, std::span<const mesh_object_i
                         *left_boundary,
                         boundary{.mesh_coordinate = first->solid_coord,
                                  .object = object_boundary{
-                                     first - rs::begin(r), first->shape_id, first->psi}});
+                                     first - std::ranges::begin(r), first->shape_id, first->psi}});
                     // invalidate the boundary point to indicate it was consumed
                     left_boundary.reset();
                 } else {
@@ -78,7 +78,7 @@ void init_line(std::vector<line>& v, int3 extents, std::span<const mesh_object_i
                     left_boundary =
                         boundary{.mesh_coordinate = first->solid_coord,
                                  .object = object_boundary{
-                                     first - rs::begin(r), first->shape_id, first->psi}};
+                                     first - std::ranges::begin(r), first->shape_id, first->psi}};
                 }
                 ++first;
             }
