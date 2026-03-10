@@ -1,12 +1,9 @@
-#include <iostream>
-
 #include "selector.hpp"
 
 #include <catch2/catch_test_macros.hpp>
 
 #include <algorithm>
 #include <iterator>
-#include <range/v3/all.hpp>
 #include <ranges>
 
 #include <vector>
@@ -478,41 +475,41 @@ TEST_CASE("optional tuple")
     using T = std::vector<int>;
     T t{1, 2, 3};
 
-    REQUIRE(rs::size(t | sel::optional_view(false)) == 0);
-    REQUIRE(rs::size(t | sel::optional_view(true)) == 3);
+    REQUIRE(std::ranges::size(t | sel::optional_view(false)) == 0);
+    REQUIRE(std::ranges::size(t | sel::optional_view(true)) == 3);
 
     index_extents i{.extents = int3{2, 3, 4}};
-    resize_and_copy(t, vs::iota(0, 2 * 3 * 4));
+    resize_and_copy(t, std::views::iota(0, 2 * 3 * 4));
 
     auto x = tuple{t};
-    REQUIRE(rs::size(x | sel::optional_view(false)) == 0);
-    REQUIRE(rs::size(x | sel::optional_view(true)) == rs::size(x));
+    REQUIRE(std::ranges::size(x | sel::optional_view(false)) == 0);
+    REQUIRE(std::ranges::size(x | sel::optional_view(true)) == std::ranges::size(x));
 
-    REQUIRE(rs::size(x | sel::xmin(i) | sel::optional_view(false)) == 0);
-    REQUIRE(rs::size(x | sel::xmin(i) | sel::optional_view(true)) == 12u);
+    REQUIRE(std::ranges::size(x | sel::xmin(i) | sel::optional_view(false)) == 0);
+    REQUIRE(std::ranges::size(x | sel::xmin(i) | sel::optional_view(true)) == 12u);
 
     auto y = x | sel::xmin(i) | sel::optional_view(false);
     y = 0;
-    REQUIRE(rs::equal(x, vs::iota(0, 24)));
+    REQUIRE(std::ranges::equal(x, std::views::iota(0, 24)));
 
     auto z = x | sel::zmax(i) | sel::optional_view(true);
     z = 0;
-    REQUIRE((x | sel::zmin(i)) == tuple{T{0, 4, 8, 12, 16, 20}});
-    REQUIRE((x | sel::zmax(i)) == tuple{T{0, 0, 0, 0, 0, 0}});
+    REQUIRE(((x | sel::zmin(i)) == tuple{T{0, 4, 8, 12, 16, 20}}));
+    REQUIRE(((x | sel::zmax(i)) == tuple{T{0, 0, 0, 0, 0, 0}}));
 }
 
 TEST_CASE("optional scalar")
 {
     using T = std::vector<int>;
     index_extents i{.extents = int3{2, 3, 4}};
-    scalar<T> s{tuple{vs::iota(0, 24)}, tuple{0, 0, 0}};
+    scalar<T> s{tuple{std::views::iota(0, 24)}, tuple{0, 0, 0}};
 
     auto q = s | sel::xmin(i) | sel::optional_view(false);
-    REQUIRE(rs::size(q) == 0);
+    REQUIRE(std::ranges::size(q) == 0);
     q = 0;
-    REQUIRE((s | sel::xmin(i)) == tuple{vs::iota(0, 12)});
-    q = vs::iota(-12, 0);
-    REQUIRE((s | sel::xmin(i)) == tuple{vs::iota(0, 12)});
+    REQUIRE(((s | sel::xmin(i)) == tuple{std::views::iota(0, 12)}));
+    q = std::views::iota(-12, 0);
+    REQUIRE(((s | sel::xmin(i)) == tuple{std::views::iota(0, 12)}));
 
     auto r = s | tuple{sel::xmin(i) | sel::optional_view(false),
                        sel::xmax(i) | sel::optional_view(true),
@@ -522,8 +519,8 @@ TEST_CASE("optional scalar")
                        sel::zmax(i) | sel::optional_view(false)};
     // get<0>(r) = 0;
     r = 0;
-    REQUIRE((s | sel::xmin(i)) == tuple{vs::iota(0, 12)});
-    REQUIRE((s | sel::xmax(i)) == tuple{vs::repeat_n(0, 12)});
+    REQUIRE(((s | sel::xmin(i)) == tuple{std::views::iota(0, 12)}));
+    REQUIRE(((s | sel::xmax(i)) == tuple{std::vector<int>(12, 0)}));
 
     s |
         tuple{sel::xmin(i),
@@ -539,10 +536,10 @@ TEST_CASE("optional scalar")
               sel::optional_view(false),
               sel::optional_view(false)} = 1;
 
-    REQUIRE((s | sel::xmin(i)) == tuple{vs::iota(0, 12)});
-    REQUIRE((s | sel::xmax(i)) == tuple{vs::repeat_n(1, 12)});
+    REQUIRE(((s | sel::xmin(i)) == tuple{std::views::iota(0, 12)}));
+    REQUIRE(((s | sel::xmax(i)) == tuple{std::vector<int>(12, 1)}));
 
-    scalar<T> v{tuple{vs::iota(24, 48)}, tuple{0, 0, 0}};
+    scalar<T> v{tuple{std::views::iota(24, 48)}, tuple{0, 0, 0}};
 
     s |
         tuple{sel::xmin(i),
@@ -557,24 +554,24 @@ TEST_CASE("optional scalar")
               sel::optional_view(false),
               sel::optional_view(false),
               sel::optional_view(false)} = v;
-    REQUIRE((s | sel::xmin(i)) == tuple{vs::iota(0, 12)});
-    REQUIRE((s | sel::xmax(i)) == tuple{vs::iota(36, 48)});
+    REQUIRE(((s | sel::xmin(i)) == tuple{std::views::iota(0, 12)}));
+    REQUIRE(((s | sel::xmax(i)) == tuple{std::views::iota(36, 48)}));
 }
 
 TEST_CASE("optional vector")
 {
     using T = std::vector<int>;
     index_extents i{.extents = int3{2, 3, 4}};
-    vector<T> v{tuple{tuple{vs::iota(0, 24)}, tuple{0, 0, 0}},
-                tuple{tuple{vs::iota(24, 48)}, tuple{0, 0, 0}},
-                tuple{tuple{vs::iota(48, 72)}, tuple{0, 0, 0}}};
+    vector<T> v{tuple{tuple{std::views::iota(0, 24)}, tuple{0, 0, 0}},
+                tuple{tuple{std::views::iota(24, 48)}, tuple{0, 0, 0}},
+                tuple{tuple{std::views::iota(48, 72)}, tuple{0, 0, 0}}};
 
     auto q = v | sel::xmin(i) | sel::optional_view(false);
-    REQUIRE(rs::size(get<0>(q)) == 0);
+    REQUIRE(std::ranges::size(get<0>(q)) == 0);
     q = 0;
-    REQUIRE(get<0>(v | sel::xmin(i)) == tuple{vs::iota(0, 12)});
-    q = vs::iota(-12, 0);
-    REQUIRE(get<1>(v | sel::xmin(i)) == tuple{vs::iota(24, 36)});
+    REQUIRE((get<0>(v | sel::xmin(i)) == tuple{std::views::iota(0, 12)}));
+    q = std::views::iota(-12, 0);
+    REQUIRE((get<1>(v | sel::xmin(i)) == tuple{std::views::iota(24, 36)}));
 
     auto r = v | tuple{sel::xmin(i) | sel::optional_view(false),
                        sel::xmax(i) | sel::optional_view(true),
@@ -584,8 +581,8 @@ TEST_CASE("optional vector")
                        sel::zmax(i) | sel::optional_view(false)};
 
     r = 0;
-    REQUIRE(get<2>(v | sel::xmin(i)) == tuple{vs::iota(48, 60)});
-    REQUIRE(get<2>(v | sel::xmax(i)) == tuple{vs::repeat_n(0, 12)});
+    REQUIRE((get<2>(v | sel::xmin(i)) == tuple{std::views::iota(48, 60)}));
+    REQUIRE((get<2>(v | sel::xmax(i)) == tuple{std::vector<int>(12, 0)}));
 
     using R = std::remove_cvref_t<decltype(r)>;
     REQUIRE(!NestedTuple<R>);
@@ -604,12 +601,12 @@ TEST_CASE("optional vector")
                sel::optional_view(false),
                sel::optional_view(false)}) = 1;
 
-    REQUIRE(get<1>(v | sel::xmin(i)) == tuple{vs::iota(24, 36)});
-    REQUIRE(get<1>(v | sel::xmax(i)) == tuple{vs::repeat_n(1, 12)});
+    REQUIRE((get<1>(v | sel::xmin(i)) == tuple{std::views::iota(24, 36)}));
+    REQUIRE((get<1>(v | sel::xmax(i)) == tuple{std::vector<int>(12, 1)}));
 
-    vector<T> u{tuple{tuple{vs::iota(48, 72)}, tuple{0, 0, 0}},
-                tuple{tuple{vs::iota(0, 24)}, tuple{0, 0, 0}},
-                tuple{tuple{vs::iota(24, 48)}, tuple{0, 0, 0}}};
+    vector<T> u{tuple{tuple{std::views::iota(48, 72)}, tuple{0, 0, 0}},
+                tuple{tuple{std::views::iota(0, 24)}, tuple{0, 0, 0}},
+                tuple{tuple{std::views::iota(24, 48)}, tuple{0, 0, 0}}};
 
     v | (tuple{sel::xmin(i),
                sel::xmax(i),
@@ -623,12 +620,12 @@ TEST_CASE("optional vector")
                sel::optional_view(false),
                sel::optional_view(false),
                sel::optional_view(false)}) = u;
-    REQUIRE(get<0>(v | sel::xmin(i)) == tuple{vs::iota(0, 12)});
-    REQUIRE(get<1>(v | sel::xmin(i)) == tuple{vs::iota(24, 36)});
-    REQUIRE(get<2>(v | sel::xmin(i)) == tuple{vs::iota(48, 60)});
-    REQUIRE(get<0>(v | sel::xmax(i)) == tuple{vs::iota(60, 72)});
-    REQUIRE(get<1>(v | sel::xmax(i)) == tuple{vs::iota(12, 24)});
-    REQUIRE(get<2>(v | sel::xmax(i)) == tuple{vs::iota(36, 48)});
+    REQUIRE((get<0>(v | sel::xmin(i)) == tuple{std::views::iota(0, 12)}));
+    REQUIRE((get<1>(v | sel::xmin(i)) == tuple{std::views::iota(24, 36)}));
+    REQUIRE((get<2>(v | sel::xmin(i)) == tuple{std::views::iota(48, 60)}));
+    REQUIRE((get<0>(v | sel::xmax(i)) == tuple{std::views::iota(60, 72)}));
+    REQUIRE((get<1>(v | sel::xmax(i)) == tuple{std::views::iota(12, 24)}));
+    REQUIRE((get<2>(v | sel::xmax(i)) == tuple{std::views::iota(36, 48)}));
 }
 
 TEST_CASE("multi_slice math")
@@ -636,102 +633,102 @@ TEST_CASE("multi_slice math")
     using T = std::vector<int>;
     using U = std::vector<index_slice>;
 
-    scalar<T> s{tuple{vs::iota(0, 24)}, tuple{0, 0, 0}};
+    scalar<T> s{tuple{std::views::iota(0, 24)}, tuple{0, 0, 0}};
 
     U a{{0, 24}};
     auto whole = sel::multi_slice(a);
 
     s | whole += 1;
 
-    REQUIRE(get<0>(s) == tuple{vs::iota(1, 25)});
+    REQUIRE((get<0>(s) == tuple{std::views::iota(1, 25)}));
 
     U b{{1, 3}, {6, 12}, {22, 24}};
     auto sparse = sel::multi_slice(b);
-    s | sparse -= 1; // vs::iota(0, 24)
+    s | sparse -= 1; // std::views::iota(0, 24)
 
-    REQUIRE(get<0>(s) == tuple{vs::concat(vs::iota(1, 2),   /* whole */
-                                          vs::iota(1, 3),   /* sparse */
-                                          vs::iota(4, 7),   /* whole */
-                                          vs::iota(6, 12),  /* sparse */
-                                          vs::iota(13, 23), /* whole */
-                                          vs::iota(22, 24)  /* sparse */
-                                          )});
+    REQUIRE((get<0>(s) == tuple{concat_vec(std::views::iota(1, 2),   /* whole */
+                                           std::views::iota(1, 3),   /* sparse */
+                                           std::views::iota(4, 7),   /* whole */
+                                           std::views::iota(6, 12),  /* sparse */
+                                           std::views::iota(13, 23), /* whole */
+                                           std::views::iota(22, 24)  /* sparse */
+                                           )}));
 
-    s | sparse += tuple{tuple{vs::iota(0, 24)},
-                        tuple{vs::iota(0, 0), vs::iota(0, 0), vs::iota(0, 0)}};
+    s | sparse += tuple{tuple{std::views::iota(0, 24)},
+                        tuple{std::views::iota(0, 0), std::views::iota(0, 0), std::views::iota(0, 0)}};
 
-    REQUIRE(get<0>(s) == tuple{vs::concat(vs::iota(1, 2),        /* whole */
-                                          dble(vs::iota(1, 3)),  /* sparse */
-                                          vs::iota(4, 7),        /* whole */
-                                          dble(vs::iota(6, 12)), /* sparse */
-                                          vs::iota(13, 23),      /* whole */
-                                          dble(vs::iota(22, 24)) /* sparse */
-                                          )});
+    REQUIRE((get<0>(s) == tuple{concat_vec(std::views::iota(1, 2),        /* whole */
+                                           dble(std::views::iota(1, 3)),  /* sparse */
+                                           std::views::iota(4, 7),        /* whole */
+                                           dble(std::views::iota(6, 12)), /* sparse */
+                                           std::views::iota(13, 23),      /* whole */
+                                           dble(std::views::iota(22, 24)) /* sparse */
+                                           )}));
 }
 
 TEST_CASE("predicate extraction")
 {
-    auto t = tuple{vs::iota(0, 12)};
-    auto v = tuple{vs::iota(1, 13)} | vs::transform([](auto&& v) { return v < 5; });
+    auto t = tuple{std::views::iota(0, 12)};
+    auto v = tuple{std::views::iota(1, 13)} | std::views::transform([](auto&& v) { return v < 5; });
 
-    REQUIRE(rs::equal(t | sel::predicate(v), vs::iota(0, 4)));
+    REQUIRE(std::ranges::equal(t | sel::predicate(v), std::views::iota(0, 4)));
 }
 
 TEST_CASE("predicate assignment")
 {
     using T = std::vector<int>;
-    auto t = tuple<T>{vs::iota(0, 12)};
+    auto t = tuple<T>{std::views::iota(0, 12)};
     auto v =
-        tuple{vs::iota(1, 13)} | vs::transform([](auto&& v) { return v < 5 || v > 9; });
+        tuple{std::views::iota(1, 13)} | std::views::transform([](auto&& v) { return v < 5 || v > 9; });
 
     t | sel::predicate(v) = -1;
 
-    REQUIRE(t == std::vector{-1, -1, -1, -1, 4, 5, 6, 7, 8, -1, -1, -1});
+    REQUIRE((t == std::vector{-1, -1, -1, -1, 4, 5, 6, 7, 8, -1, -1, -1}));
 }
 
 TEST_CASE("predicate scalar extraction")
 {
     using T = std::vector<int>;
-    scalar<T> s{tuple{vs::iota(0, 12)},
-                tuple{vs::iota(0, 2), vs::iota(5, 9), vs::iota(-1, 3)}};
+    scalar<T> s{tuple{std::views::iota(0, 12)},
+                tuple{std::views::iota(0, 2), std::views::iota(5, 9), std::views::iota(-1, 3)}};
 
     auto dp =
-        tuple{vs::iota(0, 12)} | vs::transform([](auto&& i) { return 2 * (i / 2) == i; });
+        tuple{std::views::iota(0, 12)} | std::views::transform([](auto&& i) { return 2 * (i / 2) == i; });
 
-    REQUIRE(rs::equal(s | sel::D | sel::predicate(dp), vs::iota(0, 12) | vs::stride(2)));
+    REQUIRE(std::ranges::equal(s | sel::D | sel::predicate(dp), std::vector{0, 2, 4, 6, 8, 10}));
 
     scalar<T> v{s};
-    auto rp = v | sel::R | vs::transform([](auto&& i) { return 2 * (i / 2) == i; });
+    auto rp = v | sel::R | std::views::transform([](auto&& i) { return 2 * (i / 2) == i; });
 
     auto r = s | sel::R | sel::predicate(rp);
-    REQUIRE(rs::equal(get<0>(r), T{0}));
-    REQUIRE(rs::equal(get<1>(r), T{6, 8}));
-    REQUIRE(rs::equal(get<2>(r), T{0, 2}));
+    REQUIRE(std::ranges::equal(get<0>(r), T{0}));
+    REQUIRE(std::ranges::equal(get<1>(r), T{6, 8}));
+    REQUIRE(std::ranges::equal(get<2>(r), T{0, 2}));
 }
 
 TEST_CASE("predicate scalar assignment")
 {
     using T = std::vector<int>;
-    scalar<T> s{tuple{vs::iota(0, 12)},
-                tuple{vs::iota(0, 2), vs::iota(5, 9), vs::iota(-1, 3)}};
+    scalar<T> s{tuple{std::views::iota(0, 12)},
+                tuple{std::views::iota(0, 2), std::views::iota(5, 9), std::views::iota(-1, 3)}};
 
     auto dp =
-        tuple{vs::iota(0, 12)} | vs::transform([](auto&& i) { return 2 * (i / 2) == i; });
+        tuple{std::views::iota(0, 12)} | std::views::transform([](auto&& i) { return 2 * (i / 2) == i; });
 
     s | sel::D | sel::predicate(dp) = -2;
 
-    REQUIRE(rs::equal(s | sel::D, T{-2, 1, -2, 3, -2, 5, -2, 7, -2, 9, -2, 11}));
+    REQUIRE(std::ranges::equal(s | sel::D, T{-2, 1, -2, 3, -2, 5, -2, 7, -2, 9, -2, 11}));
 
     scalar<T> v{s};
-    auto rp = v | sel::R | vs::transform([](auto&& i) { return 2 * (i / 2) == i; });
+    auto rp = v | sel::R | std::views::transform([](auto&& i) { return 2 * (i / 2) == i; });
 
     scalar<T> u = s - 10;
 
     s | sel::R | sel::predicate(rp) = u;
 
-    REQUIRE(rs::equal(get<si::Rx>(s), T{-10, 1}));
-    REQUIRE(rs::equal(get<si::Ry>(s), T{5, -4, 7, -2}));
-    REQUIRE(rs::equal(get<si::Rz>(s), T{-1, -10, 1, -8}));
+    REQUIRE(std::ranges::equal(get<si::Rx>(s), T{-10, 1}));
+    REQUIRE(std::ranges::equal(get<si::Ry>(s), T{5, -4, 7, -2}));
+    REQUIRE(std::ranges::equal(get<si::Rz>(s), T{-1, -10, 1, -8}));
 
     s | (sel::R | sel::predicate(rp)) = 3;
 }

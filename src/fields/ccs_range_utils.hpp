@@ -102,6 +102,19 @@ struct view_closure : Fn {
     {
         return static_cast<Fn&&>(vc)(std::forward<Rng>(rng));
     }
+
+    // closure | closure  =>  composed closure (applies left first, then right)
+    template <typename OtherFn>
+    friend constexpr auto operator|(view_closure lhs, view_closure<OtherFn> rhs)
+    {
+        auto fn = [l = std::move(lhs), r = std::move(rhs)]<typename Rng>(Rng&& rng)
+            requires std::invocable<const Fn&, Rng&&>
+        {
+            return static_cast<const OtherFn&>(r)(
+                static_cast<const Fn&>(l)(std::forward<Rng>(rng)));
+        };
+        return view_closure<decltype(fn)>{std::move(fn)};
+    }
 };
 
 // Deduction guide

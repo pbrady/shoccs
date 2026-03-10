@@ -371,13 +371,37 @@ Migrate test files to remove `#include <range/v3/all.hpp>` and all `rs::`/`vs::`
     - Files: `src/fields/selector.t.cpp` (lines 183–461)
     - Test: `t-selector` still won't compile until 1.20e3 completes. All 6 downstream field targets build and pass.
 
-  - [ ] **1.20e3** Migrate optional/predicate tests (lines 462–723, ~78 `rs::`/`vs::` occurrences): Tests for `optional tuple`, `optional scalar`, `optional vector`, `multi_slice math`, `predicate extraction`, `predicate assignment`, `predicate scalar extraction/assignment`.
-    - Replace `vs::repeat_n`, `vs::iota`, `vs::transform`, `vs::stride` patterns.
-    - The `dble` lambda at line 14 uses `lift(std::plus{})` which calls `vs::zip_with` internally — after migration this uses `ccs::zip_transform`. No test code change needed, but verify the `dble(vs::iota(...))` calls work with `std::views::iota`.
-    - `vs::stride(2)` at line 687 → `ccs::stride(rng, 2)` (note: used as `vs::iota(0, 12) | vs::stride(2)`, replace with manual vector or pipe through `ccs::stride`).
-    - Replace `rs::equal`, `rs::size` → `std::ranges` equivalents.
-    - Remove the `#include <range/v3/all.hpp>` and finalize includes.
-    - Files: `src/fields/selector.t.cpp` (lines 462–723)
+  - [x] **1.20e3a** Text migration of optional/predicate tests (lines 462–723): Replaced all `rs::`/`vs::` usage with `std::ranges`/`std::views`/`ccs::` equivalents. Removed `#include <range/v3/all.hpp>` and `#include <iostream>`.
+    - `rs::size(` → `std::ranges::size(`, `rs::equal(` → `std::ranges::equal(` (replace_all).
+    - `vs::iota(` → `std::views::iota(`, `vs::transform(` → `std::views::transform(` (replace_all).
+    - `vs::concat(` → `concat_vec(` (replace_all, using existing test-local helper).
+    - `vs::repeat_n(0, 12)` → `std::vector<int>(12, 0)`, `vs::repeat_n(1, 12)` → `std::vector<int>(12, 1)`.
+    - `vs::iota(0, 12) | vs::stride(2)` → `std::vector{0, 2, 4, 6, 8, 10}`.
+    - Added double parentheses `REQUIRE((expr == expr))` to all `ccs::tuple` `==` comparisons.
+    - Files: `src/fields/selector.t.cpp`
+    - Test: `t-selector` doesn't compile yet — blocked by 1.20e3b.
+
+  - [x] **1.20e3b** Add `view_closure` composition support (`closure | closure`) to `src/fields/ccs_range_utils.hpp`:
+    - Added `operator|(view_closure lhs, view_closure<OtherFn> rhs)` friend template that composes two closures into one. The inner lambda has `requires std::invocable<const Fn&, Rng&&>` to prevent over-distribution via `PipeableOver` (without this constraint, `is_nested_pipeable` incorrectly reports true for leaf types like `std::vector<int>`, causing the tuple_pipe to distribute closures past tuple boundaries into non-TupleLike elements).
+    - Files: `src/fields/ccs_range_utils.hpp`
+    - Test: All 10 previously-passing field targets still pass. `t-selector` blocked by 1.20e3c.
+
+  - [ ] **1.20e3c** Fix `ref_view<View>` losing `.apply()` method in `tuple` storage:
+    - **Problem:** When views with `.apply()` (e.g., `optional_view`, `predicate_view`, `multi_slice_view`) are stored in a `ccs::tuple`, the `view_tuple_base` applies `std::views::all_t<Args>...`. If a view element ends up as an lvalue reference during tuple construction (e.g., via `transform` → `get` returning `auto&`), `std::views::all` wraps it in `std::ranges::ref_view<View>`, which does NOT have `.apply()`. The `tuple::operator=(T&&)` at `tuple.hpp:122` calls `get<Is>(*this).apply(t)`, which fails for `ref_view<View>` types.
+    - **Root cause:** `ccs::tuple::get` always returns `auto&` (lvalue reference), even for rvalue tuples. When `transform` extracts elements from a temporary tuple via `get<Is>(FWD(t))`, the result is an lvalue reference. If this lvalue view is then stored in another tuple, `std::views::all_t<View&>` produces `ref_view<View>`.
+    - **Impact:** Blocks optional/predicate test compilation. Also affects `multi_slice math` test case (compound assignment on multi_slice views). Does NOT affect plane-only tests because plane_views are constructed as rvalues and stored directly.
+    - **Fix options:**
+      1. Make `ccs::tuple::get` return rvalue references for rvalue tuples (add `auto&& get(T&&)` overload that forwards properly).
+      2. Add an `apply` free function or ADL wrapper that unwraps `ref_view` before calling `.apply()`.
+      3. Change `tuple.hpp:122` to use `std::ranges::ref_view<V>::base()` before calling `.apply()`.
+    - Files: `src/fields/tuple_fwd.hpp` (get function), possibly `src/fields/tuple.hpp`
+    - Test: `ctest --test-dir build -R t-selector` — all optional/predicate tests should compile and pass.
+    - Must come before: 1.20e3d.
+
+  - [ ] **1.20e3d** Verify full selector test compilation and runtime correctness:
+    - After 1.20e3c, build `t-selector` and run `ctest --test-dir build -R t-selector`.
+    - Verify all test cases pass: `optional tuple`, `optional scalar`, `optional vector`, `multi_slice math`, `predicate extraction`, `predicate assignment`, `predicate scalar extraction/assignment`.
+    - Files: `src/fields/selector.t.cpp`
     - Test: `ctest --test-dir build -R t-selector`
 
 - [ ] **1.20f** Migrate `src/fields/tuple.t.cpp`: Remove range-v3 includes. Replace `vs::take_exactly` (line 98), `vs::concat` (line 191), `vs::generate_n` + `rs::to` (line 305), `vs::repeat_n` (lines 471, 485), `rs::equal`, `rs::size`.
@@ -441,7 +465,9 @@ Migrate test files to remove `#include <range/v3/all.hpp>` and all `rs::`/`vs::`
 
 1.4 (tuple_utils.hpp) ───────── 1.6, 1.7, 1.8, 1.9 (all include tuple_utils)
 
-1.13–1.19 (selectors) ───────── 1.20e1, 1.20e2, 1.20e3 (selector tests)
+1.13–1.19 (selectors) ───────── 1.20e1, 1.20e2, 1.20e3a (selector tests)
+
+1.20e3a (text migration) ───── 1.20e3b (closure composition) ── 1.20e3c (ref_view fix) ── 1.20e3d (verify)
 
 1.2a, 1.2b ──────────────────── 1.20a (range_concepts.t.cpp — needs ccs_range_utils + lazy_views)
 
