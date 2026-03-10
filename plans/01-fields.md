@@ -427,9 +427,9 @@ Migrate test files to remove `#include <range/v3/all.hpp>` and all `rs::`/`vs::`
   - Files: `src/fields/scalar.t.cpp`, `src/fields/vector.t.cpp`
   - Test: `ctest --test-dir build -R "t-scalar|t-vector"` — both passed. All 13 field tests pass.
 
-- [ ] **1.20h1** Migrate `src/fields/container_tuple.t.cpp` (327 lines, heaviest of remaining tests): Remove range-v3 includes. Replace `rs::equal` → `std::ranges::equal`, `rs::size` → `std::ranges::size`, `rs::begin`/`rs::end` → `std::ranges::begin`/`end` (~49 `rs::` occurrences). Replace `vs::iota` → `std::views::iota`, `vs::transform` → `std::views::transform`.
+- [x] **1.20h1** Migrate `src/fields/container_tuple.t.cpp` (327 lines): Removed 7 range-v3 includes. Added `#include <algorithm>`, `#include <ranges>`. Replaced `rs::size(` → `std::ranges::size(`, `rs::equal(` → `std::ranges::equal(`, `vs::iota(` → `std::views::iota(`, `vs::transform(` → `std::views::transform(`. All 49 assertions in 10 test cases pass.
   - Files: `src/fields/container_tuple.t.cpp`
-  - Test: `ctest --test-dir build -R t-container_tuple`
+  - Test: `ctest --test-dir build -R t-container_tuple` — passed
 
 - [ ] **1.20h2** Migrate `src/fields/tuple_pipe.t.cpp` (160 lines), `src/fields/single_view.t.cpp` (27 lines), and `src/fields/algorithms.t.cpp` (65 lines): Remove range-v3 includes. Replace `rs::equal` → `std::ranges::equal`, `rs::size` → `std::ranges::size`, `vs::iota` → `std::views::iota`, `vs::transform` → `std::views::transform`.
   - Files: `src/fields/tuple_pipe.t.cpp`, `src/fields/single_view.t.cpp`, `src/fields/algorithms.t.cpp`
