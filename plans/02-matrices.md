@@ -273,7 +273,7 @@ Common range-v3 → std/C++20 replacement patterns used across test files:
 
 ### Verification
 
-- [ ] **2.10** Final verification: no range-v3 remains in `src/matrices/`.
+- [x] **2.10** Final verification: no range-v3 remains in `src/matrices/`.
   - Verify: `grep -r "range/v3" src/matrices/` returns no results.
   - No CMakeLists.txt changes expected (`shoccs-matrices` links `fields` which transitively provides range-v3; this transitive dependency will be removed when fields migration completes).
   - Test: `cmake --build build && ctest --test-dir build -L matrices`
@@ -286,7 +286,7 @@ Common range-v3 → std/C++20 replacement patterns used across test files:
 2.1 (D6 decision) [DONE]
  ├── 2.3 (dense.hpp)  [DONE] ──┐
  ├── 2.2 (dense.cpp)  [DONE] ──┤── 2.9b (dense + circulant tests) [DONE] ──┐
- ├── 2.4 (circulant.cpp) [DONE]┤── 2.9d (inner_block + block tests) [DONE] ├── 2.10 (verification)
+ ├── 2.4 (circulant.cpp) [DONE]┤── 2.9d (inner_block + block tests) [DONE] ├── 2.10 (verification) [DONE]
  ├── 2.6 (csr.hpp) [DONE] ── 2.5 (csr.cpp) [DONE] ── 2.9c (csr tests) [DONE] ──┤
  ├── 2.7 (coefficient_visitor.cpp) [DONE]┐── 2.9a (visitor tests) [DONE] ┘
  └── 2.8 (unit_stride_visitor) [DONE]┘
