@@ -126,7 +126,7 @@ These project-local utilities replace range-v3 internal APIs that have no C++20 
 
 - [ ] **1.6** Migrate `src/fields/container_tuple.hpp`:
   - Replace `rs::begin(r)`/`rs::end(r)` → `std::ranges::begin(r)`/`std::ranges::end(r)` in the range constructor (line 27).
-  - Remove no range-v3 includes (container_tuple.hpp includes only `tuple_utils.hpp` which already provides transitively).
+  - No direct range-v3 includes to remove (container_tuple.hpp gets range-v3 transitively through `tuple_utils.hpp`, which is already migrated in 1.4).
   - Files: `src/fields/container_tuple.hpp`
   - Test: `ctest --test-dir build -R t-container_tuple`
 
@@ -351,11 +351,18 @@ Migrate test files to remove `#include <range/v3/all.hpp>` and all `rs::`/`vs::`
   - Files: 7 test files
   - Test: `ctest --test-dir build -L fields` — all pass.
 
+- [ ] **1.20i** Migrate or remove `src/fields/view_tuple_seg.cpp`. This is a standalone scratch/debug executable (`add_executable(seg ...)` in CMakeLists.txt) with 7 range-v3 includes (`equal`, `all`, `concat`, `iota`, `repeat_n`, `take`, `zip_with`). It is **not** a unit test. Options:
+  - (a) Delete the file and remove the `seg` target from CMakeLists.txt (preferred — it appears to be unused scratch code with commented-out lines).
+  - (b) Migrate its range-v3 usage to `std::ranges`/`std::views` and project-local equivalents.
+  - Files: `src/fields/view_tuple_seg.cpp`, `src/fields/CMakeLists.txt`
+  - Test: `cmake --build build`
+
 ### CMake Cleanup
 
-- [ ] **1.21** Remove `range-v3::range-v3` from the `fields` INTERFACE library link:
+- [ ] **1.21** Remove `range-v3::range-v3` from the `fields` INTERFACE library link and clean up the `seg` target:
   - In `src/fields/CMakeLists.txt` line 4: change `target_link_libraries(fields INTERFACE range-v3::range-v3 Boost::boost)` to `target_link_libraries(fields INTERFACE Boost::boost)`.
-  - Verify no `#include <range/v3/...>` remains in any `src/fields/` file.
+  - If `view_tuple_seg.cpp` was not deleted in 1.20i, ensure the `seg` target (line 22–23) no longer depends on range-v3. If deleted, remove the `add_executable(seg ...)` and `target_link_libraries(seg ...)` lines.
+  - Verify no `#include <range/v3/...>` remains in any `src/fields/` file: `grep -rn 'range/v3' src/fields/` should return nothing.
   - Files: `src/fields/CMakeLists.txt`
   - Test: `cmake --build build && ctest --test-dir build -L fields` — all pass, no range-v3 headers.
 
@@ -384,7 +391,7 @@ Migrate test files to remove `#include <range/v3/all.hpp>` and all `rs::`/`vs::`
 
 1.4–1.19 (all headers) ──────── 1.20a–1.20h (test migration)
 
-1.20a–1.20h (tests) ─────────── 1.21 (CMake cleanup)
+1.20a–1.20i (tests + seg.cpp) ── 1.21 (CMake cleanup)
 ```
 
 ---
