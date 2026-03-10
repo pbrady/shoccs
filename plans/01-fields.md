@@ -44,7 +44,7 @@ ctest --test-dir build -L fields
 
 These project-local utilities replace range-v3 internal APIs that have no C++20 `std::ranges` equivalent. They must be created before migrating any production headers. See decision D8.
 
-- [ ] **1.2a** Create `src/fields/ccs_range_utils.hpp` with core range-v3 replacements:
+- [x] **1.2a** Create `src/fields/ccs_range_utils.hpp` with core range-v3 replacements:
   - `ccs::view_closure<Fn>`: Wraps a callable `Fn` and provides `template<typename Rng> friend auto operator|(Rng&& rng, view_closure fn)` for pipe syntax. Must be default-constructible if `Fn` is.
   - `ccs::make_view_closure(fn)`: Factory returning `view_closure{fn}`.
   - `ccs::bind_back(fn, args...)`: Returns a lambda that prepends forwarded arguments before the bound trailing arguments. Used in selector function composition.
