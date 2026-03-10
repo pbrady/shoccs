@@ -312,6 +312,10 @@ Migrate test files to remove `#include <range/v3/all.hpp>` and all `rs::`/`vs::`
   - Files: `src/fields/range_concepts.t.cpp`
   - Test: `ctest --test-dir build -R t-range_concepts` — 1 passed. All downstream field targets unaffected.
 
+- [ ] **1.20a1** Add value verification to `z_plane_view` test in `src/fields/range_concepts.t.cpp` (line 278–280). Currently the test only checks `std::ranges::size(zpv) > 0` but does not verify element values. This is an insufficient test for `ccs::stride` (a new project-local utility). Add `REQUIRE(std::ranges::equal(zpv, std::vector{0, 4, 8, 12, 16, 20}))` (z-plane 0 with extents {2,3,4}: drop(0), stride(4) over [0..23] yields every 4th element). The `x_plane_view` test already has proper value verification.
+  - Files: `src/fields/range_concepts.t.cpp`
+  - Test: `ctest --test-dir build -R t-range_concepts`
+
 - [ ] **1.20b** Migrate `src/fields/tuple_utils.t.cpp` (611 lines, heaviest `rs::` usage): Remove `#include <range/v3/all.hpp>`. Add `#include <algorithm>`, `#include <numeric>`, `#include <ranges>`. Replace:
   - `vs::zip` in for loops → index-based iteration (lines 117, 123, 161).
   - `vs::zip_with`/`vs::repeat`/`vs::repeat_n` in lift tests → `ccs::zip_transform` or manual equivalents (lines 271, 282, 401, 424, 442, 460).
