@@ -261,6 +261,12 @@ All selector items depend on: 1.2a (ccs_range_utils.hpp) and 1.3 (tuple_fwd.hpp 
   - Files: `src/fields/selector.hpp`
   - Test: `t-selector` test file still uses range-v3 (will compile after 1.20e). All downstream targets (t-field, t-field_utils, t-field_math, t-single_view, t-container_tuple, t-algorithms) build and pass.
 
+- [ ] **1.18a** Restore dropped size assertion in `predicate_view` constructor (`src/fields/selector.hpp`):
+  - The original constructor had `assert(rs::size(rng) == rs::size(p));` to verify the base range and predicate range have matching sizes. This was dropped during the 1.18 rewrite instead of being translated.
+  - Add `assert(std::ranges::size(rng) == std::ranges::size(p));` to the `predicate_view` constructor body (around line 985).
+  - Files: `src/fields/selector.hpp`
+  - Test: `cmake --build build` (compilation check; runtime coverage comes with 1.20e3).
+
 - [ ] **1.19** Replace range-v3 utility usage in selector function objects (`selection`, `plane_selection_fn`, `multi_slice_fn`, `optional_view_fn`, `predicate_view_fn`):
   - [ ] **1.19a** In `selection<L,R,Fn>` struct (line 48): Replace `rs::semiregular_box_t<Fn>` → `ccs::semiregular_box<Fn>`.
     - Files: `src/fields/selector.hpp`
