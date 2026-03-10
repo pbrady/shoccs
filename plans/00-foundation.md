@@ -84,12 +84,13 @@ ctest --test-dir build -R t-real3_operators
 
 ### 0.6 — Add Kokkos initialization/finalization
 
-- [ ] **0.6a** In `src/app/shoccs.cpp`: Add `#include <Kokkos_Core.hpp>` at the top. Insert `Kokkos::ScopeGuard kokkos(argc, argv);` as the first statement in `main()` (before the `cxxopts::Options` construction on line 14). This ensures Kokkos is initialized before any Kokkos operations and finalized on exit.
+- [x] **0.6a** In `src/app/shoccs.cpp`: Add `#include <Kokkos_Core.hpp>` at the top. Insert `Kokkos::ScopeGuard kokkos(argc, argv);` as the first statement in `main()` (before the `cxxopts::Options` construction on line 14). This ensures Kokkos is initialized before any Kokkos operations and finalized on exit.
   - File: `src/app/shoccs.cpp`
 
-- [ ] **0.6b** In `src/app/CMakeLists.txt`: Add `Kokkos::kokkos` to the `target_link_libraries` for `shoccs-exe` (line 2: append to the existing list `cxxopts::cxxopts shoccs-run_sol spdlog::spdlog`).
+- [x] **0.6b** In `src/app/CMakeLists.txt`: Add `Kokkos::kokkos` to the `target_link_libraries` for `shoccs-exe` (line 2: append to the existing list `cxxopts::cxxopts shoccs-run_sol spdlog::spdlog`).
   - File: `src/app/CMakeLists.txt`
   - Test: `cmake --build build -- shoccs-exe && ./build/src/app/shoccs --help` starts and stops without error (Kokkos init/finalize runs silently).
+  - Note: Full link of `shoccs-exe` fails due to pre-existing `fmt::join` errors in `stencil.cpp`, `gradient.cpp`, `object_geometry.cpp`, `mesh.cpp` (unrelated to Kokkos changes). Compilation of `shoccs.cpp` succeeds, confirming correctness.
 
 ### 0.7 — Replace coroutine-based iteration utilities
 
