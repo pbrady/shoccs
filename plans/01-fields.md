@@ -207,12 +207,12 @@ These project-local utilities replace range-v3 internal APIs that have no C++20 
 
 All selector items depend on: 1.2a (ccs_range_utils.hpp) and 1.3 (tuple_fwd.hpp migration).
 
-- [ ] **1.13** Replace `plane_view<0>` (X-plane) in `src/fields/selector.hpp`:
-  - Currently: `x_plane_t<Rng>` = `decltype(rng | vs::drop_exactly(n) | vs::take_exactly(m))`. The class inherits from this composed type.
-  - Replace: Change `x_plane_t<Rng>` to use `std::views::drop(n) | std::views::take(m)` (C++20). Update the type alias and the `apply_` static method (line 186).
-  - Replace `rs::semiregular_box_t<Fn>` → `ccs::semiregular_box<Fn>` (line 181).
+- [x] **1.13** Replace `plane_view<0>` (X-plane) in `src/fields/selector.hpp`:
+  - Replaced `x_plane_t<Rng>` type alias: `vs::drop_exactly(int{}) | vs::take_exactly(integer{})` → `std::views::drop(int{}) | std::views::take(integer{})`.
+  - Replaced `apply_` method: `vs::drop_exactly(i * n) | vs::take_exactly(n)` → `std::views::drop(i * n) | std::views::take(n)`.
+  - Replaced `rs::semiregular_box_t<Fn>` → `ccs::semiregular_box<Fn>`.
   - Files: `src/fields/selector.hpp` (lines 173–202)
-  - Test: `ctest --test-dir build -R t-selector`
+  - Test: `t-selector` test file still uses range-v3 (will compile after 1.20e). All downstream targets (t-field, t-field_utils, t-field_math, t-single_view, t-container_tuple, t-algorithms) build and pass.
 
 - [ ] **1.14** Replace `plane_view<1>` (Y-plane) in `src/fields/selector.hpp`:
   - Currently: Inherits `rs::view_adaptor<plane_view<1, Rng, Fn>, Rng>` with a custom `adaptor` class using `rs::adaptor_base`, `rs::range_access`, `rs::begin`, `rs::advance`, `rs::difference_type_t`.

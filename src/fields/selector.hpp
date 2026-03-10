@@ -171,19 +171,19 @@ class plane_view;
 
 template <typename Rng>
 using x_plane_t =
-    decltype(std::declval<Rng>() | vs::drop_exactly(int{}) | vs::take_exactly(integer{}));
+    decltype(std::declval<Rng>() | std::views::drop(int{}) | std::views::take(integer{}));
 
 template <typename Rng, typename Fn>
 class plane_view<0, Rng, Fn> : public x_plane_t<Rng>
 {
     using base = x_plane_t<Rng>;
 
-    rs::semiregular_box_t<Fn> f;
+    ccs::semiregular_box<Fn> f;
 
     template <Range U>
     static constexpr auto apply_(U&& u, integer n, int i)
     {
-        return FWD(u) | vs::drop_exactly(i * n) | vs::take_exactly(n);
+        return FWD(u) | std::views::drop(i * n) | std::views::take(n);
     }
 
 public:
