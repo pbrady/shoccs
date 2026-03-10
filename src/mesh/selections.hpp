@@ -8,10 +8,6 @@
 #include "fields/ccs_range_utils.hpp"
 #include "fields/lazy_views.hpp"
 
-#include <range/v3/view/drop_exactly.hpp>
-#include <range/v3/view/stride.hpp>
-#include <range/v3/view/take_exactly.hpp>
-
 namespace ccs::views
 {
 
@@ -273,57 +269,60 @@ constexpr auto plane_view = plane_fn<I>{};
 
 constexpr auto xmin(int3 extents)
 {
-    return rs::make_view_closure([extents = MOVE(extents)]<DomainSelection S>(S&& s) {
+    return ccs::make_view_closure([extents = MOVE(extents)]<DomainSelection S>(S&& s) {
         return tuple{FWD(s) | plane_view<0>(extents)};
     });
 }
 
 constexpr auto xmax(int3 extents)
 {
-    return rs::make_view_closure([extents = MOVE(extents)]<DomainSelection S>(S&& s) {
+    return ccs::make_view_closure([extents = MOVE(extents)]<DomainSelection S>(S&& s) {
         return tuple{FWD(s) | plane_view<0>(extents, extents[0] - 1)};
     });
 }
 
 constexpr auto ymin(int3 extents)
 {
-    return rs::make_view_closure([extents = MOVE(extents)]<DomainSelection S>(S&& s) {
+    return ccs::make_view_closure([extents = MOVE(extents)]<DomainSelection S>(S&& s) {
         return tuple{FWD(s) | plane_view<1>(extents)};
     });
 }
 
 constexpr auto ymax(int3 extents)
 {
-    return rs::make_view_closure([extents = MOVE(extents)]<DomainSelection S>(S&& s) {
+    return ccs::make_view_closure([extents = MOVE(extents)]<DomainSelection S>(S&& s) {
         return tuple{FWD(s) | plane_view<1>(extents, extents[1] - 1)};
     });
 }
 
 constexpr auto zmin(int3 extents)
 {
-    return rs::make_view_closure([extents = MOVE(extents)]<DomainSelection S>(S&& s) {
+    return ccs::make_view_closure([extents = MOVE(extents)]<DomainSelection S>(S&& s) {
         return tuple{FWD(s) | plane_view<2>(extents)};
     });
 }
 
 constexpr auto zmax(int3 extents)
 {
-    return rs::make_view_closure([extents = MOVE(extents)]<DomainSelection S>(S&& s) {
+    return ccs::make_view_closure([extents = MOVE(extents)]<DomainSelection S>(S&& s) {
         return tuple{FWD(s) | plane_view<2>(extents, extents[2] - 1)};
     });
 }
 
 constexpr auto location(const cartesian& cart, const object_geometry& geometry)
 {
-    return rs::make_view_closure([&]<Selection S>(S&&) {
+    return ccs::make_view_closure([&]<Selection S>(S&&) {
         if constexpr (is_domain_selection_v<S>)
-            return vs::cartesian_product(cart.x(), cart.y(), cart.z());
+            return ccs::cartesian_product(cart.x(), cart.y(), cart.z());
         else if constexpr (is_Rx_selection_v<S>)
-            return geometry.Rx() | vs::transform([](auto&& o) { return o.position; });
+            return geometry.Rx() |
+                   std::views::transform([](auto&& o) { return o.position; });
         else if constexpr (is_Ry_selection_v<S>)
-            return geometry.Ry() | vs::transform([](auto&& o) { return o.position; });
+            return geometry.Ry() |
+                   std::views::transform([](auto&& o) { return o.position; });
         else if constexpr (is_Rz_selection_v<S>)
-            return geometry.Rz() | vs::transform([](auto&& o) { return o.position; });
+            return geometry.Rz() |
+                   std::views::transform([](auto&& o) { return o.position; });
 
         else
             static_assert("unaccounted selection type");

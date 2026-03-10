@@ -122,7 +122,7 @@ Note: `shoccs-mesh` does not link `range-v3::range-v3` in `src/mesh/CMakeLists.t
   - Test: `ctest --test-dir build -R t-cartesian`
   - Ordering: 7.1a must precede 7.1b. 7.1c must precede 7.1d. 7.1d is independent of 7.1a/7.1b.
 
-- [ ] **7.2** Migrate `selections.hpp`
+- [x] **7.2** Migrate `selections.hpp`
   - [x] **7.2a** Rewrite `YPlaneView` as a `std::ranges::view_interface` class (lines 26–163): **DONE** — replaced `rs::view_adaptor` with `std::ranges::view_interface`, standalone `iterator` class with full random-access support, deduction guide uses `std::views::all_t`, factory uses `ccs::make_view_closure`/`ccs::bind_back`. Also added `#include "fields/ccs_range_utils.hpp"` and `#include "fields/lazy_views.hpp"`, removed 4 of 7 range-v3 includes. Standalone compile test passes: random_access_range, sized_range, correct element selection.
     - Replace `rs::view_adaptor<YPlaneView<Rng>, Rng>` inheritance with `std::ranges::view_interface<YPlaneView<Rng>>`.
     - Store the base range directly as a member (e.g., `Rng base_`). Remove `friend rs::range_access`.
@@ -157,7 +157,7 @@ Note: `shoccs-mesh` does not link `range-v3::range-v3` in `src/mesh/CMakeLists.t
     - Add `#include "fields/lazy_views.hpp"` to selections.hpp.
     - File: `src/mesh/selections.hpp` lines 170–202.
   - [x] **7.2c** Rewrite `FView` as a `std::ranges::view_interface` class (lines 270–451): **DONE** — replaced `rs::view_adaptor` with `std::ranges::view_interface`, standalone `iterator` class with full random-access support (8 data members: base_it_, extents, lines, l, i, i0, i1, local_off), all adaptor methods mapped to C++20 iterator operators. Deduction guide uses `std::views::all_t`, fview_base_fn uses `std::views::all`, fview_fn uses `ccs::make_view_closure`/`ccs::bind_back`, F() uses `ccs::make_view_closure`. `begin()`/`end()`/`size()` compute line bounds inline. Note: cannot standalone compile-test yet because header also contains 7.2d functions that still use `rs::make_view_closure`; full compile-instantiation test deferred to after 7.2d.
-  - **7.2d** Replace remaining `rs::make_view_closure` in utility functions (lines 207–264, 454–459):
+  - [x] **7.2d** Replace remaining `rs::make_view_closure` in utility functions (lines 207–264, 454–459): **DONE** — replaced `rs::make_view_closure` → `ccs::make_view_closure` in xmin/xmax/ymin/ymax/zmin/zmax and location. Replaced `vs::cartesian_product` → `ccs::cartesian_product` and `vs::transform` → `std::views::transform` in location. Removed remaining 3 range-v3 includes (drop_exactly, stride, take_exactly). F() was already using `ccs::make_view_closure` from 7.2c. Zero range-v3 references remain in selections.hpp.
     - Functions `xmin`, `xmax`, `ymin`, `ymax`, `zmin`, `zmax` (lines 207–247): Replace `rs::make_view_closure` with `ccs::make_view_closure`.
     - Function `location` (lines 249–264): Replace `rs::make_view_closure` with `ccs::make_view_closure`. Replace `vs::cartesian_product(…)` with `ccs::cartesian_product(…)` (from 7.1a). Replace `vs::transform(…)` with `std::views::transform(…)`.
     - Function `F` (lines 454–459): Replace `rs::make_view_closure` with `ccs::make_view_closure`.
