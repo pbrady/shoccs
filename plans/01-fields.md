@@ -445,12 +445,9 @@ Migrate test files to remove `#include <range/v3/all.hpp>` and all `rs::`/`vs::`
 
 ### CMake Cleanup
 
-- [ ] **1.21** Remove `range-v3::range-v3` from the `fields` INTERFACE library link and clean up the `seg` target:
-  - In `src/fields/CMakeLists.txt` line 4: change `target_link_libraries(fields INTERFACE range-v3::range-v3 Boost::boost)` to `target_link_libraries(fields INTERFACE Boost::boost)`.
-  - If `view_tuple_seg.cpp` was not deleted in 1.20i, ensure the `seg` target (line 22–23) no longer depends on range-v3. If deleted, remove the `add_executable(seg ...)` and `target_link_libraries(seg ...)` lines.
-  - Verify no `#include <range/v3/...>` remains in any `src/fields/` file: `grep -rn 'range/v3' src/fields/` should return nothing.
+- [x] **1.21** Removed `range-v3::range-v3` from the `fields` INTERFACE library link in `src/fields/CMakeLists.txt`. The `seg` target was already removed in 1.20i. Verified no `#include <range/v3/...>` remains in any `src/fields/` file. All 13 fields tests pass plus `t-range_concepts`.
   - Files: `src/fields/CMakeLists.txt`
-  - Test: `cmake --build build && ctest --test-dir build -L fields` — all pass, no range-v3 headers.
+  - Test: `cmake --build build && ctest --test-dir build -L fields` — all 13 pass, no range-v3 headers.
 
 ---
 
