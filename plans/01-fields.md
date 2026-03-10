@@ -308,20 +308,9 @@ Migrate test files to remove `#include <range/v3/all.hpp>` and all `rs::`/`vs::`
 - `vs::repeat(v)` → `ccs::repeat_n(v, n)` where count is known, or manual pattern
 - `rs::make_view_closure(fn)` → `ccs::make_view_closure(fn)` (where used in test code)
 
-- [ ] **1.20a** Migrate `src/fields/range_concepts.t.cpp` (313 lines, 36 `rs::`/`vs::` occurrences): This is the concept test file. Remove `#include <range/v3/all.hpp>`. Add `#include <algorithm>`, `#include <ranges>`, `#include "ccs_range_utils.hpp"`, `#include "lazy_views.hpp"`.
-  - Replace `rs::output_range` → `std::ranges::output_range`, `rs::range_value_t` → `std::ranges::range_value_t` in concept checks (lines 18–28).
-  - Replace `vs::all(x)` → `std::views::all(x)` (line 55), `vs::iota(a, b)` → `std::views::iota(a, b)` (lines 94, 253, 273), `vs::transform(f)` → `std::views::transform(f)` (lines 65–66, 188).
-  - Replace `rs::equal` → `std::ranges::equal` (lines 61, 190, 256), `rs::begin`/`rs::end` → `std::ranges::begin`/`end` (line 254), `rs::sized_range` → `std::ranges::sized_range` (lines 259, 280), `rs::random_access_range` → `std::ranges::random_access_range` (lines 260, 281).
-  - **ViewClosure test (lines 132–138)**: After 1.3c, `ViewClosure` checks for `ccs::view_closure<Fn>`, not range-v3's `vs::view_closure`. `std::views::transform(...)` returns a standard library closure type which is NOT a `ccs::view_closure`. Rewrite: `using I = decltype(ccs::make_view_closure([](auto&& rng) { return rng; }));` and test `ViewClosure<I>`, `ViewClosures<std::tuple<I, I>>`.
-  - **NumericTuple/common_tuple test (lines 172–174)**: Remove the 3 lines using `rs::common_tuple` (type no longer exists after 1.3e).
-  - **From test (lines 91–107)**: Replace `vs::zip_with(std::plus{}, vs::iota(0, 10), vs::iota(1, 11))` (line 95) with `ccs::zip_transform(std::plus{}, std::views::iota(0, 10), std::views::iota(1, 11))`.
-  - **TupleLike test (line 79)**: Replace `vs::take_exactly(5)` → `std::views::take(5)`. Test intent preserved (verifying non-TupleLike range types).
-  - **generate_n test (lines 195–202)**: Rewrite. Replace `vs::generate_n(f, n) | vs::join | rs::to<T>()` with manual loop: `std::vector<int> v; for (int i = 0; i < 3; i++) { v.push_back(0); v.push_back(1); }`.
-  - **x_plane_view/z_plane_view test classes and test cases (lines 204–282)**: Rewrite type aliases: `det::X<Rng>` uses `std::views::drop | std::views::take` instead of `vs::drop_exactly | vs::take_exactly`. `det::Z<Rng>` uses `std::views::drop` piped into `ccs::stride` instead of `vs::drop_exactly | vs::stride`. Update constructors accordingly. Also rewrite the local `U` type alias at line 264 (mirrors `det::Z` pattern with `vs::drop_exactly | vs::stride`). The z_plane_view test case (lines 269–282) uses `vs::iota`, `rs::sized_range`, `rs::random_access_range` — replace per general rules above.
-  - **vs::zip "expansion" test (lines 284–301)**: Remove entirely (including the `wrapper` struct at lines 284–288 which is only used by this test). This only tested range-v3's `vs::zip` with parameter pack expansion, which is no longer needed.
-  - Depends on: 1.2a (ccs_range_utils.hpp for `ccs::make_view_closure`), 1.2b (lazy_views.hpp for `ccs::zip_transform`, `ccs::stride`)
+- [x] **1.20a** Migrate `src/fields/range_concepts.t.cpp`: Removed `#include <range/v3/all.hpp>` and `<iostream>`. Added `#include <algorithm>`, `#include <ranges>`, `#include "ccs_range_utils.hpp"`, `#include "lazy_views.hpp"`. Replaced all `rs::`/`vs::` usage with `std::ranges`/`std::views`/`ccs::` equivalents. Rewrote ViewClosure test with `ccs::make_view_closure`. Removed `rs::common_tuple` test lines. Rewrote `generate_n` test with manual loop. Rewrote x_plane_view/z_plane_view classes and tests to use `std::views::drop`/`take`/`ccs::stride`. Removed `vs::zip` expansion test entirely. Rewrote z_plane_view test to use vector instead of range-v3 streaming.
   - Files: `src/fields/range_concepts.t.cpp`
-  - Test: `ctest --test-dir build -R t-range_concepts`
+  - Test: `ctest --test-dir build -R t-range_concepts` — 1 passed. All downstream field targets unaffected.
 
 - [ ] **1.20b** Migrate `src/fields/tuple_utils.t.cpp` (611 lines, heaviest `rs::` usage): Remove `#include <range/v3/all.hpp>`. Add `#include <algorithm>`, `#include <numeric>`, `#include <ranges>`. Replace:
   - `vs::zip` in for loops → index-based iteration (lines 117, 123, 161).
