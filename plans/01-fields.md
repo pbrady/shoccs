@@ -74,36 +74,22 @@ These project-local utilities replace range-v3 internal APIs that have no C++20 
 
 ### Foundation Types (tuple_fwd, concepts)
 
-- [ ] **1.3** Migrate `src/fields/tuple_fwd.hpp`. This is the keystone header — changes here affect all downstream files. Apply the following substitutions:
-  - [ ] **1.3a** Replace range-v3 concept usage with C++20 equivalents:
-    - `rs::range<T>` → `std::ranges::range<T>`
-    - `rs::viewable_range<T>` → `std::ranges::viewable_range<T>`
-    - `rs::input_range<T>` → `std::ranges::input_range<T>`
-    - `rs::output_range<T, V>` → `std::ranges::output_range<T, V>`
-    - `rs::common_range<T>` → `std::ranges::common_range<T>`
-    - `rs::sized_range<T>` → `std::ranges::sized_range<T>`
-    - `rs::range_value_t<T>` → `std::ranges::range_value_t<T>`
-    - `rs::range_reference_t<T>` → `std::ranges::range_reference_t<T>`
-    - `rs::range_difference_t<T>` → `std::ranges::range_difference_t<T>`
-    - `rs::iterator_t<T>` → `std::ranges::iterator_t<T>`
-    - `rs::sentinel_t<T>` → `std::ranges::sentinel_t<T>`
-    - `rs::difference_type_t<I>` → `std::iter_difference_t<I>`
+- [x] **1.3** Migrate `src/fields/tuple_fwd.hpp`. This is the keystone header — changes here affect all downstream files. Apply the following substitutions:
+  - [x] **1.3a** Replace range-v3 concept usage with C++20 equivalents. **Note:** The `All` concept uses `(std::is_lvalue_reference_v<T> || std::ranges::view<std::remove_cvref_t<T>>)` instead of `std::ranges::viewable_range<T>` to preserve range-v3's narrower semantics — C++20's `viewable_range` additionally allows rvalue movable non-view types, which would break `viewable_range_by_value` CTAD deduction guides (would strip references from containers, causing copies instead of references).
     - Files: `src/fields/tuple_fwd.hpp`
-    - Test: `cmake --build build` — expect many failures; this is foundational.
-  - [ ] **1.3b** Replace `rs::ref_view<Rng>` with `std::ranges::ref_view<Rng>` in the `is_ref_view_impl` specialization (line 586).
+  - [x] **1.3b** Replace `rs::ref_view<Rng>` with `std::ranges::ref_view<Rng>` in `is_ref_view_impl`.
     - Files: `src/fields/tuple_fwd.hpp`
-  - [ ] **1.3c** Replace `vs::view_closure<Fn>` with `ccs::view_closure<Fn>` in `is_view_closure_impl` (line 539). Update the `ViewClosure` and `ViewClosures` concepts accordingly.
-    - Depends on: 1.2a
+  - [x] **1.3c** Replace `vs::view_closure<Fn>` with `ccs::view_closure<Fn>` in `is_view_closure_impl`. `ViewClosure` now checks for `ccs::view_closure` — range-v3 `vs::view_closure` types no longer satisfy it. Test `range_concepts.t.cpp` line 135 will fail until migrated in 1.20a.
     - Files: `src/fields/tuple_fwd.hpp`
-  - [ ] **1.3d** Replace `vs::common(...)` with `std::views::common(...)` in `constructible_from_range_impl` (line 333).
+  - [x] **1.3d** Replace `vs::common(...)` with `std::views::common(...)` in `constructible_from_range_impl`.
     - Files: `src/fields/tuple_fwd.hpp`
-  - [ ] **1.3e** Remove `rs::common_tuple<Args...>` specialization from `is_tuple_like_impl` (line 129). This type is only produced by range-v3's `vs::zip`; after migration, no code generates `rs::common_tuple` values. The `NumericTuple` test using `rs::common_tuple` (in `range_concepts.t.cpp`) will be updated in item 1.20.
+  - [x] **1.3e** Removed `rs::common_tuple<Args...>` specialization from `is_tuple_like_impl`. Test `range_concepts.t.cpp` line 173 (`NumericTuple` with `rs::common_tuple`) will fail until migrated in 1.20a.
     - Files: `src/fields/tuple_fwd.hpp`
-  - [ ] **1.3f** Replace `ranges::enable_view` specializations (lines 711–721) with `std::ranges::enable_view` in namespace `std::ranges`. Note: the specialization for `ccs::tuple<Args...>` sets `enable_view = false` (multi-element tuples are not views); the single-`All` specialization sets it to `true`.
+  - [x] **1.3f** Replaced `namespace ranges { enable_view }` with `namespace std::ranges { enable_view }`. Range-v3's `ranges::enable_view` is no longer specialized (not in scope without range-v3 include). Downstream files that still mix range-v3 views with ccs::tuple may see compilation changes; these resolve when those files are migrated.
     - Files: `src/fields/tuple_fwd.hpp`
-  - [ ] **1.3g** Remove `#include <range/v3/range/concepts.hpp>`, `#include <range/v3/view/common.hpp>`, `#include <range/v3/view/view.hpp>`. Add `#include <ranges>` and `#include "ccs_range_utils.hpp"`.
+  - [x] **1.3g** Removed all 3 range-v3 includes. Added `#include <ranges>` and `#include "ccs_range_utils.hpp"`.
     - Files: `src/fields/tuple_fwd.hpp`
-  - Test (all of 1.3): `cmake --build build` — expect many compilation errors in downstream files until they are also migrated. Use iterative approach: fix tuple_fwd.hpp, then fix callers.
+  - Test results: 8 fields targets compile (t-range_concepts, t-tuple_utils, t-container_tuple, t-single_view, t-algorithms, t-field, t-field_utils, t-field_math). 6 targets with pre-existing compilation failures have slightly increased error counts due to C++20 concepts evaluating differently for range-v3 types; these will resolve when those headers/tests are migrated. All runtime test failures are pre-existing.
 
 ### Utilities and Algorithms
 

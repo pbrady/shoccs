@@ -2,9 +2,9 @@
 
 #include "types.hpp"
 
-#include <range/v3/range/concepts.hpp>
-#include <range/v3/view/common.hpp>
-#include <range/v3/view/view.hpp>
+#include <ranges>
+
+#include "ccs_range_utils.hpp"
 
 #include <boost/mp11.hpp>
 #include <boost/type_traits/copy_cv_ref.hpp>
@@ -15,10 +15,14 @@ namespace ccs //::field::tuple
 using std::get;
 using namespace boost::mp11;
 
-// Concept for being able to apply vs::all.  Need to exclude int3 as
-// an "Allable" range to trigger proper tuple construction calls
+// Concept for being able to apply std::views::all.  Need to exclude int3 as
+// an "Allable" range to trigger proper tuple construction calls.
+// Note: C++20 viewable_range is broader than range-v3's (allows rvalue non-view
+// movable types). We use the narrower range-v3 semantics to preserve existing
+// behavior in viewable_range_by_value and CTAD deduction guides.
 template <typename T>
-concept All = rs::range<T&> && rs::viewable_range<T> &&
+concept All = std::ranges::range<T&> &&
+    (std::is_lvalue_reference_v<T> || std::ranges::view<std::remove_cvref_t<T>>) &&
     (!std::same_as<int3, std::remove_cvref_t<T>>);
 
 // Forward decls for main types
@@ -125,10 +129,6 @@ namespace detail
     struct is_tuple_like_impl<std::tuple<Args...>> : std::true_type {
     };
 
-    template <typename... Args>
-    struct is_tuple_like_impl<rs::common_tuple<Args...>> : std::true_type {
-    };
-
     template <template <typename...> typename T, typename... Args>
     struct is_tuple_like_impl<T<Args...>>
         : mp_or<std::is_base_of<container_tuple<Args...>, T<Args...>>,
@@ -164,7 +164,7 @@ template <typename T>
 concept Non_Owning_Tuple = TupleLike<T> &&(!OwningTuple<T>);
 
 template <typename T>
-concept NonTupleRange = rs::input_range<T> &&(!TupleLike<T>);
+concept NonTupleRange = std::ranges::input_range<T> &&(!TupleLike<T>);
 
 //
 // Determine the nesting level of the tuples.  Will be needed for smart selections
@@ -256,7 +256,7 @@ concept SimilarTuples =
 // Range concepts
 //
 template <typename T>
-concept Range = rs::input_range<T> &&(!std::same_as<int3, std::remove_cvref_t<T>>);
+concept Range = std::ranges::input_range<T> &&(!std::same_as<int3, std::remove_cvref_t<T>>);
 
 // template <typename T>
 // concept AnyOutputRange = rs::range<T>&& rs::output_range<T, rs::range_value_t<T>>;
@@ -273,9 +273,9 @@ struct is_output_range_impl : std::false_type {
 };
 
 template <typename Rout, typename Rin>
-    requires rs::range<Rout> &&
-        ((rs::range<Rin> && rs::output_range<Rout, rs::range_value_t<Rin>>) ||
-         (rs::output_range<Rout, Rin>)) struct is_output_range_impl<Rout, Rin>
+    requires std::ranges::range<Rout> &&
+        ((std::ranges::range<Rin> && std::ranges::output_range<Rout, std::ranges::range_value_t<Rin>>) ||
+         (std::ranges::output_range<Rout, Rin>)) struct is_output_range_impl<Rout, Rin>
         : std::true_type {
     };
 } // namespace detail
@@ -330,14 +330,14 @@ namespace detail
     };
     template <typename T, NonTupleRange Arg>
     struct constructible_from_range_impl<T, Arg> {
-        using C = decltype(vs::common(std::declval<Arg>()));
-        using type = std::is_constructible<T, rs::iterator_t<C>, rs::sentinel_t<C>>;
+        using C = decltype(std::views::common(std::declval<Arg>()));
+        using type = std::is_constructible<T, std::ranges::iterator_t<C>, std::ranges::sentinel_t<C>>;
     };
 
     template <typename T, NonTupleRange Arg>
-        requires rs::common_range<Arg>
+        requires std::ranges::common_range<Arg>
     struct constructible_from_range_impl<T, Arg> {
-        using type = std::is_constructible<T, rs::iterator_t<Arg>, rs::sentinel_t<Arg>>;
+        using type = std::is_constructible<T, std::ranges::iterator_t<Arg>, std::ranges::sentinel_t<Arg>>;
     };
 } // namespace detail
 
@@ -536,7 +536,7 @@ namespace detail
     };
 
     template <typename Fn>
-    struct is_view_closure_impl<vs::view_closure<Fn>> : std::true_type {
+    struct is_view_closure_impl<ccs::view_closure<Fn>> : std::true_type {
     };
 } // namespace detail
 
@@ -583,7 +583,7 @@ namespace detail
     };
 
     template <typename Rng>
-    struct is_ref_view_impl<rs::ref_view<Rng>> : std::true_type {
+    struct is_ref_view_impl<std::ranges::ref_view<Rng>> : std::true_type {
     };
 } // namespace detail
 
@@ -708,7 +708,7 @@ struct underlying_range_impl<T> {
 // need to specialize this bool inorder for r_tuples to have the correct behavior.
 // This is somewhat tricky and is hopefully tested by all the "concepts" tests in
 // r_tuple.t.cpp
-namespace ranges
+namespace std::ranges
 {
 template <typename... Args>
 inline constexpr bool enable_view<ccs::tuple<Args...>> = false;
@@ -719,4 +719,4 @@ inline constexpr bool enable_view<ccs::tuple<T>> = true;
 template <ccs::All T>
 inline constexpr bool enable_view<ccs::view_tuple<T>> = true;
 
-} // namespace ranges
+} // namespace std::ranges
