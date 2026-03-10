@@ -404,9 +404,17 @@ Migrate test files to remove `#include <range/v3/all.hpp>` and all `rs::`/`vs::`
     - Files: `src/fields/selector.t.cpp`
     - Test: `ctest --test-dir build -R t-selector`
 
-- [ ] **1.20f** Migrate `src/fields/tuple.t.cpp`: Remove range-v3 includes. Replace `vs::take_exactly` (line 98), `vs::concat` (line 191), `vs::generate_n` + `rs::to` (line 305), `vs::repeat_n` (lines 471, 485), `rs::equal`, `rs::size`.
+- [x] **1.20f** Migrate `src/fields/tuple.t.cpp` (526 lines): Removed `#include <range/v3/all.hpp>` and `#include <iostream>`. Added `#include <algorithm>`, `#include <numeric>`, `#include <ranges>`. Replaced:
+  - `vs::iota(a, b)` → `std::views::iota(a, b)` (~30 occurrences).
+  - `rs::size(r)` → `std::ranges::size(r)`, `rs::equal(a, b)` → `std::ranges::equal(a, b)` (~20 occurrences).
+  - `vs::take_exactly(n)` → `std::views::take(n)` (line 98).
+  - `vs::iota(0, 10) | rs::to<T>()` → `T(std::ranges::begin(iota_rng), std::ranges::end(iota_rng))` (line 96).
+  - `vs::concat(tuple{vs::iota(0, 16)}, vs::iota(16, 21))` → `std::views::iota(0, 21)` (line 191).
+  - `vs::generate_n(g, rs::size(s)) | rs::to<T>()` → `T result(std::ranges::size(s)); std::generate(result.begin(), result.end(), g)` (line 305).
+  - `vs::repeat_n(0, 3)` → `std::vector<int>(3, 0)` (lines 471, 485).
+  - Added double parentheses `REQUIRE((expr == expr))` to all `ccs::tuple` `==` comparisons to prevent Catch2 C++20 ambiguous reversed operator== errors.
   - Files: `src/fields/tuple.t.cpp`
-  - Test: `ctest --test-dir build -R t-tuple`
+  - Test: `ctest --test-dir build -R t-tuple` — 1 passed (all 12 test cases). All 9 previously-passing downstream field targets still pass.
 
 - [ ] **1.20g** Migrate `src/fields/scalar.t.cpp` (266 lines) and `src/fields/vector.t.cpp` (354 lines): Remove range-v3 includes. Replace:
   - `vs::repeat_n` (~20 occurrences across both files) → `std::vector<T>(n, v)` or `ccs::repeat_n`.
