@@ -361,12 +361,15 @@ Migrate test files to remove `#include <range/v3/all.hpp>` and all `rs::`/`vs::`
     - Files: `src/fields/selector.t.cpp` (lines 1–181)
     - Test: `t-selector` still won't compile until 1.20e2+e3 complete. All 6 downstream field targets build and pass.
 
-  - [ ] **1.20e2** Migrate multi_slice tests (lines 183–461, ~127 `rs::`/`vs::` occurrences): Tests for `multi_slice construction`, `multi_slice extraction`, `multi_slice assignment`, `multi_slice scalar extraction/assignment`, `multi_slice vector extraction/assignment`, `default operators`.
-    - This section has the heaviest `vs::concat(vs::repeat_n(...), vs::iota(...), ...)` nesting. Each `vs::concat(...)` should be replaced with the computed `std::vector<int>{...}` literal. For example: `vs::concat(vs::repeat_n(-1, 1), vs::repeat_n(-2, 7), vs::repeat_n(-1, 14), vs::repeat_n(-2, 2))` → `std::vector<int>{-1, -2,-2,-2,-2,-2,-2,-2, -1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1, -2,-2}` (or use a helper).
-    - Consider adding a test-local helper: `template<typename... Rngs> auto concat_vec(Rngs&&... rngs)` that copies ranges into a single `std::vector`.
-    - Replace `rs::equal`, `rs::size` → `std::ranges` equivalents (~30 occurrences).
+  - [x] **1.20e2** Migrate multi_slice tests (lines 183–461, ~127 `rs::`/`vs::` occurrences): Tests for `multi_slice construction`, `multi_slice extraction`, `multi_slice assignment`, `multi_slice scalar extraction/assignment`, `multi_slice vector extraction/assignment`, `default operators`.
+    - Added test-local `concat_vec(Rngs&&... rngs)` helper that copies ranges into a single `std::vector<int>` using `std::ranges::copy` and `std::back_inserter`. Added `#include <algorithm>`, `#include <iterator>`, `#include <ranges>`.
+    - Replaced `vs::concat(vs::repeat_n(...), vs::iota(...), ...)` → `concat_vec(std::vector<int>(n, v), std::views::iota(a, b), ...)` (~24 occurrences).
+    - Replaced `vs::repeat_n(v, n)` → `std::vector<int>(n, v)` (~10 occurrences in standalone use).
+    - Replaced `vs::iota(a, b)` → `std::views::iota(a, b)` (~30 occurrences).
+    - Replaced `rs::equal(a, b)` → `std::ranges::equal(a, b)`, `rs::size(r)` → `std::ranges::size(r)` (~30 occurrences).
+    - Added double parentheses `REQUIRE((expr == expr))` around all `ccs::tuple` `==` comparisons (~30 lines).
     - Files: `src/fields/selector.t.cpp` (lines 183–461)
-    - Test: `ctest --test-dir build -R t-selector`
+    - Test: `t-selector` still won't compile until 1.20e3 completes. All 6 downstream field targets build and pass.
 
   - [ ] **1.20e3** Migrate optional/predicate tests (lines 462–723, ~78 `rs::`/`vs::` occurrences): Tests for `optional tuple`, `optional scalar`, `optional vector`, `multi_slice math`, `predicate extraction`, `predicate assignment`, `predicate scalar extraction/assignment`.
     - Replace `vs::repeat_n`, `vs::iota`, `vs::transform`, `vs::stride` patterns.

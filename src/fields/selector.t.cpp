@@ -4,7 +4,10 @@
 
 #include <catch2/catch_test_macros.hpp>
 
+#include <algorithm>
+#include <iterator>
 #include <range/v3/all.hpp>
+#include <ranges>
 
 #include <vector>
 
@@ -12,6 +15,15 @@ using namespace ccs;
 
 constexpr auto plus = lift(std::plus{});
 constexpr auto dble = [](auto&& v) { return plus(v, v); };
+
+// Test-local helper: concatenates multiple ranges into a single std::vector<int>
+template <typename... Rngs>
+auto concat_vec(Rngs&&... rngs)
+{
+    std::vector<int> result;
+    (std::ranges::copy(std::forward<Rngs>(rngs), std::back_inserter(result)), ...);
+    return result;
+}
 
 TEST_CASE("planes construction")
 {
@@ -190,80 +202,81 @@ TEST_CASE("multi_slice construction")
 
 TEST_CASE("multi_slice extraction")
 {
-    auto t = tuple{vs::iota(0, 24)};
+    auto t = tuple{std::views::iota(0, 24)};
 
     SECTION("whole container")
     {
         std::vector<index_slice> slices{{0, 24}};
         auto s = t | sel::multi_slice(slices);
-        REQUIRE(rs::size(s) == 24);
-        REQUIRE(rs::equal(t | sel::multi_slice(slices), t));
+        REQUIRE(std::ranges::size(s) == 24);
+        REQUIRE(std::ranges::equal(t | sel::multi_slice(slices), t));
     }
 
     SECTION("whole container multiple slices")
     {
         std::vector<index_slice> slices{{0, 5}, {5, 10}, {10, 11}, {11, 24}};
         auto s = t | sel::multi_slice(slices);
-        REQUIRE(rs::size(s) == 24);
-        REQUIRE(rs::equal(t | sel::multi_slice(slices), t));
+        REQUIRE(std::ranges::size(s) == 24);
+        REQUIRE(std::ranges::equal(t | sel::multi_slice(slices), t));
     }
 
     SECTION("partial container, single slice")
     {
         std::vector<index_slice> slices{{2, 10}};
         auto s = t | sel::multi_slice(slices);
-        REQUIRE(rs::size(s) == 8);
-        REQUIRE(rs::equal(s, vs::iota(2, 10)));
+        REQUIRE(std::ranges::size(s) == 8);
+        REQUIRE(std::ranges::equal(s, std::views::iota(2, 10)));
     }
 
     SECTION("partial container, many slices")
     {
         std::vector<index_slice> slices{{1, 4}, {5, 6}, {10, 23}};
         auto s = t | sel::multi_slice(slices);
-        REQUIRE(rs::size(s) == 17);
-        REQUIRE(
-            rs::equal(s, vs::concat(vs::iota(1, 4), vs::iota(5, 6), vs::iota(10, 23))));
+        REQUIRE(std::ranges::size(s) == 17);
+        REQUIRE(std::ranges::equal(
+            s,
+            concat_vec(std::views::iota(1, 4), std::views::iota(5, 6), std::views::iota(10, 23))));
 
-        auto q = tuple{vs::iota(24, 48)};
+        auto q = tuple{std::views::iota(24, 48)};
         auto z = get<0>(s).apply(q);
-        REQUIRE(rs::size(z) == 17);
-        REQUIRE(rs::equal(z, q | sel::multi_slice(slices)));
+        REQUIRE(std::ranges::size(z) == 17);
+        REQUIRE(std::ranges::equal(z, q | sel::multi_slice(slices)));
     }
 }
 
 TEST_CASE("multi_slice assignment")
 {
     using T = std::vector<int>;
-    auto t = tuple<T>{vs::iota(0, 24)};
+    auto t = tuple<T>{std::views::iota(0, 24)};
 
     std::vector<index_slice> a{{0, 24}};
     auto whole = sel::multi_slice(a);
 
     t | whole = -1;
 
-    REQUIRE(t == tuple{vs::repeat_n(-1, 24)});
+    REQUIRE((t == tuple{std::vector<int>(24, -1)}));
 
     std::vector<index_slice> b{{1, 8}, {22, 24}};
     auto sparse0 = sel::multi_slice(b);
 
     t | sparse0 = -2;
-    REQUIRE(t == tuple{vs::concat(vs::repeat_n(-1, 1),
-                                  vs::repeat_n(-2, 7),
-                                  vs::repeat_n(-1, 14),
-                                  vs::repeat_n(-2, 2))});
+    REQUIRE((t == tuple{concat_vec(std::vector<int>(1, -1),
+                                   std::vector<int>(7, -2),
+                                   std::vector<int>(14, -1),
+                                   std::vector<int>(2, -2))}));
 
-    t | sparse0 = vs::concat(vs::iota(1, 8), vs::iota(22, 24));
-    REQUIRE(t == tuple{vs::concat(vs::repeat_n(-1, 1),
-                                  vs::iota(1, 8),
-                                  vs::repeat_n(-1, 14),
-                                  vs::iota(22, 24))});
+    t | sparse0 = concat_vec(std::views::iota(1, 8), std::views::iota(22, 24));
+    REQUIRE((t == tuple{concat_vec(std::vector<int>(1, -1),
+                                   std::views::iota(1, 8),
+                                   std::vector<int>(14, -1),
+                                   std::views::iota(22, 24))}));
     tuple<T> t2 = t + 1;
 
     t | sparse0 = t2 | sparse0;
-    REQUIRE(t == tuple{vs::concat(vs::repeat_n(-1, 1),
-                                  vs::iota(2, 9),
-                                  vs::repeat_n(-1, 14),
-                                  vs::iota(23, 25))});
+    REQUIRE((t == tuple{concat_vec(std::vector<int>(1, -1),
+                                   std::views::iota(2, 9),
+                                   std::vector<int>(14, -1),
+                                   std::views::iota(23, 25))}));
 }
 
 TEST_CASE("mulit_slice scalar extraction")
@@ -271,17 +284,18 @@ TEST_CASE("mulit_slice scalar extraction")
     using T = std::vector<int>;
     using U = std::vector<index_slice>;
 
-    scalar<T> s{tuple{vs::iota(0, 24)}, tuple{0, 0, 0}};
+    scalar<T> s{tuple{std::views::iota(0, 24)}, tuple{0, 0, 0}};
 
     U whole{{0, 24}};
-    REQUIRE(rs::equal(s | sel::multi_slice(whole), s | sel::D));
+    REQUIRE(std::ranges::equal(s | sel::multi_slice(whole), s | sel::D));
 
     U sparse{{1, 2}, {4, 8}, {20, 24}};
-    REQUIRE(rs::equal(s | sel::multi_slice(sparse),
-                      vs::concat(vs::iota(1, 2), vs::iota(4, 8), vs::iota(20, 24))));
+    REQUIRE(std::ranges::equal(
+        s | sel::multi_slice(sparse),
+        concat_vec(std::views::iota(1, 2), std::views::iota(4, 8), std::views::iota(20, 24))));
 
-    scalar<T> t{tuple{vs::iota(24, 48)}, tuple{0, 0, 0}};
-    REQUIRE(rs::equal(get<0>(s | sel::multi_slice(sparse)).apply(t),
+    scalar<T> t{tuple{std::views::iota(24, 48)}, tuple{0, 0, 0}};
+    REQUIRE(std::ranges::equal(get<0>(s | sel::multi_slice(sparse)).apply(t),
                       t | sel::multi_slice(sparse)));
 }
 
@@ -290,42 +304,42 @@ TEST_CASE("multi_slice scalar assignment")
     using T = std::vector<int>;
     using U = std::vector<index_slice>;
 
-    scalar<T> s{tuple{vs::iota(0, 24)}, tuple{0, 0, 0}};
+    scalar<T> s{tuple{std::views::iota(0, 24)}, tuple{0, 0, 0}};
 
     U a{{0, 24}};
     auto whole = sel::multi_slice(a);
 
     s | whole = -1;
 
-    REQUIRE(get<0>(s) == tuple{vs::repeat_n(-1, 24)});
+    REQUIRE((get<0>(s) == tuple{std::vector<int>(24, -1)}));
 
     U b{{1, 3}, {6, 12}, {22, 24}};
     auto sparse = sel::multi_slice(b);
 
     s | sparse = -2;
-    REQUIRE(get<0>(s) == tuple{vs::concat(vs::repeat_n(-1, 1),
-                                          vs::repeat_n(-2, 2),
-                                          vs::repeat_n(-1, 3),
-                                          vs::repeat_n(-2, 6),
-                                          vs::repeat_n(-1, 10),
-                                          vs::repeat_n(-2, 2))});
+    REQUIRE((get<0>(s) == tuple{concat_vec(std::vector<int>(1, -1),
+                                           std::vector<int>(2, -2),
+                                           std::vector<int>(3, -1),
+                                           std::vector<int>(6, -2),
+                                           std::vector<int>(10, -1),
+                                           std::vector<int>(2, -2))}));
 
-    s | sparse = vs::concat(vs::iota(1, 3), vs::iota(6, 12), vs::iota(22, 24));
-    REQUIRE(get<0>(s) == tuple{vs::concat(vs::repeat_n(-1, 1),
-                                          vs::iota(1, 3),
-                                          vs::repeat_n(-1, 3),
-                                          vs::iota(6, 12),
-                                          vs::repeat_n(-1, 10),
-                                          vs::iota(22, 24))});
+    s | sparse = concat_vec(std::views::iota(1, 3), std::views::iota(6, 12), std::views::iota(22, 24));
+    REQUIRE((get<0>(s) == tuple{concat_vec(std::vector<int>(1, -1),
+                                           std::views::iota(1, 3),
+                                           std::vector<int>(3, -1),
+                                           std::views::iota(6, 12),
+                                           std::vector<int>(10, -1),
+                                           std::views::iota(22, 24))}));
     scalar<T> s2 = s + 1;
 
     s | sparse = s2; // or s | spare = s2 | sparse;
-    REQUIRE(get<0>(s) == tuple{vs::concat(vs::repeat_n(-1, 1),
-                                          vs::iota(2, 4),
-                                          vs::repeat_n(-1, 3),
-                                          vs::iota(7, 13),
-                                          vs::repeat_n(-1, 10),
-                                          vs::iota(23, 25))});
+    REQUIRE((get<0>(s) == tuple{concat_vec(std::vector<int>(1, -1),
+                                           std::views::iota(2, 4),
+                                           std::vector<int>(3, -1),
+                                           std::views::iota(7, 13),
+                                           std::vector<int>(10, -1),
+                                           std::views::iota(23, 25))}));
 }
 
 TEST_CASE("multi_slice vector extraction")
@@ -333,32 +347,32 @@ TEST_CASE("multi_slice vector extraction")
     using T = std::vector<int>;
     using U = std::vector<index_slice>;
 
-    vector<T> v{tuple{tuple{vs::iota(0, 24)}, tuple{0, 0, 0}},
-                tuple{tuple{vs::iota(24, 48)}, tuple{0, 0, 0}},
-                tuple{tuple{vs::iota(48, 72)}, tuple{0, 0, 0}}};
+    vector<T> v{tuple{tuple{std::views::iota(0, 24)}, tuple{0, 0, 0}},
+                tuple{tuple{std::views::iota(24, 48)}, tuple{0, 0, 0}},
+                tuple{tuple{std::views::iota(48, 72)}, tuple{0, 0, 0}}};
 
     U whole{{0, 24}};
-    REQUIRE(rs::equal(get<0>(v | sel::multi_slice(whole)), v | sel::Dx));
-    REQUIRE(rs::equal(get<1>(v | sel::multi_slice(whole)), v | sel::Dy));
-    REQUIRE(rs::equal(get<2>(v | sel::multi_slice(whole)), v | sel::Dz));
+    REQUIRE(std::ranges::equal(get<0>(v | sel::multi_slice(whole)), v | sel::Dx));
+    REQUIRE(std::ranges::equal(get<1>(v | sel::multi_slice(whole)), v | sel::Dy));
+    REQUIRE(std::ranges::equal(get<2>(v | sel::multi_slice(whole)), v | sel::Dz));
 
     U sparse{{1, 2}, {4, 8}, {20, 24}};
-    REQUIRE(rs::equal(get<0>(v | sel::multi_slice(sparse)),
+    REQUIRE(std::ranges::equal(get<0>(v | sel::multi_slice(sparse)),
                       get<0>(v) | sel::multi_slice(sparse)));
-    REQUIRE(rs::equal(get<1>(v | sel::multi_slice(sparse)),
+    REQUIRE(std::ranges::equal(get<1>(v | sel::multi_slice(sparse)),
                       get<1>(v) | sel::multi_slice(sparse)));
-    REQUIRE(rs::equal(get<2>(v | sel::multi_slice(sparse)),
+    REQUIRE(std::ranges::equal(get<2>(v | sel::multi_slice(sparse)),
                       get<2>(v) | sel::multi_slice(sparse)));
 
-    vector<T> u{tuple{tuple{vs::iota(48, 72)}, tuple{0, 0, 0}},
-                tuple{tuple{vs::iota(0, 24)}, tuple{0, 0, 0}},
-                tuple{tuple{vs::iota(24, 48)}, tuple{0, 0, 0}}};
+    vector<T> u{tuple{tuple{std::views::iota(48, 72)}, tuple{0, 0, 0}},
+                tuple{tuple{std::views::iota(0, 24)}, tuple{0, 0, 0}},
+                tuple{tuple{std::views::iota(24, 48)}, tuple{0, 0, 0}}};
 
     const auto sp = sel::multi_slice(sparse);
 
-    REQUIRE(rs::equal(get<0>(v | sp).apply(u), get<0>(u) | sp));
-    REQUIRE(rs::equal(get<1>(v | sp).apply(u), get<1>(u) | sp));
-    REQUIRE(rs::equal(get<2>(v | sp).apply(u), get<2>(u) | sp));
+    REQUIRE(std::ranges::equal(get<0>(v | sp).apply(u), get<0>(u) | sp));
+    REQUIRE(std::ranges::equal(get<1>(v | sp).apply(u), get<1>(u) | sp));
+    REQUIRE(std::ranges::equal(get<2>(v | sp).apply(u), get<2>(u) | sp));
 }
 
 TEST_CASE("multi_slice vector assignment")
@@ -366,85 +380,85 @@ TEST_CASE("multi_slice vector assignment")
     using T = std::vector<int>;
     using U = std::vector<index_slice>;
 
-    vector<T> v{tuple{tuple{vs::iota(0, 24)}, tuple{0, 0, 0}},
-                tuple{tuple{vs::iota(24, 48)}, tuple{0, 0, 0}},
-                tuple{tuple{vs::iota(48, 72)}, tuple{0, 0, 0}}};
+    vector<T> v{tuple{tuple{std::views::iota(0, 24)}, tuple{0, 0, 0}},
+                tuple{tuple{std::views::iota(24, 48)}, tuple{0, 0, 0}},
+                tuple{tuple{std::views::iota(48, 72)}, tuple{0, 0, 0}}};
 
     U a{{0, 24}};
     auto whole = sel::multi_slice(a);
 
     v | whole = -1;
-    REQUIRE(get<vi::Dx>(v) == tuple{vs::repeat_n(-1, 24)});
-    REQUIRE(get<vi::Dy>(v) == tuple{vs::repeat_n(-1, 24)});
-    REQUIRE(get<vi::Dz>(v) == tuple{vs::repeat_n(-1, 24)});
+    REQUIRE((get<vi::Dx>(v) == tuple{std::vector<int>(24, -1)}));
+    REQUIRE((get<vi::Dy>(v) == tuple{std::vector<int>(24, -1)}));
+    REQUIRE((get<vi::Dz>(v) == tuple{std::vector<int>(24, -1)}));
 
     U b{{1, 3}, {6, 12}, {22, 24}};
     auto sparse = sel::multi_slice(b);
 
     v | sparse = -2;
-    REQUIRE(get<vi::Dx>(v) == tuple{vs::concat(vs::repeat_n(-1, 1),
-                                               vs::repeat_n(-2, 2),
-                                               vs::repeat_n(-1, 3),
-                                               vs::repeat_n(-2, 6),
-                                               vs::repeat_n(-1, 10),
-                                               vs::repeat_n(-2, 2))});
-    REQUIRE(get<vi::Dx>(v) == get<vi::Dy>(v));
-    REQUIRE(get<vi::Dx>(v) == get<vi::Dz>(v));
+    REQUIRE((get<vi::Dx>(v) == tuple{concat_vec(std::vector<int>(1, -1),
+                                                std::vector<int>(2, -2),
+                                                std::vector<int>(3, -1),
+                                                std::vector<int>(6, -2),
+                                                std::vector<int>(10, -1),
+                                                std::vector<int>(2, -2))}));
+    REQUIRE((get<vi::Dx>(v) == get<vi::Dy>(v)));
+    REQUIRE((get<vi::Dx>(v) == get<vi::Dz>(v)));
 
-    v | sparse = vs::concat(vs::iota(1, 3), vs::iota(6, 12), vs::iota(22, 24));
-    REQUIRE(get<vi::Dx>(v) == tuple{vs::concat(vs::repeat_n(-1, 1),
-                                               vs::iota(1, 3),
-                                               vs::repeat_n(-1, 3),
-                                               vs::iota(6, 12),
-                                               vs::repeat_n(-1, 10),
-                                               vs::iota(22, 24))});
-    REQUIRE(get<vi::Dx>(v) == get<vi::Dy>(v));
-    REQUIRE(get<vi::Dx>(v) == get<vi::Dz>(v));
+    v | sparse = concat_vec(std::views::iota(1, 3), std::views::iota(6, 12), std::views::iota(22, 24));
+    REQUIRE((get<vi::Dx>(v) == tuple{concat_vec(std::vector<int>(1, -1),
+                                                std::views::iota(1, 3),
+                                                std::vector<int>(3, -1),
+                                                std::views::iota(6, 12),
+                                                std::vector<int>(10, -1),
+                                                std::views::iota(22, 24))}));
+    REQUIRE((get<vi::Dx>(v) == get<vi::Dy>(v)));
+    REQUIRE((get<vi::Dx>(v) == get<vi::Dz>(v)));
 
-    v | sparse = tuple{vs::concat(vs::iota(1, 3), vs::iota(6, 12), vs::iota(22, 24)),
-                       vs::concat(vs::iota(25, 27), vs::iota(30, 36), vs::iota(46, 48)),
-                       vs::concat(vs::iota(49, 51), vs::iota(54, 60), vs::iota(70, 72))};
-    REQUIRE(get<vi::Dx>(v) == tuple{vs::concat(vs::repeat_n(-1, 1),
-                                               vs::iota(1, 3),
-                                               vs::repeat_n(-1, 3),
-                                               vs::iota(6, 12),
-                                               vs::repeat_n(-1, 10),
-                                               vs::iota(22, 24))});
-    REQUIRE(get<vi::Dy>(v) == tuple{vs::concat(vs::repeat_n(-1, 1),
-                                               vs::iota(25, 27),
-                                               vs::repeat_n(-1, 3),
-                                               vs::iota(30, 36),
-                                               vs::repeat_n(-1, 10),
-                                               vs::iota(46, 48))});
-    REQUIRE(get<vi::Dz>(v) == tuple{vs::concat(vs::repeat_n(-1, 1),
-                                               vs::iota(49, 51),
-                                               vs::repeat_n(-1, 3),
-                                               vs::iota(54, 60),
-                                               vs::repeat_n(-1, 10),
-                                               vs::iota(70, 72))});
+    v | sparse = tuple{concat_vec(std::views::iota(1, 3), std::views::iota(6, 12), std::views::iota(22, 24)),
+                       concat_vec(std::views::iota(25, 27), std::views::iota(30, 36), std::views::iota(46, 48)),
+                       concat_vec(std::views::iota(49, 51), std::views::iota(54, 60), std::views::iota(70, 72))};
+    REQUIRE((get<vi::Dx>(v) == tuple{concat_vec(std::vector<int>(1, -1),
+                                                std::views::iota(1, 3),
+                                                std::vector<int>(3, -1),
+                                                std::views::iota(6, 12),
+                                                std::vector<int>(10, -1),
+                                                std::views::iota(22, 24))}));
+    REQUIRE((get<vi::Dy>(v) == tuple{concat_vec(std::vector<int>(1, -1),
+                                                std::views::iota(25, 27),
+                                                std::vector<int>(3, -1),
+                                                std::views::iota(30, 36),
+                                                std::vector<int>(10, -1),
+                                                std::views::iota(46, 48))}));
+    REQUIRE((get<vi::Dz>(v) == tuple{concat_vec(std::vector<int>(1, -1),
+                                                std::views::iota(49, 51),
+                                                std::vector<int>(3, -1),
+                                                std::views::iota(54, 60),
+                                                std::vector<int>(10, -1),
+                                                std::views::iota(70, 72))}));
 
     vector<T> u = v + 1;
 
     v | sparse = u;
 
-    REQUIRE(get<vi::Dx>(v) == tuple{vs::concat(vs::repeat_n(-1, 1),
-                                               vs::iota(2, 4),
-                                               vs::repeat_n(-1, 3),
-                                               vs::iota(7, 13),
-                                               vs::repeat_n(-1, 10),
-                                               vs::iota(23, 25))});
-    REQUIRE(get<vi::Dy>(v) == tuple{vs::concat(vs::repeat_n(-1, 1),
-                                               vs::iota(26, 28),
-                                               vs::repeat_n(-1, 3),
-                                               vs::iota(31, 37),
-                                               vs::repeat_n(-1, 10),
-                                               vs::iota(47, 49))});
-    REQUIRE(get<vi::Dz>(v) == tuple{vs::concat(vs::repeat_n(-1, 1),
-                                               vs::iota(50, 52),
-                                               vs::repeat_n(-1, 3),
-                                               vs::iota(55, 61),
-                                               vs::repeat_n(-1, 10),
-                                               vs::iota(71, 73))});
+    REQUIRE((get<vi::Dx>(v) == tuple{concat_vec(std::vector<int>(1, -1),
+                                                std::views::iota(2, 4),
+                                                std::vector<int>(3, -1),
+                                                std::views::iota(7, 13),
+                                                std::vector<int>(10, -1),
+                                                std::views::iota(23, 25))}));
+    REQUIRE((get<vi::Dy>(v) == tuple{concat_vec(std::vector<int>(1, -1),
+                                                std::views::iota(26, 28),
+                                                std::vector<int>(3, -1),
+                                                std::views::iota(31, 37),
+                                                std::vector<int>(10, -1),
+                                                std::views::iota(47, 49))}));
+    REQUIRE((get<vi::Dz>(v) == tuple{concat_vec(std::vector<int>(1, -1),
+                                                std::views::iota(50, 52),
+                                                std::vector<int>(3, -1),
+                                                std::views::iota(55, 61),
+                                                std::vector<int>(10, -1),
+                                                std::views::iota(71, 73))}));
 }
 
 TEST_CASE("default operators for storing selections in mesh")
