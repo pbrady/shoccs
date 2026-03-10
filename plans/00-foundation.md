@@ -96,7 +96,7 @@ ctest --test-dir build -R t-real3_operators
 
 Depends on: 0.4 (D3 resolved).
 
-- [ ] **0.7a** In `src/index_view.hpp`: Replace cppcoro generators with vector-returning functions.
+- [x] **0.7a** In `src/index_view.hpp`: Replace cppcoro generators with vector-returning functions.
   - Remove `#include <cppcoro/generator.hpp>` (line 4) and `#include <range/v3/view/take_exactly.hpp>` (line 5). The `take_exactly` include is unused in this file.
   - Add `#include <vector>`.
   - Replace the volume overload `cppcoro::generator<int3> index_view(int3 extents)` (lines 12–32) with a function returning `std::vector<int3>`. Body: reserve `extents[I]*extents[F]*extents[S]` elements, then the same triple nested loop with `result.push_back(ijk)` instead of `co_yield ijk`.
@@ -104,7 +104,7 @@ Depends on: 0.4 (D3 resolved).
   - File: `src/index_view.hpp`
   - Test: compiles as part of `t-index_view` (enabled in 0.8b).
 
-- [ ] **0.7b** In `src/mesh/mesh_view.hpp`: Same pattern — replace cppcoro generators with vector-returning functions.
+- [x] **0.7b** In `src/mesh/mesh_view.hpp`: Same pattern — replace cppcoro generators with vector-returning functions.
   - Remove `#include <cppcoro/generator.hpp>` (line 6). Add `#include <vector>`.
   - Replace `cppcoro::generator<real3> location_view(const cartesian& m)` (lines 17–37) with a function returning `std::vector<real3>`. Same loop, `push_back` instead of `co_yield`.
   - Replace `cppcoro::generator<real3> location_view(const cartesian& m, int i)` (lines 39–59) with a function returning `std::vector<real3>`. Same loop, `push_back` instead of `co_yield`.
@@ -116,13 +116,13 @@ Depends on: 0.4 (D3 resolved).
 
 Depends on: 0.7a.
 
-- [ ] **0.8a** In `src/index_view.t.cpp`: Remove range-v3 usage.
+- [x] **0.8a** In `src/index_view.t.cpp`: Remove range-v3 usage.
   - Remove `#include <range/v3/algorithm/equal.hpp>` (line 5) and `#include <range/v3/range/conversion.hpp>` (line 6).
   - Line 15: Replace `index_view<0>(extents, 0) | rs::to<std::vector<int3>>()` with just `index_view<0>(extents, 0)` (since `index_view` now returns `std::vector<int3>` directly).
   - Lines 24, 34, 47, 61, 65: Replace `rs::equal(index_view<I>(extents, n), std::vector{...})` with `index_view<I>(extents, n) == std::vector{...}` (vector `==` works directly).
   - File: `src/index_view.t.cpp`
 
-- [ ] **0.8b** In `src/CMakeLists.txt`: Uncomment the index_view test (line 5) and update its dependencies.
+- [x] **0.8b** In `src/CMakeLists.txt`: Uncomment the index_view test (line 5) and update its dependencies.
   - Change `#add_unit_test(index_view "indexing" indexing cppcoro range-v3::range-v3)` to `add_unit_test(index_view "indexing" indexing)`. The `cppcoro` and `range-v3::range-v3` link dependencies are no longer needed.
   - File: `src/CMakeLists.txt`
   - Test: `ctest --test-dir build -R t-index_view` passes.
@@ -131,11 +131,11 @@ Depends on: 0.7a.
 
 Depends on: 0.7a, 0.7b.
 
-- [ ] **0.9a** Verify no active source files still include `<cppcoro/generator.hpp>`. After 0.7a and 0.7b, the only remaining reference is `src/operators/directional.cpp` which is excluded from scope (commented out of `src/operators/CMakeLists.txt` line 21). That file will have a broken include, which is acceptable since it's dead code.
+- [x] **0.9a** Verify no active source files still include `<cppcoro/generator.hpp>`. Verified: only `src/operators/directional.cpp` (dead code, commented out of CMakeLists) remains. After 0.7a and 0.7b, the only remaining reference is `src/operators/directional.cpp` which is excluded from scope (commented out of `src/operators/CMakeLists.txt` line 21). That file will have a broken include, which is acceptable since it's dead code.
 
-- [ ] **0.9b** Delete the `external/cppcoro/` directory (contains `generator.hpp` only).
+- [x] **0.9b** Delete the `external/cppcoro/` directory (contains `generator.hpp` only).
 
-- [ ] **0.9c** In `external/CMakeLists.txt`: Remove both lines (`add_library(cppcoro INTERFACE)` and `target_include_directories(cppcoro INTERFACE ${CMAKE_CURRENT_LIST_DIR})`). If this leaves the file empty, keep it as an empty file (the `add_subdirectory(external)` in the top-level CMakeLists still references it).
+- [x] **0.9c** In `external/CMakeLists.txt`: Remove both lines (`add_library(cppcoro INTERFACE)` and `target_include_directories(cppcoro INTERFACE ${CMAKE_CURRENT_LIST_DIR})`). If this leaves the file empty, keep it as an empty file (the `add_subdirectory(external)` in the top-level CMakeLists still references it).
   - Files: `external/cppcoro/generator.hpp` (delete), `external/CMakeLists.txt` (edit)
   - Test: `cmake --build build` — full build succeeds with no cppcoro references.
 
