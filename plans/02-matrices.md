@@ -246,7 +246,7 @@ Common range-v3 → std/C++20 replacement patterns used across test files:
   - Test: `ctest --test-dir build -R t-csr`
   - Must come after: 2.5, 2.6
 
-- [ ] **2.9d** Migrate composite matrix test files: `inner_block.t.cpp` + `block.t.cpp`.
+- [x] **2.9d** Migrate composite matrix test files: `inner_block.t.cpp` + `block.t.cpp`.
   - Files: `src/matrices/inner_block.t.cpp`, `src/matrices/block.t.cpp`
   - Remove all `<range/v3/...>` includes. Add `<algorithm>`, `<ranges>`, `"fields/lazy_views.hpp"` (for `ccs::stride`).
   - `inner_block.t.cpp` (9 sites — same patterns as 2.9b):
@@ -286,7 +286,7 @@ Common range-v3 → std/C++20 replacement patterns used across test files:
 2.1 (D6 decision) [DONE]
  ├── 2.3 (dense.hpp)  [DONE] ──┐
  ├── 2.2 (dense.cpp)  [DONE] ──┤── 2.9b (dense + circulant tests) [DONE] ──┐
- ├── 2.4 (circulant.cpp) [DONE]┤── 2.9d (inner_block + block tests) ├── 2.10 (verification)
+ ├── 2.4 (circulant.cpp) [DONE]┤── 2.9d (inner_block + block tests) [DONE] ├── 2.10 (verification)
  ├── 2.6 (csr.hpp) [DONE] ── 2.5 (csr.cpp) [DONE] ── 2.9c (csr tests) [DONE] ──┤
  ├── 2.7 (coefficient_visitor.cpp) [DONE]┐── 2.9a (visitor tests) [DONE] ┘
  └── 2.8 (unit_stride_visitor) [DONE]┘
