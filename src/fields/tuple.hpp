@@ -98,6 +98,24 @@ struct tuple : container_tuple<Args...>, view_tuple<Args&...> {
     constexpr tuple&& as_tuple() && { return MOVE(*this); }
 };
 
+// Helper to call .apply() on a view element, unwrapping ref_view if needed.
+// When transform() passes lvalue references through get(), CTAD can produce
+// views with reference Rng (e.g., optional_view<View&, Fn>). These don't
+// satisfy the view concept, so std::views::all wraps them in ref_view,
+// which lacks .apply(). This helper unwraps the ref_view to reach the
+// underlying view's .apply() method.
+namespace detail
+{
+template <typename V, typename U>
+constexpr auto apply_view(V&& v, U&& u)
+{
+    if constexpr (requires { FWD(v).apply(FWD(u)); })
+        return FWD(v).apply(FWD(u));
+    else
+        return FWD(v).base().apply(FWD(u));
+}
+} // namespace detail
+
 //
 // Non Owning Tuple
 //
@@ -119,7 +137,7 @@ struct tuple<Args...> : view_tuple<Args...> {
     {
         *this = [ this, &t ]<auto... Is>(std::index_sequence<Is...>)
         {
-            return tuple_cat<tuple>(get<Is>(*this).apply(t)...);
+            return tuple_cat<tuple>(detail::apply_view(get<Is>(*this), t)...);
         }
         (sequence<tuple>);
         return *this;

@@ -67,12 +67,20 @@ public:
     }
 
     // When assigning from a container_tuple, make sure we don't copy anything and instead
-    // just take news views
+    // just take news views.  If the stored view types are incompatible with all_t of the
+    // source containers (e.g., multi_slice_view vs ref_view), fall back to element-wise
+    // copy through the existing views.
     template <OwningTuple C>
         requires(!ViewClosures<C> && SimilarTuples<view_tuple_base, C>)
     constexpr view_tuple_base& operator=(C&& c)
     {
-        v = tuple_map(std::views::all, FWD(c));
+        constexpr bool can_reset_views = requires(decltype(v)& vv, C&& cc) {
+            vv = tuple_map(std::views::all, std::forward<C>(cc));
+        };
+        if constexpr (can_reset_views)
+            v = tuple_map(std::views::all, FWD(c));
+        else
+            resize_and_copy(*this, FWD(c));
         return *this;
     }
 

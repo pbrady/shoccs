@@ -386,21 +386,21 @@ Migrate test files to remove `#include <range/v3/all.hpp>` and all `rs::`/`vs::`
     - Files: `src/fields/ccs_range_utils.hpp`
     - Test: All 10 previously-passing field targets still pass. `t-selector` blocked by 1.20e3c.
 
-  - [ ] **1.20e3c** Fix `ref_view<View>` losing `.apply()` method in `tuple` storage:
-    - **Problem:** When views with `.apply()` (e.g., `optional_view`, `predicate_view`, `multi_slice_view`) are stored in a `ccs::tuple`, the `view_tuple_base` applies `std::views::all_t<Args>...`. If a view element ends up as an lvalue reference during tuple construction (e.g., via `transform` → `get` returning `auto&`), `std::views::all` wraps it in `std::ranges::ref_view<View>`, which does NOT have `.apply()`. The `tuple::operator=(T&&)` at `tuple.hpp:122` calls `get<Is>(*this).apply(t)`, which fails for `ref_view<View>` types.
-    - **Root cause:** `ccs::tuple::get` always returns `auto&` (lvalue reference), even for rvalue tuples. When `transform` extracts elements from a temporary tuple via `get<Is>(FWD(t))`, the result is an lvalue reference. If this lvalue view is then stored in another tuple, `std::views::all_t<View&>` produces `ref_view<View>`.
-    - **Impact:** Blocks optional/predicate test compilation. Also affects `multi_slice math` test case (compound assignment on multi_slice views). Does NOT affect plane-only tests because plane_views are constructed as rvalues and stored directly.
-    - **Fix options:**
-      1. Make `ccs::tuple::get` return rvalue references for rvalue tuples (add `auto&& get(T&&)` overload that forwards properly).
-      2. Add an `apply` free function or ADL wrapper that unwraps `ref_view` before calling `.apply()`.
-      3. Change `tuple.hpp:122` to use `std::ranges::ref_view<V>::base()` before calling `.apply()`.
-    - Files: `src/fields/tuple_fwd.hpp` (get function), possibly `src/fields/tuple.hpp`
-    - Test: `ctest --test-dir build -R t-selector` — all optional/predicate tests should compile and pass.
+  - [x] **1.20e3c** Fix `ref_view<View>` losing `.apply()` method in `tuple` storage:
+    - **Problem:** When views with `.apply()` (e.g., `optional_view`, `predicate_view`, `multi_slice_view`) are stored in a `ccs::tuple`, the `view_tuple_base` applies `std::views::all_t<Args>...`. If a view element ends up as an lvalue reference during tuple construction (e.g., via `transform` → `get` returning `auto&`), `std::views::all` wraps it in `std::ranges::ref_view<View>`, which does NOT have `.apply()`.
+    - **Root cause:** `transform()` always passes lvalue references from `get()`. CTAD deduces `Rng` as lvalue reference. Views with reference `Rng` don't satisfy the `view` concept, so `std::views::all` wraps them in `ref_view`, losing `.apply()`.
+    - **Three-part fix applied:**
+      1. **Deduction guides** (`selector.hpp`): Changed `optional_view`, `multi_slice_view`, and `predicate_view` deduction guides to use `std::views::all_t<Rng>` instead of `Rng&&`. For lvalue views, `all_t` copies the lightweight view handle (preserving data references). For lvalue non-view ranges, `all_t` = `ref_view<Range>` (also preserving write-through). Constructors take `Rng` by value to accept the deduced `all_t` type.
+      2. **`detail::apply_view` helper** (`tuple.hpp`): Unwraps `ref_view` before calling `.apply()`, handling cases where views are still `ref_view`-wrapped (e.g., from external construction paths).
+      3. **`view_tuple_base::operator=` fallback** (`view_tuple.hpp`): Added `if constexpr` check for OwningTuple assignment — when view types are incompatible with `tuple_map(std::views::all, ...)` (e.g., multi_slice_view tuples), falls back to `resize_and_copy`.
+    - Files: `src/fields/selector.hpp`, `src/fields/tuple.hpp`, `src/fields/view_tuple.hpp`
+    - Test: `ctest --test-dir build -R t-selector` — all 23 test cases pass.
     - Must come before: 1.20e3d.
 
-  - [ ] **1.20e3d** Verify full selector test compilation and runtime correctness:
-    - After 1.20e3c, build `t-selector` and run `ctest --test-dir build -R t-selector`.
-    - Verify all test cases pass: `optional tuple`, `optional scalar`, `optional vector`, `multi_slice math`, `predicate extraction`, `predicate assignment`, `predicate scalar extraction/assignment`.
+  - [x] **1.20e3d** Verify full selector test compilation and runtime correctness:
+    - After 1.20e3c, built `t-selector` and ran `ctest --test-dir build -R t-selector`.
+    - All 23 test cases pass: optional tuple/scalar/vector, multi_slice math/assignment, predicate extraction/assignment/scalar.
+    - Also verified all 6 buildable downstream field targets pass (`t-view_tuple`, `t-tuple_math`, `t-selector`, `t-field`, `t-field_utils`, `t-field_math`).
     - Files: `src/fields/selector.t.cpp`
     - Test: `ctest --test-dir build -R t-selector`
 

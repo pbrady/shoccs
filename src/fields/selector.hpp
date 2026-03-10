@@ -707,10 +707,10 @@ public:
 
     multi_slice_view() = default;
 
-    explicit constexpr multi_slice_view(Rng&& rng,
+    explicit constexpr multi_slice_view(Rng rng,
                                         std::span<const index_slice> slices,
                                         Fn f)
-        : base_{FWD(rng)}, slices_{MOVE(slices)}, f{MOVE(f)}
+        : base_{MOVE(rng)}, slices_{MOVE(slices)}, f{MOVE(f)}
     {
     }
 
@@ -745,7 +745,7 @@ public:
 };
 
 template <typename Rng, typename Fn>
-multi_slice_view(Rng&&, std::span<const index_slice>, Fn) -> multi_slice_view<Rng, Fn>;
+multi_slice_view(Rng&&, std::span<const index_slice>, Fn) -> multi_slice_view<std::views::all_t<Rng>, Fn>;
 
 struct multi_slice_base_fn {
     template <typename Rng>
@@ -817,8 +817,8 @@ class optional_view : public std::ranges::view_interface<optional_view<Rng, Fn>>
 public:
     optional_view() = default;
 
-    explicit constexpr optional_view(Rng&& rng, bool keep_bounds, Fn f)
-        : base_{FWD(rng)}, keep_bounds_{keep_bounds}, f{MOVE(f)}
+    explicit constexpr optional_view(Rng rng, bool keep_bounds, Fn f)
+        : base_{MOVE(rng)}, keep_bounds_{keep_bounds}, f{MOVE(f)}
     {
     }
 
@@ -845,7 +845,7 @@ public:
 };
 
 template <typename Rng, typename Fn>
-optional_view(Rng&&, bool, Fn) -> optional_view<Rng, Fn>;
+optional_view(Rng&&, bool, Fn) -> optional_view<std::views::all_t<Rng>, Fn>;
 
 struct optional_view_fn {
 
@@ -982,8 +982,8 @@ public:
 
     predicate_view() = default;
 
-    explicit constexpr predicate_view(Rng&& rng, Pred p, Fn f)
-        : base_{FWD(rng)}, pred_{MOVE(p)}, f{MOVE(f)}
+    explicit constexpr predicate_view(Rng rng, Pred p, Fn f)
+        : base_{MOVE(rng)}, pred_{MOVE(p)}, f{MOVE(f)}
     {
         assert(std::ranges::size(base_) == std::ranges::size(pred_));
     }
@@ -1033,7 +1033,7 @@ public:
 };
 
 template <typename Rng, typename Pred, typename Fn>
-predicate_view(Rng&&, Pred, Fn) -> predicate_view<Rng, Pred, Fn>;
+predicate_view(Rng&&, Pred, Fn) -> predicate_view<std::views::all_t<Rng>, Pred, Fn>;
 
 struct predicate_view_base_fn {
     template <typename Rng, typename Pred>
