@@ -26,26 +26,29 @@ Plans must be executed in this order due to dependency chains:
 Record cross-cutting architectural decisions here. Each decision should be referenced by plan items that depend on it.
 
 ### D1: Host vs. Device Execution Strategy
-**Decision:** TBD (to be resolved in Phase 0 planning)
+**Decision:** **(a) Start with `Kokkos::DefaultHostExecutionSpace` everywhere, port to GPU later.**
+The codebase is entirely CPU-only today. Starting host-only minimizes risk and allows validating correctness before adding device portability. GPU migration can be a separate future effort.
 **Options:**
-- (a) Start with `Kokkos::DefaultHostExecutionSpace` everywhere, port to GPU later
+- **(a) Start with `Kokkos::DefaultHostExecutionSpace` everywhere, port to GPU later** ← CHOSEN
 - (b) Use `Kokkos::DualView` from the start
 - (c) Use `Kokkos::View` with explicit `Kokkos::DefaultExecutionSpace` and mirror views for I/O
 **Considerations:** The code is CPU-only today. Starting host-only minimizes risk and lets us validate correctness before adding device portability.
 
 ### D2: range-v3 Removal Strategy
-**Decision:** TBD (to be resolved in Phase 0 planning)
+**Decision:** **(b) Keep `range-v3` as a project dependency; remove usage incrementally phase by phase.**
+93 source files use range-v3 (1590 total occurrences of `rs::`/`vs::`). Many uses (`vs::cartesian_product`, `vs::take_exactly`, `vs::stride`, `rs::inner_product`, `rs::to`) have no direct C++20 `std::ranges` equivalents. Each subsequent phase will remove range-v3 from its subsystem. The top-level `find_package(range-v3)` and the `rs`/`vs` namespace aliases in `types.hpp` remain until all phases complete. Phase 0 only removes range-v3 from `index_view.t.cpp`.
 **Options:**
 - (a) Remove `range-v3` dependency entirely, replace all uses with Kokkos + std
-- (b) Keep `range-v3` for host-side-only convenience code (tests, init), remove from hot paths
+- **(b) Keep `range-v3` for host-side-only convenience code (tests, init), remove from hot paths** ← CHOSEN
 - (c) Replace with C++20/23 `std::ranges` where possible, Kokkos for parallel ops
 **Considerations:** Option (c) is pragmatic — `std::ranges` covers many simple view compositions (transform, filter, take, drop). Kokkos is needed for parallel execution patterns. Tests can continue using range-v3 or std::ranges.
 
 ### D3: cppcoro Generator Replacement
-**Decision:** TBD (to be resolved in Phase 0)
+**Decision:** **(b) Replace with plain functions returning `std::vector`.**
+Generators are only used in `index_view.hpp` (2 overloads yielding `int3`) and `mesh_view.hpp` (2 overloads yielding `real3`). Both are simple triple-nested loops. Callers either iterate with range-for or collect to `std::vector` immediately. Returning `std::vector` is the simplest replacement with identical caller semantics. The allocation overhead is negligible for these host-only iteration utilities.
 **Options:**
 - (a) Replace with `Kokkos::MDRangePolicy<Rank<3>>` for all iteration
-- (b) Replace with plain nested loops (host-only code paths)
+- **(b) Replace with plain nested loops (host-only code paths)** ← CHOSEN
 - (c) Keep coroutines for host-side iteration, add Kokkos parallel paths alongside
 **Considerations:** Generators are only used in `index_view.hpp` and `mesh_view.hpp`. Both are iteration utilities that map directly to MDRangePolicy.
 
@@ -74,11 +77,12 @@ Record cross-cutting architectural decisions here. Each decision should be refer
 **Considerations:** The matrices are small per-line operators (not global sparse systems), so KokkosKernels may be overkill. Custom kernels give more control over the composite inner_block structure.
 
 ### D7: Kokkos Include Propagation Strategy
-**Decision:** TBD (to be resolved in Phase 0, item 0.5)
+**Decision:** **(b) Create a separate `kokkos_types.hpp` header; add Kokkos to each CMake target incrementally as its phase migrates.**
+`types.hpp` is included by 35+ headers across all subsystems. Adding Kokkos there in Phase 0 forces every library target to link Kokkos before any of them actually use it. Option (b) is less disruptive: Phase 0 creates the header and links Kokkos only to `indexing` and `shoccs-exe`. Phase 1 (fields) adds Kokkos to the `fields` INTERFACE library (which most targets already depend on), at which point `kokkos_types.hpp` can optionally be merged into `types.hpp`.
 **Options:**
 - (a) Add `Kokkos_Core.hpp` to `types.hpp` immediately; update all ~17 CMake library targets to link `Kokkos::kokkos`
-- (b) Create a separate `kokkos_types.hpp` header; add Kokkos to each CMake target incrementally as its phase migrates
-**Considerations:** `types.hpp` is included by 35+ headers across all subsystems. Adding Kokkos there in Phase 0 forces every library target to link Kokkos before any of them actually use it. Option (b) is less disruptive: Phase 0 creates the header and links Kokkos only to `indexing` and `shoccs-exe`. Phase 1 (fields) adds Kokkos to the `fields` INTERFACE library (which most targets already depend on), at which point `kokkos_types.hpp` can optionally be merged into `types.hpp`. Option (b) is recommended.
+- **(b) Create a separate `kokkos_types.hpp` header; add Kokkos to each CMake target incrementally as its phase migrates** ← CHOSEN
+**Considerations:** `types.hpp` is included by 35+ headers across all subsystems. Adding Kokkos there in Phase 0 forces every library target to link Kokkos before any of them actually use it.
 
 ---
 

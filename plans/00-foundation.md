@@ -56,19 +56,19 @@ ctest --test-dir build -R t-real3_operators
 
 ### 0.2 — Resolve Decision D1 (Host vs. Device strategy)
 
-- [ ] **0.2** Update `plans/meta.md` D1 entry.
+- [x] **0.2** Update `plans/meta.md` D1 entry.
   - Recommended: **Option (a)** — `Kokkos::DefaultHostExecutionSpace` everywhere initially. The codebase is entirely CPU-only today. Starting host-only minimizes risk and allows validating correctness before adding device portability. GPU migration can be a separate future effort.
   - File: `plans/meta.md`
 
 ### 0.3 — Resolve Decision D2 (range-v3 removal strategy)
 
-- [ ] **0.3** Update `plans/meta.md` D2 entry.
+- [x] **0.3** Update `plans/meta.md` D2 entry.
   - Recommended: **Option (b)** — Keep `range-v3` as a project dependency; remove usage incrementally phase by phase. Rationale: 93 source files use range-v3 (1590 total occurrences of `rs::`/`vs::`). Many uses (`vs::cartesian_product`, `vs::take_exactly`, `vs::stride`, `rs::inner_product`, `rs::to`) have no direct C++20 `std::ranges` equivalents. Each subsequent phase will remove range-v3 from its subsystem. The top-level `find_package(range-v3)` and the `rs`/`vs` namespace aliases in `types.hpp` remain until all phases complete. Phase 0 only removes range-v3 from `index_view.t.cpp`.
   - File: `plans/meta.md`
 
 ### 0.4 — Resolve Decision D3 (cppcoro generator replacement)
 
-- [ ] **0.4** Update `plans/meta.md` D3 entry.
+- [x] **0.4** Update `plans/meta.md` D3 entry.
   - Recommended: **Option (b)** — Replace with plain functions returning `std::vector`. Generators are only used in `index_view.hpp` (2 overloads yielding `int3`) and `mesh_view.hpp` (2 overloads yielding `real3`). Both are simple triple-nested loops. Callers either iterate with range-for or collect to `std::vector` immediately. Returning `std::vector` is the simplest replacement with identical caller semantics. The allocation overhead is negligible for these host-only iteration utilities.
   - File: `plans/meta.md`
 
