@@ -32,7 +32,7 @@ After reading all source files, the actual range-v3 usage in library code is min
 | File | `concat\|repeat\|take` (zero-pad) | `ranges::reverse` | Unused includes |
 |------|---|----|---|
 | E2_2.cpp | — | 4 calls | `fill.hpp` |
-| E4_2.cpp | — | 5 calls | `fill.hpp` |
+| E4_2.cpp | — | 4 calls | `fill.hpp` |
 | E4u_1.cpp | 1 (constructor) | 2 calls | `fill.hpp`, `transform.hpp` |
 | E6u_1.cpp | 1 (constructor) | 2 calls | `fill.hpp`, `transform.hpp` |
 | E8u_1.cpp | 1 (constructor) | 2 calls | `fill.hpp`, `transform.hpp` |
@@ -77,7 +77,7 @@ inline void copy_zero_padded(std::span<const real> src, std::span<real> dst) {
   - File: `src/stencils/E4_2.cpp`.
   - Remove: `#include <range/v3/algorithm/fill.hpp>` (unused), `#include <range/v3/algorithm/reverse.hpp>`.
   - Add: `#include <algorithm>`.
-  - Replace all 5 occurrences of `ranges::reverse(...)` → `std::ranges::reverse(...)` (in `nbs_floating`, `nbs_dirichlet`, `nbs_neumann`).
+  - Replace all 4 occurrences of `ranges::reverse(...)` → `std::ranges::reverse(...)` (lines 235, 263, 306, 307 — in `nbs_floating`, `nbs_dirichlet`, `nbs_neumann`).
   - Test: `ctest --test-dir build -R t-E4_2`
 
 - [ ] **3.4** Migrate `E4u_1.cpp`: replace zero-pad + `ranges::reverse`.
