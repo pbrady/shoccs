@@ -71,7 +71,7 @@ ctest --test-dir build -L matrices
   - Note: Can be done in the same work pass as 2.2
   - Test: `ctest --test-dir build -R t-dense`
 
-- [ ] **2.4** Migrate `circulant.cpp`: Replace the convolution `operator()` with explicit loops.
+- [x] **2.4** Migrate `circulant.cpp`: Replace the convolution `operator()` with explicit loops.
   - Files: `src/matrices/circulant.cpp`
   - Remove includes: all 9 range-v3 includes (`copy`, `inner_product`, `concepts`, `drop`, `repeat_n`, `sliding`, `stride`, `zip`, `zip_with`)
   - Add include: `<numeric>` (for `std::inner_product`)
@@ -286,7 +286,7 @@ Common range-v3 → std/C++20 replacement patterns used across test files:
 2.1 (D6 decision) [DONE]
  ├── 2.3 (dense.hpp)  [DONE] ──┐
  ├── 2.2 (dense.cpp)  [DONE] ──┤── 2.9b (dense + circulant tests) ──┐
- ├── 2.4 (circulant.cpp)───────┤── 2.9d (inner_block + block tests) ├── 2.10 (verification)
+ ├── 2.4 (circulant.cpp) [DONE]┤── 2.9d (inner_block + block tests) ├── 2.10 (verification)
  ├── 2.6 (csr.hpp) ── 2.5 (csr.cpp) ── 2.9c (csr tests) ───────────┤
  ├── 2.7 (coefficient_visitor.cpp) ──┐── 2.9a (visitor tests) ───────┘
  └── 2.8 (unit_stride_visitor) [DONE]┘

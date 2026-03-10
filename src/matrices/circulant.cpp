@@ -1,16 +1,7 @@
 #include "circulant.hpp"
 
 #include <cassert>
-
-#include <range/v3/algorithm/copy.hpp>
-#include <range/v3/numeric/inner_product.hpp>
-#include <range/v3/range/concepts.hpp>
-#include <range/v3/view/drop.hpp>
-#include <range/v3/view/repeat_n.hpp>
-#include <range/v3/view/sliding.hpp>
-#include <range/v3/view/stride.hpp>
-#include <range/v3/view/zip.hpp>
-#include <range/v3/view/zip_with.hpp>
+#include <numeric>
 
 namespace ccs::matrix
 {
@@ -42,24 +33,17 @@ void circulant::operator()(std::span<const real> x, std::span<real> b, Op op) co
     b = b.subspan(row_offset());
 
     if (st == 1) {
-        auto rng =
-            vs::zip_with([](auto&& a, auto&& b) { return rs::inner_product(a, b, 0.0); },
-                         vs::repeat_n(v, rows()),
-                         x | vs::sliding(size()));
-
-        // rs::copy(rng, rs::begin(b));
-        for (auto&& [y, z] : vs::zip(b, rng)) op(y, z);
+        for (integer i = 0; i < rows(); i++) {
+            auto dot = std::inner_product(v.begin(), v.end(), x.data() + i, 0.0);
+            op(b[i], dot);
+        }
     } else {
-        auto in = x | vs::stride(st);
-        auto out = b | vs::stride(st);
-
-        auto rng =
-            vs::zip_with([](auto&& a, auto&& b) { return rs::inner_product(a, b, 0.0); },
-                         vs::repeat_n(v, rows()),
-                         in | vs::sliding(size()));
-
-        // rs::copy(rng, rs::begin(out));
-        for (auto&& [y, z] : vs::zip(out, rng)) op(y, z);
+        for (integer i = 0; i < rows(); i++) {
+            real dot = 0.0;
+            for (integer j = 0; j < size(); j++)
+                dot += v[j] * x[(i + j) * st];
+            op(b[i * st], dot);
+        }
     }
 }
 
