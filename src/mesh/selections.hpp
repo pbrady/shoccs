@@ -11,6 +11,33 @@
 namespace ccs::views
 {
 
+// Concepts and traits for the utility functions below (xmin, xmax, ..., location, F).
+// These were part of the original selection system but lost during refactoring.
+// selections.hpp is dead code (not #include'd by any production TU); these stubs
+// make the header self-contained for compile-verification purposes.
+template <typename T>
+concept Selection = requires { typename std::remove_cvref_t<T>::index; };
+
+template <typename T>
+concept DomainSelection =
+    Selection<T> && std::same_as<typename std::remove_cvref_t<T>::index, si::D>;
+
+template <typename T>
+inline constexpr bool is_domain_selection_v =
+    Selection<T> && std::same_as<typename std::remove_cvref_t<T>::index, si::D>;
+
+template <typename T>
+inline constexpr bool is_Rx_selection_v =
+    Selection<T> && std::same_as<typename std::remove_cvref_t<T>::index, si::Rx>;
+
+template <typename T>
+inline constexpr bool is_Ry_selection_v =
+    Selection<T> && std::same_as<typename std::remove_cvref_t<T>::index, si::Ry>;
+
+template <typename T>
+inline constexpr bool is_Rz_selection_v =
+    Selection<T> && std::same_as<typename std::remove_cvref_t<T>::index, si::Rz>;
+
 namespace detail
 {
 // y-plane view: selects elements where y == j from a flat 3D grid.
