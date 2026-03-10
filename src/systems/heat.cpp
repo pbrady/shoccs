@@ -9,7 +9,7 @@
 
 #include "operators/discrete_operator.hpp"
 
-#include <range/v3/algorithm/max_element.hpp>
+#include <iterator>
 
 namespace ccs::systems
 {
@@ -73,12 +73,12 @@ system_stats heat::stats(const field&, const field& f, const step_controller& st
     // Extra info for debugging:
     auto linf = abs(u - sol);
     auto fluid_error = linf | m.fluid_all(object_bcs);
-    auto max_el = transform(rs::max_element, fluid_error);
+    auto max_el = transform(std::ranges::max_element, fluid_error);
     auto err_pairs = transform(
         [](auto&& rng, auto&& max_el) {
-            if (rs::end(rng) != max_el)
+            if (std::ranges::end(rng) != max_el)
                 return std::pair{
-                    *max_el, (real)rs::distance(rs::begin(rng.base()), max_el.base())};
+                    *max_el, (real)std::ranges::distance(std::ranges::begin(rng.base()), max_el.base())};
             else
                 return std::pair{0.0, (real)0};
         },
@@ -113,7 +113,7 @@ bool heat::valid(const system_stats& stats) const
 //
 real heat::timestep_size(const field&, const step_controller& step) const
 {
-    const auto h_min = rs::min(m.h());
+    const auto h_min = std::ranges::min(m.h());
     return step.parabolic_cfl() * h_min * h_min / (4 * diffusivity);
 };
 

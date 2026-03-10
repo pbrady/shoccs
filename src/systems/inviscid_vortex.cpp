@@ -6,8 +6,7 @@
 #include <numbers>
 #include <spdlog/spdlog.h>
 
-#include <range/v3/algorithm/max.hpp>
-#include <range/v3/view/transform.hpp>
+#include <algorithm>
 
 namespace ccs::systems
 {
@@ -234,7 +233,7 @@ real inviscid_vortex::timestep_size(const field&, const step_controller&) const
         U.scalars(vars::rho, vars::rhoU, vars::rhoV, vars::rhoE, vars::P);
 
     const auto d =
-        rs::max((max_abs(rhoU / rho, rhoV / rho) + sqrt(g * P / rho)) | sel::D);
+        std::ranges::max((max_abs(rhoU / rho, rhoV / rho) + sqrt(g * P / rho)) | sel::D);
 
     // return cfl *
     // std::min({cart.delta(0), cart.delta(1), cart.delta(2)}) / d;

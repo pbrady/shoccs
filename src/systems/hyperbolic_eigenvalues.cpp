@@ -7,7 +7,8 @@
 #include "operators/discrete_operator.hpp"
 #include "operators/eigenvalue_visitor.hpp"
 
-#include <range/v3/algorithm/max.hpp>
+#include <algorithm>
+#include <ranges>
 
 namespace ccs::systems
 {
@@ -36,13 +37,13 @@ system_stats
 hyperbolic_eigenvalues::stats(const field&, const field&, const step_controller&) const
 {
 
-    auto p = m.Rx() | vs::transform([this](auto&& info) {
+    auto p = m.Rx() | std::views::transform([this](auto&& info) {
                  return object_bcs[info.shape_id] == bcs::Dirichlet;
              });
     auto v = eigenvalue_visitor{m.extents(), p, std::vector<bool>{}, std::vector<bool>{}};
     grad.visit(v);
 
-    return system_stats{.stats = {-m.h(0) * rs::min(v.eigenvalues_real())}};
+    return system_stats{.stats = {-m.h(0) * std::ranges::min(v.eigenvalues_real())}};
 }
 
 real3 hyperbolic_eigenvalues::summary(const system_stats& stats) const

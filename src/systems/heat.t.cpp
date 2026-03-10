@@ -6,7 +6,8 @@
 
 #include "system.hpp"
 
-#include <range/v3/all.hpp>
+#include <algorithm>
+#include <numeric>
 
 using namespace ccs;
 
@@ -81,7 +82,7 @@ TEST_CASE("heat - E2")
     // Initialize array with system and ensure zero error
     field f{sys(step)};
     // only solid points will be zero
-    const integer solid_points = rs::count(f.scalars(0) | sel::D, 0.0);
+    const integer solid_points = std::ranges::count(f.scalars(0) | sel::D, 0.0);
     // maximum error should be zero
     auto st = sys.stats(f, f, step);
     REQUIRE(st.stats[0] == 0);
@@ -95,14 +96,15 @@ TEST_CASE("heat - E2")
 
     // at this point, all fluid points in rhs should have a value of cos(time) -> 1
     // and solid points should remain at zero
-    const integer rhs_solid_points = rs::count(u_rhs | sel::D, 0.0);
+    const integer rhs_solid_points = std::ranges::count(u_rhs | sel::D, 0.0);
     // these zeros include the zeroed rhs contributions to the dirichlet planar bcs
     int3 n{21, 22, 23};
     integer x_sz = n[1] * n[2];
     integer z_sz = n[0] * n[1];
     REQUIRE(solid_points == rhs_solid_points - (x_sz + z_sz - n[1]));
 
-    real sum = rs::accumulate(u_rhs | sel::D, 0.0);
+    auto d_rng = u_rhs | sel::D;
+    real sum = std::accumulate(std::ranges::begin(d_rng), std::ranges::end(d_rng), 0.0);
 
     REQUIRE(sum == Catch::Approx((real)n[0] * n[1] * n[2] - rhs_solid_points));
 }
@@ -189,7 +191,7 @@ TEST_CASE("heat - E2 - floating")
     // Initialize array with system and ensure zero error
     field f{sys(step)};
     // only solid points will be zero
-    const integer solid_points = rs::count(f.scalars(0) | sel::D, 0.0);
+    const integer solid_points = std::ranges::count(f.scalars(0) | sel::D, 0.0);
     // maximum error should be zero
     auto st = sys.stats(f, f, step);
     REQUIRE(st.stats[0] == 0);
@@ -203,14 +205,14 @@ TEST_CASE("heat - E2 - floating")
 
     // at this point, all fluid points in rhs should have a value of cos(time) -> 1
     // and solid points should remain at zero
-    const integer rhs_solid_points = rs::count(u_rhs | sel::D, 0.0);
+    const integer rhs_solid_points = std::ranges::count(u_rhs | sel::D, 0.0);
     // these zeros include the zeroed rhs contributions to the dirichlet planar bcs
     int3 n{21, 22, 23};
     integer x_sz = n[1] * n[2];
     integer z_sz = n[0] * n[1];
     REQUIRE(solid_points == rhs_solid_points - (x_sz + z_sz - n[1]));
 
-    auto sum = transform([](auto&& ui) { return rs::accumulate(FWD(ui), 0.0); }, u_rhs);
+    auto sum = transform([](auto&& ui) { return std::accumulate(std::ranges::begin(ui), std::ranges::end(ui), 0.0); }, u_rhs);
 
     REQUIRE(get<si::D>(sum) ==
             Catch::Approx((real)n[0] * n[1] * n[2] - rhs_solid_points));
@@ -298,7 +300,7 @@ TEST_CASE("2D heat - E2 - floating")
     // Initialize array with system and ensure zero error
     field f{sys(step)};
     // only solid points will be zero
-    const integer solid_points = rs::count(f.scalars(0) | sel::D, 0.0);
+    const integer solid_points = std::ranges::count(f.scalars(0) | sel::D, 0.0);
     // maximum error should be zero
     auto st = sys.stats(f, f, step);
     REQUIRE(st.stats[0] == 0);
@@ -312,13 +314,13 @@ TEST_CASE("2D heat - E2 - floating")
 
     // at this point, all fluid points in rhs should have a value of cos(time) -> 1
     // and solid points should remain at zero
-    const integer rhs_solid_points = rs::count(u_rhs | sel::D, 0.0);
+    const integer rhs_solid_points = std::ranges::count(u_rhs | sel::D, 0.0);
     // these zeros include the zeroed rhs contributions to the dirichlet planar bcs
     int3 n{21, 22, 1};
     integer x_sz = n[1];
     REQUIRE(solid_points == rhs_solid_points - x_sz);
 
-    auto sum = transform([](auto&& ui) { return rs::accumulate(FWD(ui), 0.0); }, u_rhs);
+    auto sum = transform([](auto&& ui) { return std::accumulate(std::ranges::begin(ui), std::ranges::end(ui), 0.0); }, u_rhs);
 
     REQUIRE(get<si::D>(sum) ==
             Catch::Approx((real)n[0] * n[1] * n[2] - rhs_solid_points));
