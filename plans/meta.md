@@ -53,20 +53,31 @@ Generators are only used in `index_view.hpp` (2 overloads yielding `int3`) and `
 **Considerations:** Generators are only used in `index_view.hpp` and `mesh_view.hpp`. Both are iteration utilities that map directly to MDRangePolicy.
 
 ### D4: Field Storage Migration
-**Decision:** TBD (to be resolved in Phase 1 planning)
+**Decision:** **(c) Keep `std::vector` for host-only data; defer `Kokkos::View` for field data to GPU phase.**
+Phase 1 removes range-v3 from the fields subsystem; it does not introduce Kokkos Views for storage. The `field` class stores `std::vector<scalar_real>` and `std::vector<vector_real>`, where the underlying element storage is `std::vector<real>` inside nested `tuple` wrappers. These remain `std::vector` throughout Phase 1. Range-v3 concepts (`rs::range`, `rs::sized_range`, `rs::output_range`, etc.) are replaced with `std::ranges` equivalents, but the storage types are unchanged. Migration to `Kokkos::View<real*>` will happen in a future GPU-enablement phase after correctness is validated with the host-only range removal.
 **Options:**
 - (a) Replace `std::vector<real>` with `Kokkos::View<real*>` everywhere
 - (b) Use `Kokkos::DualView<real*>` for fields that need host+device access
-- (c) Keep `std::vector` for host-only data (mesh coords, stencil coefficients), use `Kokkos::View` for field data
-**Considerations:** Option (c) avoids unnecessary changes to setup-time-only data while migrating the hot-path field storage.
+- **(c) Keep `std::vector` for host-only data (mesh coords, stencil coefficients), use `Kokkos::View` for field data** ← CHOSEN
+**Considerations:** Option (c) avoids unnecessary changes to setup-time-only data while migrating the hot-path field storage. Phase 1 only addresses range-v3 removal, so storage stays as `std::vector`.
 
 ### D5: Selector/View Adaptor Replacement
-**Decision:** TBD (to be resolved in Phase 1 planning)
+**Decision:** **(d) Replace `rs::view_adaptor` with standalone custom views using `std::ranges::view_interface`; defer index arrays to GPU phase.**
+The 4 custom `rs::view_adaptor` classes (`plane_view<1>`, `multi_slice_view`, `optional_view`, `predicate_view`) and the 2 composition-based views (`plane_view<0>`, `plane_view<2>`) are rewritten as standalone C++20 views:
+- `plane_view<0>` (x-plane): Replace `vs::drop_exactly | vs::take_exactly` with `std::views::drop | std::views::take` or `std::ranges::subrange`.
+- `plane_view<1>` (y-plane): Replace `rs::view_adaptor` inheritance with `std::ranges::view_interface`. Preserve the existing strided-iterator logic but implement iterator/sentinel directly (no `adaptor_base`).
+- `plane_view<2>` (z-plane): Replace `vs::drop_exactly | vs::stride` with a custom strided view (C++20 has no `std::views::stride`; that's C++23).
+- `multi_slice_view`: Replace `rs::view_adaptor` with `std::ranges::view_interface`. Preserve slice-navigation iterator logic.
+- `optional_view`: Replace with a simple conditional `std::ranges::subrange` (empty or full).
+- `predicate_view`: Replace `rs::view_adaptor` with `std::ranges::view_interface`. Preserve filter-style iteration.
+Range-v3 internal utilities (`rs::semiregular_box_t`, `rs::make_view_closure`, `rs::bind_back`, `rs::compose`) are replaced with project-local equivalents in `src/fields/ccs_range_utils.hpp` (see D8).
+Pre-computed index arrays (option a) are deferred to the GPU migration phase.
 **Options:**
 - (a) Pre-computed index arrays (`Kokkos::View<int*>`) for all selections
 - (b) Boolean masks (`Kokkos::View<bool*>`) for all selections
 - (c) Mixed: index arrays for sparse selections (Dirichlet BCs, fluid), masks for dense selections
-**Considerations:** Index arrays are better for GPU divergence. The current `plane_view`, `multi_slice_view`, `optional_view`, `predicate_view` custom adaptors all need replacement.
+- **(d) Custom `std::ranges::view_interface` classes preserving existing iterator logic** ← CHOSEN
+**Considerations:** Option (d) minimizes behavioral risk in Phase 1 by preserving identical iterator semantics. The custom views can later be replaced with Kokkos-based index arrays when GPU support is added.
 
 ### D6: Matrix-Vector Product Migration
 **Decision:** TBD (to be resolved in Phase 2 planning)
@@ -83,6 +94,31 @@ Generators are only used in `index_view.hpp` (2 overloads yielding `int3`) and `
 - (a) Add `Kokkos_Core.hpp` to `types.hpp` immediately; update all ~17 CMake library targets to link `Kokkos::kokkos`
 - **(b) Create a separate `kokkos_types.hpp` header; add Kokkos to each CMake target incrementally as its phase migrates** ← CHOSEN
 **Considerations:** `types.hpp` is included by 35+ headers across all subsystems. Adding Kokkos there in Phase 0 forces every library target to link Kokkos before any of them actually use it.
+
+### D8: C++20 Range Utility Replacements
+**Decision:** **(a) Create project-local utilities in `src/fields/ccs_range_utils.hpp` for range-v3 internal APIs with no C++20 `std::ranges` equivalent.**
+The project uses C++20 (`CMAKE_CXX_STANDARD 20`). Several range-v3 features used in the fields subsystem have no direct C++20 equivalents:
+- `vs::view_closure<Fn>` → project-local `ccs::view_closure<Fn>` (pipeable callable wrapper)
+- `rs::make_view_closure(fn)` → project-local `ccs::make_view_closure(fn)`
+- `rs::bind_back(fn, args...)` → project-local `ccs::bind_back(fn, args...)` (C++23 has `std::bind_back`)
+- `rs::compose(f, g)` → project-local `ccs::compose(f, g)`
+- `rs::semiregular_box_t<Fn>` → project-local `ccs::semiregular_box<Fn>` using `std::optional`
+- `vs::zip_with(f, rngs...)` → project-local `ccs::zip_transform_view` (C++23 has `std::views::zip_transform`)
+- `vs::zip(rngs...)` → in-place operators use index-based iteration; `field_utils.hpp` uses project-local zip
+- `vs::repeat_n(v, n)` → `std::views::transform` with constant lambda where possible; project-local `ccs::repeat_n_view` where lazy view is needed
+- `vs::stride(n)` → project-local `ccs::stride_view` (C++23 has `std::views::stride`)
+- `vs::concat(rngs...)` → test-only; replace with eager `std::vector` construction
+- `vs::take_exactly(n)` → `std::views::take(n)` (C++20; slightly different: checks bounds)
+- `vs::drop_exactly(n)` → `std::views::drop(n)` (C++20; slightly different: checks bounds)
+- `rs::to<T>()` → test-only; replace with `T(std::ranges::begin(r), std::ranges::end(r))`
+- `rs::common_tuple` → remove specialization (only produced by range-v3 zip; no longer needed)
+
+All project-local utilities go in `src/fields/ccs_range_utils.hpp`, are header-only, and are minimal implementations sufficient for the fields subsystem usage patterns.
+**Options:**
+- **(a) Project-local minimal utilities in `ccs_range_utils.hpp`** ← CHOSEN
+- (b) Upgrade to C++23 and use `std::views::zip_transform`, `std::views::stride`, `std::bind_back`, etc.
+- (c) Replace all lazy views with eager `std::vector`-based computation
+**Considerations:** Option (b) would be simpler but requires verifying compiler/Kokkos C++23 support. Option (c) changes performance characteristics of lazy expression trees in `tuple_math`. Option (a) is safest for Phase 1.
 
 ---
 

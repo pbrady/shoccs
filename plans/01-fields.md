@@ -1,6 +1,6 @@
 # Phase 1: Fields Subsystem
 
-**Goal:** Migrate the fields subsystem from range-v3 view composition to Kokkos-compatible patterns. This is the highest-complexity phase due to 4 custom view adaptors and deep range-v3 integration.
+**Goal:** Migrate the fields subsystem from range-v3 view composition to C++20 `std::ranges` and project-local utilities. This is the highest-complexity phase due to 4 custom `view_adaptor` classes and deep range-v3 integration.
 
 **Depends on:** Phase 0
 
@@ -22,7 +22,7 @@
 - `src/fields/selector_fwd.hpp`
 - `src/fields/field_fwd.hpp`
 - `src/fields/CMakeLists.txt`
-- `plans/meta.md` (decisions D2, D4, D5)
+- `plans/meta.md` (decisions D2, D4, D5, D8)
 
 **Test commands:**
 ```bash
@@ -36,77 +36,356 @@ ctest --test-dir build -L fields
 
 ### Resolve Decisions
 
-- [ ] **1.1** Resolve Decision D4 (Field storage migration). Read the field data structure hierarchy and decide. Update `plans/meta.md`.
+- [x] **1.1** Resolve Decision D4 (Field storage migration). Keep `std::vector` for Phase 1; defer `Kokkos::View` to GPU phase. Updated `plans/meta.md`.
 
-- [ ] **1.2** Resolve Decision D5 (Selector/view adaptor replacement). Read `selector.hpp` thoroughly — it has `plane_view<0,1,2>`, `multi_slice_view`, `optional_view`, `predicate_view`. Update `plans/meta.md`.
+- [x] **1.2** Resolve Decision D5 (Selector/view adaptor replacement). Replace `rs::view_adaptor` with custom `std::ranges::view_interface` classes; create project-local range utilities. Added D8 for C++20 utility strategy. Updated `plans/meta.md`.
+
+### Utility Foundation
+
+These project-local utilities replace range-v3 internal APIs that have no C++20 `std::ranges` equivalent. They must be created before migrating any production headers. See decision D8.
+
+- [ ] **1.2a** Create `src/fields/ccs_range_utils.hpp` with core range-v3 replacements:
+  - `ccs::view_closure<Fn>`: Wraps a callable `Fn` and provides `template<typename Rng> friend auto operator|(Rng&& rng, view_closure fn)` for pipe syntax. Must be default-constructible if `Fn` is.
+  - `ccs::make_view_closure(fn)`: Factory returning `view_closure{fn}`.
+  - `ccs::bind_back(fn, args...)`: Returns a lambda that prepends forwarded arguments before the bound trailing arguments. Used in selector function composition.
+  - `ccs::compose(f, g)`: Returns a lambda `[f,g](args...) { return f(g(args...)); }`. Used in selector `apply` chains.
+  - `ccs::semiregular_box<Fn>`: Wrapper using `std::optional<Fn>` to make any callable default-constructible. Provides `operator()` forwarding.
+  - Files: Create `src/fields/ccs_range_utils.hpp`.
+  - Test: `cmake --build build` (header-only, compilation test).
+  - Must come before: 1.3, 1.9, 1.13–1.19.
+
+- [ ] **1.2b** Create `src/fields/lazy_views.hpp` with lazy view replacements for range-v3 views with no C++20 equivalent:
+  - `ccs::zip_transform_view<F, Rngs...>`: Lazy view that yields `f(*it1, *it2, ...)`. Must model `std::ranges::view_interface`. Iterators must support `==`, `++`, `*`. Needed by `tuple_math.hpp` (binary operators), `tuple_utils.hpp` (`lift`), and `field_utils.hpp` (`transform_scalar`/`transform_vector`). Support at least the binary (2-range) case; variadic is needed for `field_utils.hpp`.
+  - `ccs::repeat_n_view<T>`: Lazy view of `n` copies of value `v`. Models `std::ranges::random_access_range` and `std::ranges::sized_range`. Used in `tuple_math.hpp` binary scalar operators (`vs::repeat_n(v, sz)`).
+  - `ccs::stride_view<Rng>`: Lazy view that yields every `n`-th element of `Rng`. Models `std::ranges::view_interface`. Needed by `plane_view<2>` (z-plane selector) and test code. Must support bidirectional or random-access iteration if the base range does.
+  - Helper factory functions: `ccs::zip_transform(f, rngs...)`, `ccs::repeat_n(v, n)`, `ccs::stride(rng, n)`.
+  - Files: Create `src/fields/lazy_views.hpp`.
+  - Test: `cmake --build build` (header-only, compilation test).
+  - Must come before: 1.4, 1.8, 1.13, 1.15.
 
 ### Foundation Types (tuple_fwd, concepts)
 
-- [ ] **1.3** Migrate `src/fields/tuple_fwd.hpp`: Replace range-v3 concept usage (`rs::range`, `rs::viewable_range`, `rs::input_range`, etc.) with C++20 `std::ranges` equivalents. Replace `rs::ref_view` with `std::ranges::ref_view`. Replace `vs::view_closure` with a project-local equivalent or `std::ranges` equivalent. Remove `ranges::enable_view` specializations (use `std::ranges::enable_view` or `std::ranges::view_interface`).
-  - Test: `ctest --test-dir build -L fields` — expect many failures initially; this is the keystone header.
+- [ ] **1.3** Migrate `src/fields/tuple_fwd.hpp`. This is the keystone header — changes here affect all downstream files. Apply the following substitutions:
+  - [ ] **1.3a** Replace range-v3 concept usage with C++20 equivalents:
+    - `rs::range<T>` → `std::ranges::range<T>`
+    - `rs::viewable_range<T>` → `std::ranges::viewable_range<T>`
+    - `rs::input_range<T>` → `std::ranges::input_range<T>`
+    - `rs::output_range<T, V>` → `std::ranges::output_range<T, V>`
+    - `rs::common_range<T>` → `std::ranges::common_range<T>`
+    - `rs::sized_range<T>` → `std::ranges::sized_range<T>`
+    - `rs::range_value_t<T>` → `std::ranges::range_value_t<T>`
+    - `rs::range_reference_t<T>` → `std::ranges::range_reference_t<T>`
+    - `rs::range_difference_t<T>` → `std::ranges::range_difference_t<T>`
+    - `rs::iterator_t<T>` → `std::ranges::iterator_t<T>`
+    - `rs::sentinel_t<T>` → `std::ranges::sentinel_t<T>`
+    - `rs::difference_type_t<I>` → `std::iter_difference_t<I>`
+    - Files: `src/fields/tuple_fwd.hpp`
+    - Test: `cmake --build build` — expect many failures; this is foundational.
+  - [ ] **1.3b** Replace `rs::ref_view<Rng>` with `std::ranges::ref_view<Rng>` in the `is_ref_view_impl` specialization (line 586).
+    - Files: `src/fields/tuple_fwd.hpp`
+  - [ ] **1.3c** Replace `vs::view_closure<Fn>` with `ccs::view_closure<Fn>` in `is_view_closure_impl` (line 539). Update the `ViewClosure` and `ViewClosures` concepts accordingly.
+    - Depends on: 1.2a
+    - Files: `src/fields/tuple_fwd.hpp`
+  - [ ] **1.3d** Replace `vs::common(...)` with `std::views::common(...)` in `constructible_from_range_impl` (line 333).
+    - Files: `src/fields/tuple_fwd.hpp`
+  - [ ] **1.3e** Remove `rs::common_tuple<Args...>` specialization from `is_tuple_like_impl` (line 129). This type is only produced by range-v3's `vs::zip`; after migration, no code generates `rs::common_tuple` values. The `NumericTuple` test using `rs::common_tuple` (in `range_concepts.t.cpp`) will be updated in item 1.20.
+    - Files: `src/fields/tuple_fwd.hpp`
+  - [ ] **1.3f** Replace `ranges::enable_view` specializations (lines 711–721) with `std::ranges::enable_view` in namespace `std::ranges`. Note: the specialization for `ccs::tuple<Args...>` sets `enable_view = false` (multi-element tuples are not views); the single-`All` specialization sets it to `true`.
+    - Files: `src/fields/tuple_fwd.hpp`
+  - [ ] **1.3g** Remove `#include <range/v3/range/concepts.hpp>`, `#include <range/v3/view/common.hpp>`, `#include <range/v3/view/view.hpp>`. Add `#include <ranges>` and `#include "ccs_range_utils.hpp"`.
+    - Files: `src/fields/tuple_fwd.hpp`
+  - Test (all of 1.3): `cmake --build build` — expect many compilation errors in downstream files until they are also migrated. Use iterative approach: fix tuple_fwd.hpp, then fix callers.
 
 ### Utilities and Algorithms
 
-- [ ] **1.4** Migrate `src/fields/tuple_utils.hpp`: Replace `rs::copy`, `rs::copy_n`, `rs::fill` with `std::ranges` equivalents. Replace `vs::all`, `vs::common`, `vs::zip_with` with std or manual equivalents.
+- [ ] **1.4** Migrate `src/fields/tuple_utils.hpp`:
+  - [ ] **1.4a** Replace algorithms: `rs::copy` → `std::ranges::copy`, `rs::copy_n` → `std::ranges::copy_n`, `rs::fill` → `std::ranges::fill`. Replace `rs::begin`/`rs::end`/`rs::size` → `std::ranges::begin`/`end`/`size`.
+    - Files: `src/fields/tuple_utils.hpp` (`resize_and_copy`, `to`, `ssize` functions)
+  - [ ] **1.4b** Replace `vs::all` → `std::views::all`, `vs::all_t` → `std::views::all_t` in `to()` function.
+    - Files: `src/fields/tuple_utils.hpp`
+  - [ ] **1.4c** Replace `vs::common(...)` → `std::views::common(...)` in `to()` function (line 342).
+    - Files: `src/fields/tuple_utils.hpp`
+  - [ ] **1.4d** Replace `vs::zip_with(fn, rngs...)` with `ccs::zip_transform(fn, rngs...)` in `lift()` function (lines 381, 385).
+    - Depends on: 1.2b
+    - Files: `src/fields/tuple_utils.hpp`
+  - [ ] **1.4e** Replace `rs::range` and `rs::sized_range` concept usage in template constraints with `std::ranges` equivalents.
+    - Files: `src/fields/tuple_utils.hpp`
+  - [ ] **1.4f** Remove `#include <range/v3/algorithm/copy.hpp>`, `#include <range/v3/algorithm/copy_n.hpp>`, `#include <range/v3/algorithm/fill.hpp>`, `#include <range/v3/view/all.hpp>`, `#include <range/v3/view/common.hpp>`, `#include <range/v3/view/view.hpp>`, `#include <range/v3/view/zip_with.hpp>`. Add `#include <algorithm>`, `#include <ranges>`, and `#include "lazy_views.hpp"`.
+    - Files: `src/fields/tuple_utils.hpp`
   - Test: `ctest --test-dir build -R t-tuple_utils`
 
-- [ ] **1.5** Migrate `src/fields/algorithms.hpp`: Replace `rs::minmax`, `rs::min`, `rs::max` with `std::ranges` equivalents.
+- [ ] **1.5** Migrate `src/fields/algorithms.hpp`:
+  - Replace `rs::minmax` → `std::ranges::minmax`, `rs::min` → `std::ranges::min`, `rs::max` → `std::ranges::max`, `rs::minmax_result` → `std::ranges::minmax_result`.
+  - Replace `rs::begin`/`rs::end` → `std::ranges::begin`/`end`.
+  - Replace `rs::range_value_t` → `std::ranges::range_value_t`.
+  - Remove `#include <range/v3/algorithm/max.hpp>`, etc. Add `#include <algorithm>`, `#include <ranges>`.
+  - Files: `src/fields/algorithms.hpp`
   - Test: `ctest --test-dir build -R t-algorithms`
 
 ### View/Container Tuple
 
-- [ ] **1.6** Migrate `src/fields/container_tuple.hpp`: Replace `rs::begin`/`rs::end` with `std::ranges::begin`/`end`.
+- [ ] **1.6** Migrate `src/fields/container_tuple.hpp`:
+  - Replace `rs::begin(r)`/`rs::end(r)` → `std::ranges::begin(r)`/`std::ranges::end(r)` in the range constructor (line 27).
+  - Remove no range-v3 includes (container_tuple.hpp includes only `tuple_utils.hpp` which already provides transitively).
+  - Files: `src/fields/container_tuple.hpp`
   - Test: `ctest --test-dir build -R t-container_tuple`
 
-- [ ] **1.7** Migrate `src/fields/view_tuple.hpp`: Replace `vs::all`/`vs::all_t` with `std::views::all`/`std::ranges::views::all_t`. Replace `rs::equal` with `std::ranges::equal`. The `single_view<A>` class inherits from `vs::all_t<A>` — this inheritance needs redesign.
+- [ ] **1.7** Migrate `src/fields/view_tuple.hpp`:
+  - [ ] **1.7a** Replace `vs::all`/`vs::all_t` with `std::views::all`/`std::views::all_t` throughout (lines 34, 44, 48, 53, 75, etc.). Used in `view_tuple_base` member `std::tuple<vs::all_t<Args>...> v` and constructors/assignment.
+    - Files: `src/fields/view_tuple.hpp`
+  - [ ] **1.7b** Replace `rs::equal` with `std::ranges::equal` in `operator==` (lines 115, 125).
+    - Files: `src/fields/view_tuple.hpp`
+  - [ ] **1.7c** Redesign `single_view<A>` (lines 186–235). Currently inherits from `vs::all_t<A>` (a range-v3 view type). Replace with inheritance from `std::views::all_t<A>` (a `std::ranges::ref_view<A>` or `std::ranges::owning_view<A>`). The key behaviors to preserve:
+    - `single_view<A>` makes a 1-element `view_tuple` directly iterable as a range.
+    - Assignment uses placement-new destroy-and-reconstruct semantics.
+    - The `using view = vs::all_t<A>` alias switches to `std::views::all_t<A>`.
+    - Files: `src/fields/view_tuple.hpp`
+  - [ ] **1.7d** Remove `#include <range/v3/algorithm/equal.hpp>`, `#include <range/v3/view/all.hpp>`. Add `#include <algorithm>`, `#include <ranges>`.
+    - Files: `src/fields/view_tuple.hpp`
   - Test: `ctest --test-dir build -R t-view_tuple`
 
 ### Math Operations
 
-- [ ] **1.8** Migrate `src/fields/tuple_math.hpp`: Replace `vs::zip`, `vs::zip_with`, `vs::repeat_n` with std equivalents or manual loops. `vs::zip_with` has no direct C++23 equivalent — use `std::views::zip` + `std::views::transform` or manual iteration.
+- [ ] **1.8** Migrate `src/fields/tuple_math.hpp`:
+  - [ ] **1.8a** Replace `vs::zip(out, in)` in compound-assignment operators (line 47) with index-based iteration: `auto it_o = std::ranges::begin(out); auto it_i = std::ranges::begin(in); for (; it_o != std::ranges::end(out); ++it_o, ++it_i) *it_o OP *it_i;`. This avoids needing a lazy zip view for in-place mutation.
+    - Files: `src/fields/tuple_math.hpp`
+  - [ ] **1.8b** Replace `vs::zip_with(f, rng, vs::repeat_n(v, sz))` in binary scalar operators (lines 84, 96) with `ccs::zip_transform(f, FWD(rng), ccs::repeat_n(v, sz))` or equivalently `rng | std::views::transform([f, v](auto&& x) { return f(FWD(x), v); })`. The `transform` approach is simpler and avoids needing `repeat_n_view`.
+    - Depends on: 1.2b (only if using `ccs::zip_transform`; `std::views::transform` approach needs no dependency)
+    - Files: `src/fields/tuple_math.hpp`
+  - [ ] **1.8c** Replace `vs::zip_with(f, a, b)` in binary tuple-tuple operators (line 108) with `ccs::zip_transform(f, FWD(a), FWD(b))`.
+    - Depends on: 1.2b
+    - Files: `src/fields/tuple_math.hpp`
+  - [ ] **1.8d** Replace `rs::size(rng)` → `std::ranges::size(rng)` (line 83).
+    - Files: `src/fields/tuple_math.hpp`
+  - [ ] **1.8e** Remove `#include <range/v3/view/repeat.hpp>`, `#include <range/v3/view/repeat_n.hpp>`, `#include <range/v3/view/zip.hpp>`, `#include <range/v3/view/zip_with.hpp>`. Add `#include <ranges>` and `#include "lazy_views.hpp"`.
+    - Files: `src/fields/tuple_math.hpp`
   - Test: `ctest --test-dir build -R t-tuple_math`
 
-- [ ] **1.9** Migrate `src/fields/tuple_pipe.hpp`: Replace `vs::view_closure` concept checks.
+- [ ] **1.9** Migrate `src/fields/tuple_pipe.hpp`:
+  - Replace `vs::view_closure<ViewFn>` with `ccs::view_closure<ViewFn>` in the two `operator|` overloads that accept/match view closures (lines 52, 62).
+  - Depends on: 1.2a
+  - Files: `src/fields/tuple_pipe.hpp`
   - Test: `ctest --test-dir build -R t-tuple_pipe`
+
+### Tuple Type
+
+- [ ] **1.9a** Migrate `src/fields/tuple.hpp`:
+  - Replace `vs::view_closure<ViewFn>` → `ccs::view_closure<ViewFn>` in deduction guides (lines 152–154).
+  - Depends on: 1.2a
+  - Files: `src/fields/tuple.hpp`
+  - Test: `ctest --test-dir build -R t-tuple`
 
 ### Field Type
 
-- [ ] **1.10** Migrate `src/fields/field.hpp`: Replace `rs::swap_ranges` with `std::ranges::swap_ranges`. Replace `rs::size`, `rs::begin`, `rs::end` with std equivalents.
+- [ ] **1.10** Migrate `src/fields/field.hpp`:
+  - Replace `rs::swap_ranges` → `std::ranges::swap_ranges` (lines 138, 142–143).
+  - Replace `rs::size` → `std::ranges::size`, `rs::begin`/`rs::end` → `std::ranges::begin`/`end` (lines 51–52, 90, 92, 103).
+  - Replace `rs::sized_range` → `std::ranges::sized_range`, `rs::random_access_range` → `std::ranges::random_access_range` (lines 90, 103, 120).
+  - Replace `rs::range_reference_t` → `std::ranges::range_reference_t` (lines 72, 81).
+  - Replace `rs::output_range` → `std::ranges::output_range` (concept usage removed if already handled by tuple_fwd).
+  - Remove `#include <range/v3/algorithm/swap_ranges.hpp>`. Add `#include <algorithm>`.
+  - Files: `src/fields/field.hpp`
   - Test: `ctest --test-dir build -R t-field`
 
-- [ ] **1.11** Migrate `src/fields/field_utils.hpp`: Replace `vs::zip`/`vs::zip_with` with std equivalents.
+- [ ] **1.11** Migrate `src/fields/field_utils.hpp`:
+  - Replace `vs::zip(t.scalars()...)` with index-based iteration in `for_each_scalar` and `for_each_vector` (lines 11, 17): iterate `for (int i = 0; i < t.nscalars(); ++i) f(t.scalars(i)...);` (or equivalent using `std::ranges::size`).
+  - Replace `vs::zip_with(f, t.scalars()...)` with `ccs::zip_transform(f, t.scalars()...)` in `transform_scalar` and `transform_vector` (lines 30, 36).
+  - Depends on: 1.2b
+  - Files: `src/fields/field_utils.hpp`
   - Test: `ctest --test-dir build -R t-field_utils`
 
-- [ ] **1.12** Migrate `src/fields/field_math.hpp`: Depends on field_utils migration.
+- [ ] **1.12** Migrate `src/fields/field_math.hpp`: No range-v3 includes — only depends on `field_utils.hpp` which provides range concepts transitively. Verify that after 1.11, this file compiles with no range-v3 usage.
+  - Files: `src/fields/field_math.hpp`
   - Test: `ctest --test-dir build -R t-field_math`
+
+- [ ] **1.12a** Migrate `src/fields/field_fwd.hpp`:
+  - Replace `rs::range_value_t` → `std::ranges::range_value_t`, `rs::range_reference_t` → `std::ranges::range_reference_t` (lines 76–85).
+  - Files: `src/fields/field_fwd.hpp`
+  - Test: `cmake --build build`
+
+- [ ] **1.12b** Migrate `src/fields/selector_fwd.hpp`:
+  - Replace `ranges::enable_view` specialization (line 46) with `std::ranges::enable_view` in namespace `std::ranges`.
+  - Files: `src/fields/selector_fwd.hpp`
+  - Test: `cmake --build build`
 
 ### Selectors (Highest Risk)
 
-- [ ] **1.13** Replace `plane_view<0>` (X-plane): Currently uses `vs::drop_exactly | vs::take_exactly`. Replace with index-range or `std::views::drop`/`std::views::take` or Kokkos subview.
+All selector items depend on: 1.2a (ccs_range_utils.hpp) and 1.3 (tuple_fwd.hpp migration).
+
+- [ ] **1.13** Replace `plane_view<0>` (X-plane) in `src/fields/selector.hpp`:
+  - Currently: `x_plane_t<Rng>` = `decltype(rng | vs::drop_exactly(n) | vs::take_exactly(m))`. The class inherits from this composed type.
+  - Replace: Change `x_plane_t<Rng>` to use `std::views::drop(n) | std::views::take(m)` (C++20). Update the type alias and the `apply_` static method (line 186).
+  - Replace `rs::semiregular_box_t<Fn>` → `ccs::semiregular_box<Fn>` (line 181).
+  - Files: `src/fields/selector.hpp` (lines 173–202)
   - Test: `ctest --test-dir build -R t-selector`
 
-- [ ] **1.14** Replace `plane_view<1>` (Y-plane): **Most complex custom view_adaptor.** Has hand-written iterator with strided access. Replace with pre-computed index array or custom iterator without range-v3 base classes.
+- [ ] **1.14** Replace `plane_view<1>` (Y-plane) in `src/fields/selector.hpp`:
+  - Currently: Inherits `rs::view_adaptor<plane_view<1, Rng, Fn>, Rng>` with a custom `adaptor` class using `rs::adaptor_base`, `rs::range_access`, `rs::begin`, `rs::advance`, `rs::difference_type_t`.
+  - Replace: Rewrite as a class inheriting from `std::ranges::view_interface<plane_view<1, Rng, Fn>>`. Implement:
+    - Store the base range (by value), `index_extents n`, `diff_t j`, and `ccs::semiregular_box<Fn> f`.
+    - Define a custom `iterator` class with: `operator*` (dereference base iterator), `operator++` (next with stride logic from current adaptor lines 247–255), `operator--` (prev with reverse stride, lines 258–267), `operator+=` (advance with division-based skip, lines 270–303), `operator==`, `operator-` (distance_to, line 309).
+    - `begin()` returns iterator at position `j * nz`, `end()` returns iterator at position `(nx-1) * ny * nz + j * nz + nz`.
+    - The iterator must model `std::random_access_iterator` since the current adaptor provides random-access operations.
+  - Replace `rs::semiregular_box_t<Fn>` → `ccs::semiregular_box<Fn>`.
+  - Replace `rs::range_difference_t<Rng>` → `std::ranges::range_difference_t<Rng>`.
+  - Replace `rs::begin`, `rs::advance` → `std::ranges::begin`, `std::ranges::advance`.
+  - Files: `src/fields/selector.hpp` (lines 208–330)
+  - Test: `ctest --test-dir build -R t-selector` — verify x/y/z plane extraction, assignment, and `apply` on scalar/vector types.
+
+- [ ] **1.15** Replace `plane_view<2>` (Z-plane) in `src/fields/selector.hpp`:
+  - Currently: `z_plane_t<Rng>` = `decltype(rng | vs::drop_exactly(k) | vs::stride(n))`. Inherits from this type.
+  - Replace: Change `z_plane_t<Rng>` to use `std::views::drop(k)` piped into `ccs::stride(rng, n)`. Or define `z_plane_t<Rng>` using the project-local `ccs::stride_view`.
+  - Replace `rs::semiregular_box_t<Fn>` → `ccs::semiregular_box<Fn>`.
+  - Depends on: 1.2b (stride_view)
+  - Files: `src/fields/selector.hpp` (lines 332–356)
   - Test: `ctest --test-dir build -R t-selector`
 
-- [ ] **1.15** Replace `plane_view<2>` (Z-plane): Uses `vs::drop_exactly | vs::stride`. Replace with index arithmetic or `std::views` equivalents.
+- [ ] **1.16** Replace `multi_slice_view` in `src/fields/selector.hpp`:
+  - Currently: Inherits `rs::view_adaptor<multi_slice_view<Rng, Fn>, Rng>` with a custom `adaptor` class (~135 lines, lines 459–614).
+  - Replace: Rewrite as a class inheriting from `std::ranges::view_interface<multi_slice_view<Rng, Fn>>`. Implement:
+    - Store: base range (by value), `std::span<const index_slice> slices`, `ccs::semiregular_box<Fn> f`.
+    - Define a custom `iterator` with the same slice-navigation logic (current adaptor lines 470–595). The iterator stores: `slice_it` (current slice), `last_slice`, `integer i` (position in base range), `integer multi_i` (logical position), and a base iterator.
+    - Must model at least `std::bidirectional_iterator` (current view supports `next`, `prev`, `advance`, `distance_to`).
+  - Replace all `rs::` calls with `std::ranges::` equivalents.
+  - Replace `rs::semiregular_box_t` → `ccs::semiregular_box`.
+  - Files: `src/fields/selector.hpp` (lines 455–667)
+  - Test: `ctest --test-dir build -R t-selector` — verify multi_slice extraction, assignment, and `apply`.
+
+- [ ] **1.17** Replace `optional_view` in `src/fields/selector.hpp`:
+  - Currently: Inherits `rs::view_adaptor<optional_view<Rng, Fn>, Rng>` with a simple adaptor that returns `begin` or `end` based on a bool.
+  - Replace: Rewrite as a class inheriting from `std::ranges::view_interface<optional_view<Rng, Fn>>`. Implement:
+    - `begin()`: returns `keep_bounds ? std::ranges::begin(base) : std::ranges::end(base)`.
+    - `end()`: returns `std::ranges::end(base)`.
+    - This is a very simple view — ~30 lines of replacement code.
+  - Replace `rs::semiregular_box_t` → `ccs::semiregular_box`.
+  - Files: `src/fields/selector.hpp` (lines 676–764)
   - Test: `ctest --test-dir build -R t-selector`
 
-- [ ] **1.16** Replace `multi_slice_view`: Custom `rs::view_adaptor` for discontiguous fluid regions. Replace with pre-computed index array of fluid cell indices.
+- [ ] **1.18** Replace `predicate_view` in `src/fields/selector.hpp`:
+  - Currently: Inherits `rs::view_adaptor<predicate_view<Rng, Pred, Fn>, Rng>` with filter-style iteration (lines 780–877).
+  - Replace: Rewrite as a class inheriting from `std::ranges::view_interface<predicate_view<Rng, Pred, Fn>>`. Implement:
+    - Store: base range, predicate range `Pred`, `ccs::semiregular_box<Fn> f`, cached begin.
+    - Define a custom `iterator` that skips elements where the predicate is false (same `satisfy_forward`/`satisfy_reverse` logic from lines 821–839).
+    - Must model `std::bidirectional_iterator` (current view supports `next` and `prev` but not `advance`/`distance_to`).
+    - Note: The predicate is a *range* (not a callable) — iteration advances both the base and predicate iterators in lockstep.
+  - Replace `rs::semiregular_box_t` → `ccs::semiregular_box`.
+  - Replace `rs::begin`/`rs::end`/`rs::size`/`rs::iterator_t` → `std::ranges` equivalents.
+  - Files: `src/fields/selector.hpp` (lines 776–940)
   - Test: `ctest --test-dir build -R t-selector`
 
-- [ ] **1.17** Replace `optional_view`: Custom `rs::view_adaptor` that conditionally empties a range. Replace with simple conditional or wrapper.
-  - Test: `ctest --test-dir build -R t-selector`
-
-- [ ] **1.18** Replace `predicate_view`: Custom `rs::view_adaptor` for filtered ranges. Replace with `std::views::filter` or index array.
-  - Test: `ctest --test-dir build -R t-selector`
-
-- [ ] **1.19** Replace `selection<L,R,Fn>` and `rs::semiregular_box_t`, `rs::make_view_closure`, `rs::bind_back`, `rs::compose` usage in selectors. These are range-v3 internal utilities.
+- [ ] **1.19** Replace range-v3 utility usage in selector function objects (`selection`, `plane_selection_fn`, `multi_slice_fn`, `optional_view_fn`, `predicate_view_fn`):
+  - [ ] **1.19a** In `selection<L,R,Fn>` struct (line 48): Replace `rs::semiregular_box_t<Fn>` → `ccs::semiregular_box<Fn>`.
+    - Files: `src/fields/selector.hpp`
+  - [ ] **1.19b** In `selection_view` (line 123): Replace `rs::make_view_closure(...)` → `ccs::make_view_closure(...)`.
+    - Files: `src/fields/selector.hpp`
+  - [ ] **1.19c** In `plane_selection_base_fn` (lines 370–391): Replace `rs::bind_back(...)` → `ccs::bind_back(...)` and `rs::compose(...)` → `ccs::compose(...)`.
+    - Files: `src/fields/selector.hpp`
+  - [ ] **1.19d** In `plane_selection_fn::operator()` (lines 415–416): Replace `rs::make_view_closure(rs::bind_back(...))` → `ccs::make_view_closure(ccs::bind_back(...))`.
+    - Files: `src/fields/selector.hpp`
+  - [ ] **1.19e** In `multi_slice_fn::operator()` (line 647) and `multi_slice_base_fn` (lines 652–665): Replace `rs::make_view_closure`, `rs::bind_back`, `rs::compose` → `ccs::` equivalents.
+    - Files: `src/fields/selector.hpp`
+  - [ ] **1.19f** In `optional_view_fn` (lines 738–764): Replace `rs::bind_back` → `ccs::bind_back`, `rs::make_view_closure` → `ccs::make_view_closure`.
+    - Files: `src/fields/selector.hpp`
+  - [ ] **1.19g** In `predicate_view_fn` and `predicate_view_base_fn` (lines 882–938): Replace `rs::bind_back`, `rs::compose`, `rs::make_view_closure` → `ccs::` equivalents.
+    - Files: `src/fields/selector.hpp`
+  - [ ] **1.19h** Remove `#include <range/v3/view/drop_exactly.hpp>`, `#include <range/v3/view/stride.hpp>`, `#include <range/v3/view/take_exactly.hpp>` from `selector.hpp`. Add `#include <ranges>`, `#include "ccs_range_utils.hpp"`, `#include "lazy_views.hpp"`.
+    - Files: `src/fields/selector.hpp`
   - Test: `ctest --test-dir build -R t-selector`
 
 ### Test Migration
 
-- [ ] **1.20** Migrate all 15 test files in `src/fields/` to remove `#include <range/v3/all.hpp>` and use std equivalents or direct Kokkos.
+Migrate test files to remove `#include <range/v3/all.hpp>` and all `rs::`/`vs::` usage. Replace with `std::ranges`/`std::views` (C++20) and project-local utilities. Common replacements across all test files:
+- `vs::iota(a, b)` → `std::views::iota(a, b)` (C++20)
+- `vs::transform(f)` → `std::views::transform(f)` (C++20)
+- `rs::equal(a, b)` → `std::ranges::equal(a, b)` (C++20)
+- `rs::size(r)` → `std::ranges::size(r)` (C++20)
+- `rs::begin(r)`/`rs::end(r)` → `std::ranges::begin(r)`/`std::ranges::end(r)` (C++20)
+- `vs::all(x)` → `std::views::all(x)` (C++20)
+- `vs::take(n)` / `vs::take_exactly(n)` → `std::views::take(n)` (C++20)
+- `vs::drop_exactly(n)` → `std::views::drop(n)` (C++20)
+- `vs::repeat_n(v, n)` → `std::vector<T>(n, v)` (eager, test-only) or `ccs::repeat_n(v, n)` (lazy)
+- `vs::concat(a, b, ...)` → `std::vector{...}` with values listed, or helper that copies multiple ranges into a vector
+- `vs::zip(a, b)` → index-based iteration
+- `vs::zip_with(f, a, b)` → `ccs::zip_transform(f, a, b)` or construct expected vector manually
+- `vs::stride(n)` → `ccs::stride(rng, n)` or manual iteration
+- `rs::to<T>()` → `T(std::ranges::begin(r), std::ranges::end(r))`
+- `vs::generate_n(f, n)` → manual loop building a vector
+- `vs::join` → `std::views::join` (C++20)
+- `rs::random_access_range<T>` → `std::ranges::random_access_range<T>` (C++20)
+- `rs::output_range<T, V>` → `std::ranges::output_range<T, V>` (C++20)
+- `rs::common_tuple<...>` → remove (no longer needed)
+
+- [ ] **1.20a** Migrate `src/fields/range_concepts.t.cpp`: This is the concept test file. Remove `#include <range/v3/all.hpp>`. Replace range-v3 concept checks with `std::ranges` equivalents. Remove `rs::common_tuple` test (line 172). Remove or rewrite `generate_n`/`rs::to` test (line 199). Remove or rewrite `x_plane_view`/`z_plane_view` test classes that use `vs::drop_exactly`/`vs::take_exactly`/`vs::stride` (lines 206–267). Remove `vs::zip` test (lines 291–300).
+  - Files: `src/fields/range_concepts.t.cpp`
+  - Test: `ctest --test-dir build -R t-range_concepts`
+
+- [ ] **1.20b** Migrate `src/fields/tuple_utils.t.cpp`: Remove `#include <range/v3/all.hpp>`. Replace `vs::zip` in for loops with index-based iteration (lines 117, 123, 161). Replace `vs::zip_with`/`vs::repeat`/`vs::repeat_n` in lift tests (lines 271, 282, 401, 424, 442, 460).
+  - Files: `src/fields/tuple_utils.t.cpp`
+  - Test: `ctest --test-dir build -R t-tuple_utils`
+
+- [ ] **1.20c** Migrate `src/fields/tuple_math.t.cpp`: Remove range-v3 includes. Replace `vs::zip_with(std::plus{}, a, b)` test constructions (lines 42, 85, 158, 214) with `ccs::zip_transform` or manual expected values.
+  - Files: `src/fields/tuple_math.t.cpp`
+  - Test: `ctest --test-dir build -R t-tuple_math`
+
+- [ ] **1.20d** Migrate `src/fields/view_tuple.t.cpp`: Remove range-v3 includes. Replace `vs::repeat_n` (line 133) and `vs::zip_with` (lines 352, 366–367) with project-local or manual equivalents.
+  - Files: `src/fields/view_tuple.t.cpp`
+  - Test: `ctest --test-dir build -R t-view_tuple`
+
+- [ ] **1.20e** Migrate `src/fields/selector.t.cpp`: This is the largest test file (724 lines). Remove `#include <range/v3/all.hpp>`. Major replacements:
+  - All `vs::repeat_n(v, n)` → `std::vector<int>(n, v)` (~50 occurrences)
+  - All `vs::concat(...)` → helper function or `std::vector{...}` with explicit values (~30 occurrences)
+  - `vs::stride(n) | vs::take_exactly(n)` → `ccs::stride` + `std::views::take` (line 70, 115)
+  - `rs::equal`, `rs::size` → `std::ranges` equivalents
+  - Files: `src/fields/selector.t.cpp`
+  - Test: `ctest --test-dir build -R t-selector`
+
+- [ ] **1.20f** Migrate `src/fields/tuple.t.cpp`: Remove range-v3 includes. Replace `vs::take_exactly` (line 98), `vs::concat` (line 191), `vs::generate_n` + `rs::to` (line 305), `vs::repeat_n` (lines 471, 485), `rs::equal`, `rs::size`.
+  - Files: `src/fields/tuple.t.cpp`
+  - Test: `ctest --test-dir build -R t-tuple`
+
+- [ ] **1.20g** Migrate `src/fields/scalar.t.cpp` and `src/fields/vector.t.cpp`: Remove range-v3 includes. Replace `vs::repeat_n` (~20 occurrences across both files) with `std::vector<T>(n, v)` or `ccs::repeat_n`.
+  - Files: `src/fields/scalar.t.cpp`, `src/fields/vector.t.cpp`
+  - Test: `ctest --test-dir build -R t-scalar && ctest --test-dir build -R t-vector`
+
+- [ ] **1.20h** Migrate remaining test files: `container_tuple.t.cpp`, `tuple_pipe.t.cpp`, `single_view.t.cpp`, `algorithms.t.cpp`, `field.t.cpp`, `field_utils.t.cpp`, `field_math.t.cpp`. These have lighter range-v3 usage (mostly `rs::equal`, `vs::iota`, `vs::repeat_n`). Remove `#include <range/v3/all.hpp>` and replace with `std::ranges`/`std::views` equivalents.
+  - Files: 7 test files
   - Test: `ctest --test-dir build -L fields` — all pass.
+
+### CMake Cleanup
+
+- [ ] **1.21** Remove `range-v3::range-v3` from the `fields` INTERFACE library link:
+  - In `src/fields/CMakeLists.txt` line 4: change `target_link_libraries(fields INTERFACE range-v3::range-v3 Boost::boost)` to `target_link_libraries(fields INTERFACE Boost::boost)`.
+  - Verify no `#include <range/v3/...>` remains in any `src/fields/` file.
+  - Files: `src/fields/CMakeLists.txt`
+  - Test: `cmake --build build && ctest --test-dir build -L fields` — all pass, no range-v3 headers.
+
+---
+
+## Ordering Constraints
+
+```
+1.2a (ccs_range_utils.hpp) ──┬── 1.3c, 1.3f → 1.3 (tuple_fwd.hpp)
+                              ├── 1.9  (tuple_pipe.hpp)
+                              ├── 1.9a (tuple.hpp)
+                              └── 1.19 (selector utility fns)
+
+1.2b (lazy_views.hpp) ───────┬── 1.4d (tuple_utils.hpp lift)
+                              ├── 1.8b, 1.8c (tuple_math.hpp)
+                              ├── 1.11 (field_utils.hpp)
+                              ├── 1.15 (z-plane stride_view)
+                              └── 1.19h (selector includes)
+
+1.3 (tuple_fwd.hpp) ─────────┬── 1.4–1.12 (all downstream headers)
+                              └── 1.13–1.19 (selectors)
+
+1.4 (tuple_utils.hpp) ───────── 1.6, 1.7, 1.8, 1.9 (all include tuple_utils)
+
+1.13–1.19 (selectors) ───────── 1.20e (selector tests)
+
+1.4–1.19 (all headers) ──────── 1.20a–1.20h (test migration)
+
+1.20a–1.20h (tests) ─────────── 1.21 (CMake cleanup)
+```
 
 ---
 
