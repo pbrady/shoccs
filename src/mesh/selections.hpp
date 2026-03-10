@@ -334,21 +334,24 @@ namespace detail
 {
 // fluid domain view, need to write our own adaptor so m.F() can be an output view
 template <typename Rng>
-class FView : public rs::view_adaptor<FView<Rng>, Rng>
+class FView : public std::ranges::view_interface<FView<Rng>>
 {
-    using diff_t = rs::range_difference_t<Rng>;
+    using diff_t = std::ranges::range_difference_t<Rng>;
 
-    friend rs::range_access;
+    Rng base_{};
+    index_extents extents{};
+    std::span<const line> lines{};
 
-    index_extents extents;
-    std::span<const line> lines;
-
-    class adaptor : public rs::adaptor_base
+public:
+    class iterator
     {
-        index_extents extents;
-        std::span<const line> lines;
-        unsigned long l;
-        integer i, i0, i1, local_off;
+        using base_iter = std::ranges::iterator_t<Rng>;
+
+        base_iter base_it_{};
+        index_extents extents{};
+        std::span<const line> lines{};
+        unsigned long l{};
+        integer i{}, i0{}, i1{}, local_off{};
 
         constexpr void set_line()
         {
@@ -361,81 +364,85 @@ class FView : public rs::view_adaptor<FView<Rng>, Rng>
         }
 
     public:
-        adaptor() = default;
-        adaptor(index_extents extents, std::span<const line> lines)
-            : extents{MOVE(extents)}, lines{MOVE(lines)}
+        using difference_type = diff_t;
+        using value_type = std::ranges::range_value_t<Rng>;
+        using reference = std::ranges::range_reference_t<Rng>;
+        using iterator_concept = std::random_access_iterator_tag;
+        using iterator_category = std::random_access_iterator_tag;
+
+        iterator() = default;
+
+        constexpr iterator(base_iter it,
+                           index_extents extents,
+                           std::span<const line> lines,
+                           unsigned long l,
+                           integer i,
+                           integer i0,
+                           integer i1,
+                           integer local_off)
+            : base_it_{std::move(it)}
+            , extents{extents}
+            , lines{lines}
+            , l{l}
+            , i{i}
+            , i0{i0}
+            , i1{i1}
+            , local_off{local_off}
         {
-            assert(this->lines.size() > 0);
         }
 
-        template <typename R>
-        constexpr auto begin(R& rng)
+        constexpr reference operator*() const { return *base_it_; }
+
+        constexpr iterator& operator++()
         {
-            auto it = rs::begin(rng.base());
-
-            local_off = 0;
-            l = 0;
-            set_line();
-            // this doesn't really handle the case of stride > 1
-            i = i0;
-            rs::advance(it, i);
-            return it;
-        }
-
-        template <typename R>
-        constexpr auto end(R& rng)
-        {
-            auto it = rs::begin(rng.base());
-
-            local_off = 0;
-            for (l = 0; l < lines.size(); l++) {
-                set_line();
-                local_off += (i1 - i0);
-            }
-            i = i1;
-
-            rs::advance(it, i);
-            return it;
-        }
-
-        template <typename I>
-        void next(I& it)
-        {
-            // advance to next point on this line, or to the next line
             ++i;
-            ++it;
+            ++base_it_;
             ++local_off;
             if (i == i1 && l != lines.size() - 1) {
                 ++l;
                 set_line();
 
-                it += (i0 - i);
+                base_it_ += (i0 - i);
                 i = i0;
             }
+            return *this;
         }
 
-        template <typename I>
-        void prev(I& it)
+        constexpr iterator operator++(int)
+        {
+            auto tmp = *this;
+            ++*this;
+            return tmp;
+        }
+
+        constexpr iterator& operator--()
         {
             --i;
-            --it;
+            --base_it_;
             --local_off;
             if (i < i0) {
                 --l;
                 set_line();
 
-                it -= (i - (i1 - 1));
+                base_it_ -= (i - (i1 - 1));
                 i = i1 - 1;
             }
+            return *this;
         }
 
-        template <typename I>
-        void advance(I& it, rs::difference_type_t<I> n)
+        constexpr iterator operator--(int)
         {
-            if (n == 0) return;
+            auto tmp = *this;
+            --*this;
+            return tmp;
+        }
+
+        constexpr iterator& operator+=(difference_type n)
+        {
+            if (n == 0) return *this;
 
             local_off += n;
-            rs::difference_type_t<I> it_off = 0;
+            difference_type it_off = 0;
             const auto last_line = lines.size() - 1;
 
             if (n > 0) {
@@ -466,42 +473,124 @@ class FView : public rs::view_adaptor<FView<Rng>, Rng>
                 i = i1 + n;
             }
 
-            rs::advance(it, it_off);
+            std::ranges::advance(base_it_, it_off);
+            return *this;
         }
 
-        template <typename I>
-        diff_t distance_to(const I&, const I&, const adaptor& that) const
+        constexpr iterator& operator-=(difference_type n) { return *this += -n; }
+
+        constexpr reference operator[](difference_type n) const
         {
-            return that.local_off - local_off;
+            auto tmp = *this;
+            tmp += n;
+            return *tmp;
+        }
+
+        friend constexpr iterator operator+(iterator it, difference_type n)
+        {
+            it += n;
+            return it;
+        }
+
+        friend constexpr iterator operator+(difference_type n, iterator it)
+        {
+            it += n;
+            return it;
+        }
+
+        friend constexpr iterator operator-(iterator it, difference_type n)
+        {
+            it -= n;
+            return it;
+        }
+
+        friend constexpr difference_type operator-(const iterator& a, const iterator& b)
+        {
+            return a.local_off - b.local_off;
+        }
+
+        friend constexpr bool operator==(const iterator& a, const iterator& b)
+        {
+            return a.local_off == b.local_off;
+        }
+
+        friend constexpr auto operator<=>(const iterator& a, const iterator& b)
+        {
+            return a.local_off <=> b.local_off;
         }
     };
 
-    adaptor begin_adaptor() { return {extents, lines}; }
-
-    adaptor end_adaptor() { return {extents, lines}; }
-
-public:
     FView() = default;
-    // This really hints that we should extract the extents into their own object
-    // and give them a call operator that converts an ijk tuple to a single index
-    // It should also convert so a simple int3
-    explicit constexpr FView(Rng&& rng,
+    explicit constexpr FView(Rng rng,
                              index_extents extents,
                              std::span<const line> lines)
-        : FView::view_adaptor{FWD(rng)}, extents{MOVE(extents)}, lines{MOVE(lines)}
+        : base_{std::move(rng)}, extents{MOVE(extents)}, lines{MOVE(lines)}
     {
+    }
+
+    constexpr iterator begin()
+    {
+        auto it = std::ranges::begin(base_);
+
+        integer local_off = 0;
+        unsigned long l = 0;
+
+        auto&& [_, start, end] = lines[l];
+        integer i0 = start.object ? extents(start.mesh_coordinate) + 1
+                                  : extents(start.mesh_coordinate);
+        integer i1 = end.object ? extents(end.mesh_coordinate)
+                                : extents(end.mesh_coordinate) + 1;
+
+        integer i = i0;
+        std::ranges::advance(it, i);
+        return iterator(std::move(it), extents, lines, l, i, i0, i1, local_off);
+    }
+
+    constexpr iterator end()
+    {
+        auto it = std::ranges::begin(base_);
+
+        integer local_off = 0;
+        unsigned long l;
+        integer i0 = 0, i1 = 0;
+        for (l = 0; l < lines.size(); l++) {
+            auto&& [_, start, end] = lines[l];
+            i0 = start.object ? extents(start.mesh_coordinate) + 1
+                              : extents(start.mesh_coordinate);
+            i1 = end.object ? extents(end.mesh_coordinate)
+                            : extents(end.mesh_coordinate) + 1;
+            local_off += (i1 - i0);
+        }
+        integer i = i1;
+
+        std::ranges::advance(it, i);
+        return iterator(std::move(it), extents, lines, l, i, i0, i1, local_off);
+    }
+
+    constexpr auto size() const
+    {
+        integer total = 0;
+        for (unsigned long l = 0; l < lines.size(); l++) {
+            auto&& [_, start, end] = lines[l];
+            integer i0 = start.object ? extents(start.mesh_coordinate) + 1
+                                      : extents(start.mesh_coordinate);
+            integer i1 = end.object ? extents(end.mesh_coordinate)
+                                    : extents(end.mesh_coordinate) + 1;
+            total += (i1 - i0);
+        }
+        return total;
     }
 };
 
 template <typename Rng>
-FView(Rng&&, index_extents, std::span<const line>) -> FView<Rng>;
+FView(Rng&&, index_extents, std::span<const line>) -> FView<std::views::all_t<Rng>>;
 
 struct fview_base_fn {
     template <typename Rng>
     constexpr auto
     operator()(Rng&& rng, index_extents extents, std::span<const line> lines) const
     {
-        return FView(FWD(rng), MOVE(extents), MOVE(lines));
+        return FView(std::views::all(FWD(rng)), MOVE(extents), MOVE(lines));
     }
 };
 
@@ -510,8 +599,8 @@ struct fview_fn : fview_base_fn {
 
     constexpr auto operator()(index_extents extents, std::span<const line> lines) const
     {
-        return rs::make_view_closure(
-            rs::bind_back(fview_base_fn{}, MOVE(extents), MOVE(lines)));
+        return ccs::make_view_closure(
+            ccs::bind_back(fview_base_fn{}, MOVE(extents), MOVE(lines)));
     }
 };
 
@@ -520,7 +609,7 @@ constexpr auto fview = fview_fn{};
 
 constexpr auto F(index_extents extents, std::span<const line> lines)
 {
-    return rs::make_view_closure([=]<DomainSelection S>(S&& s) {
+    return ccs::make_view_closure([=]<DomainSelection S>(S&& s) {
         return tuple{FWD(s) | detail::fview(extents, lines)};
     });
 }
