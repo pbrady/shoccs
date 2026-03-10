@@ -130,6 +130,14 @@ All project-local utilities go in `src/fields/ccs_range_utils.hpp`, are header-o
 - (c) Keep files as-is (dead code with range-v3 dependencies)
 **Considerations:** Option (b) would require updating to APIs that no longer exist (`geometry`, `domain_boundaries`). The functionality can be reimplemented from scratch if needed in the future. Option (a) is the pragmatic choice for achieving zero range-v3 references.
 
+### D11: E2_2.t.cpp `#if 0` Blocks
+**Decision:** **(a) Delete the `#if 0` blocks entirely.**
+`src/stencils/E2_2.t.cpp` has two `#if 0` blocks (lines 209–284, 287–453) containing ~25 range-v3 call sites in permanently disabled test cases. The first block tests wall interpolation edge cases; the second tests a quadratic interpolant with 3-point and 4-point stencils that differ from the active test configurations. These were disabled during development and the active tests (lines 1–208) provide sufficient coverage.
+**Options:**
+- **(a) Delete the `#if 0` blocks** ← CHOSEN
+- (b) Migrate all ~25 call sites using the same patterns as active code
+**Considerations:** Migrating dead test code adds ~50 lines of diff with no test coverage benefit. The patterns are identical to active code, so if these tests are needed in the future they can be rewritten using the migrated active code as a template.
+
 ### D9: `vs::cartesian_product` Replacement Strategy
 **Decision:** **(a) Add a project-local `ccs::cartesian_product_view` to `src/fields/lazy_views.hpp`.**
 `vs::cartesian_product(x, y, z)` is used in `cartesian.hpp` (`domain()`) and `selections.hpp` (`location()`). C++23 has `std::views::cartesian_product` but C++20 does not. The project targets C++20 (per `CMAKE_CXX_STANDARD 20`).

@@ -162,7 +162,7 @@ ctest --test-dir build
     - File: `src/mesh/mesh.cpp`.
   - **7.4b** `mesh.hpp` `object_boundaries` method (line 48):
     - Replace `vs::transform(…)` with `std::views::transform(…)`.
-    - No new include needed (mesh.hpp includes selections.hpp which will include `<ranges>`).
+    - No new include needed (`mesh.hpp` already gets `<ranges>` transitively through `fields/selector.hpp`, which was migrated in Phase 1).
     - File: `src/mesh/mesh.hpp`.
   - Test: `ctest --test-dir build -R t-mesh`
 
@@ -280,13 +280,17 @@ These files still have range-v3 usage from earlier phases and must be cleaned be
   - Test: `ctest --test-dir build -R t-simulation_cycle` (scalar_wave is used by simulation tests).
 
 - [ ] **7.13** Migrate stencil test files (heavy range-v3: `vs::linear_distribute`, `rs::inner_product`, `vs::concat`, `vs::single`, `rs::to`, `rs::fill`, `vs::take_exactly`, `vs::drop`):
-  - **7.13a** `src/stencils/polyE2_1.t.cpp`: Replace all range-v3 patterns with explicit loops / `std::inner_product` / manual vector construction. Remove `#include <range/v3/all.hpp>`, add `#include <numeric>`, `#include <ranges>`, `#include "fields/lazy_views.hpp"`.
+  - **CRITICAL**: When replacing `rs::inner_product(v, view_expr, init)` with `std::inner_product(v.begin(), v.end(), view_expr.begin(), init)`, the view expression (e.g., `mesh | f4`) MUST be stored in a named variable. A temporary view's iterator can dangle because `transform_view::iterator` stores a pointer to the parent view for the invocable. Correct pattern:
+    ```cpp
+    auto view = m | f4;  // store the view
+    std::inner_product(v.begin(), v.end(), view.begin(), 0.)
+    ```
+  - **7.13a** `src/stencils/polyE2_1.t.cpp` (342 lines, ~30 call sites): Replace all range-v3 patterns with explicit loops / `std::inner_product` / manual vector construction. Remove `#include <range/v3/all.hpp>`, add `#include <numeric>`, `#include <ranges>`, `#include "fields/lazy_views.hpp"`.
     - Lines 19, 24: `constexpr auto gt = vs::transform(gf)` and `constexpr auto bt = vs::transform(bf)` — change `constexpr` to `const` and replace `vs::transform` with `std::views::transform`. These are namespace-scope pipeable closure variables used as `mesh | gt`.
-    - `vs::linear_distribute(a, b, n) | rs::to<T>()` → `ccs::linear_distribute(a, b, n)` (from 7.1c; already returns `std::vector`).
-    - `rs::inner_product(a, b, init)` → `std::inner_product(a.begin(), a.end(), b.begin(), init)` (from `<numeric>`).
-    - `vs::concat(vs::single(x), mesh) | rs::to<T>()` → construct vector manually: `T m = {x}; m.insert(m.end(), mesh.begin(), mesh.end());`.
-    - `c | vs::drop(i * t) | vs::take_exactly(t)` → `std::span(c).subspan(i * t, t)`.
-    - Inline `vs::transform(f)` in pipelines → `std::views::transform(f)`.
+    - Lines 96, 129, 183, 232, 276: `vs::linear_distribute(a, b, n) | rs::to<T>()` → `ccs::linear_distribute(a, b, n)` (5 occurrences). Line 235: `vs::linear_distribute` in range-for → `ccs::linear_distribute` (iterate over returned vector).
+    - Lines 100, 140, 152, 194, 206, 248, 291, 306, 322, 338: `rs::inner_product(a, b, init)` → `std::inner_product` with stored view variable (10 occurrences; see CRITICAL note above).
+    - Lines 134, 146, 188, 200, 282, 297, 313, 329: `vs::concat(vs::single(x), mesh) | rs::to<T>()` or `vs::concat(mesh, vs::single(x)) | rs::to<T>()` → construct vector manually: `T m = {x}; m.insert(m.end(), mesh.begin(), mesh.end());` (8 occurrences).
+    - Lines 140, 152, 194, 206: `c | vs::drop(i * t) | vs::take_exactly(t)` → `std::span(c).subspan(i * t, t)` (4 occurrences).
     - Remove `range-v3::range-v3` link from `src/stencils/CMakeLists.txt` line 21.
   - **7.13b** `src/stencils/E2_2.t.cpp`: Same patterns as 7.13a (no constexpr globals, but has inline `vs::transform(f)` in pipelines at lines 127, 172).
     - **Active code** (lines 1–208): 6 range-v3 call sites:
@@ -294,11 +298,16 @@ These files still have range-v3 usage from earlier phases and must be cleaned be
       - Lines 127, 172: `rs::inner_product(c, mesh | vs::transform(f), 0.0)` → `std::inner_product` + `std::views::transform`.
       - Line 188: `vs::concat(vs::single(…), mesh) | rs::to<T>()` → manual vector construction.
       - Line 194: `rs::fill(cw, 0.0)` → `std::ranges::fill(cw, 0.0)`.
-    - **`#if 0` blocks** (lines 209–284 and 287–453): Must also be migrated for zero-reference completeness. Contains ~25 additional `vs::concat`, `rs::inner_product`, `vs::transform`, `rs::to` call sites, all using the same patterns as active code. Apply the same replacements. Alternatively, if these test cases are permanently disabled, delete the `#if 0` blocks entirely (simpler, cleaner).
+    - **`#if 0` blocks** (lines 209–284 and 287–453): **Delete entirely.** These contain ~25 additional range-v3 call sites in permanently disabled test cases. The first block (lines 209–284) tests wall interpolation edge cases that were disabled during development; the second block (lines 287–453) tests a quadratic interpolant (`T ci(3)` / `T cw(4)`) with different stencil sizes than the active tests. Migrating ~25 dead call sites adds risk without benefit. If these tests are needed in the future, they can be rewritten from scratch using the migrated active-code patterns as a template.
     - Remove `#include <range/v3/all.hpp>`, add `#include <numeric>`, `#include <ranges>`, `#include "fields/lazy_views.hpp"`.
     - Remove `range-v3::range-v3` link from `src/stencils/CMakeLists.txt` line 14.
-  - **7.13c** `src/stencils/E4_2.t.cpp`: Same patterns as 7.13a.
+  - **7.13c** `src/stencils/E4_2.t.cpp` (309 lines, ~35 call sites, same patterns as 7.13a):
     - Lines 23, 27, 30: `constexpr auto f4 = vs::transform(f4_f)`, `constexpr auto f3 = vs::transform(f3_f)`, `constexpr auto f2 = vs::transform(f2_f)` — change `constexpr` to `const` and replace `vs::transform` with `std::views::transform`. Used as pipeable closures in `mesh | f4`, `m | f2`, etc.
+    - Lines 48, 69, 110, 151, 188, 213: `vs::linear_distribute(…) | rs::to<T>()` → `ccs::linear_distribute(…)` (6 occurrences).
+    - Lines 74, 86, 115, 127, 156, 169, 219, 234, 249, 264, 280, 296: `vs::concat(vs::single(…), mesh) | rs::to<T>()` or `vs::concat(mesh, vs::single(…)) | rs::to<T>()` → manual vector construction (12 occurrences).
+    - Lines 54, 202, 228, 243, 258, 273, 289, 305: `rs::inner_product(v, m | fN, 0.)` → `std::inner_product` with stored view variable (8 occurrences).
+    - Lines 80, 92, 121, 133, 162, 175: `rs::inner_product(c | vs::drop(i * t) | vs::take_exactly(t), m | fN, init)` → `std::inner_product` with `std::span(c).subspan(i * t, t)` and stored view (6 occurrences).
+    - Remove `#include <range/v3/all.hpp>`, add `#include <numeric>`, `#include <ranges>`, `#include "fields/lazy_views.hpp"`.
     - Remove `range-v3::range-v3` link from `src/stencils/CMakeLists.txt` line 15.
   - Files: `src/stencils/polyE2_1.t.cpp`, `src/stencils/E2_2.t.cpp`, `src/stencils/E4_2.t.cpp`, `src/stencils/CMakeLists.txt`.
   - Test: `ctest --test-dir build -L stencils`
@@ -396,7 +405,7 @@ These files still have range-v3 usage from earlier phases and must be cleaned be
 2. **7.1c** (add `ccs::linear_distribute`) must precede **7.1d** (cartesian.cpp migration) and **7.13** (stencil tests).
 3. **7.2a–7.2c** (YPlaneView, plane_fn, FView rewrites) are independent of each other.
 4. **7.2d** (replace `rs::make_view_closure` in utility functions) should be done after 7.2a–7.2c and 7.1a.
-5. **7.3** (object_geometry.hpp) is independent of 7.2 — it has its own `#include <range/v3/view/transform.hpp>` to replace. **7.4** depends on 7.2: `mesh.hpp` includes `selections.hpp` transitively for `<ranges>`, and `mesh.hpp` line 48 uses `vs::transform` which resolves through range-v3 until 7.2 removes those includes.
+5. **7.3** (object_geometry.hpp) is independent of 7.2 — it has its own `#include <range/v3/view/transform.hpp>` to replace. **7.4** is independent of 7.2: `mesh.hpp` gets `<ranges>` transitively through `fields/selector.hpp` (already migrated in Phase 1), not through `selections.hpp`. Items 7.4a and 7.4b can be done as soon as they are reached.
 6. **7.6** (manufactured_solutions.hpp) should precede **7.15** (mms.t.cpp) since the test pipes through `ms(time)`.
 7. **7.7** (mms.cpp CMake cleanup) is independent.
 8. **7.12** (scalar_wave.cpp) should be done after **7.1–7.2** (mesh migration) so that mesh view types (`m.xyz`, `m.vxyz`) satisfy `std::ranges::viewable_range` and `std::views::transform` can pipe through them. No CMake changes needed (shoccs-system doesn't link range-v3 directly).
