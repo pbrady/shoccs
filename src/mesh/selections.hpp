@@ -577,7 +577,7 @@ public:
         auto it = std::ranges::begin(base_);
 
         integer local_off = 0;
-        unsigned long l;
+        unsigned long l = 0;
         integer i0 = 0, i1 = 0;
         for (l = 0; l < lines.size(); l++) {
             auto&& [_, start, end] = lines[l];
@@ -587,6 +587,11 @@ public:
                             : extents(end.mesh_coordinate) + 1;
             local_off += (i1 - i0);
         }
+        // Use last valid line index (not one-past-end) so that backward
+        // traversal (operator--, operator+=(-n)) retreats to the previous
+        // line instead of re-reading the last line.  This matches the
+        // state that operator++ produces when it reaches the end.
+        l = lines.size() - 1;
         integer i = i1;
 
         std::ranges::advance(it, i);
