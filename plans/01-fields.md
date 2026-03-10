@@ -327,9 +327,9 @@ Migrate test files to remove `#include <range/v3/all.hpp>` and all `rs::`/`vs::`
   - Files: `src/fields/tuple_utils.t.cpp`
   - Test: `ctest --test-dir build -R t-tuple_utils` — 1 passed (all 17 subcases). All 8 previously-passing downstream targets still pass.
 
-- [ ] **1.20c** Migrate `src/fields/tuple_math.t.cpp`: Remove range-v3 includes. Replace `vs::zip_with(std::plus{}, a, b)` test constructions (lines 42, 85, 158, 214) with `ccs::zip_transform` or manual expected values.
+- [x] **1.20c** Migrate `src/fields/tuple_math.t.cpp`: Removed `#include <range/v3/...>` (6 headers). Added `#include <algorithm>`, `#include <ranges>`, `#include "lazy_views.hpp"`. Replaced `vs::zip_with(std::plus{}, a, b)` → `ccs::zip_transform(std::plus{}, a, b)` (4 occurrences). Replaced `vs::iota` → `std::views::iota`, `rs::size` → `std::ranges::size`, `vs::repeat(6)` → `ccs::repeat_n(6, 2 * i + 1)`. Added extra parentheses around all `REQUIRE((x == y))` comparisons involving `ccs::tuple` types to prevent Catch2 `ExprLhs` decomposition, which triggers C++20 ambiguous reversed operator== errors.
   - Files: `src/fields/tuple_math.t.cpp`
-  - Test: `ctest --test-dir build -R t-tuple_math`
+  - Test: `ctest --test-dir build -R t-tuple_math` — 1 passed (all 5 test cases). All 9 previously-passing downstream field targets still pass.
 
 - [ ] **1.20d** Migrate `src/fields/view_tuple.t.cpp` (456 lines): Remove range-v3 includes. Replace:
   - `vs::repeat_n` (line 133) and `vs::zip_with` (lines 352, 366–367) → project-local or manual equivalents.
