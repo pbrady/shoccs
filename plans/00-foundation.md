@@ -74,7 +74,7 @@ ctest --test-dir build -R t-real3_operators
 
 ### 0.5 — Establish Kokkos type aliases
 
-- [ ] **0.5** Create a new header `src/kokkos_types.hpp` with Kokkos-compatible type aliases.
+- [x] **0.5** Create a new header `src/kokkos_types.hpp` with Kokkos-compatible type aliases.
   - Contents: `#pragma once`, `#include <Kokkos_Core.hpp>`, `#include "shoccs_config.hpp"`, then inside `namespace ccs`: `using execution_space = Kokkos::DefaultHostExecutionSpace;`, `using memory_space = typename execution_space::memory_space;`, `template<typename T> using device_view = Kokkos::View<T, memory_space>;`.
   - **Do NOT add `#include <Kokkos_Core.hpp>` to `types.hpp`** — `types.hpp` is included by 35+ headers across all subsystems; adding Kokkos there would require every CMake library target to link `Kokkos::kokkos`. That cascading change is deferred to Phase 1 (fields), when the `fields` INTERFACE library (which most targets depend on) adds Kokkos.
   - Keep existing `rs`/`vs` namespace aliases in `types.hpp` unchanged (per D2).
