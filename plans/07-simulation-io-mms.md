@@ -35,13 +35,15 @@ ctest --test-dir build
 
 ## Items
 
-**Build-breakage status (review 7.2b):** The 7.1a/7.1b commits introduced `ccs::cartesian_product_view` into `m.xyz`, which breaks downstream files that pipe `m.xyz` through range-v3 `view_closure` (range-v3 doesn't recognize C++20 views as `viewable_range`). Four files currently fail to compile:
+**Build-breakage status (updated review 7.7):** Four files currently fail to compile:
 - `field_data.cpp` (`vs::zip` lost transitively) → fix: **7.9**
 - `xdmf.cpp` (`vs::repeat_n` lost transitively) → fix: **7.10**
-- `heat.cpp` (`m.xyz | ms(time)` mixes C++20 view with range-v3 closure) → fix: **7.3** + **7.6** (heat.cpp itself has no range-v3 usage — fully migrated in Phase 5)
-- `scalar_wave.cpp` (same mixed-type pipe) → fix: **7.3** + **7.6** + **7.12**
+- `heat.cpp` (`m.xyz | m_sol(time)` — `ccs::tuple` piped with `std::views::transform` closure) → fix: **7.1e** (see below). 7.3 + 7.6 are done but did NOT fix this; the root cause is **7.1e**, not the range-v3/C++20 mismatch originally diagnosed.
+- `scalar_wave.cpp` (same `ccs::tuple` pipe issue + own range-v3 usage) → fix: **7.1e** + **7.12**
 
-This blocks these test targets: `t-mesh` (also needs **7.14**), `t-field_io`, `t-xdmf`, `t-simulation_cycle`, `t-heat`, `t-hyperbolic_eigenvalues`. Tests that still work: `t-cartesian`, `t-object_geometry`, `t-shapes`, `t-mms`. To restore the full build, prioritize **7.3**, **7.6**, **7.9**, **7.10**, and **7.14** before or alongside other items. Individual test targets can be built with `cmake --build build --target <target>` to bypass unrelated library failures.
+**Root cause for heat.cpp/scalar_wave.cpp (discovered review 7.7):** `ccs::cartesian_product_view::iterator` (added in 7.1a) does NOT satisfy `std::indirectly_readable` because `std::common_reference<std::tuple<const T&, ...>&&, std::tuple<T, ...>&>` has no `type` in C++20. (C++23 P2321R2 adds tuple `common_reference` specializations, but this codebase uses `-std=gnu++20`.) This means `cartesian_product_view` does not satisfy `std::ranges::input_range`, so standard constrained range adaptors (e.g., `std::views::transform`) reject it during constraint checking. The `ccs::tuple` `operator|` overload in `tuple_pipe.hpp` checks `PipeableOver` (via `is_pipeable` trait), which tests `requires(F f, T t) { t | f; }` on each leaf — this fails because `cpv | std::views::transform(lambda)` fails the `__adaptor_invocable` constraint. Fix is **7.1e** below.
+
+This blocks test targets: `t-mesh` (also needs **7.14**), `t-field_io`, `t-xdmf`, `t-simulation_cycle`, `t-heat`, `t-hyperbolic_eigenvalues`. Tests that still work: `t-cartesian`, `t-object_geometry`, `t-shapes`, `t-mms`, `t-selections`. To restore the full build, prioritize **7.1e**, **7.9**, **7.10**, and **7.14**. Individual test targets can be built with `cmake --build build --target <target>` to bypass unrelated library failures.
 
 ### Mesh (High Complexity)
 
@@ -121,6 +123,20 @@ Note: `shoccs-mesh` does not link `range-v3::range-v3` in `src/mesh/CMakeLists.t
     - File: `src/mesh/cartesian.cpp`.
   - Test: `ctest --test-dir build -R t-cartesian`
   - Ordering: 7.1a must precede 7.1b. 7.1c must precede 7.1d. 7.1d is independent of 7.1a/7.1b.
+  - [ ] **7.1e** Fix `cartesian_product_view::iterator` to satisfy `std::indirectly_readable` (review finding from 7.7): The iterator defines `value_type = std::tuple<range_value_t<R1>, range_value_t<R2>, range_value_t<R3>>` and `reference = std::tuple<range_reference_t<R1>, range_reference_t<R2>, range_reference_t<R3>>`. In C++20, `std::common_reference<reference&&, value_type&>` has no `type` because C++20 lacks `common_reference` specializations for `std::tuple` (added in C++23 P2321R2). This means the iterator doesn't satisfy `std::indirectly_readable` → `std::input_iterator` → the view doesn't satisfy `std::ranges::input_range`. Standard constrained adaptors (`std::views::transform`, etc.) refuse to pipe through it.
+    - **Fix options (pick one):**
+      - **(a) Recommended:** Add a `std::basic_common_reference` specialization in `lazy_views.hpp` that provides `common_reference` for `tuple<range_reference_t<R>..., >` and `tuple<range_value_t<R>...>`. For the specific case of `tuple<const T&, ...>` and `tuple<T, ...>`, the common reference type is `tuple<const T&, ...>`. A minimal specialization covering the 3-element tuple case used by `cartesian_product_view` suffices.
+      - **(b) Alternative:** Change `reference` to equal `value_type` (return tuples by value, making both types `tuple<V1, V2, V3>`). Simpler but incurs copy overhead and changes semantics.
+      - **(c) Alternative:** Wrap `std::views::transform(lambda)` in `ccs::make_view_closure(...)` in `manufactured_solutions.hpp` (and `scalar_wave.cpp`), so `tuple_pipe.hpp` uses the unconstrained `ccs::view_closure::operator|` instead of the standard constrained `operator|`. This is a workaround, not a fix — the iterator would still not satisfy standard iterator concepts.
+    - **Verification:** After the fix, the following must hold:
+      ```cpp
+      using cpv_t = ccs::cartesian_product_view<std::span<const double>, std::span<const double>, std::span<const double>>;
+      static_assert(std::ranges::input_range<cpv_t>);
+      static_assert(std::ranges::forward_range<cpv_t>);
+      ```
+    - **Test:** Add static_asserts to existing `t-cartesian` test. Then build `t-heat` (currently fails) to verify the fix unblocks it.
+    - File: `src/fields/lazy_views.hpp` (iterator type aliases and/or `basic_common_reference` specialization).
+    - Ordering: Must be done before **7.12** (scalar_wave.cpp) and before any test that exercises `m.xyz | std::views::transform(...)` (i.e., before heat/scalar_wave can compile).
 
 - [x] **7.2** Migrate `selections.hpp`
   - [x] **7.2a** Rewrite `YPlaneView` as a `std::ranges::view_interface` class (lines 26–163): **DONE** — replaced `rs::view_adaptor` with `std::ranges::view_interface`, standalone `iterator` class with full random-access support, deduction guide uses `std::views::all_t`, factory uses `ccs::make_view_closure`/`ccs::bind_back`. Also added `#include "fields/ccs_range_utils.hpp"` and `#include "fields/lazy_views.hpp"`, removed 4 of 7 range-v3 includes. Standalone compile test passes: random_access_range, sized_range, correct element selection.
@@ -404,16 +420,17 @@ These files still have range-v3 usage from earlier phases and must be cleaned be
 
 1. **7.1a** (add `ccs::cartesian_product_view`) must precede **7.1b**, **7.2d**, and any code depending on `ccs::cartesian_product`.
 2. **7.1c** (add `ccs::linear_distribute`) must precede **7.1d** (cartesian.cpp migration) and **7.13** (stencil tests).
-3. **7.2a–7.2c** (YPlaneView, plane_fn, FView rewrites) are independent of each other.
-4. **7.2d** (replace `rs::make_view_closure` in utility functions) should be done after 7.2a–7.2c and 7.1a.
-5. **7.3** (object_geometry.hpp) is independent of 7.2 — it has its own `#include <range/v3/view/transform.hpp>` to replace. **7.4** is independent of 7.2: `mesh.hpp` gets `<ranges>` transitively through `fields/selector.hpp` (already migrated in Phase 1), not through `selections.hpp`. Items 7.4a and 7.4b can be done as soon as they are reached.
-6. **7.6** (manufactured_solutions.hpp) should precede **7.15** (mms.t.cpp) since the test pipes through `ms(time)`.
-7. **7.7** (mms.cpp CMake cleanup) is independent.
-8. **7.12** (scalar_wave.cpp) should be done after **7.1–7.2** (mesh migration) so that mesh view types (`m.xyz`, `m.vxyz`) satisfy `std::ranges::viewable_range` and `std::views::transform` can pipe through them. No CMake changes needed (shoccs-system doesn't link range-v3 directly).
-9. **7.13** (stencil tests) depends on **7.1c** (shared `ccs::linear_distribute`).
-10. **7.20–7.25** (Final Cleanup) must come last, after all code migration items.
-11. **Build-unblocking priority:** The build is currently broken (see status note above). To restore it, **7.3** + **7.6** should be done before items whose tests depend on `shoccs-system` (e.g., 7.12), and **7.9** + **7.10** before items whose tests depend on `shoccs-io` (e.g., 7.8). **7.14** (mesh.t.cpp) must precede any item tested via `t-mesh` (7.2c, 7.2d, 7.4).
-12. **7.2e** (compile-instantiation test for `selections.hpp`) is done. **7.2f** (FView end() bug fix + multi-line test) is done. **7.3**, **7.4**, **7.5**, **7.6**, and **7.7** are done. Next: **7.8** (field_io.cpp) or **7.12** (scalar_wave.cpp) or **7.14** (mesh.t.cpp).
+3. **7.1e** (fix `cartesian_product_view` iterator `common_reference`) must precede **7.12** (scalar_wave.cpp) and any code that pipes `m.xyz` through `std::views::transform`. Also unblocks `heat.cpp` compilation.
+4. **7.2a–7.2c** (YPlaneView, plane_fn, FView rewrites) are independent of each other.
+5. **7.2d** (replace `rs::make_view_closure` in utility functions) should be done after 7.2a–7.2c and 7.1a.
+6. **7.3** (object_geometry.hpp) is independent of 7.2 — it has its own `#include <range/v3/view/transform.hpp>` to replace. **7.4** is independent of 7.2: `mesh.hpp` gets `<ranges>` transitively through `fields/selector.hpp` (already migrated in Phase 1), not through `selections.hpp`. Items 7.4a and 7.4b can be done as soon as they are reached.
+7. **7.6** (manufactured_solutions.hpp) should precede **7.15** (mms.t.cpp) since the test pipes through `ms(time)`.
+8. **7.7** (mms.cpp CMake cleanup) is independent.
+9. **7.12** (scalar_wave.cpp) should be done after **7.1e** and **7.1–7.2** (mesh migration) so that mesh view types (`m.xyz`, `m.vxyz`) satisfy `std::ranges::input_range` and `std::views::transform` can pipe through them. No CMake changes needed (shoccs-system doesn't link range-v3 directly).
+10. **7.13** (stencil tests) depends on **7.1c** (shared `ccs::linear_distribute`).
+11. **7.20–7.25** (Final Cleanup) must come last, after all code migration items.
+12. **Build-unblocking priority:** The build is currently broken (see status note above). To restore it, **7.1e** must be done first (unblocks heat.cpp/scalar_wave.cpp), then **7.9** + **7.10** (unblock shoccs-io), then **7.14** (unblock t-mesh).
+13. **7.2e** (compile-instantiation test for `selections.hpp`) is done. **7.2f** (FView end() bug fix + multi-line test) is done. **7.3**, **7.4**, **7.5**, **7.6**, and **7.7** are done. Next: **7.1e** (critical — unblocks heat.cpp), then **7.8**/**7.9**/**7.10**/**7.12**/**7.14**.
 
 ---
 
