@@ -5,11 +5,10 @@
 #include "mesh_types.hpp"
 #include "object_geometry.hpp"
 
-#include <range/v3/view/cartesian_product.hpp>
-#include <range/v3/view/chunk.hpp>
+#include "fields/ccs_range_utils.hpp"
+#include "fields/lazy_views.hpp"
+
 #include <range/v3/view/drop_exactly.hpp>
-#include <range/v3/view/for_each.hpp>
-#include <range/v3/view/join.hpp>
 #include <range/v3/view/stride.hpp>
 #include <range/v3/view/take_exactly.hpp>
 
@@ -18,136 +17,200 @@ namespace ccs::views
 
 namespace detail
 {
-// y-plane view do not result in output iterator when formulated in an intuitve fashion
-// using range-v3 building blocks: grid | vs::chunk(nz) | vs::stride(ny) | vs::join; To
-// workaround this limitiation, we define a custom y-plane view based on the v3
-// view_adapator.  This will need to be revisited if the layout changes
+// y-plane view: selects elements where y == j from a flat 3D grid.
+// Formulated as a custom view because naive range-v3 building blocks
+// (chunk | stride | join) did not produce output iterators.
+// This will need to be revisited if the layout changes.
 template <typename Rng>
-class YPlaneView : public rs::view_adaptor<YPlaneView<Rng>, Rng>
+class YPlaneView : public std::ranges::view_interface<YPlaneView<Rng>>
 {
-    using diff_t = rs::range_difference_t<Rng>;
+    using diff_t = std::ranges::range_difference_t<Rng>;
 
-    friend rs::range_access;
-    diff_t nx, ny, nz, j;
+    Rng base_{};
+    diff_t nx{}, ny{}, nz{}, j{};
 
-    class adaptor : public rs::adaptor_base
+public:
+    class iterator
     {
-        diff_t nx, ny, nz, i, j, k;
+        using base_iter = std::ranges::iterator_t<Rng>;
+
+        base_iter base_it_{};
+        diff_t nx_{}, ny_{}, nz_{};
+        diff_t i_{}, k_{};
 
     public:
-        adaptor() = default;
-        adaptor(diff_t nx, diff_t ny, diff_t nz, diff_t i, diff_t j, diff_t k)
-            : nx{nx}, ny{ny}, nz{nz}, i{i}, j{j}, k{k}
+        using difference_type = diff_t;
+        using value_type = std::ranges::range_value_t<Rng>;
+        using reference = std::ranges::range_reference_t<Rng>;
+        using iterator_concept = std::random_access_iterator_tag;
+        using iterator_category = std::random_access_iterator_tag;
+
+        iterator() = default;
+
+        constexpr iterator(base_iter it,
+                           diff_t nx,
+                           diff_t ny,
+                           diff_t nz,
+                           diff_t i,
+                           diff_t k)
+            : base_it_{std::move(it)}, nx_{nx}, ny_{ny}, nz_{nz}, i_{i}, k_{k}
         {
         }
 
-        template <typename R>
-        constexpr auto begin(R& rng)
-        {
-            auto it = rs::begin(rng.base());
-            rs::advance(it, j * nz);
-            return it;
-        }
+        constexpr reference operator*() const { return *base_it_; }
 
-        template <typename R>
-        constexpr auto end(R& rng)
+        constexpr iterator& operator++()
         {
-            auto it = rs::begin(rng.base());
-            rs::advance(it, i * ny * nz + j * nz + k);
-            return it;
-        }
-
-        template <typename I>
-        void next(I& it)
-        {
-            ++k;
-            ++it;
-            if (k == nz && i != nx - 1) {
-                k = 0;
-                ++i;
-                it += (ny - 1) * nz;
+            ++k_;
+            ++base_it_;
+            if (k_ == nz_ && i_ != nx_ - 1) {
+                k_ = 0;
+                ++i_;
+                base_it_ += (ny_ - 1) * nz_;
             }
+            return *this;
         }
 
-        template <typename I>
-        void prev(I& it)
+        constexpr iterator operator++(int)
         {
-            --k;
-            --it;
-            if (k < 0) {
-                k = nz - 1;
-                --i;
-                it -= (ny - 1) * nz;
+            auto tmp = *this;
+            ++*this;
+            return tmp;
+        }
+
+        constexpr iterator& operator--()
+        {
+            --k_;
+            --base_it_;
+            if (k_ < 0) {
+                k_ = nz_ - 1;
+                --i_;
+                base_it_ -= (ny_ - 1) * nz_;
             }
+            return *this;
         }
 
-        template <typename I>
-        void advance(I& it, rs::difference_type_t<I> n)
+        constexpr iterator operator--(int)
         {
-            if (n == 0) return;
+            auto tmp = *this;
+            --*this;
+            return tmp;
+        }
 
-            const auto line_offset = ny * nz;
-            // define a new i and k for the adaptor and adjust iterator accordingly.
+        constexpr iterator& operator+=(difference_type n)
+        {
+            if (n == 0) return *this;
+
+            const auto line_offset = ny_ * nz_;
 
             if (n > 0) {
-                n += k;
+                n += k_;
 
-                auto qr = std::div(n, nz);
-                diff_t i1 = i + qr.quot;
+                auto qr = std::div(n, nz_);
+                diff_t i1 = i_ + qr.quot;
                 diff_t k1 = qr.rem;
 
-                if (i1 == nx) {
-                    i1 = nx - 1;
-                    k1 = nz;
+                if (i1 == nx_) {
+                    i1 = nx_ - 1;
+                    k1 = nz_;
                 }
 
-                rs::advance(it, line_offset * (i1 - i) + (k1 - k));
-                i = i1;
-                k = k1;
+                base_it_ += line_offset * (i1 - i_) + (k1 - k_);
+                i_ = i1;
+                k_ = k1;
             } else {
-                n -= (nz - 1 - k);
+                n -= (nz_ - 1 - k_);
 
-                auto qr = std::div(n, nz);
-                diff_t i1 = i + qr.quot;
-                diff_t k1 = nz - 1 + qr.rem;
+                auto qr = std::div(n, nz_);
+                diff_t i1 = i_ + qr.quot;
+                diff_t k1 = nz_ - 1 + qr.rem;
 
-                rs::advance(it, line_offset * (i1 - i) + (k1 - k));
-                i = i1;
-                k = k1;
+                base_it_ += line_offset * (i1 - i_) + (k1 - k_);
+                i_ = i1;
+                k_ = k1;
             }
+            return *this;
         }
 
-        template <typename I>
-        diff_t distance_to(const I&, const I&, const adaptor& that) const
+        constexpr iterator& operator-=(difference_type n) { return *this += -n; }
+
+        constexpr reference operator[](difference_type n) const
         {
-            return (that.i - i) * nz + (that.k - k);
+            auto tmp = *this;
+            tmp += n;
+            return *tmp;
+        }
+
+        friend constexpr iterator operator+(iterator it, difference_type n)
+        {
+            it += n;
+            return it;
+        }
+
+        friend constexpr iterator operator+(difference_type n, iterator it)
+        {
+            it += n;
+            return it;
+        }
+
+        friend constexpr iterator operator-(iterator it, difference_type n)
+        {
+            it -= n;
+            return it;
+        }
+
+        friend constexpr difference_type operator-(const iterator& a, const iterator& b)
+        {
+            return (a.i_ - b.i_) * a.nz_ + (a.k_ - b.k_);
+        }
+
+        friend constexpr bool operator==(const iterator& a, const iterator& b)
+        {
+            return a.base_it_ == b.base_it_;
+        }
+
+        friend constexpr auto operator<=>(const iterator& a, const iterator& b)
+        {
+            auto diff = a - b;
+            return diff <=> decltype(diff){0};
         }
     };
 
-    adaptor begin_adaptor() { return {nx, ny, nz, 0, j, 0}; }
-
-    adaptor end_adaptor() { return {nx, ny, nz, nx - 1, j, nz}; }
-
-public:
     YPlaneView() = default;
-    explicit constexpr YPlaneView(Rng&& rng, const int3& extents, int j)
-        : YPlaneView::view_adaptor{FWD(rng)},
+    explicit constexpr YPlaneView(Rng rng, const int3& extents, int j)
+        : base_{std::move(rng)},
           nx{extents[0]},
           ny{extents[1]},
           nz{extents[2]},
           j{j}
     {
     }
+
+    constexpr iterator begin()
+    {
+        auto it = std::ranges::begin(base_);
+        std::ranges::advance(it, j * nz);
+        return iterator(std::move(it), nx, ny, nz, 0, 0);
+    }
+
+    constexpr iterator end()
+    {
+        auto it = std::ranges::begin(base_);
+        std::ranges::advance(it, (nx - 1) * ny * nz + j * nz + nz);
+        return iterator(std::move(it), nx, ny, nz, nx - 1, nz);
+    }
+
+    constexpr auto size() const { return nx * nz; }
 };
 
 template <typename Rng>
-YPlaneView(Rng&&, int3, int) -> YPlaneView<Rng>;
+YPlaneView(Rng&&, const int3&, int) -> YPlaneView<std::views::all_t<Rng>>;
 
 struct y_plane_base_fn {
     template <typename Rng>
     constexpr auto operator()(Rng&& rng, const int3& extents, int j) const
     {
-        return YPlaneView(FWD(rng), extents, j);
+        return YPlaneView(std::views::all(FWD(rng)), extents, j);
     }
 };
 
@@ -156,7 +219,7 @@ struct y_plane_fn : y_plane_base_fn {
 
     constexpr auto operator()(const int3& extents, int j) const
     {
-        return rs::make_view_closure(rs::bind_back(y_plane_base_fn{}, extents, j));
+        return ccs::make_view_closure(ccs::bind_back(y_plane_base_fn{}, extents, j));
     }
 };
 

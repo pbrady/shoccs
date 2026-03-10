@@ -115,7 +115,7 @@ Note: `shoccs-mesh` does not link `range-v3::range-v3` in `src/mesh/CMakeLists.t
   - Ordering: 7.1a must precede 7.1b. 7.1c must precede 7.1d. 7.1d is independent of 7.1a/7.1b.
 
 - [ ] **7.2** Migrate `selections.hpp`
-  - **7.2a** Rewrite `YPlaneView` as a `std::ranges::view_interface` class (lines 26–163):
+  - [x] **7.2a** Rewrite `YPlaneView` as a `std::ranges::view_interface` class (lines 26–163): **DONE** — replaced `rs::view_adaptor` with `std::ranges::view_interface`, standalone `iterator` class with full random-access support, deduction guide uses `std::views::all_t`, factory uses `ccs::make_view_closure`/`ccs::bind_back`. Also added `#include "fields/ccs_range_utils.hpp"` and `#include "fields/lazy_views.hpp"`, removed 4 of 7 range-v3 includes. Standalone compile test passes: random_access_range, sized_range, correct element selection.
     - Replace `rs::view_adaptor<YPlaneView<Rng>, Rng>` inheritance with `std::ranges::view_interface<YPlaneView<Rng>>`.
     - Store the base range directly as a member (e.g., `Rng base_`). Remove `friend rs::range_access`.
     - Replace inner `adaptor : rs::adaptor_base` (lines 33–125) with a standalone `iterator` class:
