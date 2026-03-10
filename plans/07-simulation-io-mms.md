@@ -376,7 +376,8 @@ These files still have range-v3 usage from earlier phases and must be cleaned be
   - **7.24b** Clean up commented-out CMake references to range-v3 and deleted files:
     - `src/operators/CMakeLists.txt` line 21: Remove commented-out `#add_unit_test(directional ...)` line.
     - `src/geometry/CMakeLists.txt` lines 1–10: All content is commented out and references `range-v3::range-v3` on line 7. Delete this entire file (the geometry code was moved to `src/mesh/` in prior refactoring).
-    - Files: `src/operators/CMakeLists.txt`, `src/geometry/CMakeLists.txt`.
+    - `src/mesh/CMakeLists.txt` lines 6–7, 10: If 7.19 was done, remove the now-dead commented-out `mesh_view` library definition (lines 6–7, references `cppcoro`). If 7.19 was skipped, also remove the commented-out test line 10 (`range-v3::range-v3` reference) and lines 6–7.
+    - Files: `src/operators/CMakeLists.txt`, `src/geometry/CMakeLists.txt`, `src/mesh/CMakeLists.txt`.
   - **7.24c** Remove range-v3 comments from source files:
     - `src/fields/tuple_fwd.hpp` line 262: Remove commented-out `// concept AnyOutputRange = rs::range<T>&& ...` line. Lines 20–21 and 119 mention "range-v3" in descriptive comments — update to say "C++20" or remove the range-v3 reference.
     - `src/mesh/selections.hpp` lines 21–24: Update comment "range-v3 building blocks" to reflect the C++20 rewrite.
