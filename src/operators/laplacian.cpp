@@ -1,8 +1,10 @@
 #include "laplacian.hpp"
 
 #include "io/logging.hpp"
+
 #include <fmt/ranges.h>
-#include <range/v3/view/repeat_n.hpp>
+#include <string>
+#include <vector>
 
 namespace ccs
 {
@@ -17,9 +19,10 @@ laplacian::laplacian(const mesh& m,
     logs logger{build_logger, "laplacian", "laplacian.csv"};
     logger.set_pattern("%v");
     auto st_info = st.query_max();
+    std::vector<std::string> hdr(st_info.t - 1, "wall,psi");
     logger(spdlog::level::info,
            "timestamp,deriv,interp_dir,ic,y,psi,{}",
-           fmt::join(vs::repeat_n("wall,psi", st_info.t - 1), ","));
+           fmt::join(hdr, ","));
     logger.set_pattern("%Y-%m-%d %H:%M:%S.%f,%v");
 
     dx = derivative{0, m, st, grid_bcs, obj_bcs, logger};

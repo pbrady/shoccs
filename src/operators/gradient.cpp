@@ -2,6 +2,10 @@
 
 #include "io/logging.hpp"
 
+#include <fmt/ranges.h>
+#include <string>
+#include <vector>
+
 namespace ccs
 {
 gradient::gradient(const mesh& m,
@@ -13,9 +17,10 @@ gradient::gradient(const mesh& m,
     logs logger{build_logger, "gradient", "gradient.csv"};
     logger.set_pattern("%v");
     auto st_info = st.query_max();
+    std::vector<std::string> hdr(st_info.t - 1, "wall,psi");
     logger(spdlog::level::info,
            "timestamp,deriv,interp_dir,ic,y,psi,{}",
-           fmt::join(vs::repeat_n("wall,psi", st_info.t - 1), ","));
+           fmt::join(hdr, ","));
     logger.set_pattern("%Y-%m-%d %H:%M:%S.%f,%v");
 
     dx = derivative{0, m, st, grid_bcs, obj_bcs, logger};

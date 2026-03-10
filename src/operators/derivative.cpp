@@ -1,9 +1,11 @@
 #include "derivative.hpp"
 #include "fields/selector.hpp"
 
-#include <range/v3/all.hpp>
-
+#include <algorithm>
 #include <cassert>
+#include <ranges>
+#include <span>
+#include <vector>
 
 namespace ccs
 {
@@ -70,12 +72,12 @@ struct OB_builder {
     matrix::csr::builder O;
     matrix::csr::builder B;
 
-    template <rs::random_access_range R>
+    template <std::ranges::random_access_range R>
     void add_cut_row(integer shape_row, integer solid_ic, integer stride, R&& r)
     {
         B.add_point(shape_row, shape_row, r[0]);
-        for (auto&& [i, v] : vs::enumerate(r) | vs::drop(1))
-            O.add_point(shape_row, solid_ic + i * stride, v);
+        for (int i = 1; i < std::ranges::ssize(r); ++i)
+            O.add_point(shape_row, solid_ic + i * stride, r[i]);
     }
 
     void add_cut_point(integer shape_row, real u)
@@ -85,7 +87,7 @@ struct OB_builder {
 
     // this routine is currently no good for planar objects which result in interior
     // stencils where every point is a solid point
-    template <rs::random_access_range R>
+    template <std::ranges::random_access_range R>
     void add_interp_row(integer shape_row,
                         real deriv_coeff,
                         R&& interp_coeffs,
@@ -98,7 +100,7 @@ struct OB_builder {
         const auto left_ic = m.ic(left.mesh_coordinate);
         const auto right_ic = m.ic(right.mesh_coordinate);
 
-        auto it = rs::begin(interp_coeffs);
+        auto it = std::ranges::begin(interp_coeffs);
         // handle left point
         if (const auto& obj = left.object; obj)
             B.add_point(shape_row, obj->object_coordinate, deriv_coeff * *it);
@@ -167,9 +169,8 @@ void cut_discretization(int r,
     const auto shapes = m.R(r);
     const auto sz = shapes.size();
 
-    if (sz == 0 || rs::accumulate(obj_bcs, true, [](auto&& acc, auto&& cur) {
-            return acc && (cur == bcs::Dirichlet);
-        }))
+    if (sz == 0 ||
+        std::ranges::all_of(obj_bcs, [](auto bc) { return bc == bcs::Dirichlet; }))
         return; // quick exit'
 
     auto [p, rmax, tmax, ex_max] = st.query_max();
@@ -185,7 +186,8 @@ void cut_discretization(int r,
 
     if (dir == r) {
         // no interpolation needed for this case
-        for (auto&& [shape_row, obj] : vs::enumerate(shapes)) {
+        for (integer shape_row = 0; shape_row < (integer)sz; ++shape_row) {
+            const auto& obj = shapes[shape_row];
             auto bc_t = obj_bcs[obj.shape_id];
             // nothing to do for dirichlet
             if (bc_t == bcs::Dirichlet) continue;
@@ -194,16 +196,18 @@ void cut_discretization(int r,
             st.nbs(h, bc_t, obj.psi, obj.ray_outside, c, extra);
 
             if (obj.ray_outside) {
-                auto rng = c | vs::drop_exactly((rObj - 1) * tObj) |
-                           vs::take_exactly(tObj) | vs::reverse;
+                auto sub = std::span{c}.subspan((rObj - 1) * tObj, tObj);
+                std::vector<real> rng(sub.begin(), sub.end());
+                std::ranges::reverse(rng);
                 builder.add_cut_row(shape_row, m.ic(obj.solid_coord), -stride, rng);
             } else {
-                auto rng = c | vs::take_exactly(tObj);
+                auto rng = std::span{c}.subspan(0, tObj);
                 builder.add_cut_row(shape_row, m.ic(obj.solid_coord), stride, rng);
             }
         }
     } else {
-        for (auto&& [shape_row, obj] : vs::enumerate(shapes)) {
+        for (integer shape_row = 0; shape_row < (integer)sz; ++shape_row) {
+            const auto& obj = shapes[shape_row];
             auto bc_t = obj_bcs[obj.shape_id];
             // nothing to do for dirichlet
             if (bc_t == bcs::Dirichlet) continue;
@@ -344,16 +348,22 @@ void domain_discretization(int dir,
             // first row as it will be handled in the Rx/y/z operators
             int s = bc_t != bcs::Dirichlet;
             rLeft -= s;
-            auto lc = left | vs::drop(s * tLeft);
-            leftMat = matrix::dense{
-                rLeft, tLeft - 1, lc | vs::chunk(tLeft) | vs::for_each(vs::drop(1))};
+            auto lc = std::span{left}.subspan(s * tLeft);
+
+            // Build dense matrix: skip first column of each row
+            std::vector<real> dense_data;
+            dense_data.reserve(rLeft * (tLeft - 1));
+            for (int row = 0; row < rLeft; ++row) {
+                auto row_span = lc.subspan(row * tLeft + 1, tLeft - 1);
+                dense_data.insert(dense_data.end(), row_span.begin(), row_span.end());
+            }
+            leftMat = matrix::dense{rLeft, tLeft - 1, dense_data};
 
             sub.remove_left_row_col();
 
-            // add points to B
-            auto b_coeffs = lc | vs::stride(tLeft) | vs::take(rLeft);
-            for (auto&& [row, val] : vs::enumerate(b_coeffs)) {
-                B_builder.add_point(sub.left_row(row), obj->object_coordinate, val);
+            // add points to B (first element of each row = stride by tLeft)
+            for (int row = 0; row < rLeft; ++row) {
+                B_builder.add_point(sub.left_row(row), obj->object_coordinate, lc[row * tLeft]);
             }
 
         } else {
@@ -384,18 +394,21 @@ void domain_discretization(int dir,
 
             integer s = bc_t != bcs::Dirichlet;
             rRight -= s;
-            auto rc = right | vs::take_exactly(rRight * tRight);
+            auto rc = std::span{right}.subspan(0, rRight * tRight);
 
-            rightMat = matrix::dense{rRight,
-                                     tRight - 1,
-                                     rc | vs::chunk(tRight) |
-                                         vs::for_each(vs::take(tRight - 1))};
+            // Build dense matrix: take first (tRight-1) columns of each row
+            std::vector<real> dense_data;
+            dense_data.reserve(rRight * (tRight - 1));
+            for (int row = 0; row < rRight; ++row) {
+                auto row_span = rc.subspan(row * tRight, tRight - 1);
+                dense_data.insert(dense_data.end(), row_span.begin(), row_span.end());
+            }
+            rightMat = matrix::dense{rRight, tRight - 1, dense_data};
             sub.remove_right_row_col();
 
-            // add points to B
-            auto b_coeffs =
-                rc | vs::drop(tRight - 1) | vs::stride(tRight) | vs::take(rRight);
-            for (auto&& [row, val] : vs::enumerate(b_coeffs)) {
+            // add points to B (last element of each row)
+            for (int row = 0; row < rRight; ++row) {
+                auto val = rc[row * tRight + tRight - 1];
                 B_builder.add_point(
                     sub.right_row(row - rRight), obj->object_coordinate, val);
             }

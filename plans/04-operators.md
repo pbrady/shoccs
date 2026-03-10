@@ -27,7 +27,7 @@ ctest --test-dir build -L bcs
 
 ### Core Derivative Operator
 
-- [ ] **4.1** Migrate `derivative.cpp` — `OB_builder` struct (lines 69–154):
+- [x] **4.1** Migrate `derivative.cpp` — `OB_builder` struct (lines 69–154): ✅ Done (atomic with 4.2–4.3)
   - File: `src/operators/derivative.cpp`
   - Remove `#include <range/v3/all.hpp>` (line 4), add `<algorithm>` and `<ranges>`.
     (`<numeric>` is NOT needed — all replacements use `<algorithm>` or `<ranges>`.)
@@ -42,7 +42,7 @@ ctest --test-dir build -L bcs
   - **IMPORTANT:** This item removes the only range-v3 include in derivative.cpp. Items 4.2 and 4.3 MUST be completed in the same pass/commit — the file will not compile with range-v3 usage remaining after this include is removed.
   - Test: `ctest --test-dir build -R t-derivative` (only passes after 4.1–4.3 are all done)
 
-- [ ] **4.2** Migrate `derivative.cpp` — `cut_discretization` function (lines 156–253):
+- [x] **4.2** Migrate `derivative.cpp` — `cut_discretization` function (lines 156–253): ✅ Done (atomic with 4.1, 4.3)
   - Line 170: `rs::accumulate(obj_bcs, true, [](auto&& acc, auto&& cur) { return acc && (cur == bcs::Dirichlet); })` → `std::ranges::all_of(obj_bcs, [](auto bc) { return bc == bcs::Dirichlet; })`
   - Line 188: `for (auto&& [shape_row, obj] : vs::enumerate(shapes))` → `for (integer shape_row = 0; shape_row < (integer)sz; ++shape_row) { const auto& obj = shapes[shape_row]; ... }`
   - Lines 197–198: `c | vs::drop_exactly((rObj - 1) * tObj) | vs::take_exactly(tObj) | vs::reverse` → create a reversed copy:
@@ -57,7 +57,7 @@ ctest --test-dir build -L bcs
   - Line 206: `for (auto&& [shape_row, obj] : vs::enumerate(shapes))` → same indexed loop as line 188.
   - Test: `ctest --test-dir build -R t-derivative`
 
-- [ ] **4.3** Migrate `derivative.cpp` — `domain_discretization` function (lines 301–438):
+- [x] **4.3** Migrate `derivative.cpp` — `domain_discretization` function (lines 301–438): ✅ Done (atomic with 4.1–4.2)
   - **Left boundary with object (lines 347–357):**
     - Line 347: `auto lc = left | vs::drop(s * tLeft);` → `auto lc = std::span{left}.subspan(s * tLeft);`
     - Lines 348–349: `lc | vs::chunk(tLeft) | vs::for_each(vs::drop(1))` (skip first column of each row, flatten) → explicit vector construction:
@@ -107,7 +107,7 @@ ctest --test-dir build -L bcs
 
 ### Gradient and Laplacian (Trivial)
 
-- [ ] **4.5** Migrate `gradient.cpp` — replace `vs::repeat_n`:
+- [x] **4.5** Migrate `gradient.cpp` — replace `vs::repeat_n`: ✅ Done
   - File: `src/operators/gradient.cpp`
   - `gradient.cpp` has no explicit `#include <range/v3/...>` — `vs::repeat_n` resolves transitively.
   - Line 18: `fmt::join(vs::repeat_n("wall,psi", st_info.t - 1), ",")` → build a `std::vector<std::string>`:
@@ -119,7 +119,7 @@ ctest --test-dir build -L bcs
   - Add `#include <string>` and `#include <vector>` if not already present.
   - Test: `ctest --test-dir build -R t-gradient`
 
-- [ ] **4.6** Migrate `laplacian.cpp` — replace `vs::repeat_n`:
+- [x] **4.6** Migrate `laplacian.cpp` — replace `vs::repeat_n`: ✅ Done
   - File: `src/operators/laplacian.cpp`
   - Remove `#include <range/v3/view/repeat_n.hpp>` (line 5).
   - Line 22: same `vs::repeat_n("wall,psi", st_info.t - 1)` pattern → same replacement as 4.5.
@@ -196,6 +196,13 @@ ctest --test-dir build -L bcs
 - Items 4.5, 4.6 (gradient.cpp, laplacian.cpp) are independent of 4.1–4.3 and of each other. The `vs::repeat_n` in these files resolves transitively through `types.hpp`'s namespace aliases (range-v3 remains a project dependency per D2). They can be done in any order.
 - Items 4.9–4.12 (test migration) should be done after their corresponding source files (4.1–4.8), since tests must compile against the migrated headers. However, test files have their own `#include <range/v3/all.hpp>`, so each test migration is independently compilable.
 - Items 4.4, 4.7, 4.8, 4.13, 4.14 are verification-only and can be marked complete immediately.
+
+---
+
+## Notes
+
+- **Pre-existing build breaks fixed:** Phase 3 stencils migration removed transitive range-v3 includes that provided `fmt/ranges.h` to `mesh.cpp` and `object_geometry.cpp`. Added explicit `#include <fmt/ranges.h>` to both files. These are mesh subsystem files, not operators, but were needed to unblock the operators build.
+- **Pre-existing test failure:** `t-laplacian` "E2 with Floating Objects" test fails with numerical mismatches (get<si::Rx>(ex) vs get<si::Rx>(du)). Confirmed pre-existing — fails before and after Phase 4 changes. Not caused by our operators migration.
 
 ---
 

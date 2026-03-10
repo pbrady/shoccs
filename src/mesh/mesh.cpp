@@ -1,5 +1,6 @@
 #include "mesh.hpp"
 
+#include <fmt/ranges.h>
 #include <sol/sol.hpp>
 
 #include <spdlog/sinks/basic_file_sink.h>

@@ -2,6 +2,7 @@
 #include "indexing.hpp"
 #include <cassert>
 #include <cmath>
+#include <fmt/ranges.h>
 #include <iostream>
 
 #include <sol/sol.hpp>
