@@ -331,13 +331,17 @@ Migrate test files to remove `#include <range/v3/all.hpp>` and all `rs::`/`vs::`
   - Files: `src/fields/tuple_math.t.cpp`
   - Test: `ctest --test-dir build -R t-tuple_math` — 1 passed (all 5 test cases). All 9 previously-passing downstream field targets still pass.
 
-- [ ] **1.20d** Migrate `src/fields/view_tuple.t.cpp` (456 lines): Remove range-v3 includes. Replace:
-  - `vs::repeat_n` (line 133) and `vs::zip_with` (lines 352, 366–367) → project-local or manual equivalents.
-  - `rs::empty_view<T>{}` → `std::ranges::empty_view<T>{}`.
-  - `rs::make_view_closure(fn)` → `ccs::make_view_closure(fn)`.
-  - `rs::equal` → `std::ranges::equal`, `rs::size` → `std::ranges::size`.
+- [x] **1.20d** Migrate `src/fields/view_tuple.t.cpp` (456 lines): Removed 7 range-v3 includes and `#include <iostream>`. Added `#include <algorithm>`, `#include <functional>`, `#include <ranges>`, `#include "ccs_range_utils.hpp"`, `#include "lazy_views.hpp"`. Replaced:
+  - `vs::repeat_n(-1, n)` → `ccs::repeat_n(-1, n)` (line 128).
+  - `vs::zip_with(fn, a, b)` → `ccs::zip_transform(fn, a, b)` (4 occurrences in Pipe Syntax tests).
+  - `rs::empty_view<T>{}` → `std::ranges::empty_view<T>{}` (2 occurrences).
+  - `rs::make_view_closure(fn)` → `ccs::make_view_closure(fn)` (2 occurrences). Rewrote closure composition (`closure | std::views::transform(f)`) into combined closures since `ccs::view_closure` doesn't support closure-to-closure piping.
+  - `rs::equal` → `std::ranges::equal`, `rs::size` → `std::ranges::size`, `vs::iota` → `std::views::iota`, `vs::all_t` → `std::views::all_t`, `vs::transform` → `std::views::transform`.
+  - `namespace ranges { enable_view }` → `namespace std::ranges { enable_view }`.
+  - Fixed `U x{}` default construction of `view_tuple<T&>` (not default-constructible with `std::ranges::ref_view`): initialized with a real vector instead.
+  - Added extra parentheses around `REQUIRE((x == y))` comparisons involving `ccs::tuple` types to prevent Catch2 C++20 ambiguous reversed operator== errors.
   - Files: `src/fields/view_tuple.t.cpp`
-  - Test: `ctest --test-dir build -R t-view_tuple`
+  - Test: `ctest --test-dir build -R t-view_tuple` — 1 passed. All 9 previously-passing downstream field targets still pass.
 
 - [ ] **1.20e** Migrate `src/fields/selector.t.cpp`: This is the largest test file (723 lines, 266 `rs::`/`vs::` occurrences). Split into 3 sub-items due to diff size. Remove `#include <range/v3/all.hpp>`. Add `#include <algorithm>`, `#include <ranges>`, `#include "lazy_views.hpp"`.
 
