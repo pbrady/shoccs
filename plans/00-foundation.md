@@ -38,19 +38,19 @@ ctest --test-dir build -R t-real3_operators
 
 ### 0.1 — Add Kokkos to the CMake build system
 
-- [ ] **0.1a** In `CMakeLists.txt` (top-level): Add `find_package(Kokkos REQUIRED)` after the existing `find_package` block (after line 34, before `include(GNUInstallDirs)`).
+- [x] **0.1a** In `CMakeLists.txt` (top-level): Add `find_package(Kokkos REQUIRED)` after the existing `find_package` block (after line 34, before `include(GNUInstallDirs)`).
   - File: `CMakeLists.txt`
-  - Test: `cmake -S . -B build -G Ninja -DBUILD_TESTING=ON` succeeds and prints `-- Found Kokkos` (or similar).
+  - Test: `cmake -S . -B build -G Ninja -DBUILD_TESTING=ON` succeeds and prints `-- Enabled Kokkos devices: OPENMP;SERIAL`.
 
-- [ ] **0.1b** In `src/CMakeLists.txt`: Add `target_link_libraries(indexing INTERFACE Kokkos::kokkos)` after line 3 (`add_library(indexing INTERFACE)`). This makes Kokkos available to the `indexing` INTERFACE library and its consumers (test targets).
+- [x] **0.1b** In `src/CMakeLists.txt`: Add `target_link_libraries(indexing INTERFACE Kokkos::kokkos)` after line 3 (`add_library(indexing INTERFACE)`). This makes Kokkos available to the `indexing` INTERFACE library and its consumers (test targets).
   - File: `src/CMakeLists.txt`
   - Test: `cmake --build build -- t-indexing` succeeds.
 
-- [ ] **0.1c** In `config/shoccsConfig.cmake.in`: Add `find_package(Kokkos REQUIRED)` after the existing `find_package` lines (after line 13).
+- [x] **0.1c** In `config/shoccsConfig.cmake.in`: Add `find_package(Kokkos REQUIRED)` after the existing `find_package` lines (after line 13).
   - File: `config/shoccsConfig.cmake.in`
   - Test: `cmake --build build` succeeds.
 
-- [ ] **0.1d** In `.devcontainer/spack.yaml`: Update the comment on line 24 from `# Future: Kokkos for migration from range-v3` to `# Kokkos (parallel execution framework)`. The kokkos spec is already active (not commented out).
+- [x] **0.1d** In `.devcontainer/spack.yaml`: Update the comment on line 24 from `# Future: Kokkos for migration from range-v3` to `# Kokkos (parallel execution framework)`. The kokkos spec is already active (not commented out).
   - File: `.devcontainer/spack.yaml`
   - No build test needed (comment-only change).
 

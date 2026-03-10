@@ -32,6 +32,7 @@ if (BUILD_TESTING)
 endif()
 find_package(Boost REQUIRED) # for header only mp11
 find_package(lapackpp REQUIRED)
+find_package(Kokkos REQUIRED)
 
 
 include(GNUInstallDirs)

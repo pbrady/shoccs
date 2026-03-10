@@ -21,7 +21,7 @@ spack:
     - "catch2@3:"
     - boost
     - lapackpp
-    # Future: Kokkos for migration from range-v3
+    # Kokkos (parallel execution framework)
     - kokkos cxxstd=20 +serial +openmp
     - "cmake@3.24:"
     - ninja
