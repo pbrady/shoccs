@@ -93,20 +93,20 @@ These project-local utilities replace range-v3 internal APIs that have no C++20 
 
 ### Utilities and Algorithms
 
-- [ ] **1.4** Migrate `src/fields/tuple_utils.hpp`:
-  - [ ] **1.4a** Replace algorithms: `rs::copy` → `std::ranges::copy`, `rs::copy_n` → `std::ranges::copy_n`, `rs::fill` → `std::ranges::fill`. Replace `rs::begin`/`rs::end`/`rs::size` → `std::ranges::begin`/`end`/`size`.
+- [x] **1.4** Migrate `src/fields/tuple_utils.hpp`:
+  - [x] **1.4a** Replace algorithms: `rs::copy` → `std::ranges::copy`, `rs::copy_n` → `std::ranges::copy_n`, `rs::fill` → `std::ranges::fill`. Replace `rs::begin`/`rs::end`/`rs::size` → `std::ranges::begin`/`end`/`size`.
     - Files: `src/fields/tuple_utils.hpp` (`resize_and_copy`, `to`, `ssize` functions)
   - [x] **1.4b** ~~Replace `vs::all`/`vs::all_t` in `to()` function~~ — REMOVED: `vs::all` and `vs::all_t` are not used in `tuple_utils.hpp`. The `<range/v3/view/all.hpp>` include is unused (no direct `vs::all` usage in the file body) and its removal is already covered by 1.4f.
-  - [ ] **1.4c** Replace `vs::common(...)` → `std::views::common(...)` in `to()` function (line 342).
+  - [x] **1.4c** Replace `vs::common(...)` → `std::views::common(...)` in `to()` function (line 342). Also replaced `rs::common_range` → `std::ranges::common_range` and `rs::begin`/`rs::end` → `std::ranges::begin`/`end` in the same function.
     - Files: `src/fields/tuple_utils.hpp`
-  - [ ] **1.4d** Replace `vs::zip_with(fn, rngs...)` with `ccs::zip_transform(fn, rngs...)` in `lift()` function (lines 381, 385).
+  - [x] **1.4d** Replace `vs::zip_with(fn, rngs...)` with `ccs::zip_transform(fn, rngs...)` in `lift()` function (lines 381, 385).
     - Depends on: 1.2b
     - Files: `src/fields/tuple_utils.hpp`
-  - [ ] **1.4e** Replace `rs::range` and `rs::sized_range` concept usage in template constraints with `std::ranges` equivalents.
+  - [x] **1.4e** Replace `rs::range` and `rs::sized_range` concept usage in template constraints with `std::ranges` equivalents. Changed `rs::range... Args` → `std::ranges::range... Args` in `lift()` and `rs::sized_range X` → `std::ranges::sized_range X` in `ssize()`.
     - Files: `src/fields/tuple_utils.hpp`
-  - [ ] **1.4f** Remove `#include <range/v3/algorithm/copy.hpp>`, `#include <range/v3/algorithm/copy_n.hpp>`, `#include <range/v3/algorithm/fill.hpp>`, `#include <range/v3/view/all.hpp>`, `#include <range/v3/view/common.hpp>`, `#include <range/v3/view/view.hpp>`, `#include <range/v3/view/zip_with.hpp>`. Add `#include <algorithm>`, `#include <ranges>`, and `#include "lazy_views.hpp"`.
+  - [x] **1.4f** Remove all 7 range-v3 includes. Add `#include <algorithm>`, `#include <ranges>`, and `#include "lazy_views.hpp"`.
     - Files: `src/fields/tuple_utils.hpp`
-  - Test: `ctest --test-dir build -R t-tuple_utils`
+  - Test: `ctest --test-dir build -R t-tuple_utils` — 15 passed, 2 failed (pre-existing: `resize_and_copy tuples to tuples`). Downstream targets (t-container_tuple, t-field, t-field_utils, t-field_math) now fail because they relied on transitive range-v3 includes through tuple_utils.hpp; will be fixed by items 1.5–1.9.
 
 - [ ] **1.5** Migrate `src/fields/algorithms.hpp`:
   - Replace `rs::minmax` → `std::ranges::minmax`, `rs::min` → `std::ranges::min`, `rs::max` → `std::ranges::max`, `rs::minmax_result` → `std::ranges::minmax_result`.

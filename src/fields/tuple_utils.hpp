@@ -4,13 +4,10 @@
 
 #include <tuple>
 
-#include <range/v3/algorithm/copy.hpp>
-#include <range/v3/algorithm/copy_n.hpp>
-#include <range/v3/algorithm/fill.hpp>
-#include <range/v3/view/all.hpp>
-#include <range/v3/view/common.hpp>
-#include <range/v3/view/view.hpp>
-#include <range/v3/view/zip_with.hpp>
+#include <algorithm>
+#include <ranges>
+
+#include "lazy_views.hpp"
 
 namespace ccs
 {
@@ -278,21 +275,21 @@ constexpr I transform_reduce(TransformFn tf, T&& t, ReduceFn rf, I init)
 template <Range R, OutputRange<R> C>
 constexpr void resize_and_copy(C&& container, R&& r)
 {
-    constexpr bool can_resize = requires(C c, R r) { c.resize(rs::size(r)); };
-    constexpr bool compare_sizes = requires(C c, R r) { rs::size(c) < rs::size(r); };
+    constexpr bool can_resize = requires(C c, R r) { c.resize(std::ranges::size(r)); };
+    constexpr bool compare_sizes = requires(C c, R r) { std::ranges::size(c) < std::ranges::size(r); };
     if constexpr (can_resize)
     {
-        container.resize(rs::size(r));
-        rs::copy(FWD(r), rs::begin(container));
+        container.resize(std::ranges::size(r));
+        std::ranges::copy(FWD(r), std::ranges::begin(container));
     }
     else if constexpr (compare_sizes)
     {
         auto min_sz =
-            rs::size(container) < rs::size(r) ? rs::size(container) : rs::size(r);
+            std::ranges::size(container) < std::ranges::size(r) ? std::ranges::size(container) : std::ranges::size(r);
         // note that copy_n takes an input iterator rather than a range
-        rs::copy_n(rs::begin(r), min_sz, rs::begin(container));
+        std::ranges::copy_n(std::ranges::begin(r), min_sz, std::ranges::begin(container));
     }
-    else { rs::copy(FWD(r), rs::begin(container)); }
+    else { std::ranges::copy(FWD(r), std::ranges::begin(container)); }
 }
 
 // Given a container and and input range, attempt to resize the container.
@@ -307,7 +304,7 @@ constexpr void resize_and_copy(C&& container, R&& r)
 template <Numeric N, OutputRange<N> T>
 constexpr void resize_and_copy(T&& t, N n)
 {
-    rs::fill(FWD(t), n);
+    std::ranges::fill(FWD(t), n);
 }
 
 template <typename R, OutputTuple<R> T>
@@ -336,11 +333,11 @@ template <typename R, typename Arg>
     requires(!std::constructible_from<R, Arg> && ConstructibleFromRange<R, Arg>)
 constexpr R to(Arg&& arg)
 {
-    if constexpr (rs::common_range<Arg>) {
-        return R(rs::begin(arg), rs::end(arg));
+    if constexpr (std::ranges::common_range<Arg>) {
+        return R(std::ranges::begin(arg), std::ranges::end(arg));
     } else {
-        auto rng = vs::common(arg);
-        return R(rs::begin(rng), rs::end(rng));
+        auto rng = std::views::common(arg);
+        return R(std::ranges::begin(rng), std::ranges::end(rng));
     }
 }
 
@@ -377,19 +374,19 @@ constexpr auto lift(Fn fn)
         using type = mp_front<mp_list<decltype(tup)...>>;
         if constexpr (TupleLike<type>)
             return transform(
-                [fn]<rs::range... Args>(Args && ... rngs) {
-                    return vs::zip_with(fn, FWD(rngs)...);
+                [fn]<std::ranges::range... Args>(Args && ... rngs) {
+                    return ccs::zip_transform(fn, FWD(rngs)...);
                 },
                 FWD(tup)...);
         else // assume its just a range for now
-            return vs::zip_with(fn, FWD(tup)...);
+            return ccs::zip_transform(fn, FWD(tup)...);
     };
 }
 
 template <TupleLike T>
 constexpr auto ssize(T&& t)
 {
-    return transform([]<rs::sized_range X>(X&& x) -> ssize_t { return rs::size(FWD(x)); },
+    return transform([]<std::ranges::sized_range X>(X&& x) -> ssize_t { return std::ranges::size(FWD(x)); },
                      FWD(t));
 }
 
