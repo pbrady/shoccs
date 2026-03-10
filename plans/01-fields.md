@@ -416,13 +416,16 @@ Migrate test files to remove `#include <range/v3/all.hpp>` and all `rs::`/`vs::`
   - Files: `src/fields/tuple.t.cpp`
   - Test: `ctest --test-dir build -R t-tuple` — 1 passed (all 12 test cases). All 9 previously-passing downstream field targets still pass.
 
-- [ ] **1.20g** Migrate `src/fields/scalar.t.cpp` (266 lines) and `src/fields/vector.t.cpp` (354 lines): Remove range-v3 includes. Replace:
-  - `vs::repeat_n` (~20 occurrences across both files) → `std::vector<T>(n, v)` or `ccs::repeat_n`.
-  - `vs::cartesian_product(a, b, ...)` → nested for loops (used in both files for constructing test grids; no C++20 equivalent).
-  - `vs::generate_n(f, n)` → manual loop building a vector (in `scalar.t.cpp`).
-  - `rs::equal` → `std::ranges::equal` (heavily used in both files, ~118 occurrences combined).
+- [x] **1.20g** Migrate `src/fields/scalar.t.cpp` (266 lines) and `src/fields/vector.t.cpp` (354 lines): Removed `#include <range/v3/all.hpp>`. Added `#include <algorithm>`, `#include <ranges>`, `#include <tuple>`, `#include <vector>`. Replaced:
+  - `vs::cartesian_product(x, y, z)` → test-local `cartesian_product_vec(x, y, z)` helper that builds an eager `std::vector<std::tuple<...>>` via nested loops (no C++20 equivalent).
+  - `vs::repeat_n(v, n)` → `std::vector<T>(n, v)` (~20 occurrences across both files).
+  - `vs::generate_n([&]() { return vs::all(g::z); }, nx * ny) | vs::join` → manual loop appending `g::z` `nx * ny` times into a `std::vector<real>`.
+  - `rs::equal(a, b)` → `std::ranges::equal(a, b)`, `rs::size(r)` → `std::ranges::size(r)` (~118 occurrences combined).
+  - `vs::iota(a, b)` → `std::views::iota(a, b)`, `vs::transform(f)` → `std::views::transform(f)`, `vs::all(x)` → `std::views::all(x)`.
+  - `sel::D | vs::transform(f)` closure composition → inlined as sequential piping `s | sel::D | std::views::transform(f)`.
+  - Added double parentheses `REQUIRE((expr == expr))` around all `ccs::tuple`/`scalar`/`vector` `==` comparisons to prevent Catch2 C++20 ambiguous reversed operator== errors.
   - Files: `src/fields/scalar.t.cpp`, `src/fields/vector.t.cpp`
-  - Test: `ctest --test-dir build -R t-scalar && ctest --test-dir build -R t-vector`
+  - Test: `ctest --test-dir build -R "t-scalar|t-vector"` — both passed. All 13 field tests pass.
 
 - [ ] **1.20h1** Migrate `src/fields/container_tuple.t.cpp` (327 lines, heaviest of remaining tests): Remove range-v3 includes. Replace `rs::equal` → `std::ranges::equal`, `rs::size` → `std::ranges::size`, `rs::begin`/`rs::end` → `std::ranges::begin`/`end` (~49 `rs::` occurrences). Replace `vs::iota` → `std::views::iota`, `vs::transform` → `std::views::transform`.
   - Files: `src/fields/container_tuple.t.cpp`
