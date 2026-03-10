@@ -48,9 +48,11 @@ ctest --test-dir build -L bcs
   - Lines 197–198: `c | vs::drop_exactly((rObj - 1) * tObj) | vs::take_exactly(tObj) | vs::reverse` → create a reversed copy:
     ```cpp
     auto sub = std::span{c}.subspan((rObj - 1) * tObj, tObj);
-    std::vector<real> rng(sub.rbegin(), sub.rend());
+    std::vector<real> rng(sub.begin(), sub.end());
+    std::ranges::reverse(rng);
     ```
-    (Pass `rng` directly to `add_cut_row` — it accepts any `random_access_range`, and `std::vector<real>` qualifies.)
+    (`std::span` has no `.rbegin()`/`.rend()` members — copy then reverse instead.
+    Pass `rng` directly to `add_cut_row` — it accepts any `random_access_range`, and `std::vector<real>` qualifies.)
   - Line 201: `c | vs::take_exactly(tObj)` → `std::span{c}.subspan(0, tObj)` (already a `random_access_range`).
   - Line 206: `for (auto&& [shape_row, obj] : vs::enumerate(shapes))` → same indexed loop as line 188.
   - Test: `ctest --test-dir build -R t-derivative`
