@@ -138,7 +138,7 @@ ctest --test-dir build -L bcs
 - [ ] **4.9** Migrate `derivative.t.cpp`:
   - File: `src/operators/derivative.t.cpp`
   - Remove `#include <range/v3/all.hpp>` (line 12), add `#include <ranges>` and `#include <algorithm>`.
-  - **`vs::transform` (7 declarations, lines 59–81):** `constexpr auto f2 = vs::transform(...)` → `constexpr auto f2 = std::views::transform(...)`. Same for f2_dx, f2_dy, f2_dz, f2_ddx, f2_ddy, f2_ddz.
+  - **`vs::transform` (5 active calls, lines 59–79):** `constexpr auto f2 = vs::transform(...)` → `constexpr auto f2 = std::views::transform(...)`. Same for f2_dx, f2_dy, f2_dz, f2_ddx. Note: f2_ddy (line 80) and f2_ddz (line 81) are aliases (`= f2_ddx`), not `vs::transform` calls — no change needed for those.
   - **`vs::transform` inline (line 332):** `m.xyz | vs::transform([](auto&&) { return pick(); })` → `m.xyz | std::views::transform([](auto&&) { return pick(); })`.
   - **`vs::generate_n` (lines 148, 206):** `u | sel::D = vs::generate_n(g, m.size())` → generate into a temporary vector:
     ```cpp
@@ -157,7 +157,7 @@ ctest --test-dir build -L bcs
 - [ ] **4.11** Migrate `laplacian.t.cpp`:
   - File: `src/operators/laplacian.t.cpp`
   - Remove `#include <range/v3/all.hpp>` (line 15), add `#include <ranges>`.
-  - **`vs::transform` (13 declarations, lines 23–83):** `vs::transform(...)` → `std::views::transform(...)`. For f2, f2_dx, f2_dy, f2_dz, f2_ddx, f2_ddy, f2_ddz, g2, g2_dx, g2_dy, g2_ddx, g2_ddy.
+  - **`vs::transform` (12 declarations, lines 23–83):** `vs::transform(...)` → `std::views::transform(...)`. For f2, f2_dx, f2_dy, f2_dz, f2_ddx, f2_ddy, f2_ddz, g2, g2_dx, g2_dy, g2_ddx, g2_ddy.
   - **`rs::size` (5 uses, lines 111, 133, 195, 269, 347):** `rs::size(...)` → `std::ranges::size(...)`.
   - Test: `ctest --test-dir build -R t-laplacian`
 
