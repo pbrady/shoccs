@@ -198,7 +198,7 @@ Common range-v3 → std/C++20 replacement patterns used across test files:
 - `vs::single(v)` / `vs::repeat_n(v, n)` → `std::vector{v}` / `std::vector(n, v)` (eager, fine for tests)
 - `vs::repeat(v)` → `std::vector<real>(size, v)` of appropriate size (used in visitor tests for dummy data)
 
-- [ ] **2.9a** Migrate visitor test files: `unit_stride_visitor.t.cpp` + `coefficient_visitor.t.cpp`.
+- [x] **2.9a** Migrate visitor test files: `unit_stride_visitor.t.cpp` + `coefficient_visitor.t.cpp`.
   - Files: `src/matrices/unit_stride_visitor.t.cpp`, `src/matrices/coefficient_visitor.t.cpp`
   - `unit_stride_visitor.t.cpp`:
     - Remove `<range/v3/all.hpp>`. Add `<algorithm>`, `<ranges>`, `<vector>`.
@@ -288,7 +288,7 @@ Common range-v3 → std/C++20 replacement patterns used across test files:
  ├── 2.2 (dense.cpp)  [DONE] ──┤── 2.9b (dense + circulant tests) ──┐
  ├── 2.4 (circulant.cpp) [DONE]┤── 2.9d (inner_block + block tests) ├── 2.10 (verification)
  ├── 2.6 (csr.hpp) [DONE] ── 2.5 (csr.cpp) [DONE] ── 2.9c (csr tests) ──┤
- ├── 2.7 (coefficient_visitor.cpp) [DONE]┐── 2.9a (visitor tests) ───────┘
+ ├── 2.7 (coefficient_visitor.cpp) [DONE]┐── 2.9a (visitor tests) [DONE] ┘
  └── 2.8 (unit_stride_visitor) [DONE]┘
 ```
 

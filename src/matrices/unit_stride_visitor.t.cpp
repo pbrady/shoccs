@@ -8,7 +8,9 @@
 #include <catch2/catch_test_macros.hpp>
 #include <catch2/matchers/catch_matchers_vector.hpp>
 
-#include <range/v3/all.hpp>
+#include <algorithm>
+#include <ranges>
+#include <vector>
 
 #include <fmt/core.h>
 #include <fmt/ranges.h>
@@ -19,7 +21,7 @@ using T = std::vector<real>;
 
 TEST_CASE("no boundary with holes")
 {
-    auto t = vs::repeat(0.0);
+    auto t = std::vector<real>(12, 0.0);
 
     auto vis = matrix::unit_stride_visitor(10, 10);
 
@@ -28,22 +30,22 @@ TEST_CASE("no boundary with holes")
         mat.visit(vis);
     }
 
-    REQUIRE(rs::equal(vis.mapped(1, 2, 0, 3), std::vector{0, 1, 2, 3, 4, 5}));
+    REQUIRE(std::ranges::equal(vis.mapped(1, 2, 0, 3), std::vector{0, 1, 2, 3, 4, 5}));
 
     {
         const auto mat = matrix::dense{3, 4, 7, 6, 1, t};
         mat.visit(vis);
     }
 
-    REQUIRE(rs::equal(vis.mapped(1, 2, 0, 3), std::vector{0, 1, 2, 7, 8, 9}));
-    REQUIRE(rs::equal(vis.mapped(7, 3, 6, 4),
+    REQUIRE(std::ranges::equal(vis.mapped(1, 2, 0, 3), std::vector{0, 1, 2, 7, 8, 9}));
+    REQUIRE(std::ranges::equal(vis.mapped(7, 3, 6, 4),
                       std::vector{17, 18, 19, 20, 24, 25, 26, 27, 31, 32, 33, 34}));
 }
 
 TEST_CASE("dirichlet")
 {
 
-    auto t = vs::repeat(0.0);
+    auto t = std::vector<real>(8, 0.0);
 
     auto vis = matrix::unit_stride_visitor(10, 10);
 
@@ -52,21 +54,21 @@ TEST_CASE("dirichlet")
         mat.visit(vis);
     }
 
-    REQUIRE(rs::equal(vis.mapped(1, 2, 1, 2), std::vector{0, 1, 2, 3}));
+    REQUIRE(std::ranges::equal(vis.mapped(1, 2, 1, 2), std::vector{0, 1, 2, 3}));
 
     {
         const auto mat = matrix::dense{2, 4, 7, 6, 1, t, rdd};
         mat.visit(vis);
     }
 
-    REQUIRE(rs::equal(vis.mapped(1, 2, 1, 2), std::vector{0, 1, 5, 6}));
-    REQUIRE(rs::equal(vis.mapped(7, 2, 6, 3), std::vector{12, 13, 14, 17, 18, 19}));
+    REQUIRE(std::ranges::equal(vis.mapped(1, 2, 1, 2), std::vector{0, 1, 5, 6}));
+    REQUIRE(std::ranges::equal(vis.mapped(7, 2, 6, 3), std::vector{12, 13, 14, 17, 18, 19}));
 }
 
 TEST_CASE("inner_block")
 {
     auto t = T(3, 0);
-    auto u = vs::repeat(0.0);
+    auto u = std::vector<real>(6, 0.0);
 
     auto vis = matrix::unit_stride_visitor(10, 10);
 
@@ -80,9 +82,9 @@ TEST_CASE("inner_block")
 
     x.visit(vis);
 
-    REQUIRE(rs::equal(vis.mapped(1, 2, 1, 2), std::vector{0, 1, 9, 10}));
-    REQUIRE(rs::equal(vis.mapped(3, 1, 2, 3), std::vector{19, 20, 21}));
-    REQUIRE(rs::equal(vis.mapped(8, 2, 7, 3), std::vector{69, 70, 71, 78, 79, 80}));
+    REQUIRE(std::ranges::equal(vis.mapped(1, 2, 1, 2), std::vector{0, 1, 9, 10}));
+    REQUIRE(std::ranges::equal(vis.mapped(3, 1, 2, 3), std::vector{19, 20, 21}));
+    REQUIRE(std::ranges::equal(vis.mapped(8, 2, 7, 3), std::vector{69, 70, 71, 78, 79, 80}));
 }
 
 TEST_CASE("csr")
@@ -93,7 +95,7 @@ TEST_CASE("csr")
         nxyz, std::vector<bool>{true, false}, std::vector<bool>{}, std::vector<bool>{});
 
     auto t = T(3, 0);
-    auto u = vs::repeat(0.0);
+    auto u = std::vector<real>(4, 0.0);
 
     auto x = matrix::inner_block(8,
                                  1,
