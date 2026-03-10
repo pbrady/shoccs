@@ -209,46 +209,65 @@ Common range-v3 → std/C++20 replacement patterns used across test files:
       - "csr" (line 96): `auto u = std::vector<real>(4, 0.0);` (dense{2,2}=4)
     - Replace `rs::equal(a, b)` → `std::ranges::equal(a, b)` (9 occurrences: lines 31, 38, 39, 55, 62, 63, 83, 84, 85).
   - `coefficient_visitor.t.cpp`:
-    - Remove `<range/v3/all.hpp>`. Add `<algorithm>`, `<ranges>`, `<numeric>`.
-    - Replace `vs::iota(25, 50) | rs::to<T>()` → `T` from `std::views::iota`: e.g. `auto r = std::views::iota(25, 50); T imat(std::ranges::begin(r), std::ranges::end(r));`
-    - Replace `rs::equal(a, b)` → `std::ranges::equal(a, b)` (3 occurrences).
+    - Remove `<range/v3/all.hpp>`. Add `<algorithm>`, `<ranges>`.
+    - Replace `vs::iota(25, 50) | rs::to<T>()` (3 occurrences: lines 19, 36, 75) → `auto r = std::views::iota(25, 50); T imat(r.begin(), r.end());`
+    - Replace `rs::equal(a, b)` → `std::ranges::equal(a, b)` (3 occurrences: lines 30, 64, 140).
   - Test: `ctest --test-dir build -R "t-unit_stride_visitor|t-coefficient_visitor"`
   - Must come after: 2.7, 2.8
 
 - [ ] **2.9b** Migrate dense + circulant test files: `dense.t.cpp` + `circulant.t.cpp`.
   - Files: `src/matrices/dense.t.cpp`, `src/matrices/circulant.t.cpp`
-  - Both files use similar patterns: `iota`, `transform`, `drop`, `stride`, `take`, `generate_n`, `to<T>`.
-  - Remove all `<range/v3/...>` includes. Add `<algorithm>`, `<ranges>`, `<numeric>`, `"fields/lazy_views.hpp"` (for `ccs::stride`).
-  - Key transformations:
-    - `vs::iota(0, 25)` → `std::views::iota(0, 25)`
-    - `rng | vs::transform(f) | rs::to<T>()` → use iterator-pair constructor or loop
-    - `vs::generate_n(g, n) | rs::to<T>()` → `T v(n); std::generate_n(v.begin(), n, g);`
-    - `x | vs::drop(offset) | vs::stride(3) | vs::take(n) | rs::to<T>()` → `ccs::stride(x | std::views::drop(offset), 3) | std::views::take(n)` then collect to vector
+  - Remove all `<range/v3/...>` includes. Add `<algorithm>`, `<ranges>`, `"fields/lazy_views.hpp"` (for `ccs::stride`).
+  - `dense.t.cpp` (7 sites):
+    - Line 33: `rng | vs::transform(x2) | rs::to<T>()` → `T rng2(rng.size()); std::ranges::transform(rng, rng2.begin(), [](auto x) { return x + x; });`
+    - Line 47: `vs::generate_n(g, A.columns()) | rs::to<T>()` → `T x(A.columns()); std::generate_n(x.begin(), A.columns(), g);`
+    - Lines 54–55: `x | vs::drop(1) | rs::to<T>()` (2×) → `T xx(x.begin() + 1, x.end());`
+    - Line 125: `vs::iota(0, 25)` → `std::views::iota(0, 25)` (used directly as range input to `dense` constructor; no conversion needed)
+    - Line 130: `vs::iota(0, 15) | rs::to<std::vector<real>>()` → `auto r = std::views::iota(0, 15); std::vector<real> x(r.begin(), r.end());`
+    - Lines 136–137: `vs::iota(0, 15) | vs::drop(offset) | vs::stride(3) | rs::to<…>()` → collect `ccs::stride(std::views::iota(0, 15) | std::views::drop(offset), 3)` to vector via iterator-pair constructor
+    - Line 141: `b | vs::drop(offset) | vs::stride(3) | rs::to<…>()` → same `ccs::stride` + collect pattern
+  - `circulant.t.cpp` (8 sites):
+    - Lines 33, 46: `vs::generate_n(g, N) | rs::to<T>()` (2×) → `T x(N); std::generate_n(x.begin(), N, g);`
+    - Line 40: `x | vs::transform(x2) | rs::to<T>()` → `T b2(x.size()); std::ranges::transform(x, b2.begin(), x2);`
+    - Lines 51–52: `x | vs::drop(1) | vs::stride(2) | vs::take(N) | rs::to<T>()` (2×) → collect `ccs::stride(…, 2) | std::views::take(N)` to vector
+    - Line 99: `vs::iota(0, 15) | rs::to<T>()` → `auto r = std::views::iota(0, 15); T x(r.begin(), r.end());`
+    - Line 106: `vs::iota(0, 15) | vs::drop(…) | vs::stride(3) | rs::to<T>()` → `ccs::stride` + collect pattern
+    - Lines 110–111: `b | vs::drop(offset) | vs::stride(3) | vs::take(N) | rs::to<T>()` → same pattern
+    - Line 112: `bb | vs::drop(1) | rs::to<T>()` → `T r(bb.begin() + 1, bb.end());`
   - Test: `ctest --test-dir build -R "t-dense|t-circulant"`
   - Must come after: 2.2, 2.3, 2.4
 
 - [ ] **2.9c** Migrate CSR test file: `csr.t.cpp`.
   - Files: `src/matrices/csr.t.cpp`
-  - Remove all `<range/v3/...>` includes. Add `<algorithm>`, `<random>`.
-  - Replace `ranges::shuffle(pts)` → `std::ranges::shuffle(pts, urbg)` with a local `std::mt19937` engine (seeded from `std::random_device` or fixed seed for reproducibility).
-  - Replace `vs::generate_n(g, n) | rs::to<T>()` → manual vector + `std::generate_n`.
+  - Remove all 4 `<range/v3/...>` includes (`equal`, `shuffle`, `conversion`, `generate_n`). Add `<algorithm>`, `<random>`.
+  - Note: `<range/v3/algorithm/equal.hpp>` (line 10) is an unused include — just remove it.
+  - Rewrite `random_vec` constexpr lambda (lines 19–21): replace `vs::generate_n(g, n) | rs::to<T>()` body → `T v(n); std::generate_n(v.begin(), n, []() { return pick(); }); return v;`
+  - Replace `ranges::shuffle(pts)` → `std::ranges::shuffle(pts, rng)` (2 occurrences: lines 100, 151) with a file-local `std::mt19937 rng{42};` or `std::mt19937 rng{std::random_device{}()};`.
   - Test: `ctest --test-dir build -R t-csr`
   - Must come after: 2.5, 2.6
 
 - [ ] **2.9d** Migrate composite matrix test files: `inner_block.t.cpp` + `block.t.cpp`.
   - Files: `src/matrices/inner_block.t.cpp`, `src/matrices/block.t.cpp`
-  - `inner_block.t.cpp`: Same patterns as 2.9b (iota, transform, drop, stride, take, generate_n, to<T>).
-  - `block.t.cpp` (most complex test file):
-    - Replace `vs::concat(vs::single(0.0), rhs_, vs::repeat_n(0.0, 4), rhs_) | rs::to<T>()` → eager vector concatenation (2 occurrences: lines 136 and 158):
+  - Remove all `<range/v3/...>` includes. Add `<algorithm>`, `<ranges>`, `"fields/lazy_views.hpp"` (for `ccs::stride`).
+  - `inner_block.t.cpp` (9 sites — same patterns as 2.9b):
+    - Lines 44, 75: `vs::generate_n(g, N) | rs::to<T>()` (2×) → `T x(N); std::generate_n(x.begin(), N, g);`
+    - Line 51: `x | vs::transform(x2) | rs::to<T>()` → `T b2(x.size()); std::ranges::transform(x, b2.begin(), x2);`
+    - Lines 82–83: `x | vs::drop(1) | rs::to<T>()` (2×) → `T xx(x.begin() + 1, x.end());`
+    - Lines 170, 172, 186: `vs::iota(a, b) | rs::to<T>()` (3×) → `auto r = std::views::iota(a, b); T v(r.begin(), r.end());`
+    - Lines 198–199, 203–204: `… | vs::drop(off) | vs::stride(st) | vs::take(n) | rs::to<T>()` (2×) → `ccs::stride` + collect pattern
+  - `block.t.cpp` (most complex test file, 10 sites):
+    - Lines 136, 158: `vs::concat(vs::single(0.0), rhs_, vs::repeat_n(0.0, 4), rhs_) | rs::to<T>()` (2×) → eager vector concatenation:
       ```cpp
       T x{0.0};
       x.insert(x.end(), rhs_.begin(), rhs_.end());
       x.insert(x.end(), 4, 0.0);
       x.insert(x.end(), rhs_.begin(), rhs_.end());
       ```
-    - Replace `vs::iota | rs::to<T>()` (lines 174, 176, 204), `vs::generate_n | rs::to<T>()` (line 62), `vs::transform | rs::to<T>()` (lines 73, 158), `vs::drop | vs::stride | vs::take | rs::to<T>()` (lines 217-218, 222-223).
-    - No `rs::equal` usage in this file (uses `REQUIRE_THAT` + `Approx` instead).
-  - Remove all `<range/v3/...>` includes. Add `<algorithm>`, `<ranges>`, `<numeric>`, `"fields/lazy_views.hpp"`.
+    - Line 62: `vs::generate_n(g, N) | rs::to<T>()` → `T x(N); std::generate_n(x.begin(), N, g);`
+    - Line 73: `xx | vs::transform(x2) | rs::to<T>()` → `T xx2(xx.size()); std::ranges::transform(xx, xx2.begin(), x2);`
+    - Lines 174, 176, 204: `vs::iota(a, b) | rs::to<T>()` (3×) → `auto r = std::views::iota(a, b); T v(r.begin(), r.end());`
+    - Lines 217–218, 222–223: `… | vs::drop(off) | vs::stride(st) | vs::take(n) | rs::to<T>()` (2×) → `ccs::stride` + collect pattern
+    - Note: `<range/v3/algorithm/equal.hpp>` (line 10) is an unused include — just remove it. No `rs::equal` calls in this file.
   - Test: `ctest --test-dir build -R "t-inner_block|t-block"`
   - Must come after: 2.2, 2.3, 2.4
 
