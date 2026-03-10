@@ -182,35 +182,18 @@ Note: `shoccs-mesh` does not link `range-v3::range-v3` in `src/mesh/CMakeLists.t
   - **7.4b** `mesh.hpp` `object_boundaries` method: Replaced `vs::transform(…)` with `std::views::transform(…)`. Compiles.
   - Test: shoccs-mesh library builds; t-cartesian and t-selections pass. t-mesh blocked on 7.14 (mesh.t.cpp migration).
 
-- [ ] **7.5** Verify `mesh_view.hpp` — already migrated.
+- [x] **7.5** Verify `mesh_view.hpp` — already migrated. **DONE** — confirmed: plain loops returning `std::vector<real3>`, no range-v3 or cppcoro.
   - `mesh_view.hpp` uses plain loops returning `std::vector<real3>` — no range-v3 or cppcoro.
   - The `mesh_view.t.cpp` test is **commented out** in `src/mesh/CMakeLists.txt` (line 10). No action needed unless we uncomment it (see 7.12b).
   - Test: build succeeds (no test to run).
 
 ### MMS (Medium Complexity)
 
-- [ ] **7.6** Migrate `manufactured_solutions.hpp` (lines 9, 205–245):
-  - Remove `#include <range/v3/view/transform.hpp>`, add `#include <ranges>`.
-  - Replace 6 methods that return `vs::transform(lambda)` with `std::views::transform(lambda)`:
-    - `operator()(real time)` — line 208
-    - `ddt(real time)` — line 215
-    - `gradient(real time)` — line 222
-    - `gradient(int i, real time)` — line 229
-    - `divergence(real time)` — line 236
-    - `laplacian(real time)` — line 243
-  - Each is a one-line change: `vs::transform(…)` → `std::views::transform(…)`.
+- [x] **7.6** Migrate `manufactured_solutions.hpp` (lines 9, 205–245): **DONE** — replaced `#include <range/v3/view/transform.hpp>` with `#include <ranges>`, replaced all 6 `vs::transform` with `std::views::transform`. Compiles and passes t-mms.
   - File: `src/mms/manufactured_solutions.hpp`.
   - Test: `ctest --test-dir build -R t-mms`
 
-- [ ] **7.7** Migrate `mms.cpp` (lines 9, 43–44):
-  - Remove `#include <range/v3/action/transform.hpp>`, add `#include <algorithm>` and `#include <cctype>`.
-  - Line 43–44: Replace `str | rs::action::transform([](auto c) { return std::tolower(c); })` with:
-    ```cpp
-    std::transform(ms_t.begin(), ms_t.end(), ms_t.begin(),
-                   [](unsigned char c) { return std::tolower(c); });
-    ```
-    Note: cast to `unsigned char` for `std::tolower` safety.
-  - Remove `PRIVATE range-v3::range-v3` from `src/mms/CMakeLists.txt` line 4.
+- [x] **7.7** Migrate `mms.cpp` (lines 9, 43–44): **DONE** — replaced `#include <range/v3/action/transform.hpp>` with `#include <algorithm>`, replaced `rs::action::transform` with `std::transform` (with `unsigned char` cast). Removed `PRIVATE range-v3::range-v3` from CMakeLists.txt. Compiles and passes t-mms.
   - Files: `src/mms/mms.cpp`, `src/mms/CMakeLists.txt`.
   - Test: `ctest --test-dir build -R t-mms`
 
@@ -430,7 +413,7 @@ These files still have range-v3 usage from earlier phases and must be cleaned be
 9. **7.13** (stencil tests) depends on **7.1c** (shared `ccs::linear_distribute`).
 10. **7.20–7.25** (Final Cleanup) must come last, after all code migration items.
 11. **Build-unblocking priority:** The build is currently broken (see status note above). To restore it, **7.3** + **7.6** should be done before items whose tests depend on `shoccs-system` (e.g., 7.12), and **7.9** + **7.10** before items whose tests depend on `shoccs-io` (e.g., 7.8). **7.14** (mesh.t.cpp) must precede any item tested via `t-mesh` (7.2c, 7.2d, 7.4).
-12. **7.2e** (compile-instantiation test for `selections.hpp`) is done. **7.2f** (FView end() bug fix + multi-line test) is done. **7.3** and **7.4** are done. Next: **7.5** (verify mesh_view.hpp) or **7.6** (manufactured_solutions.hpp).
+12. **7.2e** (compile-instantiation test for `selections.hpp`) is done. **7.2f** (FView end() bug fix + multi-line test) is done. **7.3**, **7.4**, **7.5**, **7.6**, and **7.7** are done. Next: **7.8** (field_io.cpp) or **7.12** (scalar_wave.cpp) or **7.14** (mesh.t.cpp).
 
 ---
 

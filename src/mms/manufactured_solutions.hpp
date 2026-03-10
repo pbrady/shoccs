@@ -6,7 +6,7 @@
 #include <cassert>
 #include <concepts>
 #include <optional>
-#include <range/v3/view/transform.hpp>
+#include <ranges>
 
 #include <sol/forward.hpp>
 
@@ -205,42 +205,42 @@ public:
         auto operator()(real time) const
         {
             assert(s);
-            return vs::transform(
+            return std::views::transform(
                 [this, time](auto&& loc) { return (*this)(time, FWD(loc)); });
         }
 
         auto ddt(real time) const
         {
             assert(s);
-            return vs::transform(
+            return std::views::transform(
                 [this, time](auto&& loc) { return ddt(time, FWD(loc)); });
         }
 
         auto gradient(real time) const
         {
             assert(s);
-            return vs::transform(
+            return std::views::transform(
                 [this, time](auto&& loc) { return gradient(time, FWD(loc)); });
         }
 
         auto gradient(int i, real time) const
         {
             assert(s);
-            return vs::transform(
+            return std::views::transform(
                 [this, i, time](auto&& loc) { return gradient(time, FWD(loc))[i]; });
         }
 
         auto divergence(real time) const
         {
             assert(s);
-            return vs::transform(
+            return std::views::transform(
                 [this, time](auto&& loc) { return divergence(time, FWD(loc)); });
         }
 
         auto laplacian(real time) const
         {
             assert(s);
-            return vs::transform(
+            return std::views::transform(
                 [this, time](auto&& loc) { return laplacian(time, FWD(loc)); });
         }
 };
