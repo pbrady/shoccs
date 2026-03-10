@@ -2,10 +2,12 @@
 
 #include <catch2/catch_test_macros.hpp>
 
-#include <range/v3/all.hpp>
-
-#include <iostream>
+#include <algorithm>
+#include <numeric>
+#include <ranges>
 #include <vector>
+
+#include "lazy_views.hpp"
 
 using namespace ccs;
 
@@ -81,9 +83,9 @@ TEST_CASE("for_each")
             for (auto&& i : v) i += 1;
         },
         s);
-    REQUIRE(rs::equal(get<0>(s), T{2, 3, 4}));
-    REQUIRE(rs::equal(get<1>(s), T{5, 6, 7}));
-    REQUIRE(rs::equal(get<2>(s), T{8, 9, 10}));
+    REQUIRE(std::ranges::equal(get<0>(s), T{2, 3, 4}));
+    REQUIRE(std::ranges::equal(get<1>(s), T{5, 6, 7}));
+    REQUIRE(std::ranges::equal(get<2>(s), T{8, 9, 10}));
 
     for_each(
         [](auto& x, auto& y) {
@@ -92,50 +94,50 @@ TEST_CASE("for_each")
         },
         s,
         t);
-    REQUIRE(rs::equal(get<0>(t), T{2, 3, 4}));
-    REQUIRE(rs::equal(get<1>(t), T{5, 6, 7}));
-    REQUIRE(rs::equal(get<2>(t), T{8, 9, 10}));
+    REQUIRE(std::ranges::equal(get<0>(t), T{2, 3, 4}));
+    REQUIRE(std::ranges::equal(get<1>(t), T{5, 6, 7}));
+    REQUIRE(std::ranges::equal(get<2>(t), T{8, 9, 10}));
 
-    REQUIRE(rs::equal(get<0>(s), T{4, 5, 6}));
-    REQUIRE(rs::equal(get<1>(s), T{1, 2, 3}));
-    REQUIRE(rs::equal(get<2>(s), T{-1, -2, -3}));
+    REQUIRE(std::ranges::equal(get<0>(s), T{4, 5, 6}));
+    REQUIRE(std::ranges::equal(get<1>(s), T{1, 2, 3}));
+    REQUIRE(std::ranges::equal(get<2>(s), T{-1, -2, -3}));
 
     for_each(
         []<auto I>(mp_size_t<I>, auto& v) {
             for (auto&& i : v) i += I;
         },
         s);
-    REQUIRE(rs::equal(get<0>(s), T{4, 5, 6}));
-    REQUIRE(rs::equal(get<1>(s), T{2, 3, 4}));
-    REQUIRE(rs::equal(get<2>(s), T{1, 0, -1}));
+    REQUIRE(std::ranges::equal(get<0>(s), T{4, 5, 6}));
+    REQUIRE(std::ranges::equal(get<1>(s), T{2, 3, 4}));
+    REQUIRE(std::ranges::equal(get<2>(s), T{1, 0, -1}));
 
     for_each(std::tuple{[](auto&& x, auto&& y) {
                             using std::swap;
                             swap(x, y);
                         },
                         [](auto& x, auto& y) {
-                            for (auto&& [i, j] : vs::zip(x, y)) {
-                                i += 1;
-                                j -= 1;
+                            for (size_t idx = 0; idx < x.size(); ++idx) {
+                                x[idx] += 1;
+                                y[idx] -= 1;
                             }
                         },
                         [](auto&& x, auto&& y) {
-                            for (auto&& [i, j] : vs::zip(x, y)) {
-                                i *= 2;
-                                j *= 3;
+                            for (size_t idx = 0; idx < x.size(); ++idx) {
+                                x[idx] *= 2;
+                                y[idx] *= 3;
                             }
                         }},
              s,
              t);
     // swapped
-    REQUIRE(rs::equal(get<0>(s), T{2, 3, 4}));
-    REQUIRE(rs::equal(get<0>(t), T{4, 5, 6}));
+    REQUIRE(std::ranges::equal(get<0>(s), T{2, 3, 4}));
+    REQUIRE(std::ranges::equal(get<0>(t), T{4, 5, 6}));
 
-    REQUIRE(rs::equal(get<1>(s), T{3, 4, 5}));
-    REQUIRE(rs::equal(get<1>(t), T{4, 5, 6}));
+    REQUIRE(std::ranges::equal(get<1>(s), T{3, 4, 5}));
+    REQUIRE(std::ranges::equal(get<1>(t), T{4, 5, 6}));
 
-    REQUIRE(rs::equal(get<2>(s), T{2, 0, -2}));
-    REQUIRE(rs::equal(get<2>(t), T{24, 27, 30}));
+    REQUIRE(std::ranges::equal(get<2>(s), T{2, 0, -2}));
+    REQUIRE(std::ranges::equal(get<2>(t), T{24, 27, 30}));
 }
 
 TEST_CASE("nested for_each")
@@ -158,7 +160,7 @@ TEST_CASE("nested for_each")
 
     for_each(
         [](const T& u, T& v) {
-            for (auto&& [i, j] : vs::zip(u, v)) j *= i;
+            for (size_t idx = 0; idx < u.size(); ++idx) v[idx] *= u[idx];
         },
         s,
         t);
@@ -184,7 +186,7 @@ TEST_CASE("transform")
     auto t = std::tuple(T{4, 5, 6}, T{1, 2, 3, 4, 5, 6}, T{6, 7});
 
     {
-        auto r = transform([](auto&& vec) { return rs::accumulate(FWD(vec), 0); }, s);
+        auto r = transform([](auto&& vec) { return std::accumulate(std::ranges::begin(vec), std::ranges::end(vec), 0); }, s);
 
         auto&& [x, y, z] = r;
         REQUIRE(x == 6);
@@ -194,7 +196,7 @@ TEST_CASE("transform")
 
     {
         auto r = transform(
-            [](auto&&... vec) { return (rs::accumulate(FWD(vec), 0) + ...); }, s, t);
+            [](auto&&... vec) { return (std::accumulate(std::ranges::begin(vec), std::ranges::end(vec), 0) + ...); }, s, t);
 
         auto&& [x, y, z] = r;
         REQUIRE(x == 21);
@@ -205,7 +207,7 @@ TEST_CASE("transform")
     {
         constexpr auto f = []<auto I>(mp_size_t<I>, auto&& vec)
         {
-            return rs::accumulate(FWD(vec), I);
+            return std::accumulate(std::ranges::begin(vec), std::ranges::end(vec), I);
         };
         auto r = transform(f, s);
 
@@ -218,7 +220,7 @@ TEST_CASE("transform")
     {
         constexpr auto f = []<auto I>(mp_size_t<I>, auto&&... vec)
         {
-            return (rs::accumulate(FWD(vec), I) + ...);
+            return (std::accumulate(std::ranges::begin(vec), std::ranges::end(vec), I) + ...);
         };
         auto r = transform(f, s, t);
 
@@ -229,9 +231,9 @@ TEST_CASE("transform")
     }
 
     {
-        constexpr auto f = [](auto&& vec) { return rs::accumulate(FWD(vec), -6); };
-        constexpr auto g = [](auto&& vec) { return rs::accumulate(FWD(vec), -39); };
-        constexpr auto h = [](auto&& vec) { return rs::accumulate(FWD(vec), -9); };
+        constexpr auto f = [](auto&& vec) { return std::accumulate(std::ranges::begin(vec), std::ranges::end(vec), -6); };
+        constexpr auto g = [](auto&& vec) { return std::accumulate(std::ranges::begin(vec), std::ranges::end(vec), -39); };
+        constexpr auto h = [](auto&& vec) { return std::accumulate(std::ranges::begin(vec), std::ranges::end(vec), -9); };
 
         auto r = transform(std::tuple{f, g, h}, s);
 
@@ -243,13 +245,13 @@ TEST_CASE("transform")
 
     {
         constexpr auto f = [](auto&& x, auto&& y) {
-            return rs::accumulate(FWD(x), -21) + rs::accumulate(FWD(y), 0);
+            return std::accumulate(std::ranges::begin(x), std::ranges::end(x), -21) + std::accumulate(std::ranges::begin(y), std::ranges::end(y), 0);
         };
         constexpr auto g = [](auto&& x, auto&& y) {
-            return rs::accumulate(FWD(x), -60) + rs::accumulate(FWD(y), 0);
+            return std::accumulate(std::ranges::begin(x), std::ranges::end(x), -60) + std::accumulate(std::ranges::begin(y), std::ranges::end(y), 0);
         };
         constexpr auto h = [](auto&& x, auto&& y) {
-            return rs::accumulate(FWD(x), -22) + rs::accumulate(FWD(y), 0);
+            return std::accumulate(std::ranges::begin(x), std::ranges::end(x), -22) + std::accumulate(std::ranges::begin(y), std::ranges::end(y), 0);
         };
 
         auto r = transform(std::tuple{f, g, h}, s, t);
@@ -268,25 +270,25 @@ TEST_CASE("nested transform")
     auto s = std::tuple{std::tuple{T{1, 2}}, std::tuple{T{3, 4}, T{5}}};
 
     auto a = transform(
-        [](const T& v) { return vs::zip_with(std::plus{}, vs::all(v), vs::repeat(1)); },
+        [](const T& v) { return ccs::zip_transform(std::plus{}, std::views::all(v), ccs::repeat_n(1, std::ranges::size(v))); },
         s);
 
-    REQUIRE(rs::equal(get<0>(get<0>(a)), T{2, 3}));
-    REQUIRE(rs::equal(get<0>(get<1>(a)), T{4, 5}));
-    REQUIRE(rs::equal(get<1>(get<1>(a)), T{6}));
+    REQUIRE(std::ranges::equal(get<0>(get<0>(a)), T{2, 3}));
+    REQUIRE(std::ranges::equal(get<0>(get<1>(a)), T{4, 5}));
+    REQUIRE(std::ranges::equal(get<1>(get<1>(a)), T{6}));
 
     auto t = std::tuple{std::tuple{T{0, 1}}, std::tuple{T{2, 3}, T{4}}};
 
     auto b = transform(
         [](const T& u, const T& v) {
-            return vs::zip_with(std::plus{}, vs::all(u), vs::all(v));
+            return ccs::zip_transform(std::plus{}, std::views::all(u), std::views::all(v));
         },
         s,
         t);
 
-    REQUIRE(rs::equal(get<0>(get<0>(b)), T{1, 3}));
-    REQUIRE(rs::equal(get<0>(get<1>(b)), T{5, 7}));
-    REQUIRE(rs::equal(get<1>(get<1>(b)), T{9}));
+    REQUIRE(std::ranges::equal(get<0>(get<0>(b)), T{1, 3}));
+    REQUIRE(std::ranges::equal(get<0>(get<1>(b)), T{5, 7}));
+    REQUIRE(std::ranges::equal(get<1>(get<1>(b)), T{9}));
 }
 
 TEST_CASE("transform_reduce")
@@ -294,18 +296,18 @@ TEST_CASE("transform_reduce")
     using T = std::vector<int>;
     auto s = std::tuple{T{0, 1, 2}, T{-1, 0, 0}, T{1, -10, 1}};
 
-    auto k = transform_reduce(rs::max, s, std::plus{}, -3);
+    auto k = transform_reduce(std::ranges::max, s, std::plus{}, -3);
 
     REQUIRE(k == 0);
 
     auto [min, max] = transform_reduce(
-        rs::minmax,
+        std::ranges::minmax,
         s,
         [](auto&& acc, auto&& item) {
-            return rs::minmax_result<int>{rs::min(acc.min, item.min),
-                                          rs::max(acc.max, item.max)};
+            return std::ranges::minmax_result<int>{std::ranges::min(acc.min, item.min),
+                                                    std::ranges::max(acc.max, item.max)};
         },
-        rs::minmax_result<int>{});
+        std::ranges::minmax_result<int>{});
 
     REQUIRE(min == -10);
     REQUIRE(max == 2);
@@ -321,7 +323,7 @@ TEST_CASE("range lift")
     constexpr auto plus = lift(std::plus{});
 
     auto r = plus(s, t);
-    REQUIRE(rs::equal(r, T{5, 7, 9}));
+    REQUIRE(std::ranges::equal(r, T{5, 7, 9}));
 }
 
 TEST_CASE("tuple lift")
@@ -333,25 +335,25 @@ TEST_CASE("tuple lift")
 
     auto a = lift1(s);
 
-    REQUIRE(rs::equal(get<0>(get<0>(a)), T{2, 3}));
-    REQUIRE(rs::equal(get<0>(get<1>(a)), T{4, 5}));
-    REQUIRE(rs::equal(get<1>(get<1>(a)), T{6}));
+    REQUIRE(std::ranges::equal(get<0>(get<0>(a)), T{2, 3}));
+    REQUIRE(std::ranges::equal(get<0>(get<1>(a)), T{4, 5}));
+    REQUIRE(std::ranges::equal(get<1>(get<1>(a)), T{6}));
 
     auto t = std::tuple{std::tuple{T{0, 1}}, std::tuple{T{2, 3}, T{4}}};
 
     constexpr auto lift2 = lift([](auto&&... args) { return (args + ...); });
     auto b = lift2(s, t);
 
-    REQUIRE(rs::equal(get<0>(get<0>(b)), T{1, 3}));
-    REQUIRE(rs::equal(get<0>(get<1>(b)), T{5, 7}));
-    REQUIRE(rs::equal(get<1>(get<1>(b)), T{9}));
+    REQUIRE(std::ranges::equal(get<0>(get<0>(b)), T{1, 3}));
+    REQUIRE(std::ranges::equal(get<0>(get<1>(b)), T{5, 7}));
+    REQUIRE(std::ranges::equal(get<1>(get<1>(b)), T{9}));
 
     constexpr auto lift_plus = lift(std::plus{});
     auto c = lift_plus(s, t);
 
-    REQUIRE(rs::equal(get<0>(get<0>(c)), T{1, 3}));
-    REQUIRE(rs::equal(get<0>(get<1>(c)), T{5, 7}));
-    REQUIRE(rs::equal(get<1>(get<1>(c)), T{9}));
+    REQUIRE(std::ranges::equal(get<0>(get<0>(c)), T{1, 3}));
+    REQUIRE(std::ranges::equal(get<0>(get<1>(c)), T{5, 7}));
+    REQUIRE(std::ranges::equal(get<1>(get<1>(c)), T{9}));
 }
 
 TEST_CASE("resize_and_copy vector")
@@ -359,21 +361,21 @@ TEST_CASE("resize_and_copy vector")
     using T = std::vector<int>;
 
     auto t = T{};
-    resize_and_copy(t, vs::iota(0, 10));
-    REQUIRE(rs::size(t) == rs::size(vs::iota(0, 10)));
-    REQUIRE(rs::equal(t, vs::iota(0, 10)));
+    resize_and_copy(t, std::views::iota(0, 10));
+    REQUIRE(std::ranges::size(t) == std::ranges::size(std::views::iota(0, 10)));
+    REQUIRE(std::ranges::equal(t, std::views::iota(0, 10)));
 
-    resize_and_copy(t, vs::iota(0, 2));
-    REQUIRE(rs::size(t) == rs::size(vs::iota(0, 2)));
-    REQUIRE(rs::equal(t, vs::iota(0, 2)));
+    resize_and_copy(t, std::views::iota(0, 2));
+    REQUIRE(std::ranges::size(t) == std::ranges::size(std::views::iota(0, 2)));
+    REQUIRE(std::ranges::equal(t, std::views::iota(0, 2)));
 
-    resize_and_copy(vs::all(t), vs::iota(5, 10));
-    REQUIRE(rs::size(t) == 5u);
-    REQUIRE(rs::equal(t, vs::iota(5, 10)));
+    resize_and_copy(std::views::all(t), std::views::iota(5, 10));
+    REQUIRE(std::ranges::size(t) == 5u);
+    REQUIRE(std::ranges::equal(t, std::views::iota(5, 10)));
 
     resize_and_copy(t, 0);
-    REQUIRE(rs::size(t) == 5u);
-    REQUIRE(rs::equal(t, T{0, 0, 0, 0, 0}));
+    REQUIRE(std::ranges::size(t) == 5u);
+    REQUIRE(std::ranges::equal(t, T{0, 0, 0, 0, 0}));
 }
 
 template <auto I>
@@ -392,17 +394,17 @@ TEST_CASE("resize_and_copy span")
 
     T t = t_;
 
-    resize_and_copy(t, vs::iota(0, 10));
-    REQUIRE(rs::size(t) == 5u);
-    REQUIRE(rs::equal(t_, vs::iota(0, 5)));
+    resize_and_copy(t, std::views::iota(0, 10));
+    REQUIRE(std::ranges::size(t) == 5u);
+    REQUIRE(std::ranges::equal(t_, std::views::iota(0, 5)));
 
     resize_and_copy(t, -1);
-    REQUIRE(rs::size(t) == 5u);
-    REQUIRE(rs::equal(t, vs::repeat_n(-1, rs::size(t))));
+    REQUIRE(std::ranges::size(t) == 5u);
+    REQUIRE(std::ranges::equal(t, std::vector<int>(std::ranges::size(t), -1)));
 
-    resize_and_copy(t, vs::iota(0, 10) | vs::transform([](auto&& i) { return i + 1; }));
-    REQUIRE(rs::size(t) == 5u);
-    REQUIRE(rs::equal(t, vs::iota(1, 6)));
+    resize_and_copy(t, std::views::iota(0, 10) | std::views::transform([](auto&& i) { return i + 1; }));
+    REQUIRE(std::ranges::size(t) == 5u);
+    REQUIRE(std::ranges::equal(t, std::views::iota(1, 6)));
 }
 
 TEST_CASE("resize_and_copy tuples")
@@ -411,54 +413,54 @@ TEST_CASE("resize_and_copy tuples")
 
     std::tuple<T, T> x{};
     {
-        resize_and_copy(x, vs::iota(0, 10));
+        resize_and_copy(x, std::views::iota(0, 10));
         auto&& [a, b] = x;
-        REQUIRE(rs::size(a) == 10u);
-        REQUIRE(rs::size(b) == 10u);
-        REQUIRE(rs::equal(a, vs::iota(0, 10)));
-        REQUIRE(rs::equal(a, b));
+        REQUIRE(std::ranges::size(a) == 10u);
+        REQUIRE(std::ranges::size(b) == 10u);
+        REQUIRE(std::ranges::equal(a, std::views::iota(0, 10)));
+        REQUIRE(std::ranges::equal(a, b));
 
         resize_and_copy(x, -1);
-        REQUIRE(rs::size(a) == 10u);
-        REQUIRE(rs::size(b) == 10u);
-        REQUIRE(rs::equal(a, vs::repeat_n(-1, rs::size(a))));
-        REQUIRE(rs::equal(a, b));
+        REQUIRE(std::ranges::size(a) == 10u);
+        REQUIRE(std::ranges::size(b) == 10u);
+        REQUIRE(std::ranges::equal(a, std::vector<int>(std::ranges::size(a), -1)));
+        REQUIRE(std::ranges::equal(a, b));
     }
 
     {
         auto u = T{};
         auto v = T{};
         std::tuple<T&, T&> y{u, v};
-        resize_and_copy(y, vs::iota(0, 10));
+        resize_and_copy(y, std::views::iota(0, 10));
         auto&& [a, b] = y;
-        REQUIRE(rs::size(a) == 10u);
-        REQUIRE(rs::size(b) == 10u);
-        REQUIRE(rs::equal(a, vs::iota(0, 10)));
-        REQUIRE(rs::equal(a, b));
+        REQUIRE(std::ranges::size(a) == 10u);
+        REQUIRE(std::ranges::size(b) == 10u);
+        REQUIRE(std::ranges::equal(a, std::views::iota(0, 10)));
+        REQUIRE(std::ranges::equal(a, b));
 
         resize_and_copy(y, -1);
-        REQUIRE(rs::size(a) == 10u);
-        REQUIRE(rs::size(b) == 10u);
-        REQUIRE(rs::equal(a, vs::repeat_n(-1, rs::size(a))));
-        REQUIRE(rs::equal(a, b));
+        REQUIRE(std::ranges::size(a) == 10u);
+        REQUIRE(std::ranges::size(b) == 10u);
+        REQUIRE(std::ranges::equal(a, std::vector<int>(std::ranges::size(a), -1)));
+        REQUIRE(std::ranges::equal(a, b));
     }
 
     {
         auto u = T(3);
         auto v = T(4);
         std::tuple<std::span<int>, std::span<int>> y{u, v};
-        resize_and_copy(y, vs::iota(0, 10));
+        resize_and_copy(y, std::views::iota(0, 10));
         auto&& [a, b] = y;
-        REQUIRE(rs::size(a) == 3u);
-        REQUIRE(rs::size(b) == 4u);
-        REQUIRE(rs::equal(a, vs::iota(0, 3)));
-        REQUIRE(rs::equal(b, vs::iota(0, 4)));
+        REQUIRE(std::ranges::size(a) == 3u);
+        REQUIRE(std::ranges::size(b) == 4u);
+        REQUIRE(std::ranges::equal(a, std::views::iota(0, 3)));
+        REQUIRE(std::ranges::equal(b, std::views::iota(0, 4)));
 
         resize_and_copy(y, -1);
-        REQUIRE(rs::size(a) == 3u);
-        REQUIRE(rs::size(b) == 4u);
-        REQUIRE(rs::equal(a, vs::repeat_n(-1, rs::size(a))));
-        REQUIRE(rs::equal(b, vs::repeat_n(-1, rs::size(b))));
+        REQUIRE(std::ranges::size(a) == 3u);
+        REQUIRE(std::ranges::size(b) == 4u);
+        REQUIRE(std::ranges::equal(a, std::vector<int>(std::ranges::size(a), -1)));
+        REQUIRE(std::ranges::equal(b, std::vector<int>(std::ranges::size(b), -1)));
     }
 }
 
@@ -468,79 +470,79 @@ TEST_CASE("resize_and_copy tuples to tuples")
 
     {
         std::tuple<T, T> x{};
-        auto y = std::tuple{vs::iota(0, 10), vs::iota(3, 6)};
+        auto y = std::tuple{std::views::iota(0, 10), std::views::iota(3, 6)};
 
         resize_and_copy(x, y);
         auto&& [a, b] = x;
-        REQUIRE(rs::size(a) == 10u);
-        REQUIRE(rs::size(b) == 3u);
-        REQUIRE(rs::equal(a, vs::iota(0, 10)));
-        REQUIRE(rs::equal(b, vs::iota(3, 6)));
+        REQUIRE(std::ranges::size(a) == 10u);
+        REQUIRE(std::ranges::size(b) == 3u);
+        REQUIRE(std::ranges::equal(a, std::views::iota(0, 10)));
+        REQUIRE(std::ranges::equal(b, std::views::iota(3, 6)));
     }
 
     {
         auto u = T{};
         auto v = T{};
         std::tuple<T&, T&> x{u, v};
-        auto y = std::tuple{vs::iota(0, 10), vs::iota(3, 6)};
+        auto y = std::tuple{std::views::iota(0, 10), std::views::iota(3, 6)};
 
         resize_and_copy(x, y);
         auto&& [a, b] = x;
-        REQUIRE(rs::size(a) == 10u);
-        REQUIRE(rs::size(b) == 3u);
-        REQUIRE(rs::equal(a, vs::iota(0, 10)));
-        REQUIRE(rs::equal(b, vs::iota(3, 6)));
+        REQUIRE(std::ranges::size(a) == 10u);
+        REQUIRE(std::ranges::size(b) == 3u);
+        REQUIRE(std::ranges::equal(a, std::views::iota(0, 10)));
+        REQUIRE(std::ranges::equal(b, std::views::iota(3, 6)));
     }
 
     {
         auto u = T{};
         auto v = T{};
-        auto x = std::tuple{vs::all(u), vs::all(v)};
+        auto x = std::tuple{std::views::all(u), std::views::all(v)};
 
-        resize_and_copy(x, std::tuple{vs::iota(0, 10), vs::iota(3, 6)});
+        resize_and_copy(x, std::tuple{std::views::iota(0, 10), std::views::iota(3, 6)});
         auto&& [a, b] = x;
-        REQUIRE(rs::size(a) == 10u);
-        REQUIRE(rs::size(b) == 3u);
-        REQUIRE(rs::equal(a, vs::iota(0, 10)));
-        REQUIRE(rs::equal(b, vs::iota(3, 6)));
+        REQUIRE(std::ranges::size(a) == 10u);
+        REQUIRE(std::ranges::size(b) == 3u);
+        REQUIRE(std::ranges::equal(a, std::views::iota(0, 10)));
+        REQUIRE(std::ranges::equal(b, std::views::iota(3, 6)));
     }
 }
 
 TEST_CASE("to_tuple")
 {
-    const auto i = vs::iota(0, 10);
-    const auto j = vs::iota(1, 5);
-    const auto k = vs::iota(10, 30);
+    const auto i = std::views::iota(0, 10);
+    const auto j = std::views::iota(1, 5);
+    const auto k = std::views::iota(10, 30);
 
     using T = std::vector<real>;
     {
         auto t = T{1, 2, 3};
         auto s = to<std::span<const real>>(t);
-        REQUIRE(rs::equal(t, s));
+        REQUIRE(std::ranges::equal(t, s));
     }
 
     {
         auto t = to<std::vector<int>>(i);
-        REQUIRE(rs::equal(t, i));
+        REQUIRE(std::ranges::equal(t, i));
     }
 
     {
         auto t = to<std::tuple<T>>(std::tuple{i});
-        REQUIRE(rs::equal(get<0>(t), i));
+        REQUIRE(std::ranges::equal(get<0>(t), i));
     }
 
     {
         auto t = to<std::tuple<T, T>>(std::tuple{i, j});
-        REQUIRE(rs::equal(get<0>(t), i));
-        REQUIRE(rs::equal(get<1>(t), j));
+        REQUIRE(std::ranges::equal(get<0>(t), i));
+        REQUIRE(std::ranges::equal(get<1>(t), j));
     }
 
     {
         auto t = to<std::tuple<std::tuple<T>, std::tuple<T, T>>>(
             std::tuple{std::tuple{i}, std::tuple{j, k}});
-        REQUIRE(rs::equal(get<0>(get<0>(t)), i));
-        REQUIRE(rs::equal(get<0>(get<1>(t)), j));
-        REQUIRE(rs::equal(get<1>(get<1>(t)), k));
+        REQUIRE(std::ranges::equal(get<0>(get<0>(t)), i));
+        REQUIRE(std::ranges::equal(get<0>(get<1>(t)), j));
+        REQUIRE(std::ranges::equal(get<1>(get<1>(t)), k));
     }
 
     {

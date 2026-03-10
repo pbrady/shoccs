@@ -316,14 +316,16 @@ Migrate test files to remove `#include <range/v3/all.hpp>` and all `rs::`/`vs::`
   - Files: `src/fields/range_concepts.t.cpp`
   - Test: `ctest --test-dir build -R t-range_concepts` — 1 passed.
 
-- [ ] **1.20b** Migrate `src/fields/tuple_utils.t.cpp` (611 lines, heaviest `rs::` usage): Remove `#include <range/v3/all.hpp>`. Add `#include <algorithm>`, `#include <numeric>`, `#include <ranges>`. Replace:
-  - `vs::zip` in for loops → index-based iteration (lines 117, 123, 161).
-  - `vs::zip_with`/`vs::repeat`/`vs::repeat_n` in lift tests → `ccs::zip_transform` or manual equivalents (lines 271, 282, 401, 424, 442, 460).
-  - `rs::accumulate(rng, init, op)` → `std::accumulate(std::ranges::begin(r), std::ranges::end(r), init, op)` (~5 occurrences).
-  - `rs::equal` → `std::ranges::equal`, `rs::size` → `std::ranges::size` (~100 occurrences combined).
-  - `rs::minmax`/`rs::min`/`rs::max`/`rs::minmax_result` → `std::ranges::minmax`/`min`/`max`/`minmax_result`.
+- [x] **1.20b** Migrate `src/fields/tuple_utils.t.cpp` (611 lines, heaviest `rs::` usage): Removed `#include <range/v3/all.hpp>` and `#include <iostream>`. Added `#include <algorithm>`, `#include <numeric>`, `#include <ranges>`, `#include "lazy_views.hpp"`. Replaced:
+  - `vs::zip` in for loops → index-based iteration (3 occurrences).
+  - `vs::zip_with(..., vs::repeat(1))` → `ccs::zip_transform(..., ccs::repeat_n(1, size))`.
+  - `vs::zip_with(std::plus{}, ...)` → `ccs::zip_transform(std::plus{}, ...)`.
+  - `vs::repeat_n(-1, n)` → `std::vector<int>(n, -1)` (5 occurrences).
+  - `rs::accumulate(rng, init)` → `std::accumulate(std::ranges::begin(r), std::ranges::end(r), init)` (10 occurrences).
+  - `rs::equal` → `std::ranges::equal`, `rs::size` → `std::ranges::size`, `vs::iota` → `std::views::iota`, `vs::all` → `std::views::all`, `vs::transform` → `std::views::transform`.
+  - `rs::max`/`rs::min`/`rs::minmax`/`rs::minmax_result` → `std::ranges::` equivalents.
   - Files: `src/fields/tuple_utils.t.cpp`
-  - Test: `ctest --test-dir build -R t-tuple_utils`
+  - Test: `ctest --test-dir build -R t-tuple_utils` — 1 passed (all 17 subcases). All 8 previously-passing downstream targets still pass.
 
 - [ ] **1.20c** Migrate `src/fields/tuple_math.t.cpp`: Remove range-v3 includes. Replace `vs::zip_with(std::plus{}, a, b)` test constructions (lines 42, 85, 158, 214) with `ccs::zip_transform` or manual expected values.
   - Files: `src/fields/tuple_math.t.cpp`
