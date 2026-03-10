@@ -37,12 +37,41 @@ ctest --test-dir build
 
 ### Mesh (High Complexity)
 
+Note: `shoccs-mesh` does not link `range-v3::range-v3` in `src/mesh/CMakeLists.txt`, so no CMake changes are needed for items 7.1–7.5. Range-v3 headers are found via spack's global include path; once the `#include <range/v3/...>` directives are removed, the dependency is gone.
+
 - [ ] **7.1** Migrate `cartesian.hpp` and `cartesian.cpp`
   - **7.1a** Add `ccs::cartesian_product_view` to `src/fields/lazy_views.hpp` (see decision D9 in `plans/meta.md`).
-    - A lazy view over three ranges yielding `std::tuple<T1&, T2&, T3&>` in triple-nested-loop order (first range slowest, third fastest).
-    - Model `std::ranges::view_interface` with at least forward iteration.
-    - Add factory `ccs::cartesian_product(r1, r2, r3)`.
+    - A lazy view over three ranges yielding `std::tuple<range_reference_t<R1>, range_reference_t<R2>, range_reference_t<R3>>` in triple-nested-loop order (first range slowest, third fastest).
+    - Template signature: `template <std::ranges::forward_range R1, std::ranges::forward_range R2, std::ranges::forward_range R3> requires (std::ranges::view<R1> && std::ranges::view<R2> && std::ranges::view<R3>)`.
+    - Inherit from `std::ranges::view_interface<cartesian_product_view<R1, R2, R3>>`.
+    - **View data members:** `R1 r1_; R2 r2_; R3 r3_;`
+    - **Iterator class** (forward-only, nested inside the view):
+      - Required typedefs: `using value_type = std::tuple<std::ranges::range_value_t<R1>, std::ranges::range_value_t<R2>, std::ranges::range_value_t<R3>>; using reference = std::tuple<std::ranges::range_reference_t<R1>, std::ranges::range_reference_t<R2>, std::ranges::range_reference_t<R3>>; using difference_type = std::ptrdiff_t; using iterator_concept = std::forward_iterator_tag;`
+      - Data members (7 total, self-contained — no pointer to parent):
+        `std::ranges::iterator_t<R1> it1_; std::ranges::iterator_t<R2> it2_; std::ranges::iterator_t<R3> it3_;`
+        `std::ranges::iterator_t<R2> begin2_; std::ranges::sentinel_t<R2> end2_;`
+        `std::ranges::iterator_t<R3> begin3_; std::ranges::sentinel_t<R3> end3_;`
+      - `operator*() const` → `return reference{*it1_, *it2_, *it3_};`
+      - `operator++()` → triple-nested increment:
+        ```cpp
+        ++it3_;
+        if (it3_ == end3_) {
+            it3_ = begin3_;
+            ++it2_;
+            if (it2_ == end2_) {
+                it2_ = begin2_;
+                ++it1_;
+            }
+        }
+        ```
+      - `operator==(other) const` → `it1_ == other.it1_ && it2_ == other.it2_ && it3_ == other.it3_`
+    - **begin()**: If any range is empty, return end(). Otherwise: `iterator{begin(r1_), begin(r2_), begin(r3_), begin(r2_), end(r2_), begin(r3_), end(r3_)}`.
+    - **end()**: `iterator{end(r1_), begin(r2_), begin(r3_), begin(r2_), end(r2_), begin(r3_), end(r3_)}`.
+    - **size() const** (if all ranges are `sized_range`): `return size(r1_) * size(r2_) * size(r3_);`
+    - Deduction guide: `cartesian_product_view(R1&&, R2&&, R3&&) -> cartesian_product_view<std::views::all_t<R1>, std::views::all_t<R2>, std::views::all_t<R3>>`.
+    - Factory: `struct cartesian_product_fn { ... }; inline constexpr cartesian_product_fn cartesian_product{};` — takes 3 `viewable_range` args, applies `std::views::all` and constructs the view.
     - File: `src/fields/lazy_views.hpp` (append after `stride_view`).
+    - Estimated: ~120–150 lines (iterator ~70, view ~40, factory/deduction guide ~20).
     - Test: unit test or compile check in 7.1b.
   - **7.1b** Migrate `cartesian.hpp` (line 10, 74):
     - Remove `#include <range/v3/view/cartesian_product.hpp>`.
@@ -200,6 +229,8 @@ ctest --test-dir build
 
 ### I/O (Low-Medium Complexity)
 
+Note: `shoccs-io` does not link `range-v3::range-v3` in `src/io/CMakeLists.txt`, so no CMake changes are needed for items 7.8–7.10.
+
 - [ ] **7.8** Migrate `field_io.cpp` (lines 10–11, 52–55, 64–66):
   - Remove `#include <range/v3/range/conversion.hpp>` and `#include <range/v3/view/transform.hpp>`.
   - Lines 52–55: Replace `names | vs::transform(…) | rs::to<vector<string>>()` with an explicit loop:
@@ -231,7 +262,7 @@ ctest --test-dir build
       ```
     - Lines 25, 29: Replace `rs::size(tmp)` and `rs::size(pos)` with `tmp.size()` and `pos.size()` (both are `real3` = `std::array<real,3>`, which has `.size()`).
   - **`write` method** (lines 39–59):
-    - Line 43: Replace `vs::zip(filenames, f.scalars())` with an index-based loop:
+    - Line 43: Replace `vs::zip(filenames, f.scalars())` with an index-based loop (`f.scalars()` returns `std::vector<scalar_view>&`, which supports `operator[]`):
       ```cpp
       auto& scalars = f.scalars();
       for (size_t idx = 0; idx < filenames.size(); ++idx) {
