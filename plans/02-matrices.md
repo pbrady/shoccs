@@ -215,7 +215,7 @@ Common range-v3 → std/C++20 replacement patterns used across test files:
   - Test: `ctest --test-dir build -R "t-unit_stride_visitor|t-coefficient_visitor"`
   - Must come after: 2.7, 2.8
 
-- [ ] **2.9b** Migrate dense + circulant test files: `dense.t.cpp` + `circulant.t.cpp`.
+- [x] **2.9b** Migrate dense + circulant test files: `dense.t.cpp` + `circulant.t.cpp`.
   - Files: `src/matrices/dense.t.cpp`, `src/matrices/circulant.t.cpp`
   - Remove all `<range/v3/...>` includes. Add `<algorithm>`, `<ranges>`, `"fields/lazy_views.hpp"` (for `ccs::stride`).
   - `dense.t.cpp` (7 sites):
@@ -285,7 +285,7 @@ Common range-v3 → std/C++20 replacement patterns used across test files:
 ```
 2.1 (D6 decision) [DONE]
  ├── 2.3 (dense.hpp)  [DONE] ──┐
- ├── 2.2 (dense.cpp)  [DONE] ──┤── 2.9b (dense + circulant tests) ──┐
+ ├── 2.2 (dense.cpp)  [DONE] ──┤── 2.9b (dense + circulant tests) [DONE] ──┐
  ├── 2.4 (circulant.cpp) [DONE]┤── 2.9d (inner_block + block tests) ├── 2.10 (verification)
  ├── 2.6 (csr.hpp) [DONE] ── 2.5 (csr.cpp) [DONE] ── 2.9c (csr tests) ──┤
  ├── 2.7 (coefficient_visitor.cpp) [DONE]┐── 2.9a (visitor tests) [DONE] ┘
