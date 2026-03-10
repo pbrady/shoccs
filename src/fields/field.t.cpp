@@ -1,6 +1,6 @@
 #include "field.hpp"
 
-#include <range/v3/view/repeat_n.hpp>
+#include <ranges>
 
 #include <catch2/catch_approx.hpp>
 #include <catch2/catch_test_macros.hpp>
@@ -43,13 +43,13 @@ TEST_CASE("concepts")
         static_assert(ConstructibleFromRange<U, T>); // fails
         // static_assert(std::constructible_from<T, U>); // fails
         static_assert(
-            std::constructible_from<rs::range_value_t<T>, rs::range_value_t<U>>);
+            std::constructible_from<std::ranges::range_value_t<T>, std::ranges::range_value_t<U>>);
         static_assert(
-            std::constructible_from<rs::range_value_t<U>, rs::range_value_t<T>>);
+            std::constructible_from<std::ranges::range_value_t<U>, std::ranges::range_value_t<T>>);
 
         // static_assert(std::constructible_from<U, T>);
         T t{};
-        U u{rs::begin(t), rs::end(t)};
+        U u{std::ranges::begin(t), std::ranges::end(t)};
     }
 }
 
@@ -65,8 +65,8 @@ TEST_CASE("construction")
     auto y = field{y_size};
 
     auto&& [u, v] = y.scalars(0, 1);
-    REQUIRE(ssize(u) == ssize(v));
-    REQUIRE(ssize(u) == scalar_size);
+    REQUIRE((ssize(u) == ssize(v)));
+    REQUIRE((ssize(u) == scalar_size));
 }
 
 TEST_CASE("construction/conversion")
@@ -80,57 +80,57 @@ TEST_CASE("construction/conversion")
     auto&& [a, b] = x.scalars(0, 1);
     a = 1;
     b = 2;
-    REQUIRE(a ==
-            tuple{tuple{vs::repeat_n(1, 10)},
-                  tuple{vs::repeat_n(1, 2), vs::repeat_n(1, 4), vs::repeat_n(1, 5)}});
+    REQUIRE((a ==
+            tuple{tuple{std::vector<int>(10, 1)},
+                  tuple{std::vector<int>(2, 1), std::vector<int>(4, 1), std::vector<int>(5, 1)}}));
 
     {
         field y{x};
         auto&& [c, d] = y.scalars(0, 1);
-        REQUIRE(a == c);
-        REQUIRE(b == d);
+        REQUIRE((a == c));
+        REQUIRE((b == d));
     }
 
     {
         field_span y{x};
         auto&& [a, b] = x.scalars(0, 1);
         auto&& [c, d] = y.scalars(0, 1);
-        REQUIRE(a == c);
-        REQUIRE(b == d);
+        REQUIRE((a == c));
+        REQUIRE((b == d));
         // ensure that we are not making copies by seeing if the change percolates
         // to original
         c = 3;
-        REQUIRE(a == c);
+        REQUIRE((a == c));
 
         field z{y};
         auto&& [e, f] = z.scalars(0, 1);
-        REQUIRE(e == a);
-        REQUIRE(f == b);
+        REQUIRE((e == a));
+        REQUIRE((f == b));
 
         f = 100;
-        REQUIRE(b == d);
+        REQUIRE((b == d));
         REQUIRE(!(f == b));
 
         field_view v{y};
         auto&& [g, h] = v.scalars(0, 1);
-        REQUIRE(g == a);
-        REQUIRE(h == b);
+        REQUIRE((g == a));
+        REQUIRE((h == b));
     }
 
     {
         field_view y{x};
         auto&& [a, b] = x.scalars(0, 1);
         auto&& [c, d] = y.scalars(0, 1);
-        REQUIRE(a == c);
-        REQUIRE(b == d);
+        REQUIRE((a == c));
+        REQUIRE((b == d));
 
         field z{y};
         auto&& [e, f] = z.scalars(0, 1);
-        REQUIRE(e == a);
-        REQUIRE(f == b);
+        REQUIRE((e == a));
+        REQUIRE((f == b));
 
         f = 100;
-        REQUIRE(b == d);
+        REQUIRE((b == d));
         REQUIRE(!(f == b));
     }
 }
@@ -142,23 +142,23 @@ TEST_CASE("assignment")
     auto x = field{x_size};
 
     auto integer_scalar = [](integer i) {
-        return tuple{tuple{vs::repeat_n(i, 10)},
-                     tuple{vs::repeat_n(i, 2), vs::repeat_n(i, 4), vs::repeat_n(i, 5)}};
+        return tuple{tuple{std::vector<integer>(10, i)},
+                     tuple{std::vector<integer>(2, i), std::vector<integer>(4, i), std::vector<integer>(5, i)}};
     };
 
     x = 1;
     auto&& [a, b] = x.scalars(0, 1);
-    REQUIRE(a == integer_scalar(1));
-    REQUIRE(a == b);
+    REQUIRE((a == integer_scalar(1)));
+    REQUIRE((a == b));
 
     field y{x};
     y = 2;
 
     field_span z{x};
     z = y;
-    REQUIRE(a == integer_scalar(2));
+    REQUIRE((a == integer_scalar(2)));
     z = -1;
-    REQUIRE(b == integer_scalar(-1));
+    REQUIRE((b == integer_scalar(-1)));
 
     auto f = [](field_span fs) {
         auto&& [u, v] = fs.scalars(1, 0);
@@ -166,6 +166,6 @@ TEST_CASE("assignment")
         v = 11;
     };
     x = f;
-    REQUIRE(a == integer_scalar(11));
-    REQUIRE(b == integer_scalar(10));
+    REQUIRE((a == integer_scalar(11)));
+    REQUIRE((b == integer_scalar(10)));
 }

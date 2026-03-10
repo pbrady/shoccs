@@ -343,7 +343,7 @@ Migrate test files to remove `#include <range/v3/all.hpp>` and all `rs::`/`vs::`
   - Files: `src/fields/view_tuple.t.cpp`
   - Test: `ctest --test-dir build -R t-view_tuple` — 1 passed. All 9 previously-passing downstream field targets still pass.
 
-- [ ] **1.20e** Migrate `src/fields/selector.t.cpp`: This is the largest test file (723 lines, 266 `rs::`/`vs::` occurrences). Split into 3 sub-items due to diff size. Remove `#include <range/v3/all.hpp>`. Add `#include <algorithm>`, `#include <ranges>`, `#include "lazy_views.hpp"`.
+- [x] **1.20e** Migrate `src/fields/selector.t.cpp`: This is the largest test file (723 lines, 266 `rs::`/`vs::` occurrences). Split into 3 sub-items due to diff size. Remove `#include <range/v3/all.hpp>`. Add `#include <algorithm>`, `#include <ranges>`, `#include "lazy_views.hpp"`.
 
   Common patterns across all sub-items:
   - `vs::repeat_n(v, n)` → `std::vector<int>(n, v)` (~66 occurrences total)
@@ -435,9 +435,9 @@ Migrate test files to remove `#include <range/v3/all.hpp>` and all `rs::`/`vs::`
   - Files: `src/fields/tuple_pipe.t.cpp`, `src/fields/single_view.t.cpp`, `src/fields/algorithms.t.cpp`
   - Test: `ctest --test-dir build -R "t-tuple_pipe|t-single_view|t-algorithms"`
 
-- [ ] **1.20h3** Migrate `src/fields/field.t.cpp` (169 lines), `src/fields/field_utils.t.cpp` (60 lines), and `src/fields/field_math.t.cpp` (106 lines): Remove range-v3 includes where present. Replace `rs::begin`/`rs::end` → `std::ranges::begin`/`end`, `rs::equal` → `std::ranges::equal`, `vs::repeat_n` → `std::vector<T>(n, v)` or `ccs::repeat_n`, `vs::iota` → `std::views::iota`. Note: `field.t.cpp` has a direct `#include <range/v3/view/repeat_n.hpp>` (line 3) for `vs::repeat_n`; remove it and replace usage with `std::vector<T>(n, v)`.
+- [x] **1.20h3** Migrate `src/fields/field.t.cpp` (169 lines), `src/fields/field_utils.t.cpp` (60 lines), and `src/fields/field_math.t.cpp` (106 lines): Removed `#include <range/v3/view/repeat_n.hpp>` from `field.t.cpp` and `#include <range/v3/all.hpp>` from `field_utils.t.cpp` and `field_math.t.cpp`. Added `#include <ranges>` where needed. Replaced `rs::range_value_t` → `std::ranges::range_value_t`, `rs::begin`/`rs::end` → `std::ranges::begin`/`end`, `rs::equal` → `std::ranges::equal`, `vs::repeat_n(v, n)` → `std::vector<T>(n, v)`, `vs::iota` → `std::views::iota`. Added double parentheses `REQUIRE((expr == expr))` to all `ccs::tuple` `==` comparisons.
   - Files: `src/fields/field.t.cpp`, `src/fields/field_utils.t.cpp`, `src/fields/field_math.t.cpp`
-  - Test: `ctest --test-dir build -R "t-field$|t-field_utils|t-field_math"`
+  - Test: `ctest --test-dir build -R "t-field$|t-field_utils|t-field_math"` — all 3 targets pass. All 13 field-labeled tests pass.
 
 - [ ] **1.20i** Migrate or remove `src/fields/view_tuple_seg.cpp`. This is a standalone scratch/debug executable (`add_executable(seg ...)` in CMakeLists.txt) with 7 range-v3 includes (`equal`, `all`, `concat`, `iota`, `repeat_n`, `take`, `zip_with`). It is **not** a unit test. Options:
   - (a) Delete the file and remove the `seg` target from CMakeLists.txt (preferred — it appears to be unused scratch code with commented-out lines).

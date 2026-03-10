@@ -1,10 +1,10 @@
 #include "field.hpp"
 
+#include <ranges>
+
 #include <catch2/catch_approx.hpp>
 #include <catch2/catch_test_macros.hpp>
 #include <catch2/matchers/catch_matchers_vector.hpp>
-
-#include <range/v3/all.hpp>
 
 using namespace ccs;
 using T = std::vector<real>;
@@ -18,16 +18,16 @@ TEST_CASE("Output")
     auto&& [a, b] = x.scalars(0, 1);
 
     a = 1;
-    b = tuple{tuple{vs::iota(0, 5)},
-              tuple{vs::iota(1, 2), vs::iota(2, 4), vs::iota(4, 7)}};
+    b = tuple{tuple{std::views::iota(0, 5)},
+              tuple{std::views::iota(1, 2), std::views::iota(2, 4), std::views::iota(4, 7)}};
 
     x += 1;
 
-    REQUIRE(a ==
-            tuple{tuple{vs::repeat_n(2, 5)},
-                  tuple{vs::repeat_n(2, 1), vs::repeat_n(2, 2), vs::repeat_n(2, 3)}});
-    REQUIRE(b == tuple{tuple{vs::iota(1, 6)},
-                       tuple{vs::iota(2, 3), vs::iota(3, 5), vs::iota(5, 8)}});
+    REQUIRE((a ==
+            tuple{tuple{std::vector<int>(5, 2)},
+                  tuple{std::vector<int>(1, 2), std::vector<int>(2, 2), std::vector<int>(3, 2)}}));
+    REQUIRE((b == tuple{tuple{std::views::iota(1, 6)},
+                       tuple{std::views::iota(2, 3), std::views::iota(3, 5), std::views::iota(5, 8)}}));
 
     auto y = field{sz};
 
@@ -39,8 +39,8 @@ TEST_CASE("Output")
     x += y;
 
     scalar<T> z{tuple{tuple{5}, tuple{1, 2, 3}}};
-    REQUIRE(a == z);
-    REQUIRE(b == z);
+    REQUIRE((a == z));
+    REQUIRE((b == z));
 }
 
 TEST_CASE("real math")
@@ -52,30 +52,30 @@ TEST_CASE("real math")
     auto&& [a, b] = x.scalars(0, 1);
 
     a = 1;
-    b = tuple{tuple{vs::iota(0, 5)},
-              tuple{vs::iota(1, 2), vs::iota(2, 4), vs::iota(4, 7)}};
+    b = tuple{tuple{std::views::iota(0, 5)},
+              tuple{std::views::iota(1, 2), std::views::iota(2, 4), std::views::iota(4, 7)}};
 
     auto y = x + 1;
 
     auto&& [c, d] = y.scalars(0, 1);
-    REQUIRE(c ==
-            tuple{tuple{vs::repeat_n(2, 5)},
-                  tuple{vs::repeat_n(2, 1), vs::repeat_n(2, 2), vs::repeat_n(2, 3)}});
-    REQUIRE(d == tuple{tuple{vs::iota(1, 6)},
-                       tuple{vs::iota(2, 3), vs::iota(3, 5), vs::iota(5, 8)}});
+    REQUIRE((c ==
+            tuple{tuple{std::vector<int>(5, 2)},
+                  tuple{std::vector<int>(1, 2), std::vector<int>(2, 2), std::vector<int>(3, 2)}}));
+    REQUIRE((d == tuple{tuple{std::views::iota(1, 6)},
+                       tuple{std::views::iota(2, 3), std::views::iota(3, 5), std::views::iota(5, 8)}}));
 
     field z{y};
 
     auto&& [e, f] = z.scalars(0, 1);
-    REQUIRE(e == c);
-    REQUIRE(f == d);
+    REQUIRE((e == c));
+    REQUIRE((f == d));
 
     auto q = 1 + y + z;
     auto r = 2 * x + 3;
     auto&& [g, h] = q.scalars(0, 1);
     auto&& [i, j] = r.scalars(0, 1);
-    REQUIRE(g == i);
-    REQUIRE(h == j);
+    REQUIRE((g == i));
+    REQUIRE((h == j));
 }
 
 TEST_CASE("span math")
@@ -88,8 +88,8 @@ TEST_CASE("span math")
     auto&& [a, b] = x.scalars(0, 1);
 
     a = 1;
-    b = tuple{tuple{vs::iota(0, 5)},
-              tuple{vs::iota(1, 2), vs::iota(2, 4), vs::iota(4, 7)}};
+    b = tuple{tuple{std::views::iota(0, 5)},
+              tuple{std::views::iota(1, 2), std::views::iota(2, 4), std::views::iota(4, 7)}};
 
     auto y = x * x + 1;
 
@@ -101,6 +101,6 @@ TEST_CASE("span math")
 
     auto&& [c, d] = xx.scalars(0, 1);
 
-    REQUIRE(a == c);
-    REQUIRE(b == d);
+    REQUIRE((a == c));
+    REQUIRE((b == d));
 }
