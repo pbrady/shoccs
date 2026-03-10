@@ -54,7 +54,7 @@ These project-local utilities replace range-v3 internal APIs that have no C++20 
   - Test: `cmake --build build` (header-only, compilation test).
   - Must come before: 1.3, 1.9, 1.13–1.19.
 
-- [ ] **1.2b** Create `src/fields/lazy_views.hpp` with lazy view replacements for range-v3 views with no C++20 equivalent:
+- [x] **1.2b** Create `src/fields/lazy_views.hpp` with lazy view replacements for range-v3 views with no C++20 equivalent:
   - `ccs::zip_transform_view<F, Rngs...>`: Lazy view that yields `f(*it1, *it2, ...)`. Must model `std::ranges::view_interface`. Iterators must support `==`, `++`, `*`. Needed by `tuple_math.hpp` (binary operators), `tuple_utils.hpp` (`lift`), and `field_utils.hpp` (`transform_scalar`/`transform_vector`). Support at least the binary (2-range) case; variadic is needed for `field_utils.hpp`.
   - `ccs::repeat_n_view<T>`: Lazy view of `n` copies of value `v`. Models `std::ranges::random_access_range` and `std::ranges::sized_range`. Used in `tuple_math.hpp` binary scalar operators (`vs::repeat_n(v, sz)`).
   - `ccs::stride_view<Rng>`: Lazy view that yields every `n`-th element of `Rng`. Models `std::ranges::view_interface`. Needed by `plane_view<2>` (z-plane selector) and test code. Must support bidirectional or random-access iteration if the base range does.
