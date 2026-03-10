@@ -39,7 +39,7 @@ ctest --test-dir build
 
 Note: `shoccs-mesh` does not link `range-v3::range-v3` in `src/mesh/CMakeLists.txt`, so no CMake changes are needed for items 7.1–7.5. Range-v3 headers are found via spack's global include path; once the `#include <range/v3/...>` directives are removed, the dependency is gone.
 
-- [ ] **7.1** Migrate `cartesian.hpp` and `cartesian.cpp`
+- [x] **7.1** Migrate `cartesian.hpp` and `cartesian.cpp`
   - [x] **7.1a** Add `ccs::cartesian_product_view` to `src/fields/lazy_views.hpp` (see decision D9 in `plans/meta.md`). **DONE** — added ~150 lines: forward-only iterator with triple-nested increment, view_interface base, deduction guide, factory CPO. Compiles and passes t-cartesian, t-field tests.
     - A lazy view over three ranges yielding `std::tuple<range_reference_t<R1>, range_reference_t<R2>, range_reference_t<R3>>` in triple-nested-loop order (first range slowest, third fastest).
     - Template signature: `template <std::ranges::forward_range R1, std::ranges::forward_range R2, std::ranges::forward_range R3> requires (std::ranges::view<R1> && std::ranges::view<R2> && std::ranges::view<R3>)`.
@@ -73,7 +73,7 @@ Note: `shoccs-mesh` does not link `range-v3::range-v3` in `src/mesh/CMakeLists.t
     - File: `src/fields/lazy_views.hpp` (append after `stride_view`).
     - Estimated: ~120–150 lines (iterator ~70, view ~40, factory/deduction guide ~20).
     - Test: unit test or compile check in 7.1b.
-  - **7.1b** Migrate `cartesian.hpp` (line 10, 74):
+  - [x] **7.1b** Migrate `cartesian.hpp` (line 10, 74): **DONE** — replaced `#include <range/v3/view/cartesian_product.hpp>` with `#include "fields/lazy_views.hpp"`, changed `vs::cartesian_product` to `ccs::cartesian_product`. Compiles and passes t-cartesian.
     - Remove `#include <range/v3/view/cartesian_product.hpp>`.
     - Add `#include "fields/lazy_views.hpp"`.
     - Line 74: Replace `vs::cartesian_product(x(), y(), z())` with `ccs::cartesian_product(x(), y(), z())`.
@@ -84,7 +84,7 @@ Note: `shoccs-mesh` does not link `range-v3::range-v3` in `src/mesh/CMakeLists.t
     - File: `src/fields/lazy_views.hpp` (append after `stride_view`).
     - Used by: 7.1d (cartesian.cpp) and 7.13a/b/c (stencil tests).
     - Ordering: Must precede 7.1d and 7.13.
-  - **7.1d** Migrate `cartesian.cpp` constructor (lines 3, 13–34):
+  - [x] **7.1d** Migrate `cartesian.cpp` constructor (lines 3, 13–34): **DONE** — replaced `#include <range/v3/all.hpp>` with `#include "fields/lazy_views.hpp"` + `#include <algorithm>`. Replaced `concat_copy` with explicit loop, `vs::zip_with` with loop, `rs::count_if` with `std::count_if`, `vs::linear_distribute | rs::to` with `ccs::linear_distribute`. Compiles and passes t-cartesian.
     - Remove `#include <range/v3/all.hpp>` (line 3), add `#include <algorithm>`, `#include <numeric>`, and `#include "fields/lazy_views.hpp"`.
     - Lines 13–15 (`concat_copy` with `rs::copy`, `vs::concat`, `vs::repeat`, `vs::take`): Replace with an explicit loop that copies up to 3 values from `in`, padding with `val`:
       ```cpp

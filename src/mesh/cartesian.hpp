@@ -7,7 +7,7 @@
 #include "fields/tuple.hpp"
 #include "io/logging.hpp"
 
-#include <range/v3/view/cartesian_product.hpp>
+#include "fields/lazy_views.hpp"
 
 #include <sol/forward.hpp>
 
@@ -71,7 +71,7 @@ public:
     constexpr std::span<const real> y() const { return y_; }
     constexpr std::span<const real> z() const { return z_; }
 
-    constexpr auto domain() const { return tuple{vs::cartesian_product(x(), y(), z())}; }
+    constexpr auto domain() const { return tuple{ccs::cartesian_product(x(), y(), z())}; }
 
     constexpr real3 h() const { return h_; }
     constexpr real h(int i) const { return h_[i]; }
