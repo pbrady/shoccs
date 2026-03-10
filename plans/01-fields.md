@@ -101,8 +101,7 @@ These project-local utilities replace range-v3 internal APIs that have no C++20 
 - [ ] **1.4** Migrate `src/fields/tuple_utils.hpp`:
   - [ ] **1.4a** Replace algorithms: `rs::copy` → `std::ranges::copy`, `rs::copy_n` → `std::ranges::copy_n`, `rs::fill` → `std::ranges::fill`. Replace `rs::begin`/`rs::end`/`rs::size` → `std::ranges::begin`/`end`/`size`.
     - Files: `src/fields/tuple_utils.hpp` (`resize_and_copy`, `to`, `ssize` functions)
-  - [ ] **1.4b** Replace `vs::all` → `std::views::all`, `vs::all_t` → `std::views::all_t` in `to()` function.
-    - Files: `src/fields/tuple_utils.hpp`
+  - [x] **1.4b** ~~Replace `vs::all`/`vs::all_t` in `to()` function~~ — REMOVED: `vs::all` and `vs::all_t` are not used in `tuple_utils.hpp`. The `<range/v3/view/all.hpp>` include is unused (no direct `vs::all` usage in the file body) and its removal is already covered by 1.4f.
   - [ ] **1.4c** Replace `vs::common(...)` → `std::views::common(...)` in `to()` function (line 342).
     - Files: `src/fields/tuple_utils.hpp`
   - [ ] **1.4d** Replace `vs::zip_with(fn, rngs...)` with `ccs::zip_transform(fn, rngs...)` in `lift()` function (lines 381, 385).
