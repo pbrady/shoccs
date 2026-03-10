@@ -61,7 +61,16 @@ These project-local utilities replace range-v3 internal APIs that have no C++20 
   - Helper factory functions: `ccs::zip_transform(f, rngs...)`, `ccs::repeat_n(v, n)`, `ccs::stride(rng, n)`.
   - Files: Create `src/fields/lazy_views.hpp`.
   - Test: `cmake --build build` (header-only, compilation test).
-  - Must come before: 1.4, 1.8, 1.13, 1.15.
+  - Must come before: 1.2c, 1.4, 1.8, 1.13, 1.15.
+
+- [ ] **1.2c** Fix `zip_transform_view` to propagate iterator category and support `sized_range` in `src/fields/lazy_views.hpp`:
+  - **Problem:** The current `zip_transform_iterator` hardcodes `iterator_category = std::input_iterator_tag` and lacks `operator--`, `operator+=`/`-=`/`[]`/`+`/`-`/`<=>`. Downstream production code depends on `sized_range` and `random_access_range` when base ranges support them: `field.hpp:90,92` (`nscalars()`/`nvectors()` require `sized_range`), `field.hpp:103,120` (`scalars(i)` requires `random_access_range`), and `tuple_math.t.cpp:219` (`.size()` on view math results). The range-v3 `zip_with` and C++23 `zip_transform_view` both propagate the weakest category from base ranges.
+  - Compute `iterator_concept` as the weakest iterator concept among all base range iterators (input/forward/bidirectional/random-access).
+  - Add conditional `operator--` (when all bases are bidirectional), `operator+=`/`-=`/`[]`/`+`/`-`/`<=>` (when all bases are random-access) to `zip_transform_iterator`, guarded by `requires` clauses.
+  - Add `size()` to `zip_transform_view` when all `Rngs` model `std::ranges::sized_range`, returning the minimum `std::ranges::size(rng)` across base ranges.
+  - Files: `src/fields/lazy_views.hpp`
+  - Test: `cmake --build build` (header-only, compilation test).
+  - Must come before: 1.4d, 1.8b, 1.8c, 1.11.
 
 ### Foundation Types (tuple_fwd, concepts)
 
@@ -440,10 +449,10 @@ Migrate test files to remove `#include <range/v3/all.hpp>` and all `rs::`/`vs::`
                               ├── 1.9a (tuple.hpp)
                               └── 1.19 (selector utility fns)
 
-1.2b (lazy_views.hpp) ───────┬── 1.4d (tuple_utils.hpp lift)
-                              ├── 1.8b, 1.8c (tuple_math.hpp)
-                              ├── 1.11 (field_utils.hpp)
-                              ├── 1.15 (z-plane stride_view)
+1.2b (lazy_views.hpp) ──── 1.2c (zip_transform fix) ──┬── 1.4d (tuple_utils.hpp lift)
+                                                        ├── 1.8b, 1.8c (tuple_math.hpp)
+                                                        └── 1.11 (field_utils.hpp)
+1.2b (lazy_views.hpp) ───────┬── 1.15 (z-plane stride_view)
                               └── 1.19h (selector includes)
 
 1.3 (tuple_fwd.hpp) ─────────┬── 1.4–1.12b (all downstream headers)
