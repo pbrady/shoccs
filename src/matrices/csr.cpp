@@ -1,9 +1,6 @@
 #include "csr.hpp"
 
-#include <range/v3/algorithm/sort.hpp>
-#include <range/v3/view/enumerate.hpp>
-#include <range/v3/view/sliding.hpp>
-#include <range/v3/view/transform.hpp>
+#include <algorithm>
 
 namespace ccs::matrix
 {
@@ -12,22 +9,27 @@ csr csr::builder::to_csr(integer nrows)
 {
     std::vector<int> u(nrows + 1);
 
-    rs::sort(p);
+    std::ranges::sort(p);
     auto first = p.begin();
     auto last = p.end();
 
-    for (auto&& [i, r] : u | vs::sliding(2) | vs::enumerate) {
-        // initialize to an empty row
-        r[1] = r[0];
-        while (first != last && first->row == static_cast<integer>(i)) {
-            ++r[1];
+    for (integer i = 0; i < nrows; i++) {
+        u[i + 1] = u[i];
+        while (first != last && first->row == i) {
+            ++u[i + 1];
             ++first;
         }
     }
 
-    return csr{p | vs::transform([](auto&& p_) { return p_.v; }),
-               p | vs::transform([](auto&& p_) { return p_.col; }),
-               u};
+    std::vector<real> w_vec;
+    std::vector<integer> v_vec;
+    w_vec.reserve(p.size());
+    v_vec.reserve(p.size());
+    for (auto& pt : p) {
+        w_vec.push_back(pt.v);
+        v_vec.push_back(pt.col);
+    }
+    return csr{w_vec, v_vec, u};
 }
 
 void csr::operator()(std::span<const real> x, std::span<real> b) const

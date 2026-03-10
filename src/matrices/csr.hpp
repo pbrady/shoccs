@@ -4,7 +4,7 @@
 #include "matrix_visitor.hpp"
 
 #include <compare>
-#include <range/v3/range/concepts.hpp>
+#include <ranges>
 #include <vector>
 
 namespace ccs::matrix
@@ -20,11 +20,11 @@ class csr
 public:
     csr() = default;
 
-    template <ranges::input_range W, ranges::input_range V, ranges::input_range U>
+    template <std::ranges::input_range W, std::ranges::input_range V, std::ranges::input_range U>
     csr(W&& w, V&& v, U&& u, flag row_col_space = 0)
-        : w(rs::begin(w), rs::end(w)),
-          v(rs::begin(v), rs::end(v)),
-          u(rs::begin(u), rs::end(u)),
+        : w(std::ranges::begin(w), std::ranges::end(w)),
+          v(std::ranges::begin(v), std::ranges::end(v)),
+          u(std::ranges::begin(u), std::ranges::end(u)),
           f{row_col_space}
     {
     }

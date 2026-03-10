@@ -95,7 +95,7 @@ ctest --test-dir build -L matrices
   - Test: `ctest --test-dir build -R t-circulant`
   - Must come after: 2.1
 
-- [ ] **2.5** Migrate `csr.cpp`: Replace sort, sliding+enumerate, and transform with std/loops.
+- [x] **2.5** Migrate `csr.cpp`: Replace sort, sliding+enumerate, and transform with std/loops.
   - Files: `src/matrices/csr.cpp`
   - Remove includes: `<range/v3/algorithm/sort.hpp>`, `<range/v3/view/enumerate.hpp>`, `<range/v3/view/sliding.hpp>`, `<range/v3/view/transform.hpp>`
   - Add include: `<algorithm>` (for `std::ranges::sort`)
@@ -122,7 +122,7 @@ ctest --test-dir build -L matrices
   - Test: `ctest --test-dir build -R t-csr`
   - Must come after: 2.6 (csr constructor must accept std ranges first)
 
-- [ ] **2.6** Migrate `csr.hpp`: Replace range-v3 concepts and iterator accessors.
+- [x] **2.6** Migrate `csr.hpp`: Replace range-v3 concepts and iterator accessors.
   - Files: `src/matrices/csr.hpp`
   - Remove include: `<range/v3/range/concepts.hpp>`
   - Add include: `<ranges>`
@@ -132,7 +132,7 @@ ctest --test-dir build -L matrices
 
 ### Visitors
 
-- [ ] **2.7** Migrate `coefficient_visitor.cpp`: Replace chunk+for_each+drop/take and zip patterns with explicit loops.
+- [x] **2.7** Migrate `coefficient_visitor.cpp`: Replace chunk+for_each+drop/take and zip patterns with explicit loops.
   - Files: `src/matrices/coefficient_visitor.cpp` (`.hpp` has no range-v3 usage)
   - Remove includes: `<range/v3/view/chunk.hpp>`, `<range/v3/view/drop.hpp>`, `<range/v3/view/for_each.hpp>`, `<range/v3/view/zip.hpp>`
   - `visit(const dense&)` — LDD case: Replace `vs::chunk(c_n) | vs::for_each(vs::drop(1))` + `vs::zip(ind|t, d|t)` → nested loop skipping first column of each row:
@@ -287,8 +287,8 @@ Common range-v3 → std/C++20 replacement patterns used across test files:
  ├── 2.3 (dense.hpp)  [DONE] ──┐
  ├── 2.2 (dense.cpp)  [DONE] ──┤── 2.9b (dense + circulant tests) ──┐
  ├── 2.4 (circulant.cpp) [DONE]┤── 2.9d (inner_block + block tests) ├── 2.10 (verification)
- ├── 2.6 (csr.hpp) ── 2.5 (csr.cpp) ── 2.9c (csr tests) ───────────┤
- ├── 2.7 (coefficient_visitor.cpp) ──┐── 2.9a (visitor tests) ───────┘
+ ├── 2.6 (csr.hpp) [DONE] ── 2.5 (csr.cpp) [DONE] ── 2.9c (csr tests) ──┤
+ ├── 2.7 (coefficient_visitor.cpp) [DONE]┐── 2.9a (visitor tests) ───────┘
  └── 2.8 (unit_stride_visitor) [DONE]┘
 ```
 
