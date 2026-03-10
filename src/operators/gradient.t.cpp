@@ -7,7 +7,7 @@
 #include <catch2/catch_test_macros.hpp>
 #include <catch2/matchers/catch_matchers_vector.hpp>
 
-#include <range/v3/all.hpp>
+#include <ranges>
 
 #include <sol/sol.hpp>
 
@@ -18,37 +18,37 @@ const std::vector<real> alpha{
     -1.47956280234494, 0.261900367793859, -0.145072532538541, -0.224665713988644};
 
 // 2nd order polynomial for use with E2
-constexpr auto f2 = vs::transform([](auto&& loc) {
+constexpr auto f2 = std::views::transform([](auto&& loc) {
     auto&& [x, y, z] = loc;
     return x * (y + z) + y * (x + z) + z * (x + y) + 3 * x * y * z;
 });
 
-constexpr auto f2_dx = vs::transform([](auto&& loc) {
+constexpr auto f2_dx = std::views::transform([](auto&& loc) {
     auto&& [x, y, z] = loc;
     return 2. * (y + z) + 3. * y * z;
 });
 
-constexpr auto f2_dy = vs::transform([](auto&& loc) {
+constexpr auto f2_dy = std::views::transform([](auto&& loc) {
     auto&& [x, y, z] = loc;
     return 2. * (x + z) + 3. * x * z;
 });
 
-constexpr auto f2_dz = vs::transform([](auto&& loc) {
+constexpr auto f2_dz = std::views::transform([](auto&& loc) {
     auto&& [x, y, z] = loc;
     return 2. * (x + y) + 3. * x * y;
 });
 
-constexpr auto g = vs::transform([](auto&& loc) {
+constexpr auto g = std::views::transform([](auto&& loc) {
     auto&& [x, y, z] = loc;
     return x * y + (x + y);
 });
 
-constexpr auto gx = vs::transform([](auto&& loc) {
+constexpr auto gx = std::views::transform([](auto&& loc) {
     auto&& [x, y, z] = loc;
     return y + 1;
 });
 
-constexpr auto gy = vs::transform([](auto&& loc) {
+constexpr auto gy = std::views::transform([](auto&& loc) {
     auto&& [x, y, z] = loc;
     return x + 1;
 });
@@ -78,7 +78,7 @@ TEST_CASE("E2_1 Domain")
         ex | m.dirichlet(gridBcs) = 0;
 
         vector_real du{u, u, u};
-        REQUIRE((integer)rs::size(du | sel::Dx) == m.size());
+        REQUIRE((integer)std::ranges::size(du | sel::Dx) == m.size());
 
         auto grad = gradient{m, st, gridBcs, objectBcs};
         du = grad(u);
@@ -139,7 +139,7 @@ TEST_CASE("E2 with Objects")
 
     // initialize fields
     scalar_real u{loc | f2};
-    REQUIRE(rs::size(u | sel::Rx) == m.Rx().size());
+    REQUIRE(std::ranges::size(u | sel::Rx) == m.Rx().size());
 
     // set the exact du we expect based on zeros assigned to dirichlet locations
     vector_real ex{m.vs()};
@@ -216,7 +216,7 @@ TEST_CASE("2D E2 with Objects - Floating")
 
     // initialize fields
     scalar_real u{loc | g};
-    REQUIRE(rs::size(u | sel::Rx) == m.Rx().size());
+    REQUIRE(std::ranges::size(u | sel::Rx) == m.Rx().size());
 
     // set the exact du we expect based on zeros assigned to dirichlet locations
     vector_real ex{m.vs()};
@@ -294,7 +294,7 @@ TEST_CASE("E2 with Objects - Floating")
 
     // initialize fields
     scalar_real u{loc | f2};
-    REQUIRE(rs::size(u | sel::Rx) == m.Rx().size());
+    REQUIRE(std::ranges::size(u | sel::Rx) == m.Rx().size());
 
     // set the exact du we expect based on zeros assigned to dirichlet locations
     vector_real ex{m.vs()};

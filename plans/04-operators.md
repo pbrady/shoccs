@@ -99,7 +99,7 @@ ctest --test-dir build -L bcs
       ```
   - Test: `ctest --test-dir build -R t-derivative`
 
-- [ ] **4.4** Verify `derivative.hpp` has no range-v3 usage:
+- [x] **4.4** Verify `derivative.hpp` has no range-v3 usage: ✅ Verified clean, build passes
   - File: `src/operators/derivative.hpp`
   - **Already verified clean**: No `#include <range/v3/...>`, no `rs::`, no `vs::` references.
   - No changes needed; mark complete after confirming build.
@@ -127,21 +127,21 @@ ctest --test-dir build -L bcs
 
 ### Eigenvalue Visitor (No range-v3)
 
-- [ ] **4.7** Verify `eigenvalue_visitor.hpp` and `eigenvalue_visitor.cpp` have no range-v3 usage:
+- [x] **4.7** Verify `eigenvalue_visitor.hpp` and `eigenvalue_visitor.cpp` have no range-v3 usage: ✅ Verified clean, build passes
   - **Already verified clean**: Neither file includes range-v3 or uses `rs::`/`vs::`.
   - No changes needed; mark complete after confirming build.
   - Test: `ctest --test-dir build -R t-eigenvalue_visitor`
 
 ### Boundaries (No range-v3)
 
-- [ ] **4.8** Verify `boundaries.hpp` and `boundaries.cpp` have no range-v3 usage:
+- [x] **4.8** Verify `boundaries.hpp` and `boundaries.cpp` have no range-v3 usage: ✅ Verified clean, build passes
   - **Already verified clean**: Neither file includes range-v3 or uses `rs::`/`vs::`.
   - No changes needed; mark complete after confirming build.
   - Test: `ctest --test-dir build -R t-boundaries`
 
 ### Test Migration
 
-- [ ] **4.9** Migrate `derivative.t.cpp`:
+- [x] **4.9** Migrate `derivative.t.cpp`: ✅ Done
   - File: `src/operators/derivative.t.cpp`
   - Remove `#include <range/v3/all.hpp>` (line 12), add `#include <ranges>` and `#include <algorithm>`.
   - **`vs::transform` (5 active calls, lines 59–79):** `constexpr auto f2 = vs::transform(...)` → `constexpr auto f2 = std::views::transform(...)`. Same for f2_dx, f2_dy, f2_dz, f2_ddx. Note: f2_ddy (line 80) and f2_ddz (line 81) are aliases (`= f2_ddx`), not `vs::transform` calls — no change needed for those.
@@ -154,35 +154,35 @@ ctest --test-dir build -L bcs
   - **`rs::size` (10 uses, lines 151, 179, 219, 241, 275, 300, 334, 339, 371, 386):** `rs::size(...)` → `std::ranges::size(...)`.
   - Test: `ctest --test-dir build -R t-derivative`
 
-- [ ] **4.10** Migrate `gradient.t.cpp`:
+- [x] **4.10** Migrate `gradient.t.cpp`: ✅ Done
   - File: `src/operators/gradient.t.cpp`
   - Remove `#include <range/v3/all.hpp>` (line 10), add `#include <ranges>`.
   - **`vs::transform` (7 declarations, lines 21–53):** `vs::transform(...)` → `std::views::transform(...)`. For f2, f2_dx, f2_dy, f2_dz, g, gx, gy.
   - **`rs::size` (4 uses, lines 81, 142, 219, 297):** `rs::size(...)` → `std::ranges::size(...)`.
   - Test: `ctest --test-dir build -R t-gradient`
 
-- [ ] **4.11** Migrate `laplacian.t.cpp`:
+- [x] **4.11** Migrate `laplacian.t.cpp`: ✅ Done
   - File: `src/operators/laplacian.t.cpp`
   - Remove `#include <range/v3/all.hpp>` (line 15), add `#include <ranges>`.
   - **`vs::transform` (12 declarations, lines 23–83):** `vs::transform(...)` → `std::views::transform(...)`. For f2, f2_dx, f2_dy, f2_dz, f2_ddx, f2_ddy, f2_ddz, g2, g2_dx, g2_dy, g2_ddx, g2_ddy.
   - **`rs::size` (5 uses, lines 111, 133, 195, 269, 347):** `rs::size(...)` → `std::ranges::size(...)`.
   - Test: `ctest --test-dir build -R t-laplacian`
 
-- [ ] **4.12** Migrate `eigenvalue_visitor.t.cpp`:
+- [x] **4.12** Migrate `eigenvalue_visitor.t.cpp`: ✅ Done
   - File: `src/operators/eigenvalue_visitor.t.cpp`
   - No `#include <range/v3/...>` present, but uses `rs::max` (line 114).
   - Line 114: `rs::max(eigs)` → `std::ranges::max(eigs)`. Add `#include <algorithm>` and `#include <ranges>` if needed.
   - Note: `to<T>(...)` on lines 57, 111 is project-local (`fields/tuple_utils.hpp`), NOT range-v3. No change needed.
   - Test: `ctest --test-dir build -R t-eigenvalue_visitor`
 
-- [ ] **4.13** Verify `boundaries.t.cpp` has no range-v3 usage:
+- [x] **4.13** Verify `boundaries.t.cpp` has no range-v3 usage: ✅ Verified clean
   - **Already verified clean**: No range-v3 includes, no `rs::`/`vs::` usage.
   - No changes needed.
   - Test: `ctest --test-dir build -R t-boundaries`
 
 ### Remove range-v3 from CMake
 
-- [ ] **4.14** Verify no range-v3 link dependency in `src/operators/CMakeLists.txt`:
+- [x] **4.14** Verify no range-v3 link dependency in `src/operators/CMakeLists.txt`: ✅ Verified, all tests pass
   - **Already verified**: `shoccs-operators` links `shoccs-mesh shoccs-matrices shoccs-logging lapackpp`. No direct `range-v3::range-v3` dependency.
   - `shoccs-bcs` links `sol2::sol2 lua shoccs-logging`. No range-v3 dependency.
   - Range-v3 headers were only pulled in via explicit `#include <range/v3/...>` in source files (derivative.cpp, laplacian.cpp) and test files. Once those includes are removed in items 4.1–4.12, no CMake changes are needed.

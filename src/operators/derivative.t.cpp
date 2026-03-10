@@ -9,7 +9,8 @@
 #include "random/random.hpp"
 #include "stencils/stencil.hpp"
 
-#include <range/v3/all.hpp>
+#include <algorithm>
+#include <ranges>
 
 #include <fmt/core.h>
 #include <fmt/ranges.h>
@@ -20,63 +21,63 @@ using Catch::Matchers::Approx;
 constexpr auto g = []() { return pick(); };
 
 // 2nd order polynomial for use with E2
-// constexpr auto f2 = vs::transform([](auto&& loc) {
+// constexpr auto f2 = std::views::transform([](auto&& loc) {
 //     auto&& [x, y, z] = loc;
 //     return x * x * (y + z) + y * y * (x + z) + z * z * (x + y) + 3 * x * y * z + x + y
 //     +
 //            z;
 // });
 
-// constexpr auto f2_dx = vs::transform([](auto&& loc) {
+// constexpr auto f2_dx = std::views::transform([](auto&& loc) {
 //     auto&& [x, y, z] = loc;
 //     return 2. * x * (y + z) + y * y + z * z + 3. * y * z + 1;
 // });
 
-// constexpr auto f2_dy = vs::transform([](auto&& loc) {
+// constexpr auto f2_dy = std::views::transform([](auto&& loc) {
 //     auto&& [x, y, z] = loc;
 //     return x * x + 2. * y * (x + z) + z * z + 3. * x * z + 1;
 // });
 
-// constexpr auto f2_dz = vs::transform([](auto&& loc) {
+// constexpr auto f2_dz = std::views::transform([](auto&& loc) {
 //     auto&& [x, y, z] = loc;
 //     return x * x + y * y + 2. * z * (x + y) + 3. * x * y + 1;
 // });
 
-// constexpr auto f2_ddx = vs::transform([](auto&& loc) {
+// constexpr auto f2_ddx = std::views::transform([](auto&& loc) {
 //     auto&& [_, y, z] = loc;
 //     return 2. * (y + z);
 // });
 
-// constexpr auto f2_ddy = vs::transform([](auto&& loc) {
+// constexpr auto f2_ddy = std::views::transform([](auto&& loc) {
 //     auto&& [x, _, z] = loc;
 //     return 2. * (x + z);
 // });
 
-// constexpr auto f2_ddz = vs::transform([](auto&& loc) {
+// constexpr auto f2_ddz = std::views::transform([](auto&& loc) {
 //     auto&& [x, y, _] = loc;
 //     return 2. * (x + y);
 // });
-constexpr auto f2 = vs::transform([](auto&& loc) {
+constexpr auto f2 = std::views::transform([](auto&& loc) {
     auto&& [x, y, z] = loc;
     return x * (y + z) + y * (x + z) + z * (x + y) + 3 * x * y * z;
 });
 
-constexpr auto f2_dx = vs::transform([](auto&& loc) {
+constexpr auto f2_dx = std::views::transform([](auto&& loc) {
     auto&& [x, y, z] = loc;
     return 2. * (y + z) + 3. * y * z;
 });
 
-constexpr auto f2_dy = vs::transform([](auto&& loc) {
+constexpr auto f2_dy = std::views::transform([](auto&& loc) {
     auto&& [x, y, z] = loc;
     return 2. * (x + z) + 3. * x * z;
 });
 
-constexpr auto f2_dz = vs::transform([](auto&& loc) {
+constexpr auto f2_dz = std::views::transform([](auto&& loc) {
     auto&& [x, y, z] = loc;
     return 2. * (x + y) + 3. * x * y;
 });
 
-constexpr auto f2_ddx = vs::transform([](auto&& loc) { return 0.0; });
+constexpr auto f2_ddx = std::views::transform([](auto&& loc) { return 0.0; });
 constexpr auto f2_ddy = f2_ddx;
 constexpr auto f2_ddz = f2_ddx;
 
@@ -145,10 +146,10 @@ TEST_CASE("Identity FFFFFF")
     // initialize fields
     randomize();
     scalar<T> u{m.ss()};
-    u | sel::D = vs::generate_n(g, m.size());
+    { std::vector<real> tmp(m.size()); std::ranges::generate(tmp, g); u | sel::D = tmp; }
 
     scalar<T> du{m.ss()};
-    REQUIRE((integer)rs::size(du | sel::D) == m.size());
+    REQUIRE((integer)std::ranges::size(du | sel::D) == m.size());
 
     for (int i = 0; i < 3; i++) {
         auto d = derivative{i, m, stencils::identity, gridBcs, objectBcs};
@@ -176,7 +177,7 @@ TEST_CASE("E2_2 FFFFFF")
     //    u | sel::D = m.location() | f2);
 
     scalar<T> du{m.ss()};
-    REQUIRE((integer)rs::size(du | sel::D) == m.size());
+    REQUIRE((integer)std::ranges::size(du | sel::D) == m.size());
 
     // exact
     std::array<scalar<T>, 3> dd{m.xyz | f2_ddx, m.xyz | f2_ddy, m.xyz | f2_ddz};
@@ -203,7 +204,7 @@ TEST_CASE("Identity Mixed")
     // initialize fields
     randomize();
     scalar<T> u{m.ss()};
-    u | sel::D = vs::generate_n(g, m.size());
+    { std::vector<real> tmp(m.size()); std::ranges::generate(tmp, g); u | sel::D = tmp; }
 
     SECTION("DDFNFD")
     {
@@ -216,7 +217,7 @@ TEST_CASE("Identity Mixed")
         du_exact | m.dirichlet(gridBcs) = 0;
 
         scalar<T> du{u};
-        REQUIRE((integer)rs::size(du | sel::D) == m.size());
+        REQUIRE((integer)std::ranges::size(du | sel::D) == m.size());
 
         for (int i = 0; i < m.dims(); i++) {
             auto d = derivative{i, m, stencils::identity, gridBcs, objectBcs};
@@ -238,7 +239,7 @@ TEST_CASE("Identity Mixed")
         du_exact | m.dirichlet(gridBcs) = 0;
 
         scalar<T> du{u};
-        REQUIRE((integer)rs::size(du | sel::D) == m.size());
+        REQUIRE((integer)std::ranges::size(du | sel::D) == m.size());
 
         for (int i = 0; i < m.dims(); i++) {
             auto d = derivative{i, m, stencils::identity, gridBcs, objectBcs};
@@ -272,7 +273,7 @@ TEST_CASE("E2 Mixed")
 
         std::array<scalar<T>, 3> dd{m.xyz | f2_ddx, m.xyz | f2_ddy, m.xyz | f2_ddz};
         scalar<T> du{m.ss()};
-        REQUIRE((integer)rs::size(du | sel::D) == m.size());
+        REQUIRE((integer)std::ranges::size(du | sel::D) == m.size());
 
         for (int i = 0; i < m.dims(); i++) {
             auto d = derivative{i, m, stencils::second::E2, gridBcs, objectBcs};
@@ -297,7 +298,7 @@ TEST_CASE("E2 Mixed")
         std::array<scalar<T>, 3> dd{m.xyz | f2_ddx, m.xyz | f2_ddy, m.xyz | f2_ddz};
 
         scalar<T> du{u};
-        REQUIRE((integer)rs::size(du | sel::D) == m.size());
+        REQUIRE((integer)std::ranges::size(du | sel::D) == m.size());
 
         for (int i = 0; i < m.dims(); i++) {
             auto d = derivative{i, m, stencils::second::E2, gridBcs, objectBcs};
@@ -329,14 +330,14 @@ TEST_CASE("Identity with Objects")
 
     // initialize fields
     randomize();
-    scalar<T> u{m.xyz | vs::transform([](auto&&) { return pick(); })};
+    scalar<T> u{m.xyz | std::views::transform([](auto&&) { return pick(); })};
 
-    REQUIRE(rs::size(u | sel::Rx) == m.Rx().size());
+    REQUIRE(std::ranges::size(u | sel::Rx) == m.Rx().size());
 
     scalar<T> du_x{u};
     scalar<T> du_y{u};
     scalar<T> du_z{u};
-    REQUIRE((integer)rs::size(du_x | sel::D) == m.size());
+    REQUIRE((integer)std::ranges::size(du_x | sel::D) == m.size());
 
     auto dx = derivative{0, m, stencils::identity, gridBcs, objectBcs};
     auto dy = derivative{1, m, stencils::identity, gridBcs, objectBcs};
@@ -368,7 +369,7 @@ TEST_CASE("E2 with Objects")
 
     // initialize fields
     scalar<T> u = m.xyz | f2;
-    REQUIRE(rs::size(u | sel::Rx) == m.Rx().size());
+    REQUIRE(std::ranges::size(u | sel::Rx) == m.Rx().size());
 
     scalar<T> nu = m.xyz | f2_dx;
 
@@ -383,7 +384,7 @@ TEST_CASE("E2 with Objects")
     du_z | m.fluid_all(objectBcs) = m.xyz | f2_ddz;
     du_z | m.dirichlet(gridBcs, objectBcs) = 0;
 
-    REQUIRE((integer)rs::size(du_x | sel::D) == m.size());
+    REQUIRE((integer)std::ranges::size(du_x | sel::D) == m.size());
 
     auto dx = derivative{0, m, stencils::second::E2, gridBcs, objectBcs};
     auto dy = derivative{1, m, stencils::second::E2, gridBcs, objectBcs};

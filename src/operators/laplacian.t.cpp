@@ -12,7 +12,7 @@
 #include "random/random.hpp"
 #include "stencils/stencil.hpp"
 
-#include <range/v3/all.hpp>
+#include <ranges>
 
 using namespace ccs;
 using Catch::Matchers::Approx;
@@ -20,64 +20,64 @@ using Catch::Matchers::Approx;
 constexpr auto g = []() { return pick(); };
 
 // 2nd order polynomial for use with E2
-constexpr auto f2 = vs::transform([](auto&& loc) {
+constexpr auto f2 = std::views::transform([](auto&& loc) {
     auto&& [x, y, z] = loc;
     return x * x * (y + z) + y * y * (x + z) + z * z * (x + y) + 3 * x * y * z + x + y +
            z;
 });
 
-constexpr auto f2_dx = vs::transform([](auto&& loc) {
+constexpr auto f2_dx = std::views::transform([](auto&& loc) {
     auto&& [x, y, z] = loc;
     return 2. * x * (y + z) + y * y + z * z + 3. * y * z + 1;
 });
 
-constexpr auto f2_dy = vs::transform([](auto&& loc) {
+constexpr auto f2_dy = std::views::transform([](auto&& loc) {
     auto&& [x, y, z] = loc;
     return x * x + 2. * y * (x + z) + z * z + 3. * x * z + 1;
 });
 
-constexpr auto f2_dz = vs::transform([](auto&& loc) {
+constexpr auto f2_dz = std::views::transform([](auto&& loc) {
     auto&& [x, y, z] = loc;
     return x * x + y * y + 2. * z * (x + y) + 3. * x * y + 1;
 });
 
-constexpr auto f2_ddx = vs::transform([](auto&& loc) {
+constexpr auto f2_ddx = std::views::transform([](auto&& loc) {
     auto&& [_, y, z] = loc;
     return 2. * (y + z);
 });
 
-constexpr auto f2_ddy = vs::transform([](auto&& loc) {
+constexpr auto f2_ddy = std::views::transform([](auto&& loc) {
     auto&& [x, _, z] = loc;
     return 2. * (x + z);
 });
 
-constexpr auto f2_ddz = vs::transform([](auto&& loc) {
+constexpr auto f2_ddz = std::views::transform([](auto&& loc) {
     auto&& [x, y, _] = loc;
     return 2. * (x + y);
 });
 
 // 2D 1st order polynomial for use with E2
-constexpr auto g2 = vs::transform([](auto&& loc) {
+constexpr auto g2 = std::views::transform([](auto&& loc) {
     auto&& [x, y, _] = loc;
     return 3 * x * y + x + y + 1;
 });
 
-constexpr auto g2_dx = vs::transform([](auto&& loc) {
+constexpr auto g2_dx = std::views::transform([](auto&& loc) {
     auto&& [x, y, _] = loc;
     return 3. * y + 1;
 });
 
-constexpr auto g2_dy = vs::transform([](auto&& loc) {
+constexpr auto g2_dy = std::views::transform([](auto&& loc) {
     auto&& [x, y, _] = loc;
     return 3. * x + 1;
 });
 
-constexpr auto g2_ddx = vs::transform([](auto&& loc) {
+constexpr auto g2_ddx = std::views::transform([](auto&& loc) {
     auto&& [_, y, __] = loc;
     return 0;
 });
 
-constexpr auto g2_ddy = vs::transform([](auto&& loc) {
+constexpr auto g2_ddy = std::views::transform([](auto&& loc) {
     auto&& [x, _, __] = loc;
     return 0;
 });
@@ -108,7 +108,7 @@ TEST_CASE("E2_2 Domain")
         ex | m.dirichlet(gridBcs) = 0;
 
         scalar<T> du{u};
-        REQUIRE((integer)rs::size(du | sel::D) == m.size());
+        REQUIRE((integer)std::ranges::size(du | sel::D) == m.size());
 
         auto lap = laplacian{m, stencils::second::E2, gridBcs, objectBcs};
         du = lap(u);
@@ -130,7 +130,7 @@ TEST_CASE("E2_2 Domain")
         scalar<T> nu{loc | f2_dz};
 
         scalar<T> du{m.ss()};
-        REQUIRE((integer)rs::size(du | sel::D) == m.size());
+        REQUIRE((integer)std::ranges::size(du | sel::D) == m.size());
 
         auto lap = laplacian{m, stencils::second::E2, gridBcs, objectBcs};
         du = lap(u, nu);
@@ -192,7 +192,7 @@ TEST_CASE("E2 with Dirichlet Objects")
 
     // initialize fields
     scalar<T> u{loc | f2};
-    REQUIRE(rs::size(u | sel::Rx) == m.Rx().size());
+    REQUIRE(std::ranges::size(u | sel::Rx) == m.Rx().size());
 
     // set the exact du we expect based on zeros assigned to dirichlet locations
     scalar<T> ex{m.ss()};
@@ -266,7 +266,7 @@ TEST_CASE("E2 with Floating Objects")
 
     // initialize fields
     scalar<T> u{loc | f2};
-    REQUIRE(rs::size(u | sel::Rx) == m.Rx().size());
+    REQUIRE(std::ranges::size(u | sel::Rx) == m.Rx().size());
 
     // set the exact du we expect based on zeros assigned to dirichlet locations
     scalar<T> ex{m.ss()};
@@ -344,7 +344,7 @@ TEST_CASE("2D E2 with Floating Objects")
 
     // initialize fields
     scalar<T> u{loc | g2};
-    REQUIRE(rs::size(u | sel::Rx) == m.Rx().size());
+    REQUIRE(std::ranges::size(u | sel::Rx) == m.Rx().size());
 
     // set the exact du we expect based on zeros assigned to dirichlet locations
     scalar<T> ex{m.ss()};

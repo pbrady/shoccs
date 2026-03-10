@@ -9,6 +9,7 @@
 #include "identity_stencil.hpp"
 #include "stencils/stencil.hpp"
 
+#include <algorithm>
 #include <sol/sol.hpp>
 
 using namespace ccs;
@@ -111,5 +112,5 @@ TEST_CASE("e2-poly")
     auto eigs = to<T>(v.eigenvalues_real());
     REQUIRE(eigs.size() == 20u);
 
-    REQUIRE(rs::max(eigs) == Catch::Approx(0.19628372852526094));
+    REQUIRE(std::ranges::max(eigs) == Catch::Approx(0.19628372852526094));
 }
