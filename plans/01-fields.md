@@ -188,8 +188,9 @@ These project-local utilities replace range-v3 internal APIs that have no C++20 
   - Test: `ctest --test-dir build -R t-field`
 
 - [ ] **1.11** Migrate `src/fields/field_utils.hpp`:
-  - Replace `vs::zip(t.scalars()...)` with index-based iteration in `for_each_scalar` and `for_each_vector` (lines 11, 17): iterate `for (int i = 0; i < t.nscalars(); ++i) f(t.scalars(i)...);` (or equivalent using `std::ranges::size`).
+  - Replace `vs::zip(t.scalars()...)` with index-based iteration in `for_each_scalar` and `for_each_vector` (lines 11, 17): iterate `for (int i = 0; i < t.nscalars(); ++i) f(t.scalars(i)...);` (or equivalent using `std::ranges::size`). Note: `t` is a parameter pack `T&&... t`; use the first argument's size.
   - Replace `vs::zip_with(f, t.scalars()...)` with `ccs::zip_transform(f, t.scalars()...)` in `transform_scalar` and `transform_vector` (lines 30, 36).
+  - Add `#include "lazy_views.hpp"` for `ccs::zip_transform`. No direct range-v3 includes to remove (range-v3 is accessed transitively through `field_fwd.hpp` → `selector.hpp`).
   - Depends on: 1.2b
   - Files: `src/fields/field_utils.hpp`
   - Test: `ctest --test-dir build -R t-field_utils`
@@ -280,7 +281,7 @@ All selector items depend on: 1.2a (ccs_range_utils.hpp) and 1.3 (tuple_fwd.hpp 
     - Files: `src/fields/selector.hpp`
   - [ ] **1.19c** In `plane_selection_base_fn` (lines 370–391): Replace `rs::bind_back(...)` → `ccs::bind_back(...)` and `rs::compose(...)` → `ccs::compose(...)`.
     - Files: `src/fields/selector.hpp`
-  - [ ] **1.19d** In `plane_selection_fn::operator()` (lines 415–416): Replace `rs::make_view_closure(rs::bind_back(...))` → `ccs::make_view_closure(ccs::bind_back(...))`.
+  - [ ] **1.19d** In `plane_selection_fn::operator()` (lines 415–416, 420): Replace `rs::make_view_closure(rs::bind_back(...))` → `ccs::make_view_closure(ccs::bind_back(...))` on lines 415–416. Also replace `rs::bind_back(*this, plane_coord)` → `ccs::bind_back(*this, plane_coord)` on line 420.
     - Files: `src/fields/selector.hpp`
   - [ ] **1.19e** In `multi_slice_fn::operator()` (line 647) and `multi_slice_base_fn` (lines 652–665): Replace `rs::make_view_closure`, `rs::bind_back`, `rs::compose` → `ccs::` equivalents.
     - Files: `src/fields/selector.hpp`
@@ -314,12 +315,24 @@ Migrate test files to remove `#include <range/v3/all.hpp>` and all `rs::`/`vs::`
 - `rs::random_access_range<T>` → `std::ranges::random_access_range<T>` (C++20)
 - `rs::output_range<T, V>` → `std::ranges::output_range<T, V>` (C++20)
 - `rs::common_tuple<...>` → remove (no longer needed)
+- `vs::cartesian_product(a, b, ...)` → nested for loops (test-only; C++23 `std::views::cartesian_product` not available in C++20)
+- `rs::accumulate(rng, init, op)` → `std::accumulate(std::ranges::begin(r), std::ranges::end(r), init, op)` (from `<numeric>`)
+- `rs::empty_view<T>{}` → `std::ranges::empty_view<T>{}` (C++20)
+- `rs::minmax(rng)` → `std::ranges::minmax(rng)`, `rs::minmax_result<V>` → `std::ranges::minmax_result<V>` (C++20)
+- `rs::min(a, b)` → `std::ranges::min(a, b)`, `rs::max(a, b)` → `std::ranges::max(a, b)` (C++20)
+- `vs::repeat(v)` → `ccs::repeat_n(v, n)` where count is known, or manual pattern
+- `rs::make_view_closure(fn)` → `ccs::make_view_closure(fn)` (where used in test code)
 
 - [ ] **1.20a** Migrate `src/fields/range_concepts.t.cpp`: This is the concept test file. Remove `#include <range/v3/all.hpp>`. Replace range-v3 concept checks with `std::ranges` equivalents. Remove `rs::common_tuple` test (line 172). Remove or rewrite `generate_n`/`rs::to` test (line 199). Remove or rewrite `x_plane_view`/`z_plane_view` test classes that use `vs::drop_exactly`/`vs::take_exactly`/`vs::stride` (lines 206–267). Remove `vs::zip` test (lines 291–300).
   - Files: `src/fields/range_concepts.t.cpp`
   - Test: `ctest --test-dir build -R t-range_concepts`
 
-- [ ] **1.20b** Migrate `src/fields/tuple_utils.t.cpp`: Remove `#include <range/v3/all.hpp>`. Replace `vs::zip` in for loops with index-based iteration (lines 117, 123, 161). Replace `vs::zip_with`/`vs::repeat`/`vs::repeat_n` in lift tests (lines 271, 282, 401, 424, 442, 460).
+- [ ] **1.20b** Migrate `src/fields/tuple_utils.t.cpp` (611 lines, heaviest `rs::` usage): Remove `#include <range/v3/all.hpp>`. Add `#include <algorithm>`, `#include <numeric>`, `#include <ranges>`. Replace:
+  - `vs::zip` in for loops → index-based iteration (lines 117, 123, 161).
+  - `vs::zip_with`/`vs::repeat`/`vs::repeat_n` in lift tests → `ccs::zip_transform` or manual equivalents (lines 271, 282, 401, 424, 442, 460).
+  - `rs::accumulate(rng, init, op)` → `std::accumulate(std::ranges::begin(r), std::ranges::end(r), init, op)` (~5 occurrences).
+  - `rs::equal` → `std::ranges::equal`, `rs::size` → `std::ranges::size` (~100 occurrences combined).
+  - `rs::minmax`/`rs::min`/`rs::max`/`rs::minmax_result` → `std::ranges::minmax`/`min`/`max`/`minmax_result`.
   - Files: `src/fields/tuple_utils.t.cpp`
   - Test: `ctest --test-dir build -R t-tuple_utils`
 
@@ -327,7 +340,11 @@ Migrate test files to remove `#include <range/v3/all.hpp>` and all `rs::`/`vs::`
   - Files: `src/fields/tuple_math.t.cpp`
   - Test: `ctest --test-dir build -R t-tuple_math`
 
-- [ ] **1.20d** Migrate `src/fields/view_tuple.t.cpp`: Remove range-v3 includes. Replace `vs::repeat_n` (line 133) and `vs::zip_with` (lines 352, 366–367) with project-local or manual equivalents.
+- [ ] **1.20d** Migrate `src/fields/view_tuple.t.cpp` (456 lines): Remove range-v3 includes. Replace:
+  - `vs::repeat_n` (line 133) and `vs::zip_with` (lines 352, 366–367) → project-local or manual equivalents.
+  - `rs::empty_view<T>{}` → `std::ranges::empty_view<T>{}`.
+  - `rs::make_view_closure(fn)` → `ccs::make_view_closure(fn)`.
+  - `rs::equal` → `std::ranges::equal`, `rs::size` → `std::ranges::size`.
   - Files: `src/fields/view_tuple.t.cpp`
   - Test: `ctest --test-dir build -R t-view_tuple`
 
@@ -343,13 +360,25 @@ Migrate test files to remove `#include <range/v3/all.hpp>` and all `rs::`/`vs::`
   - Files: `src/fields/tuple.t.cpp`
   - Test: `ctest --test-dir build -R t-tuple`
 
-- [ ] **1.20g** Migrate `src/fields/scalar.t.cpp` and `src/fields/vector.t.cpp`: Remove range-v3 includes. Replace `vs::repeat_n` (~20 occurrences across both files) with `std::vector<T>(n, v)` or `ccs::repeat_n`.
+- [ ] **1.20g** Migrate `src/fields/scalar.t.cpp` (266 lines) and `src/fields/vector.t.cpp` (354 lines): Remove range-v3 includes. Replace:
+  - `vs::repeat_n` (~20 occurrences across both files) → `std::vector<T>(n, v)` or `ccs::repeat_n`.
+  - `vs::cartesian_product(a, b, ...)` → nested for loops (used in both files for constructing test grids; no C++20 equivalent).
+  - `vs::generate_n(f, n)` → manual loop building a vector (in `scalar.t.cpp`).
+  - `rs::equal` → `std::ranges::equal` (heavily used in both files, ~118 occurrences combined).
   - Files: `src/fields/scalar.t.cpp`, `src/fields/vector.t.cpp`
   - Test: `ctest --test-dir build -R t-scalar && ctest --test-dir build -R t-vector`
 
-- [ ] **1.20h** Migrate remaining test files: `container_tuple.t.cpp`, `tuple_pipe.t.cpp`, `single_view.t.cpp`, `algorithms.t.cpp`, `field.t.cpp`, `field_utils.t.cpp`, `field_math.t.cpp`. These have lighter range-v3 usage (mostly `rs::equal`, `vs::iota`, `vs::repeat_n`). Remove `#include <range/v3/all.hpp>` and replace with `std::ranges`/`std::views` equivalents.
-  - Files: 7 test files
-  - Test: `ctest --test-dir build -L fields` — all pass.
+- [ ] **1.20h1** Migrate `src/fields/container_tuple.t.cpp` (327 lines, heaviest of remaining tests): Remove range-v3 includes. Replace `rs::equal` → `std::ranges::equal`, `rs::size` → `std::ranges::size`, `rs::begin`/`rs::end` → `std::ranges::begin`/`end` (~49 `rs::` occurrences). Replace `vs::iota` → `std::views::iota`, `vs::transform` → `std::views::transform`.
+  - Files: `src/fields/container_tuple.t.cpp`
+  - Test: `ctest --test-dir build -R t-container_tuple`
+
+- [ ] **1.20h2** Migrate `src/fields/tuple_pipe.t.cpp` (160 lines), `src/fields/single_view.t.cpp` (27 lines), and `src/fields/algorithms.t.cpp` (65 lines): Remove range-v3 includes. Replace `rs::equal` → `std::ranges::equal`, `rs::size` → `std::ranges::size`, `vs::iota` → `std::views::iota`, `vs::transform` → `std::views::transform`.
+  - Files: `src/fields/tuple_pipe.t.cpp`, `src/fields/single_view.t.cpp`, `src/fields/algorithms.t.cpp`
+  - Test: `ctest --test-dir build -R "t-tuple_pipe|t-single_view|t-algorithms"`
+
+- [ ] **1.20h3** Migrate `src/fields/field.t.cpp` (169 lines), `src/fields/field_utils.t.cpp` (60 lines), and `src/fields/field_math.t.cpp` (106 lines): Remove range-v3 includes where present. Replace `rs::begin`/`rs::end` → `std::ranges::begin`/`end`, `rs::equal` → `std::ranges::equal`, `vs::repeat_n` → `std::vector<T>(n, v)` or `ccs::repeat_n`, `vs::iota` → `std::views::iota`. Note: `field.t.cpp` has no direct `#include <range/v3/...>` (gets range-v3 transitively) but may need `#include <algorithm>` and `#include <ranges>` after transitive includes are removed.
+  - Files: `src/fields/field.t.cpp`, `src/fields/field_utils.t.cpp`, `src/fields/field_math.t.cpp`
+  - Test: `ctest --test-dir build -R "t-field$|t-field_utils|t-field_math"`
 
 - [ ] **1.20i** Migrate or remove `src/fields/view_tuple_seg.cpp`. This is a standalone scratch/debug executable (`add_executable(seg ...)` in CMakeLists.txt) with 7 range-v3 includes (`equal`, `all`, `concat`, `iota`, `repeat_n`, `take`, `zip_with`). It is **not** a unit test. Options:
   - (a) Delete the file and remove the `seg` target from CMakeLists.txt (preferred — it appears to be unused scratch code with commented-out lines).
@@ -389,9 +418,9 @@ Migrate test files to remove `#include <range/v3/all.hpp>` and all `rs::`/`vs::`
 
 1.13–1.19 (selectors) ───────── 1.20e (selector tests)
 
-1.4–1.19 (all headers) ──────── 1.20a–1.20h (test migration)
+1.4–1.19 (all headers) ──────── 1.20a–1.20h3 (test migration)
 
-1.20a–1.20i (tests + seg.cpp) ── 1.21 (CMake cleanup)
+1.20a–1.20h3, 1.20i (tests + seg.cpp) ── 1.21 (CMake cleanup)
 ```
 
 ---
