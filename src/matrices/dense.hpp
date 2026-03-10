@@ -4,9 +4,8 @@
 #include "matrix_visitor.hpp"
 #include <vector>
 
-#include <range/v3/algorithm/copy.hpp>
-#include <range/v3/range/concepts.hpp>
-#include <range/v3/view/take.hpp>
+#include <algorithm>
+#include <ranges>
 
 namespace ccs::matrix
 {
@@ -20,14 +19,14 @@ class dense : public matrix_base
 public:
     dense() = default;
 
-    template <rs::input_range R>
+    template <std::ranges::input_range R>
     dense(integer rows, integer columns, R&& rng, flag boundary = 0)
         : matrix_base{rows, columns}, v(rows * columns), f{boundary}
     {
-        rs::copy(rng | vs::take(v.size()), v.begin());
+        std::ranges::copy(rng | std::views::take(v.size()), v.begin());
     }
 
-    template <rs::input_range R>
+    template <std::ranges::input_range R>
     dense(integer rows,
           integer columns,
           integer row_offset,
@@ -39,7 +38,7 @@ public:
           v(rows * columns),
           f{boundary}
     {
-        rs::copy(rng | vs::take(v.size()), v.begin());
+        std::ranges::copy(rng | std::views::take(v.size()), v.begin());
     }
 
     auto size() const noexcept { return v.size(); }

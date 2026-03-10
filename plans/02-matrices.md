@@ -37,7 +37,7 @@ ctest --test-dir build -L matrices
 
 ### Core Matrix Types
 
-- [ ] **2.2** Migrate `dense.cpp`: Replace the MatVec `operator()` implementation with explicit loops.
+- [x] **2.2** Migrate `dense.cpp`: Replace the MatVec `operator()` implementation with explicit loops.
   - Files: `src/matrices/dense.cpp`
   - Remove includes: `<range/v3/algorithm/copy.hpp>`, `<range/v3/numeric/inner_product.hpp>`, `<range/v3/range/concepts.hpp>`, `<range/v3/view/chunk.hpp>`, `<range/v3/view/repeat_n.hpp>`, `<range/v3/view/stride.hpp>`, `<range/v3/view/zip.hpp>`, `<range/v3/view/zip_with.hpp>`
   - Add include: `<numeric>` (for `std::inner_product`)
@@ -62,7 +62,7 @@ ctest --test-dir build -L matrices
   - Test: `ctest --test-dir build -R t-dense`
   - Must come after: 2.1
 
-- [ ] **2.3** Migrate `dense.hpp`: Replace range-v3 concepts and algorithms with std equivalents.
+- [x] **2.3** Migrate `dense.hpp`: Replace range-v3 concepts and algorithms with std equivalents.
   - Files: `src/matrices/dense.hpp`
   - Remove includes: `<range/v3/algorithm/copy.hpp>`, `<range/v3/range/concepts.hpp>`, `<range/v3/view/take.hpp>`
   - Add includes: `<algorithm>`, `<ranges>`
@@ -172,7 +172,7 @@ ctest --test-dir build -L matrices
     ```
   - Test: `ctest --test-dir build -R t-coefficient_visitor`
 
-- [ ] **2.8** Migrate `unit_stride_visitor.hpp` and `unit_stride_visitor.cpp`: Replace `rs::size` and `rs::begin`/`rs::end` with std equivalents.
+- [x] **2.8** Migrate `unit_stride_visitor.hpp` and `unit_stride_visitor.cpp`: Replace `rs::size` and `rs::begin`/`rs::end` with std equivalents.
   - Files: `src/matrices/unit_stride_visitor.hpp`, `src/matrices/unit_stride_visitor.cpp`
   - Note: Neither file has explicit `#include <range/v3/...>` lines. The `rs::` calls resolve through `types.hpp` (`namespace rs = ranges;`) via transitive range-v3 includes from other translation units. After migration, `<ranges>` must be included explicitly.
   - `.hpp`: Add include: `<ranges>`
@@ -284,12 +284,12 @@ Common range-v3 → std/C++20 replacement patterns used across test files:
 
 ```
 2.1 (D6 decision) [DONE]
- ├── 2.3 (dense.hpp)  ──┐
- ├── 2.2 (dense.cpp)  ──┤── 2.9b (dense + circulant tests) ──┐
- ├── 2.4 (circulant.cpp)┤── 2.9d (inner_block + block tests) ├── 2.10 (verification)
- ├── 2.6 (csr.hpp) ── 2.5 (csr.cpp) ── 2.9c (csr tests) ────┤
- ├── 2.7 (coefficient_visitor.cpp) ──┐── 2.9a (visitor tests) ┘
- └── 2.8 (unit_stride_visitor.hpp/.cpp)┘
+ ├── 2.3 (dense.hpp)  [DONE] ──┐
+ ├── 2.2 (dense.cpp)  [DONE] ──┤── 2.9b (dense + circulant tests) ──┐
+ ├── 2.4 (circulant.cpp)───────┤── 2.9d (inner_block + block tests) ├── 2.10 (verification)
+ ├── 2.6 (csr.hpp) ── 2.5 (csr.cpp) ── 2.9c (csr tests) ───────────┤
+ ├── 2.7 (coefficient_visitor.cpp) ──┐── 2.9a (visitor tests) ───────┘
+ └── 2.8 (unit_stride_visitor) [DONE]┘
 ```
 
 Items 2.2–2.8 have no inter-dependencies (except 2.5 depends on 2.6) and can be done in parallel (2.1 is already complete).

@@ -119,8 +119,8 @@ void unit_stride_visitor::visit(const csr& mat)
     const auto& row_skip = *selectors[row_flags];
     const auto& col_skip = *selectors[col_flags];
 
-    const bool check_row = rs::size(row_skip) > 0;
-    const bool check_col = rs::size(col_skip) > 0;
+    const bool check_row = row_skip.size() > 0;
+    const bool check_col = col_skip.size() > 0;
 
     for (integer row = 0; row < mat.rows(); row++) {
         // skip if dirichlet row
