@@ -230,16 +230,15 @@ All selector items depend on: 1.2a (ccs_range_utils.hpp) and 1.3 (tuple_fwd.hpp 
   - Files: `src/fields/selector.hpp` (lines 401–425)
   - Test: `t-selector` test file still uses range-v3 (will compile after 1.20e). All downstream targets (t-field, t-field_utils, t-field_math, t-single_view, t-container_tuple, t-algorithms) build and pass.
 
-- [ ] **1.16** Replace `multi_slice_view` in `src/fields/selector.hpp`:
-  - Currently: Inherits `rs::view_adaptor<multi_slice_view<Rng, Fn>, Rng>` with a custom `adaptor` class (~135 lines, lines 459–614).
-  - Replace: Rewrite as a class inheriting from `std::ranges::view_interface<multi_slice_view<Rng, Fn>>`. Implement:
-    - Store: base range (by value), `std::span<const index_slice> slices`, `ccs::semiregular_box<Fn> f`.
-    - Define a custom `iterator` with the same slice-navigation logic (current adaptor lines 470–595). The iterator stores: `slice_it` (current slice), `last_slice`, `integer i` (position in base range), `integer multi_i` (logical position), and a base iterator.
-    - Must model at least `std::bidirectional_iterator` (current view supports `next`, `prev`, `advance`, `distance_to`).
-  - Replace all `rs::` calls with `std::ranges::` equivalents.
-  - Replace `rs::semiregular_box_t` → `ccs::semiregular_box`.
-  - Files: `src/fields/selector.hpp` (lines 455–667)
-  - Test: `ctest --test-dir build -R t-selector` — verify multi_slice extraction, assignment, and `apply`.
+- [x] **1.16** Replace `multi_slice_view` in `src/fields/selector.hpp`:
+  - Rewrote as a class inheriting from `std::ranges::view_interface<multi_slice_view<Rng, Fn>>` with a custom `iterator` class implementing the slice-navigation logic.
+  - Iterator stores: `base_iter`, `slice_it` (current slice), `last_slice_`, `integer i_` (position in base range), `integer multi_i_` (logical position). Models `std::random_access_iterator`.
+  - Implements all random-access operations: `++`, `--`, `+=`, `-=`, `[]`, `+`, `-`, `==`, `<=>`.
+  - Fixed potential UB in `operator--` and `operator+=` (negative) when iterator is at end position (slice iterator past end of span) — now properly decrements slice iterator before dereferencing.
+  - `begin()` positions at first slice's first element; `end()` positions past last slice with `multi_i` = total element count.
+  - Replaced `rs::view_adaptor` → `std::ranges::view_interface`, `rs::range_difference_t` → `std::ranges::range_difference_t`, `rs::semiregular_box_t` → `ccs::semiregular_box`, `rs::begin`/`rs::end`/`rs::advance` → `std::ranges::begin`/`end`/`advance`.
+  - Files: `src/fields/selector.hpp`
+  - Test: `t-selector` test file still uses range-v3 (will compile after 1.20e). All downstream targets (t-field, t-field_utils, t-field_math, t-single_view, t-container_tuple, t-algorithms) build and pass.
 
 - [ ] **1.17** Replace `optional_view` in `src/fields/selector.hpp`:
   - Currently: Inherits `rs::view_adaptor<optional_view<Rng, Fn>, Rng>` with a simple adaptor that returns `begin` or `end` based on a bool.

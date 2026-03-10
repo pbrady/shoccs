@@ -526,155 +526,215 @@ namespace detail
 // multi_slice view is used to select multiple slices of data and treat them as a single
 // range. Used to construct the `fluid` selector
 template <typename Rng, typename Fn>
-class multi_slice_view : public rs::view_adaptor<multi_slice_view<Rng, Fn>, Rng>
+class multi_slice_view : public std::ranges::view_interface<multi_slice_view<Rng, Fn>>
 {
-    using diff_t = rs::range_difference_t<Rng>;
+    using diff_t = std::ranges::range_difference_t<Rng>;
 
-    friend rs::range_access;
+    Rng base_;
+    std::span<const index_slice> slices_;
 
-    std::span<const index_slice> slices;
+    ccs::semiregular_box<Fn> f;
 
-    rs::semiregular_box_t<Fn> f;
-
-    class adaptor : public rs::adaptor_base
+public:
+    class iterator
     {
+        using base_iter = std::ranges::iterator_t<Rng>;
         using slice_it = typename std::span<const index_slice>::iterator;
 
-        // iterators to keep track of the slices
-        slice_it slice;
-        slice_it last_slice;
+        base_iter base_it_{};
+        slice_it slice_{};
+        slice_it last_slice_{};
 
-        integer i;       // current index in the base range [slice->first, slice->last)
-        integer multi_i; // index in the multi_slice, allows for quick size computation
-
-        // constexpr void set_line()
-        // {
-        //     auto&& [_, start, end] = lines[l];
-
-        //     i0 = start.object ? extents(start.mesh_coordinate) + 1
-        //                       : extents(start.mesh_coordinate);
-        //     i1 = end.object ? extents(end.mesh_coordinate)
-        //                     : extents(end.mesh_coordinate) + 1;
-        // }
+        integer i_{};       // current index in the base range [slice->first, slice->last)
+        integer multi_i_{}; // index in the multi_slice, allows for quick size computation
 
     public:
-        adaptor() = default;
-        adaptor(std::span<const index_slice> slices)
-            : slice{rs::begin(slices)}, last_slice{rs::end(slices)}
+        using difference_type = diff_t;
+        using value_type = std::ranges::range_value_t<Rng>;
+        using reference = std::ranges::range_reference_t<Rng>;
+        using iterator_concept = std::random_access_iterator_tag;
+        using iterator_category = std::random_access_iterator_tag;
+
+        iterator() = default;
+
+        constexpr iterator(base_iter it,
+                           slice_it slice,
+                           slice_it last_slice,
+                           integer i,
+                           integer multi_i)
+            : base_it_{std::move(it)}
+            , slice_{slice}
+            , last_slice_{last_slice}
+            , i_{i}
+            , multi_i_{multi_i}
         {
         }
 
-        template <typename R>
-        constexpr auto begin(R& rng)
+        constexpr reference operator*() const { return *base_it_; }
+
+        constexpr iterator& operator++()
         {
-            auto it = rs::begin(rng.base());
-
-            multi_i = 0;
-            i = slice != last_slice ? slice->first : 0;
-
-            rs::advance(it, i);
-            return it;
-        }
-
-        template <typename R>
-        constexpr auto end(R& rng)
-        {
-            auto it = rs::begin(rng.base());
-
-            for (multi_i = 0; slice != last_slice; ++slice) {
-                multi_i += slice->last - slice->first;
-                i = slice->last;
+            ++i_;
+            ++base_it_;
+            ++multi_i_;
+            if (i_ == slice_->last && ++slice_ != last_slice_) {
+                base_it_ += (slice_->first - i_);
+                i_ = slice_->first;
             }
-
-            rs::advance(it, i);
-            return it;
+            return *this;
         }
 
-        template <typename I>
-        void next(I& it)
+        constexpr iterator operator++(int)
         {
-            // advance to next point on this line, or to the next line
-            ++i;
-            ++it;
-            ++multi_i;
-            if (i == slice->last && ++slice != last_slice) {
-                it += (slice->first - i);
-                i = slice->first;
+            auto tmp = *this;
+            ++*this;
+            return tmp;
+        }
+
+        constexpr iterator& operator--()
+        {
+            --i_;
+            --base_it_;
+            --multi_i_;
+            if (slice_ == last_slice_) {
+                // Stepping back from the end position
+                --slice_;
+            } else if (i_ < slice_->first) {
+                --slice_;
+                base_it_ -= (i_ - (slice_->last - 1));
+                i_ = slice_->last - 1;
             }
+            return *this;
         }
 
-        template <typename I>
-        void prev(I& it)
+        constexpr iterator operator--(int)
         {
-            --i;
-            --it;
-            --multi_i;
-            if (i < slice->first) {
-                --slice;
-                it -= (i - (slice->last - 1));
-                i = slice->last - 1;
-            }
+            auto tmp = *this;
+            --*this;
+            return tmp;
         }
 
-        template <typename I>
-        void advance(I& it, rs::difference_type_t<I> n)
+        constexpr iterator& operator+=(difference_type n)
         {
-            if (n == 0) return;
+            if (n == 0) return *this;
 
-            multi_i += n;
-            rs::difference_type_t<I> it_off = 0;
-            // const auto last_line = lines.size() - 1;
+            multi_i_ += n;
+            difference_type it_off = 0;
 
             if (n > 0) {
-                // move iterator to i0 to make life easier
-                it_off = (slice->first - i);
-                i = slice->first;
+                // move iterator to slice start to make life easier
+                it_off = (slice_->first - i_);
+                i_ = slice_->first;
                 n -= it_off;
-                while (slice != last_slice && n > ((slice->last - 1) - slice->first)) {
-                    // advance the line and reset i0/i1
-                    n -= (slice->last - slice->first);
-                    ++slice;
-                    // set_line();
+                while (slice_ != last_slice_ &&
+                       n > ((slice_->last - 1) - slice_->first)) {
+                    n -= (slice_->last - slice_->first);
+                    ++slice_;
                 }
-                it_off += slice->first + n - i;
-                i = slice->first + n;
+                if (slice_ != last_slice_) {
+                    it_off += slice_->first + n - i_;
+                    i_ = slice_->first + n;
+                } else {
+                    // Reached end position
+                    auto prev = slice_ - 1;
+                    it_off += prev->last + n - i_;
+                    i_ = prev->last + n;
+                }
             } else {
-                // move iterator to i1 to make life easier
-                it_off = (slice->last - i);
-                i = slice->last;
+                // Handle end position
+                if (slice_ == last_slice_) --slice_;
+                // move iterator to slice end to make life easier
+                it_off = (slice_->last - i_);
+                i_ = slice_->last;
                 n -= it_off;
 
-                while (n < (slice->first - slice->last)) {
-                    n -= (slice->first - slice->last);
-                    --slice;
-                    // set_line();
+                while (n < (slice_->first - slice_->last)) {
+                    n -= (slice_->first - slice_->last);
+                    --slice_;
                 }
-                it_off += slice->last + n - i;
-                i = slice->last + n;
+                it_off += slice_->last + n - i_;
+                i_ = slice_->last + n;
             }
 
-            rs::advance(it, it_off);
+            std::ranges::advance(base_it_, it_off);
+            return *this;
         }
 
-        template <typename I>
-        diff_t distance_to(const I&, const I&, const adaptor& that) const
+        constexpr iterator& operator-=(difference_type n) { return *this += -n; }
+
+        constexpr reference operator[](difference_type n) const
         {
-            return that.multi_i - multi_i;
+            auto tmp = *this;
+            tmp += n;
+            return *tmp;
+        }
+
+        friend constexpr iterator operator+(iterator it, difference_type n)
+        {
+            it += n;
+            return it;
+        }
+
+        friend constexpr iterator operator+(difference_type n, iterator it)
+        {
+            it += n;
+            return it;
+        }
+
+        friend constexpr iterator operator-(iterator it, difference_type n)
+        {
+            it -= n;
+            return it;
+        }
+
+        friend constexpr difference_type operator-(const iterator& a, const iterator& b)
+        {
+            return a.multi_i_ - b.multi_i_;
+        }
+
+        friend constexpr bool operator==(const iterator& a, const iterator& b)
+        {
+            return a.multi_i_ == b.multi_i_;
+        }
+
+        friend constexpr auto operator<=>(const iterator& a, const iterator& b)
+        {
+            return a.multi_i_ <=> b.multi_i_;
         }
     };
 
-    adaptor begin_adaptor() { return {slices}; }
-
-    adaptor end_adaptor() { return {slices}; }
-
-public:
     multi_slice_view() = default;
 
     explicit constexpr multi_slice_view(Rng&& rng,
                                         std::span<const index_slice> slices,
                                         Fn f)
-        : multi_slice_view::view_adaptor{FWD(rng)}, slices{MOVE(slices)}, f{MOVE(f)}
+        : base_{FWD(rng)}, slices_{MOVE(slices)}, f{MOVE(f)}
     {
+    }
+
+    constexpr auto begin()
+    {
+        auto it = std::ranges::begin(base_);
+        auto first = slices_.begin();
+        auto last = slices_.end();
+        integer i = first != last ? first->first : 0;
+        std::ranges::advance(it, i);
+        return iterator(std::move(it), first, last, i, 0);
+    }
+
+    constexpr auto end()
+    {
+        auto it = std::ranges::begin(base_);
+        integer total = 0;
+        integer i = 0;
+        auto first = slices_.begin();
+        auto last = slices_.end();
+        for (auto s = first; s != last; ++s) {
+            total += s->last - s->first;
+            i = s->last;
+        }
+        std::ranges::advance(it, i);
+        return iterator(std::move(it), last, last, i, total);
     }
 
     template <typename U>
