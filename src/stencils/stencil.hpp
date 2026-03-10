@@ -5,6 +5,7 @@
 #include "operators/boundaries.hpp"
 #include "types.hpp"
 
+#include <algorithm>
 #include <concepts>
 #include <optional>
 
@@ -35,6 +36,13 @@ struct interp_line {
     boundary left;
     boundary right;
 };
+
+inline void copy_zero_padded(std::span<const real> src, std::span<real> dst)
+{
+    auto n = std::min(src.size(), dst.size());
+    std::copy_n(src.begin(), n, dst.begin());
+    std::fill(dst.begin() + n, dst.end(), 0.0);
+}
 
 // satisfaction of Stencil makes a type a stencil
 template <typename T>

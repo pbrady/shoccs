@@ -58,7 +58,7 @@ inline void copy_zero_padded(std::span<const real> src, std::span<real> dst) {
 }
 ```
 
-- [ ] **3.1** Add `copy_zero_padded` inline function to `src/stencils/stencil.hpp`.
+- [x] **3.1** Add `copy_zero_padded` inline function to `src/stencils/stencil.hpp`.
   - Add `#include <algorithm>` to `stencil.hpp`.
   - Place the function in `namespace ccs::stencils`, before the `stencil` class.
   - Signature: `inline void copy_zero_padded(std::span<const real> src, std::span<real> dst)`.
