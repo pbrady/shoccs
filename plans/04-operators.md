@@ -29,7 +29,8 @@ ctest --test-dir build -L bcs
 
 - [ ] **4.1** Migrate `derivative.cpp` — `OB_builder` struct (lines 69–154):
   - File: `src/operators/derivative.cpp`
-  - Remove `#include <range/v3/all.hpp>` (line 4), add `<algorithm>`, `<numeric>`, `<ranges>`.
+  - Remove `#include <range/v3/all.hpp>` (line 4), add `<algorithm>` and `<ranges>`.
+    (`<numeric>` is NOT needed — all replacements use `<algorithm>` or `<ranges>`.)
   - Line 73: `template <rs::random_access_range R>` → `template <std::ranges::random_access_range R>`
   - Line 77: `for (auto&& [i, v] : vs::enumerate(r) | vs::drop(1))` → indexed `for` loop starting at index 1:
     ```cpp
@@ -38,7 +39,8 @@ ctest --test-dir build -L bcs
     ```
   - Line 88: `template <rs::random_access_range R>` → `template <std::ranges::random_access_range R>`
   - Line 101: `auto it = rs::begin(interp_coeffs);` → `auto it = std::ranges::begin(interp_coeffs);`
-  - Test: `ctest --test-dir build -R t-derivative`
+  - **IMPORTANT:** This item removes the only range-v3 include in derivative.cpp. Items 4.2 and 4.3 MUST be completed in the same pass/commit — the file will not compile with range-v3 usage remaining after this include is removed.
+  - Test: `ctest --test-dir build -R t-derivative` (only passes after 4.1–4.3 are all done)
 
 - [ ] **4.2** Migrate `derivative.cpp` — `cut_discretization` function (lines 156–253):
   - Line 170: `rs::accumulate(obj_bcs, true, [](auto&& acc, auto&& cur) { return acc && (cur == bcs::Dirichlet); })` → `std::ranges::all_of(obj_bcs, [](auto bc) { return bc == bcs::Dirichlet; })`
@@ -48,13 +50,13 @@ ctest --test-dir build -L bcs
     auto sub = std::span{c}.subspan((rObj - 1) * tObj, tObj);
     std::vector<real> rng(sub.rbegin(), sub.rend());
     ```
-    (Pass `std::span{rng}` to `add_cut_row`, which accepts any `random_access_range`.)
+    (Pass `rng` directly to `add_cut_row` — it accepts any `random_access_range`, and `std::vector<real>` qualifies.)
   - Line 201: `c | vs::take_exactly(tObj)` → `std::span{c}.subspan(0, tObj)` (already a `random_access_range`).
   - Line 206: `for (auto&& [shape_row, obj] : vs::enumerate(shapes))` → same indexed loop as line 188.
   - Test: `ctest --test-dir build -R t-derivative`
 
 - [ ] **4.3** Migrate `derivative.cpp` — `domain_discretization` function (lines 301–438):
-  - **Left boundary with object (lines 347–356):**
+  - **Left boundary with object (lines 347–357):**
     - Line 347: `auto lc = left | vs::drop(s * tLeft);` → `auto lc = std::span{left}.subspan(s * tLeft);`
     - Lines 348–349: `lc | vs::chunk(tLeft) | vs::for_each(vs::drop(1))` (skip first column of each row, flatten) → explicit vector construction:
       ```cpp
@@ -66,7 +68,8 @@ ctest --test-dir build -L bcs
       }
       leftMat = matrix::dense{rLeft, tLeft - 1, dense_data};
       ```
-    - Lines 354–356: `lc | vs::stride(tLeft) | vs::take(rLeft)` with `vs::enumerate` → explicit strided loop:
+      (`matrix::dense` constructor accepts any `std::ranges::input_range` — verified in Phase 2 migration.)
+    - Lines 354–357: `lc | vs::stride(tLeft) | vs::take(rLeft)` with `vs::enumerate` → explicit strided loop:
       ```cpp
       for (int row = 0; row < rLeft; ++row) {
           B_builder.add_point(sub.left_row(row), obj->object_coordinate, lc[row * tLeft]);
@@ -74,7 +77,7 @@ ctest --test-dir build -L bcs
       ```
   - **Right boundary with object (lines 387–401):**
     - Line 387: `right | vs::take_exactly(rRight * tRight)` → `auto rc = std::span{right}.subspan(0, rRight * tRight);`
-    - Lines 391–392: `rc | vs::chunk(tRight) | vs::for_each(vs::take(tRight - 1))` (take first (tRight-1) columns of each row, flatten) → explicit vector:
+    - Lines 389–392: `rc | vs::chunk(tRight) | vs::for_each(vs::take(tRight - 1))` (take first (tRight-1) columns of each row, flatten) → explicit vector:
       ```cpp
       std::vector<real> dense_data;
       dense_data.reserve(rRight * (tRight - 1));
@@ -84,7 +87,8 @@ ctest --test-dir build -L bcs
       }
       rightMat = matrix::dense{rRight, tRight - 1, dense_data};
       ```
-    - Lines 396–398: `rc | vs::drop(tRight - 1) | vs::stride(tRight) | vs::take(rRight)` with `vs::enumerate` → explicit strided loop (take last element of each row):
+      (`matrix::dense` constructor accepts any `std::ranges::input_range` — verified in Phase 2 migration.)
+    - Lines 396–401: `rc | vs::drop(tRight - 1) | vs::stride(tRight) | vs::take(rRight)` with `vs::enumerate` → explicit strided loop (take last element of each row):
       ```cpp
       for (int row = 0; row < rRight; ++row) {
           auto val = rc[row * tRight + tRight - 1];
@@ -140,10 +144,11 @@ ctest --test-dir build -L bcs
   - Remove `#include <range/v3/all.hpp>` (line 12), add `#include <ranges>` and `#include <algorithm>`.
   - **`vs::transform` (5 active calls, lines 59–79):** `constexpr auto f2 = vs::transform(...)` → `constexpr auto f2 = std::views::transform(...)`. Same for f2_dx, f2_dy, f2_dz, f2_ddx. Note: f2_ddy (line 80) and f2_ddz (line 81) are aliases (`= f2_ddx`), not `vs::transform` calls — no change needed for those.
   - **`vs::transform` inline (line 332):** `m.xyz | vs::transform([](auto&&) { return pick(); })` → `m.xyz | std::views::transform([](auto&&) { return pick(); })`.
-  - **`vs::generate_n` (lines 148, 206):** `u | sel::D = vs::generate_n(g, m.size())` → generate into a temporary vector:
+  - **`vs::generate_n` (lines 148, 206):** `u | sel::D = vs::generate_n(g, m.size())` → generate into a temporary vector and assign:
     ```cpp
-    { std::vector<real> tmp(m.size()); std::generate_n(tmp.begin(), m.size(), g); u | sel::D = tmp; }
+    { std::vector<real> tmp(m.size()); std::ranges::generate(tmp, g); u | sel::D = tmp; }
     ```
+    (Alternative: `std::generate_n(tmp.begin(), m.size(), g)` — both work since `tmp` is pre-sized.)
   - **`rs::size` (10 uses, lines 151, 179, 219, 241, 275, 300, 334, 339, 371, 386):** `rs::size(...)` → `std::ranges::size(...)`.
   - Test: `ctest --test-dir build -R t-derivative`
 
@@ -185,9 +190,9 @@ ctest --test-dir build -L bcs
 
 ## Ordering Constraints
 
-- Items 4.1–4.3 (derivative.cpp) must be done together or sequentially — the `#include <range/v3/all.hpp>` removal in 4.1 affects all three. Recommended: do 4.1 first (it removes the include and adds std replacements), then 4.2 and 4.3 in the same pass.
-- Items 4.5, 4.6 (gradient.cpp, laplacian.cpp) are independent of 4.1–4.3.
-- Items 4.9–4.12 (test migration) should be done after their corresponding source files (4.1–4.8), since tests must compile against the migrated headers.
+- **Items 4.1–4.3 MUST be done in a single atomic pass/commit.** Item 4.1 removes `#include <range/v3/all.hpp>` from derivative.cpp, which breaks all range-v3 usage in the file. Items 4.2 and 4.3 migrate the remaining range-v3 patterns. The file will not compile until all three items are complete. Apply all changes, then test once.
+- Items 4.5, 4.6 (gradient.cpp, laplacian.cpp) are independent of 4.1–4.3 and of each other. The `vs::repeat_n` in these files resolves transitively through `types.hpp`'s namespace aliases (range-v3 remains a project dependency per D2). They can be done in any order.
+- Items 4.9–4.12 (test migration) should be done after their corresponding source files (4.1–4.8), since tests must compile against the migrated headers. However, test files have their own `#include <range/v3/all.hpp>`, so each test migration is independently compilable.
 - Items 4.4, 4.7, 4.8, 4.13, 4.14 are verification-only and can be marked complete immediately.
 
 ---
