@@ -35,6 +35,14 @@ ctest --test-dir build
 
 ## Items
 
+**Build-breakage status (review 7.2b):** The 7.1a/7.1b commits introduced `ccs::cartesian_product_view` into `m.xyz`, which breaks downstream files that pipe `m.xyz` through range-v3 `view_closure` (range-v3 doesn't recognize C++20 views as `viewable_range`). Four files currently fail to compile:
+- `field_data.cpp` (`vs::zip` lost transitively) → fix: **7.9**
+- `xdmf.cpp` (`vs::repeat_n` lost transitively) → fix: **7.10**
+- `heat.cpp` (`m.xyz | ms(time)` mixes C++20 view with range-v3 closure) → fix: **7.3** + **7.6** (heat.cpp itself has no range-v3 usage — fully migrated in Phase 5)
+- `scalar_wave.cpp` (same mixed-type pipe) → fix: **7.3** + **7.6** + **7.12**
+
+This blocks these test targets: `t-mesh` (also needs **7.14**), `t-field_io`, `t-xdmf`, `t-simulation_cycle`, `t-heat`, `t-hyperbolic_eigenvalues`. Tests that still work: `t-cartesian`, `t-object_geometry`, `t-shapes`, `t-mms`. To restore the full build, prioritize **7.3**, **7.6**, **7.9**, **7.10**, and **7.14** before or alongside other items. Individual test targets can be built with `cmake --build build --target <target>` to bypass unrelated library failures.
+
 ### Mesh (High Complexity)
 
 Note: `shoccs-mesh` does not link `range-v3::range-v3` in `src/mesh/CMakeLists.txt`, so no CMake changes are needed for items 7.1–7.5. Range-v3 headers are found via spack's global include path; once the `#include <range/v3/...>` directives are removed, the dependency is gone.
@@ -443,6 +451,7 @@ These files still have range-v3 usage from earlier phases and must be cleaned be
 8. **7.12** (scalar_wave.cpp) should be done after **7.1–7.2** (mesh migration) so that mesh view types (`m.xyz`, `m.vxyz`) satisfy `std::ranges::viewable_range` and `std::views::transform` can pipe through them. No CMake changes needed (shoccs-system doesn't link range-v3 directly).
 9. **7.13** (stencil tests) depends on **7.1c** (shared `ccs::linear_distribute`).
 10. **7.20–7.25** (Final Cleanup) must come last, after all code migration items.
+11. **Build-unblocking priority:** The build is currently broken (see status note above). To restore it, **7.3** + **7.6** should be done before items whose tests depend on `shoccs-system` (e.g., 7.12), and **7.9** + **7.10** before items whose tests depend on `shoccs-io` (e.g., 7.8). **7.14** (mesh.t.cpp) must precede any item tested via `t-mesh` (7.2c, 7.2d, 7.4).
 
 ---
 
