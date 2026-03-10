@@ -431,7 +431,7 @@ Migrate test files to remove `#include <range/v3/all.hpp>` and all `rs::`/`vs::`
   - Files: `src/fields/container_tuple.t.cpp`
   - Test: `ctest --test-dir build -R t-container_tuple` — passed
 
-- [ ] **1.20h2** Migrate `src/fields/tuple_pipe.t.cpp` (160 lines), `src/fields/single_view.t.cpp` (27 lines), and `src/fields/algorithms.t.cpp` (65 lines): Remove range-v3 includes. Replace `rs::equal` → `std::ranges::equal`, `rs::size` → `std::ranges::size`, `vs::iota` → `std::views::iota`, `vs::transform` → `std::views::transform`.
+- [x] **1.20h2** Migrate `src/fields/tuple_pipe.t.cpp` (160 lines), `src/fields/single_view.t.cpp` (27 lines), and `src/fields/algorithms.t.cpp` (65 lines): Removed range-v3 includes. Added `#include <algorithm>`, `#include <ranges>`. Replaced `rs::equal` → `std::ranges::equal`, `rs::size` → `std::ranges::size`, `vs::iota` → `std::views::iota`, `vs::transform` → `std::views::transform`. Added double parentheses `REQUIRE((expr == expr))` to all `ccs::tuple` `==` comparisons. Wrapped `closure | tuple` composition expression with `ccs::make_view_closure` (C++20 `std::views::transform` partials are not `ccs::view_closure`). All 14 field-labeled tests pass.
   - Files: `src/fields/tuple_pipe.t.cpp`, `src/fields/single_view.t.cpp`, `src/fields/algorithms.t.cpp`
   - Test: `ctest --test-dir build -R "t-tuple_pipe|t-single_view|t-algorithms"`
 
