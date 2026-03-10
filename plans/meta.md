@@ -80,10 +80,11 @@ Pre-computed index arrays (option a) are deferred to the GPU migration phase.
 **Considerations:** Option (d) minimizes behavioral risk in Phase 1 by preserving identical iterator semantics. The custom views can later be replaced with Kokkos-based index arrays when GPU support is added.
 
 ### D6: Matrix-Vector Product Migration
-**Decision:** TBD (to be resolved in Phase 2 planning)
+**Decision:** **(b) Write all custom explicit loops (no KokkosKernels dependency).**
+The matrices are small per-line operators (dense: 2–5 rows, circulant: stencil width 3–7, CSR: sparse boundary coupling), not global sparse systems. KokkosKernels (option a) is overkill for these sizes. Per D1 (host-only execution) and D4 (keep `std::vector` storage), there is no device memory to manage (option c is N/A). Replace range-v3 view pipelines (`vs::zip_with`, `vs::chunk`, `vs::repeat_n`, `vs::sliding`, `vs::stride`, `vs::zip`) with explicit `for` loops using `std::inner_product` for dot products. Phase 1 utilities (`ccs::stride`, `ccs::zip_transform`, `ccs::repeat_n` from `fields/lazy_views.hpp`) are available but explicit loops are simpler and clearer for these small fixed-size operations. Kokkos parallel kernels can be introduced in a future GPU-enablement phase.
 **Options:**
 - (a) Use KokkosSparse::CrsMatrix + KokkosSparse::spmv for CSR; custom kernels for dense/circulant
-- (b) Write all custom Kokkos kernels (no KokkosKernels dependency)
+- **(b) Write all custom explicit loops (no KokkosKernels dependency)** ← CHOSEN
 - (c) Keep matrix assembly on host, copy to device, apply via Kokkos kernels
 **Considerations:** The matrices are small per-line operators (not global sparse systems), so KokkosKernels may be overkill. Custom kernels give more control over the composite inner_block structure.
 
