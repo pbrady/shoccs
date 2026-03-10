@@ -322,7 +322,18 @@ Migrate test files to remove `#include <range/v3/all.hpp>` and all `rs::`/`vs::`
 - `vs::repeat(v)` → `ccs::repeat_n(v, n)` where count is known, or manual pattern
 - `rs::make_view_closure(fn)` → `ccs::make_view_closure(fn)` (where used in test code)
 
-- [ ] **1.20a** Migrate `src/fields/range_concepts.t.cpp`: This is the concept test file. Remove `#include <range/v3/all.hpp>`. Replace range-v3 concept checks with `std::ranges` equivalents. Remove `rs::common_tuple` test (line 172). Remove or rewrite `generate_n`/`rs::to` test (line 199). Remove or rewrite `x_plane_view`/`z_plane_view` test classes that use `vs::drop_exactly`/`vs::take_exactly`/`vs::stride` (lines 206–267). Remove `vs::zip` test (lines 291–300).
+- [ ] **1.20a** Migrate `src/fields/range_concepts.t.cpp` (313 lines, 36 `rs::`/`vs::` occurrences): This is the concept test file. Remove `#include <range/v3/all.hpp>`. Add `#include <algorithm>`, `#include <ranges>`, `#include "ccs_range_utils.hpp"`, `#include "lazy_views.hpp"`.
+  - Replace `rs::output_range` → `std::ranges::output_range`, `rs::range_value_t` → `std::ranges::range_value_t` in concept checks (lines 18–28).
+  - Replace `vs::all(x)` → `std::views::all(x)` (line 55), `vs::iota(a, b)` → `std::views::iota(a, b)` (lines 94, 253, 273), `vs::transform(f)` → `std::views::transform(f)` (lines 65–66, 188).
+  - Replace `rs::equal` → `std::ranges::equal` (lines 61, 190, 256), `rs::begin`/`rs::end` → `std::ranges::begin`/`end` (line 254), `rs::sized_range` → `std::ranges::sized_range` (lines 259, 280), `rs::random_access_range` → `std::ranges::random_access_range` (lines 260, 281).
+  - **ViewClosure test (lines 132–138)**: After 1.3c, `ViewClosure` checks for `ccs::view_closure<Fn>`, not range-v3's `vs::view_closure`. `std::views::transform(...)` returns a standard library closure type which is NOT a `ccs::view_closure`. Rewrite: `using I = decltype(ccs::make_view_closure([](auto&& rng) { return rng; }));` and test `ViewClosure<I>`, `ViewClosures<std::tuple<I, I>>`.
+  - **NumericTuple/common_tuple test (lines 172–174)**: Remove the 3 lines using `rs::common_tuple` (type no longer exists after 1.3e).
+  - **From test (lines 91–107)**: Replace `vs::zip_with(std::plus{}, vs::iota(0, 10), vs::iota(1, 11))` (line 95) with `ccs::zip_transform(std::plus{}, std::views::iota(0, 10), std::views::iota(1, 11))`.
+  - **TupleLike test (line 79)**: Replace `vs::take_exactly(5)` → `std::views::take(5)`. Test intent preserved (verifying non-TupleLike range types).
+  - **generate_n test (lines 195–202)**: Rewrite. Replace `vs::generate_n(f, n) | vs::join | rs::to<T>()` with manual loop: `std::vector<int> v; for (int i = 0; i < 3; i++) { v.push_back(0); v.push_back(1); }`.
+  - **x_plane_view/z_plane_view test classes (lines 204–267)**: Rewrite type aliases: `det::X<Rng>` uses `std::views::drop | std::views::take` instead of `vs::drop_exactly | vs::take_exactly`. `det::Z<Rng>` uses `std::views::drop` piped into `ccs::stride` instead of `vs::drop_exactly | vs::stride`. Update constructors accordingly.
+  - **vs::zip "expansion" test (lines 290–301)**: Remove entirely. This only tested range-v3's `vs::zip` with parameter pack expansion, which is no longer needed.
+  - Depends on: 1.2a (ccs_range_utils.hpp for `ccs::make_view_closure`), 1.2b (lazy_views.hpp for `ccs::zip_transform`, `ccs::stride`)
   - Files: `src/fields/range_concepts.t.cpp`
   - Test: `ctest --test-dir build -R t-range_concepts`
 
@@ -347,13 +358,38 @@ Migrate test files to remove `#include <range/v3/all.hpp>` and all `rs::`/`vs::`
   - Files: `src/fields/view_tuple.t.cpp`
   - Test: `ctest --test-dir build -R t-view_tuple`
 
-- [ ] **1.20e** Migrate `src/fields/selector.t.cpp`: This is the largest test file (723 lines). Remove `#include <range/v3/all.hpp>`. Major replacements:
-  - All `vs::repeat_n(v, n)` → `std::vector<int>(n, v)` (~50 occurrences)
-  - All `vs::concat(...)` → helper function or `std::vector{...}` with explicit values (~30 occurrences)
-  - `vs::stride(n) | vs::take_exactly(n)` → `ccs::stride` + `std::views::take` (line 70, 115)
-  - `rs::equal`, `rs::size` → `std::ranges` equivalents
-  - Files: `src/fields/selector.t.cpp`
-  - Test: `ctest --test-dir build -R t-selector`
+- [ ] **1.20e** Migrate `src/fields/selector.t.cpp`: This is the largest test file (723 lines, 266 `rs::`/`vs::` occurrences). Split into 3 sub-items due to diff size. Remove `#include <range/v3/all.hpp>`. Add `#include <algorithm>`, `#include <ranges>`, `#include "lazy_views.hpp"`.
+
+  Common patterns across all sub-items:
+  - `vs::repeat_n(v, n)` → `std::vector<int>(n, v)` (~66 occurrences total)
+  - `vs::concat(a, b, ...)` → `std::vector<int>{...}` with values listed out, or a test-local `concat_to_vec` helper (~24 occurrences total)
+  - `vs::iota(a, b)` → `std::views::iota(a, b)` (many occurrences)
+  - `rs::equal(a, b)` → `std::ranges::equal(a, b)`, `rs::size(r)` → `std::ranges::size(r)`
+  - `ViewClosure<...>` static_asserts (lines 26–31, 188) remain valid since selector closures use `ccs::view_closure` after migration
+
+  - [ ] **1.20e1** Migrate plane selector tests (lines 1–181, ~61 `rs::`/`vs::` occurrences): Tests for `planes construction`, `planes extraction`, `planes assignment`, `planes scalar extraction/assignment`, `planes vector extraction/assignment`.
+    - Replace `vs::stride(n) | vs::take_exactly(n)` → `ccs::stride(rng, n)` piped to `std::views::take(n)` (lines 70, 115).
+    - Replace `vs::repeat_n` in REQUIRE comparisons → `std::vector<int>(n, v)`.
+    - Replace `vs::iota` → `std::views::iota`.
+    - Replace `rs::equal` → `std::ranges::equal` (~20 occurrences in this section).
+    - Files: `src/fields/selector.t.cpp` (lines 1–181)
+    - Test: `ctest --test-dir build -R t-selector`
+
+  - [ ] **1.20e2** Migrate multi_slice tests (lines 183–461, ~127 `rs::`/`vs::` occurrences): Tests for `multi_slice construction`, `multi_slice extraction`, `multi_slice assignment`, `multi_slice scalar extraction/assignment`, `multi_slice vector extraction/assignment`, `default operators`.
+    - This section has the heaviest `vs::concat(vs::repeat_n(...), vs::iota(...), ...)` nesting. Each `vs::concat(...)` should be replaced with the computed `std::vector<int>{...}` literal. For example: `vs::concat(vs::repeat_n(-1, 1), vs::repeat_n(-2, 7), vs::repeat_n(-1, 14), vs::repeat_n(-2, 2))` → `std::vector<int>{-1, -2,-2,-2,-2,-2,-2,-2, -1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1, -2,-2}` (or use a helper).
+    - Consider adding a test-local helper: `template<typename... Rngs> auto concat_vec(Rngs&&... rngs)` that copies ranges into a single `std::vector`.
+    - Replace `rs::equal`, `rs::size` → `std::ranges` equivalents (~30 occurrences).
+    - Files: `src/fields/selector.t.cpp` (lines 183–461)
+    - Test: `ctest --test-dir build -R t-selector`
+
+  - [ ] **1.20e3** Migrate optional/predicate tests (lines 462–723, ~78 `rs::`/`vs::` occurrences): Tests for `optional tuple`, `optional scalar`, `optional vector`, `multi_slice math`, `predicate extraction`, `predicate assignment`, `predicate scalar extraction/assignment`.
+    - Replace `vs::repeat_n`, `vs::iota`, `vs::transform`, `vs::stride` patterns.
+    - The `dble` lambda at line 14 uses `lift(std::plus{})` which calls `vs::zip_with` internally — after migration this uses `ccs::zip_transform`. No test code change needed, but verify the `dble(vs::iota(...))` calls work with `std::views::iota`.
+    - `vs::stride(2)` at line 687 → `ccs::stride(rng, 2)` (note: used as `vs::iota(0, 12) | vs::stride(2)`, replace with manual vector or pipe through `ccs::stride`).
+    - Replace `rs::equal`, `rs::size` → `std::ranges` equivalents.
+    - Remove the `#include <range/v3/all.hpp>` and finalize includes.
+    - Files: `src/fields/selector.t.cpp` (lines 462–723)
+    - Test: `ctest --test-dir build -R t-selector`
 
 - [ ] **1.20f** Migrate `src/fields/tuple.t.cpp`: Remove range-v3 includes. Replace `vs::take_exactly` (line 98), `vs::concat` (line 191), `vs::generate_n` + `rs::to` (line 305), `vs::repeat_n` (lines 471, 485), `rs::equal`, `rs::size`.
   - Files: `src/fields/tuple.t.cpp`
@@ -415,11 +451,13 @@ Migrate test files to remove `#include <range/v3/all.hpp>` and all `rs::`/`vs::`
 
 1.4 (tuple_utils.hpp) ───────── 1.6, 1.7, 1.8, 1.9 (all include tuple_utils)
 
-1.13–1.19 (selectors) ───────── 1.20e (selector tests)
+1.13–1.19 (selectors) ───────── 1.20e1, 1.20e2, 1.20e3 (selector tests)
+
+1.2a, 1.2b ──────────────────── 1.20a (range_concepts.t.cpp — needs ccs_range_utils + lazy_views)
 
 1.4–1.19 (all headers) ──────── 1.20a–1.20h3 (test migration)
 
-1.20a–1.20h3, 1.20i (tests + seg.cpp) ── 1.21 (CMake cleanup)
+1.20a–1.20h3, 1.20e1–1.20e3, 1.20i (tests + seg.cpp) ── 1.21 (CMake cleanup)
 ```
 
 ---
