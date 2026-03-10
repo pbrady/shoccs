@@ -214,18 +214,14 @@ All selector items depend on: 1.2a (ccs_range_utils.hpp) and 1.3 (tuple_fwd.hpp 
   - Files: `src/fields/selector.hpp` (lines 173–202)
   - Test: `t-selector` test file still uses range-v3 (will compile after 1.20e). All downstream targets (t-field, t-field_utils, t-field_math, t-single_view, t-container_tuple, t-algorithms) build and pass.
 
-- [ ] **1.14** Replace `plane_view<1>` (Y-plane) in `src/fields/selector.hpp`:
-  - Currently: Inherits `rs::view_adaptor<plane_view<1, Rng, Fn>, Rng>` with a custom `adaptor` class using `rs::adaptor_base`, `rs::range_access`, `rs::begin`, `rs::advance`, `rs::difference_type_t`.
-  - Replace: Rewrite as a class inheriting from `std::ranges::view_interface<plane_view<1, Rng, Fn>>`. Implement:
-    - Store the base range (by value), `index_extents n`, `diff_t j`, and `ccs::semiregular_box<Fn> f`.
-    - Define a custom `iterator` class with: `operator*` (dereference base iterator), `operator++` (next with stride logic from current adaptor lines 247–255), `operator--` (prev with reverse stride, lines 258–267), `operator+=` (advance with division-based skip, lines 270–303), `operator==`, `operator-` (distance_to, line 309).
-    - `begin()` returns iterator at position `j * nz`, `end()` returns iterator at position `(nx-1) * ny * nz + j * nz + nz`.
-    - The iterator must model `std::random_access_iterator` since the current adaptor provides random-access operations.
-  - Replace `rs::semiregular_box_t<Fn>` → `ccs::semiregular_box<Fn>`.
-  - Replace `rs::range_difference_t<Rng>` → `std::ranges::range_difference_t<Rng>`.
-  - Replace `rs::begin`, `rs::advance` → `std::ranges::begin`, `std::ranges::advance`.
-  - Files: `src/fields/selector.hpp` (lines 208–330)
-  - Test: `ctest --test-dir build -R t-selector` — verify x/y/z plane extraction, assignment, and `apply` on scalar/vector types.
+- [x] **1.14** Replace `plane_view<1>` (Y-plane) in `src/fields/selector.hpp`:
+  - Rewrote as a class inheriting from `std::ranges::view_interface<plane_view<1, Rng, Fn>>` with a custom `iterator` class implementing the non-contiguous y-plane stride pattern.
+  - Iterator stores base iterator + grid dimensions (nx, ny, nz) + logical position (i, k). Implements all random-access operations: `++`, `--`, `+=`, `-=`, `[]`, `+`, `-`, `==`, `<=>`.
+  - `begin()` positions at `j * nz`, `end()` positions at `(nx-1)*ny*nz + j*nz + nz`.
+  - Added explicit `size() const` returning `nx * nz`.
+  - Replaced `rs::view_adaptor` → `std::ranges::view_interface`, `rs::range_difference_t` → `std::ranges::range_difference_t`, `rs::semiregular_box_t` → `ccs::semiregular_box`, `rs::begin`/`rs::advance` → `std::ranges::begin`/`advance`.
+  - Files: `src/fields/selector.hpp` (lines 208–393)
+  - Test: `t-selector` test file still uses range-v3 (will compile after 1.20e). All downstream targets (t-field, t-field_utils, t-field_math, t-single_view, t-container_tuple, t-algorithms) build and pass.
 
 - [ ] **1.15** Replace `plane_view<2>` (Z-plane) in `src/fields/selector.hpp`:
   - Currently: `z_plane_t<Rng>` = `decltype(rng | vs::drop_exactly(k) | vs::stride(n))`. Inherits from this type.
