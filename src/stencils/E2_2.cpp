@@ -1,7 +1,6 @@
 #include "stencil.hpp"
 
-#include <range/v3/algorithm/fill.hpp>
-#include <range/v3/algorithm/reverse.hpp>
+#include <algorithm>
 
 #include <cassert>
 
@@ -131,7 +130,7 @@ struct E2_2 {
         c[7] = (2 + -2 * t6) * 1.0 / (2 + psi);
         for (auto&& v : c) v /= (h * h);
 
-        if (right) ranges::reverse(c);
+        if (right) std::ranges::reverse(c);
 
         return c;
     }
@@ -153,7 +152,7 @@ struct E2_2 {
         c[3] = (2 + -2 * t6) * 1.0 / (2 + psi);
         for (auto&& v : c) v /= (h * h);
 
-        if (right) ranges::reverse(c);
+        if (right) std::ranges::reverse(c);
         // nbs_floating(h, psi, c, right);
         // if (right)
         //     ranges::fill(c.subspan((R - 1) * T), real{});
@@ -185,8 +184,8 @@ struct E2_2 {
         for (auto&& v : x) v /= h;
 
         if (right) {
-            ranges::reverse(c);
-            ranges::reverse(x);
+            std::ranges::reverse(c);
+            std::ranges::reverse(x);
             for (auto&& v : x) v *= -1;
         }
         return c;

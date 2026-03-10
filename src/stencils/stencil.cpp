@@ -1,5 +1,6 @@
 #include "stencil.hpp"
 
+#include <fmt/ranges.h>
 #include <sol/sol.hpp>
 
 namespace ccs::stencils

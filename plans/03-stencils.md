@@ -66,21 +66,21 @@ inline void copy_zero_padded(std::span<const real> src, std::span<real> dst) {
   - No ordering constraint: items 3.2–3.3 don't need this; items 3.4–3.8 depend on it.
   - Test: `cmake --build build` succeeds (no callers yet).
 
-- [ ] **3.2** Migrate `E2_2.cpp`: replace `ranges::reverse` with `std::ranges::reverse`.
+- [x] **3.2** Migrate `E2_2.cpp`: replace `ranges::reverse` with `std::ranges::reverse`.
   - File: `src/stencils/E2_2.cpp`.
   - Remove: `#include <range/v3/algorithm/fill.hpp>` (unused), `#include <range/v3/algorithm/reverse.hpp>`.
   - Add: `#include <algorithm>`.
   - Replace all 4 occurrences of `ranges::reverse(...)` → `std::ranges::reverse(...)` (lines 134, 156, 188, 189).
   - Test: `ctest --test-dir build -R t-E2_2`
 
-- [ ] **3.3** Migrate `E4_2.cpp`: replace `ranges::reverse` with `std::ranges::reverse`.
+- [x] **3.3** Migrate `E4_2.cpp`: replace `ranges::reverse` with `std::ranges::reverse`.
   - File: `src/stencils/E4_2.cpp`.
   - Remove: `#include <range/v3/algorithm/fill.hpp>` (unused), `#include <range/v3/algorithm/reverse.hpp>`.
   - Add: `#include <algorithm>`.
   - Replace all 4 occurrences of `ranges::reverse(...)` → `std::ranges::reverse(...)` (lines 235, 263, 306, 307 — in `nbs_floating`, `nbs_dirichlet`, `nbs_neumann`).
   - Test: `ctest --test-dir build -R t-E4_2`
 
-- [ ] **3.4** Migrate `E4u_1.cpp`: replace zero-pad + `ranges::reverse`.
+- [x] **3.4** Migrate `E4u_1.cpp`: replace zero-pad + `ranges::reverse`.
   - File: `src/stencils/E4u_1.cpp`.
   - **Depends on: 3.1.**
   - Remove all 7 range-v3 includes (lines 3–9).
@@ -89,7 +89,7 @@ inline void copy_zero_padded(std::span<const real> src, std::span<real> dst) {
   - Replace 2 occurrences of `ranges::reverse(c)` → `std::ranges::reverse(c)` (in `nbs_floating` line 106, `nbs_dirichlet` line 129).
   - Test: `ctest --test-dir build -R t-E4u_1`
 
-- [ ] **3.5** Migrate `E6u_1.cpp`: same pattern as 3.4.
+- [x] **3.5** Migrate `E6u_1.cpp`: same pattern as 3.4.
   - File: `src/stencils/E6u_1.cpp`.
   - **Depends on: 3.1.**
   - Remove all 7 range-v3 includes (lines 3–9).
@@ -98,7 +98,7 @@ inline void copy_zero_padded(std::span<const real> src, std::span<real> dst) {
   - Replace 2 `ranges::reverse(c)` → `std::ranges::reverse(c)` (in `nbs_floating` line 146, `nbs_dirichlet` line 213).
   - Test: `ctest --test-dir build -R t-E6u_1`
 
-- [ ] **3.6** Migrate `E8u_1.cpp`: same pattern as 3.4.
+- [x] **3.6** Migrate `E8u_1.cpp`: same pattern as 3.4.
   - File: `src/stencils/E8u_1.cpp`.
   - **Depends on: 3.1.**
   - Remove all 7 range-v3 includes (lines 3–9).
@@ -107,7 +107,7 @@ inline void copy_zero_padded(std::span<const real> src, std::span<real> dst) {
   - Replace 2 `ranges::reverse(c)` → `std::ranges::reverse(c)` (in `nbs_floating` line 197, `nbs_dirichlet` line 301).
   - Test: `ctest --test-dir build -R t-E8u_1`
 
-- [ ] **3.7** Migrate `polyE2_1.cpp`: 3 zero-pad replacements + `ranges::reverse`.
+- [x] **3.7** Migrate `polyE2_1.cpp`: 3 zero-pad replacements + `ranges::reverse`.
   - File: `src/stencils/polyE2_1.cpp`.
   - **Depends on: 3.1.**
   - Remove all 7 range-v3 includes (lines 3–9).
@@ -119,7 +119,7 @@ inline void copy_zero_padded(std::span<const real> src, std::span<real> dst) {
   - Replace 2 `ranges::reverse(c)` → `std::ranges::reverse(c)` (in `nbs_floating` line 209, `nbs_dirichlet` line 254).
   - Test: `ctest --test-dir build -R t-polyE2_1`
 
-- [ ] **3.8** Migrate `E2_1.cpp` (2509 lines — largest file, but simple range-v3 usage).
+- [x] **3.8** Migrate `E2_1.cpp` (2509 lines — largest file, but simple range-v3 usage).
   - File: `src/stencils/E2_1.cpp`.
   - **Depends on: 3.1.**
   - Despite 2509 lines, the range-v3 usage is only: 1 zero-pad in constructor (line 27–28) + 2 `ranges::reverse` calls (lines 1311, 2498). The rest is hand-written coefficient tables.
@@ -129,7 +129,7 @@ inline void copy_zero_padded(std::span<const real> src, std::span<real> dst) {
   - Replace 2 `ranges::reverse(c)` → `std::ranges::reverse(c)` (line 1311 in `nbs_floating`, line 2498 in `nbs_dirichlet`).
   - Test: `ctest --test-dir build -R t-E2_1`
 
-- [ ] **3.9** Clean up CMakeLists.txt and test file includes. Verify no library dependency on range-v3 remains.
+- [x] **3.9** Clean up CMakeLists.txt and test file includes. Verify no library dependency on range-v3 remains.
   - **Depends on: 3.2–3.8 all complete.**
   - **3.9a** Remove unused `#include <range/v3/view/zip.hpp>` from 4 test files:
     - `src/stencils/E4u_1.t.cpp` (line 9)
@@ -145,6 +145,8 @@ inline void copy_zero_padded(std::span<const real> src, std::span<real> dst) {
     - Remove `range-v3::range-v3` from `add_unit_test()` calls for E2_1, E4u_1, E6u_1, E8u_1 (they no longer use it).
     - Keep `range-v3::range-v3` in `add_unit_test()` calls for E2_2, E4_2, polyE2_1 (tests still use it).
   - Test: `ctest --test-dir build -L stencils` — all 7 pass.
+  - **Note:** t-E2_1 has a pre-existing floating-point precision failure (unrelated to migration).
+  - **Note:** stencil.cpp had a pre-existing missing `#include <fmt/ranges.h>` for `fmt::join`; fixed as part of this work.
 
 ---
 
