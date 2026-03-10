@@ -305,7 +305,7 @@ run_claude() {
   # stdout = claude's response, stderr = diagnostics
   # Unset CLAUDECODE to allow nested invocations (e.g., running from inside
   # an existing Claude Code session in a container).
-  env -u CLAUDECODE "${cmd[@]}" "$prompt" > "$output_file" 2>"$log_file" || {
+  env -u CLAUDECODE "${cmd[@]}" "$prompt" 2>"$log_file" | tee "$output_file" || {
     printf 'ralph_wiggum: claude exited with error\n' >&2
     cat "$log_file" >&2
     die "claude pass failed (see $log_file)"
