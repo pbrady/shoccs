@@ -88,14 +88,25 @@ ctest --test-dir build
 - [ ] **7.2** Migrate `selections.hpp`
   - **7.2a** Rewrite `YPlaneView` as a `std::ranges::view_interface` class (lines 26–163):
     - Replace `rs::view_adaptor<YPlaneView<Rng>, Rng>` inheritance with `std::ranges::view_interface<YPlaneView<Rng>>`.
-    - Store the base range directly (not via `view_adaptor`).
-    - Replace inner `adaptor : rs::adaptor_base` with a standalone `iterator` class implementing the same `next`/`prev`/`advance`/`distance_to` logic but as C++20 iterator operations (`operator++`, `operator--`, `operator+=`, `operator-`, `operator==`, `operator<=>`).
-    - Replace `rs::begin(rng.base())` / `rs::advance(it, n)` with `std::ranges::begin(base_)` / `std::ranges::advance(it, n)`.
+    - Store the base range directly as a member (e.g., `Rng base_`). Remove `friend rs::range_access`.
+    - Replace inner `adaptor : rs::adaptor_base` (lines 33–125) with a standalone `iterator` class:
+      - Required typedefs: `using value_type = std::ranges::range_value_t<Rng>; using difference_type = std::ranges::range_difference_t<Rng>; using iterator_concept = std::random_access_iterator_tag;`
+      - Data members: wrap a base iterator (`std::ranges::iterator_t<Rng> it_`) plus the adaptor state (`diff_t nx, ny, nz, i, j, k`).
+      - Map adaptor methods → C++20 iterator operators:
+        - `adaptor::next(I&)` (lines 61–70) → `operator++()`: increment `k`/`it_`, advance to next x-row when `k == nz`.
+        - `adaptor::prev(I&)` (lines 72–82) → `operator--()`: decrement `k`/`it_`, retreat to prior x-row when `k < 0`.
+        - `adaptor::advance(I&, n)` (lines 84–118) → `operator+=(difference_type n)`: same `std::div` logic for computing new `(i, k)`.
+        - `adaptor::distance_to(...)` (lines 120–124) → `friend difference_type operator-(iterator, iterator)`: `(that.i - this->i) * nz + (that.k - this->k)`.
+      - Also implement: `operator*()` → `*it_`; `operator==(other)` → `it_ == other.it_`; `operator<=>(other)` → compare based on `(i, k)` or iterator position.
+    - Implement `begin()`/`end()` on YPlaneView:
+      - `begin()`: create iterator with `it_` = `std::ranges::begin(base_)` advanced by `j * nz`, `i = 0`, `k = 0`. (Matches `begin_adaptor` line 127.)
+      - `end()`: create iterator with `it_` = `std::ranges::begin(base_)` advanced by `(nx-1)*ny*nz + j*nz + nz`, `i = nx-1`, `k = nz`. (Matches `end_adaptor` line 129.)
+    - Implement `size() const` → `return nx * nz;` (enables `std::ranges::sized_range`).
     - Replace `rs::range_difference_t<Rng>` with `std::ranges::range_difference_t<Rng>`.
-    - Replace `rs::difference_type_t<I>` with `std::iter_difference_t<I>` (or use the iterator's own `difference_type`).
     - Update `y_plane_fn` (line 154–161): Replace `rs::make_view_closure(rs::bind_back(...))` with `ccs::make_view_closure(ccs::bind_back(...))`.
     - Add `#include "fields/ccs_range_utils.hpp"` to selections.hpp.
     - File: `src/mesh/selections.hpp` lines 26–163.
+    - Estimated diff: ~180 lines (remove ~125 lines, add ~180 lines).
   - **7.2b** Replace `plane_fn<0>` and `plane_fn<2>` range-v3 adaptors (lines 170–202):
     - `plane_fn<0>` line 174: Replace `vs::take_exactly(n)` with `std::views::take(n)`.
     - `plane_fn<0>` line 179: Replace `vs::drop_exactly(n)` with `std::views::drop(n)`.
@@ -109,10 +120,24 @@ ctest --test-dir build
     - Add `#include "fields/lazy_views.hpp"` to selections.hpp.
     - File: `src/mesh/selections.hpp` lines 170–202.
   - **7.2c** Rewrite `FView` as a `std::ranges::view_interface` class (lines 270–451):
-    - Same approach as 7.2a: replace `rs::view_adaptor` inheritance, `rs::adaptor_base`, `rs::range_access` with `view_interface` + standalone iterator.
+    - Same approach as 7.2a: replace `rs::view_adaptor` inheritance with `std::ranges::view_interface<FView<Rng>>`. Store base range directly. Remove `friend rs::range_access`.
+    - Replace inner `adaptor : rs::adaptor_base` (lines 279–410) with a standalone `iterator` class:
+      - Required typedefs: `using value_type = std::ranges::range_value_t<Rng>; using difference_type = std::ranges::range_difference_t<Rng>; using iterator_concept = std::random_access_iterator_tag;`
+      - Data members: wrap a base iterator (`std::ranges::iterator_t<Rng> it_`) plus adaptor state (`index_extents extents`, `std::span<const line> lines`, `unsigned long l`, `integer i, i0, i1, local_off`).
+      - Map adaptor methods → C++20 iterator operators:
+        - `adaptor::next(I&)` (lines 334–348) → `operator++()`: advance `i`/`it_`, jump to next line when `i == i1`.
+        - `adaptor::prev(I&)` (lines 350–363) → `operator--()`: retreat `i`/`it_`, jump to prev line when `i < i0`.
+        - `adaptor::advance(I&, n)` (lines 365–403) → `operator+=(difference_type n)`: same multi-line advance/retreat logic.
+        - `adaptor::distance_to(...)` (lines 405–409) → `friend difference_type operator-(iterator, iterator)`: `that.local_off - this->local_off`.
+      - Also implement: `operator*()` → `*it_`; `operator==(other)` → compare by `local_off` (or `it_`); `operator<=>(other)` → compare by `local_off`.
+    - Implement `begin()`/`end()` on FView:
+      - `begin()`: create iterator initialized per `begin_adaptor` (line 412): first line, `i = i0`.
+      - `end()`: create iterator initialized per `end_adaptor` (line 414): after last line, `i = i1` of last line.
+    - Implement `size() const` → sum of `(i1 - i0)` for all lines (enables `std::ranges::sized_range`).
     - Replace `rs::begin(rng.base())`, `rs::advance(it, n)` with `std::ranges::begin(base_)`, `std::ranges::advance(it, n)`.
     - Update `fview_fn` (lines 441–448): Replace `rs::make_view_closure(rs::bind_back(...))` with `ccs::make_view_closure(ccs::bind_back(...))`.
     - File: `src/mesh/selections.hpp` lines 270–451.
+    - Estimated diff: ~230 lines (remove ~180 lines, add ~230 lines).
   - **7.2d** Replace remaining `rs::make_view_closure` in utility functions (lines 207–264, 454–459):
     - Functions `xmin`, `xmax`, `ymin`, `ymax`, `zmin`, `zmax` (lines 207–247): Replace `rs::make_view_closure` with `ccs::make_view_closure`.
     - Function `location` (lines 249–264): Replace `rs::make_view_closure` with `ccs::make_view_closure`. Replace `vs::cartesian_product(…)` with `ccs::cartesian_product(…)` (from 7.1a). Replace `vs::transform(…)` with `std::views::transform(…)`.
@@ -248,7 +273,9 @@ These files still have range-v3 usage from earlier phases and must be cleaned be
 - [ ] **7.12** Migrate `src/systems/scalar_wave.cpp` (lines 14, 30, 37):
   - Remove `#include <range/v3/view/transform.hpp>`, add `#include <ranges>`.
   - Lines 30, 37: Replace `vs::transform(lambda)` with `std::views::transform(lambda)`.
-  - These are used in the `initial_condition` and `exact` methods which return pipeable view closures.
+  - These are inside `constexpr` function templates (`neg_G<I>()` at line 28, `solution()` at line 35) that return pipeable view closures. `std::views::transform` is a `constexpr` CPO, so the replacement works in this context.
+  - Note: This item was deferred from Phase 5 because mesh views (`m.xyz`, `m.vxyz`) produced range-v3 types. After Phase 7 migrates mesh views (7.1–7.2), `std::views::transform` can pipe through the new standard-compatible types.
+  - Ordering: Should be done after 7.1–7.2 (mesh migration) to ensure mesh view types satisfy `std::ranges::viewable_range`.
   - File: `src/systems/scalar_wave.cpp`.
   - Test: `ctest --test-dir build -R t-simulation_cycle` (scalar_wave is used by simulation tests).
 
@@ -262,8 +289,13 @@ These files still have range-v3 usage from earlier phases and must be cleaned be
     - Inline `vs::transform(f)` in pipelines → `std::views::transform(f)`.
     - Remove `range-v3::range-v3` link from `src/stencils/CMakeLists.txt` line 21.
   - **7.13b** `src/stencils/E2_2.t.cpp`: Same patterns as 7.13a (no constexpr globals, but has inline `vs::transform(f)` in pipelines at lines 127, 172).
-    - Also replace `rs::fill(cw, 0.0)` → `std::ranges::fill(cw, 0.0)` (line 194).
-    - Note: lines inside `#if 0` blocks (209–284, 287–453) can be migrated or left since they're compiled out.
+    - **Active code** (lines 1–208): 6 range-v3 call sites:
+      - Lines 124, 168: `vs::linear_distribute(…) | rs::to<T>()` → `ccs::linear_distribute(…)`.
+      - Lines 127, 172: `rs::inner_product(c, mesh | vs::transform(f), 0.0)` → `std::inner_product` + `std::views::transform`.
+      - Line 188: `vs::concat(vs::single(…), mesh) | rs::to<T>()` → manual vector construction.
+      - Line 194: `rs::fill(cw, 0.0)` → `std::ranges::fill(cw, 0.0)`.
+    - **`#if 0` blocks** (lines 209–284 and 287–453): Must also be migrated for zero-reference completeness. Contains ~25 additional `vs::concat`, `rs::inner_product`, `vs::transform`, `rs::to` call sites, all using the same patterns as active code. Apply the same replacements. Alternatively, if these test cases are permanently disabled, delete the `#if 0` blocks entirely (simpler, cleaner).
+    - Remove `#include <range/v3/all.hpp>`, add `#include <numeric>`, `#include <ranges>`, `#include "fields/lazy_views.hpp"`.
     - Remove `range-v3::range-v3` link from `src/stencils/CMakeLists.txt` line 14.
   - **7.13c** `src/stencils/E4_2.t.cpp`: Same patterns as 7.13a.
     - Lines 23, 27, 30: `constexpr auto f4 = vs::transform(f4_f)`, `constexpr auto f3 = vs::transform(f3_f)`, `constexpr auto f2 = vs::transform(f2_f)` — change `constexpr` to `const` and replace `vs::transform` with `std::views::transform`. Used as pipeable closures in `mesh | f4`, `m | f2`, etc.
@@ -349,6 +381,9 @@ These files still have range-v3 usage from earlier phases and must be cleaned be
     - `src/fields/tuple_fwd.hpp` line 262: Remove commented-out `// concept AnyOutputRange = rs::range<T>&& ...` line. Lines 20–21 and 119 mention "range-v3" in descriptive comments — update to say "C++20" or remove the range-v3 reference.
     - `src/mesh/selections.hpp` lines 21–24: Update comment "range-v3 building blocks" to reflect the C++20 rewrite.
     - Files: `src/fields/tuple_fwd.hpp`, `src/mesh/selections.hpp`.
+  - **7.24d** Verification: Earlier-phase files (phases 0–6) are confirmed clean of actual range-v3 usage.
+    - Grep for `rs::|vs::` in `src/matrices/`, `src/operators/` (excluding directional), `src/temporal/`, `src/systems/` (excluding scalar_wave.cpp), `src/fields/`, `src/real3_operators.t.cpp` returns only false positives from identifiers containing `rs::` or `vs::` as substrings (e.g., `Catch::Matchers::Approx`, `vars::`, `scalars::`, `integrators::`).
+    - No additional migration work needed for these files.
   - Test: build succeeds.
 - [ ] **7.25** Full build and test: `cmake --build build && ctest --test-dir build` — all pass.
 
@@ -360,10 +395,10 @@ These files still have range-v3 usage from earlier phases and must be cleaned be
 2. **7.1c** (add `ccs::linear_distribute`) must precede **7.1d** (cartesian.cpp migration) and **7.13** (stencil tests).
 3. **7.2a–7.2c** (YPlaneView, plane_fn, FView rewrites) are independent of each other.
 4. **7.2d** (replace `rs::make_view_closure` in utility functions) should be done after 7.2a–7.2c and 7.1a.
-5. **7.3**, **7.4** depend on 7.2 (they include selections.hpp transitively).
+5. **7.3** (object_geometry.hpp) is independent of 7.2 — it has its own `#include <range/v3/view/transform.hpp>` to replace. **7.4** depends on 7.2: `mesh.hpp` includes `selections.hpp` transitively for `<ranges>`, and `mesh.hpp` line 48 uses `vs::transform` which resolves through range-v3 until 7.2 removes those includes.
 6. **7.6** (manufactured_solutions.hpp) should precede **7.15** (mms.t.cpp) since the test pipes through `ms(time)`.
 7. **7.7** (mms.cpp CMake cleanup) is independent.
-8. **7.12** (scalar_wave.cpp) is independent of mesh/IO items. No CMake changes needed (shoccs-system doesn't link range-v3 directly).
+8. **7.12** (scalar_wave.cpp) should be done after **7.1–7.2** (mesh migration) so that mesh view types (`m.xyz`, `m.vxyz`) satisfy `std::ranges::viewable_range` and `std::views::transform` can pipe through them. No CMake changes needed (shoccs-system doesn't link range-v3 directly).
 9. **7.13** (stencil tests) depends on **7.1c** (shared `ccs::linear_distribute`).
 10. **7.20–7.25** (Final Cleanup) must come last, after all code migration items.
 
