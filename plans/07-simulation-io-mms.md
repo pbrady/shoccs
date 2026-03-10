@@ -333,7 +333,10 @@ These files still have range-v3 usage from earlier phases and must be cleaned be
 - [ ] **7.21** Remove `find_package(range-v3 REQUIRED)` from `config/shoccsConfig.cmake.in` (line 8).
 - [ ] **7.22** Remove `"range-v3@0.12:"` from `.devcontainer/spack.yaml` (line 17).
 - [ ] **7.23** Remove `rs`/`vs` namespace aliases and the `namespace ranges::views {}` forward declaration from `src/types.hpp` (lines 15–17, 28–29).
-- [ ] **7.24** Sweep: Remove `#include <range/v3/...>` from any remaining files (e.g., `src/fields/tuple_fwd.hpp` has a commented-out `rs::` reference on line 262 — remove it). Also remove `#include <range/v3/…>` from excluded files (`src/operators/directional.cpp` and `directional.t.cpp` — these are commented out of CMake but should be cleaned up too).
+- [ ] **7.24** Sweep: Remove `#include <range/v3/...>` from any remaining files (e.g., `src/fields/tuple_fwd.hpp` has a commented-out `rs::` reference on line 262 — remove it). Also clean up excluded files that still use range-v3:
+  - `src/operators/directional.cpp` (commented out of CMake line 21): has heavy range-v3 usage (`vs::stride`, `vs::enumerate`, `vs::drop`, `vs::take`, `vs::take_exactly`, `vs::reverse`, `vs::chunk`, `vs::for_each` — 5 includes, 6 API call sites). Either fully migrate (replace `vs::stride` with `ccs::stride`, `vs::drop`/`vs::take` with `std::views::` equivalents, `vs::take_exactly` with `std::views::take`, `vs::reverse` with `std::views::reverse`, `vs::enumerate` with `std::views::enumerate` (C++23) or index loop, `vs::chunk`/`vs::for_each` with explicit loops) or delete the file since it is not compiled.
+  - `src/operators/directional.t.cpp` (same CMake line): has heavy range-v3 usage (`vs::generate_n`, `vs::filter`, `vs::transform`, `rs::to`, `rs::fill`, `rs::equal` — 7 includes, 6+ API call sites). Same options: fully migrate or delete.
+  - Note: Simply removing `#include` lines is NOT sufficient for these files — they have range-v3 API calls throughout the code.
 - [ ] **7.25** Full build and test: `cmake --build build && ctest --test-dir build` — all pass.
 
 ---
