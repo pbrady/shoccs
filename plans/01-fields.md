@@ -124,19 +124,19 @@ These project-local utilities replace range-v3 internal APIs that have no C++20 
   - Files: `src/fields/container_tuple.hpp`
   - Test: `ctest --test-dir build -R t-container_tuple` — 1 passed.
 
-- [ ] **1.7** Migrate `src/fields/view_tuple.hpp`:
-  - [ ] **1.7a** Replace `vs::all`/`vs::all_t` with `std::views::all`/`std::views::all_t` throughout (lines 34, 44, 48, 53, 75, etc.). Used in `view_tuple_base` member `std::tuple<vs::all_t<Args>...> v` and constructors/assignment.
+- [x] **1.7** Migrate `src/fields/view_tuple.hpp`:
+  - [x] **1.7a** Replace `vs::all`/`vs::all_t` with `std::views::all`/`std::views::all_t` throughout (lines 34, 44, 48, 53, 75, etc.). Used in `view_tuple_base` member `std::tuple<vs::all_t<Args>...> v` and constructors/assignment.
     - Files: `src/fields/view_tuple.hpp`
-  - [ ] **1.7b** Replace `rs::equal` with `std::ranges::equal` in `operator==` (lines 115, 125).
+  - [x] **1.7b** Replace `rs::equal` with `std::ranges::equal` in `operator==` (lines 115, 125).
     - Files: `src/fields/view_tuple.hpp`
-  - [ ] **1.7c** Redesign `single_view<A>` (lines 186–235). Currently inherits from `vs::all_t<A>` (a range-v3 view type). Replace with inheritance from `std::views::all_t<A>` (a `std::ranges::ref_view<A>` or `std::ranges::owning_view<A>`). The key behaviors to preserve:
+  - [x] **1.7c** Redesign `single_view<A>` (lines 186–235). Currently inherits from `vs::all_t<A>` (a range-v3 view type). Replace with inheritance from `std::views::all_t<A>` (a `std::ranges::ref_view<A>` or `std::ranges::owning_view<A>`). The key behaviors to preserve:
     - `single_view<A>` makes a 1-element `view_tuple` directly iterable as a range.
     - Assignment uses placement-new destroy-and-reconstruct semantics.
     - The `using view = vs::all_t<A>` alias switches to `std::views::all_t<A>`.
     - Files: `src/fields/view_tuple.hpp`
-  - [ ] **1.7d** Remove `#include <range/v3/algorithm/equal.hpp>`, `#include <range/v3/view/all.hpp>`. Add `#include <algorithm>`, `#include <ranges>`.
+  - [x] **1.7d** Remove `#include <range/v3/algorithm/equal.hpp>`, `#include <range/v3/view/all.hpp>`. Add `#include <algorithm>`, `#include <ranges>`.
     - Files: `src/fields/view_tuple.hpp`
-  - Test: `ctest --test-dir build -R t-view_tuple`
+  - Test: `t-view_tuple` target fails to compile because `view_tuple.t.cpp` still uses range-v3 types (will be fixed in 1.20d). Downstream targets (t-single_view, t-container_tuple, t-field, t-field_utils, t-field_math) all compile and pass.
 
 ### Math Operations
 

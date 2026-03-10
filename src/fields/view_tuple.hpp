@@ -1,7 +1,7 @@
 #pragma once
 
-#include <range/v3/algorithm/equal.hpp>
-#include <range/v3/view/all.hpp>
+#include <algorithm>
+#include <ranges>
 
 #include "tuple_math.hpp"
 #include "tuple_pipe.hpp"
@@ -31,7 +31,7 @@ private:
     static constexpr bool Output = (OutputRange<Args> && ...);
 
 public:
-    std::tuple<vs::all_t<Args>...> v;
+    std::tuple<std::views::all_t<Args>...> v;
 
     view_tuple_base() = default;
     view_tuple_base(const view_tuple_base&) = default;
@@ -41,16 +41,16 @@ public:
     view_tuple_base& operator=(view_tuple_base&&) = default;
 
     explicit constexpr view_tuple_base(Args&&... args) requires(sizeof...(Args) > 0)
-        : v{vs::all(FWD(args))...} {};
+        : v{std::views::all(FWD(args))...} {};
 
     template <NonTupleRange... Ranges>
         requires(std::constructible_from<Args, Ranges>&&...)
-    explicit constexpr view_tuple_base(Ranges&&... args) : v{vs::all(Args{FWD(args)})...}
+    explicit constexpr view_tuple_base(Ranges&&... args) : v{std::views::all(Args{FWD(args)})...}
     {
     }
 
     template <TupleLike T>
-    explicit constexpr view_tuple_base(T&& t) : v{tuple_map(vs::all, FWD(t))}
+    explicit constexpr view_tuple_base(T&& t) : v{tuple_map(std::views::all, FWD(t))}
     {
     }
 
@@ -72,7 +72,7 @@ public:
         requires(!ViewClosures<C> && SimilarTuples<view_tuple_base, C>)
     constexpr view_tuple_base& operator=(C&& c)
     {
-        v = tuple_map(vs::all, FWD(c));
+        v = tuple_map(std::views::all, FWD(c));
         return *this;
     }
 
@@ -112,7 +112,7 @@ public:
     {
         return [&]<auto... Is>(std::index_sequence<Is...>)
         {
-            return (rs::equal(get<Is>(x), y) && ...);
+            return (std::ranges::equal(get<Is>(x), y) && ...);
         }
         (sequence<view_tuple_base>);
     }
@@ -122,7 +122,7 @@ public:
     {
         return [&]<auto... Is>(std::index_sequence<Is...>)
         {
-            return (rs::equal(get<Is>(x), get<Is>(y)) && ...);
+            return (std::ranges::equal(get<Is>(x), get<Is>(y)) && ...);
         }
         (sequence<view_tuple_base>);
     }
@@ -184,9 +184,9 @@ struct single_view {
 };
 
 template <All A>
-struct single_view<A> : vs::all_t<A> {
+struct single_view<A> : std::views::all_t<A> {
 private:
-    using view = vs::all_t<A>;
+    using view = std::views::all_t<A>;
 
     view& as_view() & { return static_cast<view&>(*this); }
     const view& as_view() const& { return static_cast<const view&>(*this); }
@@ -211,17 +211,17 @@ public:
         return *this;
     }
 
-    constexpr single_view(A a) : view(vs::all(a)) {}
+    constexpr single_view(A a) : view(std::views::all(a)) {}
 
     template <TupleLike T>
-    constexpr single_view(T&& t) : view(vs::all(get<0>(t)))
+    constexpr single_view(T&& t) : view(std::views::all(get<0>(t)))
     {
     }
 
     constexpr single_view& operator=(A a)
     {
         this->~single_view();
-        new (this) single_view{vs::all(a)};
+        new (this) single_view{std::views::all(a)};
         return *this;
     }
 
