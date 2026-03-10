@@ -165,7 +165,8 @@ Note: `shoccs-mesh` does not link `range-v3::range-v3` in `src/mesh/CMakeLists.t
     - File: `src/mesh/selections.hpp`.
   - Test: `ctest --test-dir build -R t-mesh`
   - **NOTE (review follow-up):** `selections.hpp` is not `#include`d by any source file in the codebase — `selector.hpp` has a separate, already-migrated `plane_view<1>` that superseded it. This means the `YPlaneView` and `FView` templates are never instantiated by any compiled TU, and `ctest -R t-mesh` does not exercise them (even when it compiles). After completing 7.2d, add a minimal compile-instantiation check (e.g., a static_assert or small test in `mesh.t.cpp` that includes `selections.hpp` and instantiates `YPlaneView` and `FView` with a concrete range type) to verify the migration compiles correctly.
-  - Ordering: 7.2a/7.2b/7.2c are independent of each other. 7.2d depends on 7.1a (for `ccs::cartesian_product`) and should be done last.
+  - [ ] **7.2e** Add compile-instantiation test for `selections.hpp` (unblocks confidence in 7.2a–7.2d): Since `selections.hpp` is dead code (not `#include`d anywhere), the migrated `YPlaneView` and `FView` templates (~400 lines of custom iterator logic) have never been compiled. Add a small test or static_assert block in `mesh.t.cpp` (or a new TU) that `#include`s `selections.hpp` and instantiates `YPlaneView` and `FView` with a concrete range type (e.g., `std::span<int>` or `std::vector<int>`). Verify that the instantiated types satisfy `std::ranges::random_access_range` and `std::ranges::sized_range`. This does NOT need to run meaningful assertions — just compile successfully to catch any template errors in the migrated code. Must be done before 7.14 (mesh.t.cpp migration) to avoid merging untested template code further downstream.
+  - Ordering: 7.2a/7.2b/7.2c are independent of each other. 7.2d depends on 7.1a (for `ccs::cartesian_product`) and should be done last. **7.2e** should be done right after 7.2d (i.e., next).
 
 - [ ] **7.3** Migrate `object_geometry.hpp` (lines 10, 65–66):
   - Remove `#include <range/v3/view/transform.hpp>`, add `#include <ranges>`.
@@ -434,6 +435,7 @@ These files still have range-v3 usage from earlier phases and must be cleaned be
 9. **7.13** (stencil tests) depends on **7.1c** (shared `ccs::linear_distribute`).
 10. **7.20–7.25** (Final Cleanup) must come last, after all code migration items.
 11. **Build-unblocking priority:** The build is currently broken (see status note above). To restore it, **7.3** + **7.6** should be done before items whose tests depend on `shoccs-system` (e.g., 7.12), and **7.9** + **7.10** before items whose tests depend on `shoccs-io` (e.g., 7.8). **7.14** (mesh.t.cpp) must precede any item tested via `t-mesh` (7.2c, 7.2d, 7.4).
+12. **7.2e** (compile-instantiation test for `selections.hpp`) should be done immediately — it validates ~400 lines of migrated template code that has never been compiled.
 
 ---
 
