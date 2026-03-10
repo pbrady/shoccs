@@ -439,11 +439,9 @@ Migrate test files to remove `#include <range/v3/all.hpp>` and all `rs::`/`vs::`
   - Files: `src/fields/field.t.cpp`, `src/fields/field_utils.t.cpp`, `src/fields/field_math.t.cpp`
   - Test: `ctest --test-dir build -R "t-field$|t-field_utils|t-field_math"` — all 3 targets pass. All 13 field-labeled tests pass.
 
-- [ ] **1.20i** Migrate or remove `src/fields/view_tuple_seg.cpp`. This is a standalone scratch/debug executable (`add_executable(seg ...)` in CMakeLists.txt) with 7 range-v3 includes (`equal`, `all`, `concat`, `iota`, `repeat_n`, `take`, `zip_with`). It is **not** a unit test. Options:
-  - (a) Delete the file and remove the `seg` target from CMakeLists.txt (preferred — it appears to be unused scratch code with commented-out lines).
-  - (b) Migrate its range-v3 usage to `std::ranges`/`std::views` and project-local equivalents.
-  - Files: `src/fields/view_tuple_seg.cpp`, `src/fields/CMakeLists.txt`
-  - Test: `cmake --build build`
+- [x] **1.20i** Removed `src/fields/view_tuple_seg.cpp` (unused scratch/debug executable with 7 range-v3 includes) and its `seg` target from `src/fields/CMakeLists.txt`. Option (a) chosen — file deleted.
+  - Files: `src/fields/view_tuple_seg.cpp` (deleted), `src/fields/CMakeLists.txt`
+  - Test: All 13 fields tests pass.
 
 ### CMake Cleanup
 

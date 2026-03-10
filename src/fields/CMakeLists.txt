@@ -19,6 +19,3 @@ add_unit_test(field "fields" fields)
 add_unit_test(field_utils "fields" fields)
 add_unit_test(field_math "fields" fields)
 
-add_executable(seg view_tuple_seg.cpp)
-target_link_libraries(seg fields)
-
