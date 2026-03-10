@@ -435,7 +435,7 @@ Migrate test files to remove `#include <range/v3/all.hpp>` and all `rs::`/`vs::`
   - Files: `src/fields/tuple_pipe.t.cpp`, `src/fields/single_view.t.cpp`, `src/fields/algorithms.t.cpp`
   - Test: `ctest --test-dir build -R "t-tuple_pipe|t-single_view|t-algorithms"`
 
-- [ ] **1.20h3** Migrate `src/fields/field.t.cpp` (169 lines), `src/fields/field_utils.t.cpp` (60 lines), and `src/fields/field_math.t.cpp` (106 lines): Remove range-v3 includes where present. Replace `rs::begin`/`rs::end` → `std::ranges::begin`/`end`, `rs::equal` → `std::ranges::equal`, `vs::repeat_n` → `std::vector<T>(n, v)` or `ccs::repeat_n`, `vs::iota` → `std::views::iota`. Note: `field.t.cpp` has no direct `#include <range/v3/...>` (gets range-v3 transitively) but may need `#include <algorithm>` and `#include <ranges>` after transitive includes are removed.
+- [ ] **1.20h3** Migrate `src/fields/field.t.cpp` (169 lines), `src/fields/field_utils.t.cpp` (60 lines), and `src/fields/field_math.t.cpp` (106 lines): Remove range-v3 includes where present. Replace `rs::begin`/`rs::end` → `std::ranges::begin`/`end`, `rs::equal` → `std::ranges::equal`, `vs::repeat_n` → `std::vector<T>(n, v)` or `ccs::repeat_n`, `vs::iota` → `std::views::iota`. Note: `field.t.cpp` has a direct `#include <range/v3/view/repeat_n.hpp>` (line 3) for `vs::repeat_n`; remove it and replace usage with `std::vector<T>(n, v)`.
   - Files: `src/fields/field.t.cpp`, `src/fields/field_utils.t.cpp`, `src/fields/field_math.t.cpp`
   - Test: `ctest --test-dir build -R "t-field$|t-field_utils|t-field_math"`
 
