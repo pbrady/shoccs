@@ -301,7 +301,7 @@ These files still have range-v3 usage from earlier phases and must be cleaned be
     - **`#if 0` blocks** (lines 209–284 and 287–453): **Delete entirely.** These contain ~25 additional range-v3 call sites in permanently disabled test cases. The first block (lines 209–284) tests wall interpolation edge cases that were disabled during development; the second block (lines 287–453) tests a quadratic interpolant (`T ci(3)` / `T cw(4)`) with different stencil sizes than the active tests. Migrating ~25 dead call sites adds risk without benefit. If these tests are needed in the future, they can be rewritten from scratch using the migrated active-code patterns as a template.
     - Remove `#include <range/v3/all.hpp>`, add `#include <numeric>`, `#include <ranges>`, `#include "fields/lazy_views.hpp"`.
     - Remove `range-v3::range-v3` link from `src/stencils/CMakeLists.txt` line 14.
-  - **7.13c** `src/stencils/E4_2.t.cpp` (309 lines, ~35 call sites, same patterns as 7.13a):
+  - **7.13c** `src/stencils/E4_2.t.cpp` (308 lines, ~35 call sites, same patterns as 7.13a):
     - Lines 23, 27, 30: `constexpr auto f4 = vs::transform(f4_f)`, `constexpr auto f3 = vs::transform(f3_f)`, `constexpr auto f2 = vs::transform(f2_f)` — change `constexpr` to `const` and replace `vs::transform` with `std::views::transform`. Used as pipeable closures in `mesh | f4`, `m | f2`, etc.
     - Lines 48, 69, 110, 151, 188, 213: `vs::linear_distribute(…) | rs::to<T>()` → `ccs::linear_distribute(…)` (6 occurrences).
     - Lines 74, 86, 115, 127, 156, 169, 219, 234, 249, 264, 280, 296: `vs::concat(vs::single(…), mesh) | rs::to<T>()` or `vs::concat(mesh, vs::single(…)) | rs::to<T>()` → manual vector construction (12 occurrences).

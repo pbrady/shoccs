@@ -121,6 +121,17 @@ All project-local utilities go in `src/fields/ccs_range_utils.hpp`, are header-o
 - (c) Replace all lazy views with eager `std::vector`-based computation
 **Considerations:** Option (b) would be simpler but requires verifying compiler/Kokkos C++23 support. Option (c) changes performance characteristics of lazy expression trees in `tuple_math`. Option (a) is safest for Phase 1.
 
+### D9: `vs::cartesian_product` Replacement Strategy
+**Decision:** **(a) Add a project-local `ccs::cartesian_product_view` to `src/fields/lazy_views.hpp`.**
+`vs::cartesian_product(x, y, z)` is used in `cartesian.hpp` (`domain()`) and `selections.hpp` (`location()`). C++23 has `std::views::cartesian_product` but C++20 does not. The project targets C++20 (per `CMAKE_CXX_STANDARD 20`).
+The new `ccs::cartesian_product_view` lazily yields `std::tuple<T1&, T2&, T3&>` in triple-nested-loop order (first range slowest, third range fastest). It models `std::ranges::view_interface` with at least forward iteration. This matches the existing range-v3 `vs::cartesian_product` behavior and the mesh layout convention (x-slowest, z-fastest).
+Eager alternatives (returning `std::vector<real3>`) were considered but rejected because `domain()` is stored as a member type in `mesh.hpp` using `decltype`, and changing it to a vector would alter the type and semantics of the fields framework's location tuples.
+**Options:**
+- **(a) Project-local `ccs::cartesian_product_view` in `lazy_views.hpp`** ← CHOSEN
+- (b) Upgrade to C++23 for `std::views::cartesian_product`
+- (c) Change `domain()` API to return `std::vector<std::tuple<real,real,real>>`
+**Considerations:** Option (a) is consistent with D8 (project-local utilities for missing C++20 features). Option (c) would change the mesh.hpp member types and downstream field DSL usage.
+
 ### D10: Dead Code Cleanup for `directional.cpp`/`directional.t.cpp`
 **Decision:** **(a) Delete these files entirely.**
 `directional.cpp`, `directional.t.cpp`, and `directional.hpp` are commented out of `src/operators/CMakeLists.txt` (line 21). They use an older API (`geometry` class, `domain_boundaries`, `mesh` constructor with positional args) that no longer exists in the current codebase, and have heavy range-v3 + cppcoro dependencies (5+ range-v3 includes in the .cpp, 7 includes in the test, cppcoro generator). Migrating these files would require both range-v3 removal AND API updates for a code path that is not compiled or tested. The `directional` operator was superseded by the `derivative` operator. Similarly, `src/io/format_test.cpp` is a standalone demo (not in the build) with range-v3 usage — delete it too.
@@ -137,17 +148,6 @@ All project-local utilities go in `src/fields/ccs_range_utils.hpp`, are header-o
 - **(a) Delete the `#if 0` blocks** ← CHOSEN
 - (b) Migrate all ~25 call sites using the same patterns as active code
 **Considerations:** Migrating dead test code adds ~50 lines of diff with no test coverage benefit. The patterns are identical to active code, so if these tests are needed in the future they can be rewritten using the migrated active code as a template.
-
-### D9: `vs::cartesian_product` Replacement Strategy
-**Decision:** **(a) Add a project-local `ccs::cartesian_product_view` to `src/fields/lazy_views.hpp`.**
-`vs::cartesian_product(x, y, z)` is used in `cartesian.hpp` (`domain()`) and `selections.hpp` (`location()`). C++23 has `std::views::cartesian_product` but C++20 does not. The project targets C++20 (per `CMAKE_CXX_STANDARD 20`).
-The new `ccs::cartesian_product_view` lazily yields `std::tuple<T1&, T2&, T3&>` in triple-nested-loop order (first range slowest, third range fastest). It models `std::ranges::view_interface` with at least forward iteration. This matches the existing range-v3 `vs::cartesian_product` behavior and the mesh layout convention (x-slowest, z-fastest).
-Eager alternatives (returning `std::vector<real3>`) were considered but rejected because `domain()` is stored as a member type in `mesh.hpp` using `decltype`, and changing it to a vector would alter the type and semantics of the fields framework's location tuples.
-**Options:**
-- **(a) Project-local `ccs::cartesian_product_view` in `lazy_views.hpp`** ← CHOSEN
-- (b) Upgrade to C++23 for `std::views::cartesian_product`
-- (c) Change `domain()` API to return `std::vector<std::tuple<real,real,real>>`
-**Considerations:** Option (a) is consistent with D8 (project-local utilities for missing C++20 features). Option (c) would change the mesh.hpp member types and downstream field DSL usage.
 
 ---
 
