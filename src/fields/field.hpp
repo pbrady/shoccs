@@ -2,7 +2,7 @@
 
 #include "field_fwd.hpp"
 #include "field_math.hpp"
-#include <range/v3/algorithm/swap_ranges.hpp>
+#include <algorithm>
 #include <utility>
 
 namespace ccs
@@ -48,8 +48,8 @@ public:
         requires(ConstructibleFromRange<S, scalar_type<F>>&&
                      ConstructibleFromRange<V, vector_type<F>>)
     constexpr field(F&& f)
-        : s(rs::begin(f.scalars()), rs::end(f.scalars())),
-          v(rs::begin(f.vectors()), rs::end(f.vectors()))
+        : s(std::ranges::begin(f.scalars()), std::ranges::end(f.scalars())),
+          v(std::ranges::begin(f.vectors()), std::ranges::end(f.vectors()))
     {
     }
 
@@ -69,8 +69,8 @@ public:
     }
 
     template <Field F>
-    requires std::is_assignable_v<rs::range_reference_t<S>, scalar_ref_t<F>> &&
-        std::is_assignable_v<rs::range_reference_t<V>, vector_ref_t<F>>
+    requires std::is_assignable_v<std::ranges::range_reference_t<S>, scalar_ref_t<F>> &&
+        std::is_assignable_v<std::ranges::range_reference_t<V>, vector_ref_t<F>>
             field& operator=(F&& f)
     {
         for_each([](auto& u, auto&& v) { u = v; }, *this, FWD(f));
@@ -78,8 +78,8 @@ public:
     }
 
     template <typename F>
-        requires(!Field<F> && std::is_assignable_v<rs::range_reference_t<S>, F> &&
-                 std::is_assignable_v<rs::range_reference_t<V>, F>)
+        requires(!Field<F> && std::is_assignable_v<std::ranges::range_reference_t<S>, F> &&
+                 std::is_assignable_v<std::ranges::range_reference_t<V>, F>)
     field& operator=(F&& f)
     {
         for_each([&f](auto& u) { u = f; }, *this);
@@ -87,9 +87,9 @@ public:
     }
 
     // api for resizing should only be available for true containers
-    constexpr int nscalars() const requires rs::sized_range<S> { return rs::size(s); }
+    constexpr int nscalars() const requires std::ranges::sized_range<S> { return std::ranges::size(s); }
 
-    constexpr int nvectors() const requires rs::sized_range<V> { return rs::size(v); }
+    constexpr int nvectors() const requires std::ranges::sized_range<V> { return std::ranges::size(v); }
 
     constexpr auto& scalars() { return s; }
 
@@ -100,7 +100,7 @@ public:
     constexpr const auto& vectors() const { return v; }
 
     template <std::integral... Is>
-    decltype(auto) scalars(Is&&... i) const requires rs::random_access_range<S>
+    decltype(auto) scalars(Is&&... i) const requires std::ranges::random_access_range<S>
     {
         if constexpr (sizeof...(Is) > 1)
             return tuple(s[i]...);
@@ -117,7 +117,7 @@ public:
     }
 
     template <std::integral... Is>
-    decltype(auto) scalars(Is&&... i) requires rs::random_access_range<S>
+    decltype(auto) scalars(Is&&... i) requires std::ranges::random_access_range<S>
     {
         if constexpr (sizeof...(Is) > 1)
             return tuple{s[i]...};
@@ -135,12 +135,12 @@ public:
 
     constexpr void swap(field& other) noexcept requires requires(S s0, S s1, V v0, V v1)
     {
-        rs::swap_ranges(s0, s1);
-        rs::swap_ranges(v0, v1);
+        std::ranges::swap_ranges(s0, s1);
+        std::ranges::swap_ranges(v0, v1);
     }
     {
-        rs::swap_ranges(s, other.s);
-        rs::swap_ranges(v, other.v);
+        std::ranges::swap_ranges(s, other.s);
+        std::ranges::swap_ranges(v, other.v);
     }
 
     friend constexpr void swap(field& a, field& b) noexcept { a.swap(b); }

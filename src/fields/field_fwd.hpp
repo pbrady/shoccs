@@ -73,14 +73,14 @@ template <Field F>
 using vector_type = detail::vector_type_impl<std::remove_cvref_t<F>>::type;
 
 template <Field F>
-using scalar_value_t = rs::range_value_t<scalar_type<F>>;
+using scalar_value_t = std::ranges::range_value_t<scalar_type<F>>;
 
 template <Field F>
-using vector_value_t = rs::range_value_t<vector_type<F>>;
+using vector_value_t = std::ranges::range_value_t<vector_type<F>>;
 
 template <Field F>
-using scalar_ref_t = rs::range_reference_t<scalar_type<F>>;
+using scalar_ref_t = std::ranges::range_reference_t<scalar_type<F>>;
 
 template <Field F>
-using vector_ref_t = rs::range_reference_t<vector_type<F>>;
+using vector_ref_t = std::ranges::range_reference_t<vector_type<F>>;
 } // namespace ccs

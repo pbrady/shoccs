@@ -173,15 +173,14 @@ These project-local utilities replace range-v3 internal APIs that have no C++20 
 
 ### Field Type
 
-- [ ] **1.10** Migrate `src/fields/field.hpp`:
-  - Replace `rs::swap_ranges` → `std::ranges::swap_ranges` (lines 138, 142–143).
-  - Replace `rs::size` → `std::ranges::size`, `rs::begin`/`rs::end` → `std::ranges::begin`/`end` (lines 51–52, 90, 92, 103).
-  - Replace `rs::sized_range` → `std::ranges::sized_range`, `rs::random_access_range` → `std::ranges::random_access_range` (lines 90, 103, 120).
-  - Replace `rs::range_reference_t` → `std::ranges::range_reference_t` (lines 72, 81).
-  - Replace `rs::output_range` → `std::ranges::output_range` (concept usage removed if already handled by tuple_fwd).
-  - Remove `#include <range/v3/algorithm/swap_ranges.hpp>`. Add `#include <algorithm>`.
+- [x] **1.10** Migrate `src/fields/field.hpp`:
+  - Replaced `rs::swap_ranges` → `std::ranges::swap_ranges` (4 occurrences in swap method).
+  - Replaced `rs::size` → `std::ranges::size`, `rs::begin`/`rs::end` → `std::ranges::begin`/`end`.
+  - Replaced `rs::sized_range` → `std::ranges::sized_range`, `rs::random_access_range` → `std::ranges::random_access_range`.
+  - Replaced `rs::range_reference_t` → `std::ranges::range_reference_t` (4 occurrences in assignment operators).
+  - Removed `#include <range/v3/algorithm/swap_ranges.hpp>`. Added `#include <algorithm>`.
   - Files: `src/fields/field.hpp`
-  - Test: `ctest --test-dir build -R t-field`
+  - Test: `ctest --test-dir build -R t-field` — passed. All downstream targets (t-field_utils, t-field_math, t-single_view, t-container_tuple) also pass.
 
 - [x] **1.11** Migrate `src/fields/field_utils.hpp`:
   - Replaced `vs::zip(FWD(t).scalars()...)` in `for_each_scalar`/`for_each_vector` with index-based iteration: `for (int i = 0; i < n; ++i) f(t.scalars()[i]...);` using the first argument's `nscalars()`/`nvectors()`.
@@ -190,14 +189,14 @@ These project-local utilities replace range-v3 internal APIs that have no C++20 
   - Files: `src/fields/field_utils.hpp`
   - Test: `ctest --test-dir build -R t-field_utils` — passed.
 
-- [ ] **1.12** Migrate `src/fields/field_math.hpp`: No range-v3 includes — only depends on `field_utils.hpp` which provides range concepts transitively. Verify that after 1.11, this file compiles with no range-v3 usage.
+- [x] **1.12** Migrate `src/fields/field_math.hpp`: Verified — no `rs::`, `vs::`, or `range/v3` includes present. File uses only C++20 concepts and project-local utilities transitively.
   - Files: `src/fields/field_math.hpp`
-  - Test: `ctest --test-dir build -R t-field_math`
+  - Test: `ctest --test-dir build -R t-field_math` — passed.
 
-- [ ] **1.12a** Migrate `src/fields/field_fwd.hpp`:
-  - Replace `rs::range_value_t` → `std::ranges::range_value_t`, `rs::range_reference_t` → `std::ranges::range_reference_t` (lines 76–85).
+- [x] **1.12a** Migrate `src/fields/field_fwd.hpp`:
+  - Replaced `rs::range_value_t` → `std::ranges::range_value_t` (2 occurrences), `rs::range_reference_t` → `std::ranges::range_reference_t` (2 occurrences).
   - Files: `src/fields/field_fwd.hpp`
-  - Test: `cmake --build build`
+  - Test: `cmake --build build` — passed. All downstream field tests pass.
 
 - [x] **1.12b** Migrate `src/fields/selector_fwd.hpp`:
   - Replaced `namespace ranges { ... enable_view ... }` with `namespace std::ranges { ... enable_view ... }`.
