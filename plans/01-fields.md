@@ -348,7 +348,7 @@ Migrate test files to remove `#include <range/v3/all.hpp>` and all `rs::`/`vs::`
   - Files: `src/fields/view_tuple.t.cpp`
   - Test: `ctest --test-dir build -R t-view_tuple`
 
-- [ ] **1.20e** Migrate `src/fields/selector.t.cpp`: This is the largest test file (724 lines). Remove `#include <range/v3/all.hpp>`. Major replacements:
+- [ ] **1.20e** Migrate `src/fields/selector.t.cpp`: This is the largest test file (723 lines). Remove `#include <range/v3/all.hpp>`. Major replacements:
   - All `vs::repeat_n(v, n)` → `std::vector<int>(n, v)` (~50 occurrences)
   - All `vs::concat(...)` → helper function or `std::vector{...}` with explicit values (~30 occurrences)
   - `vs::stride(n) | vs::take_exactly(n)` → `ccs::stride` + `std::views::take` (line 70, 115)
@@ -400,7 +400,7 @@ Migrate test files to remove `#include <range/v3/all.hpp>` and all `rs::`/`vs::`
 ## Ordering Constraints
 
 ```
-1.2a (ccs_range_utils.hpp) ──┬── 1.3c, 1.3f → 1.3 (tuple_fwd.hpp)
+1.2a (ccs_range_utils.hpp) ──┬── 1.3c → 1.3 (tuple_fwd.hpp)
                               ├── 1.9  (tuple_pipe.hpp)
                               ├── 1.9a (tuple.hpp)
                               └── 1.19 (selector utility fns)
