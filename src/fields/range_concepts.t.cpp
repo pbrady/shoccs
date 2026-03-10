@@ -275,9 +275,9 @@ TEST_CASE("z_plane_view")
     auto t_ = std::views::iota(0, 2 * 3 * 4);
     std::vector<int> t{std::ranges::begin(t_), std::ranges::end(t_)};
 
-    // verify z_plane_view is valid
+    // verify z_plane_view values: drop(0), stride(4) over [0..23] → every 4th element
     auto zpv = z_plane_view(t, i, 0);
-    REQUIRE(std::ranges::size(zpv) > 0);
+    REQUIRE(std::ranges::equal(zpv, std::vector{0, 4, 8, 12, 16, 20}));
 
     using T = decltype(z_plane_view(t, i, 0));
     REQUIRE(std::ranges::sized_range<T>);
