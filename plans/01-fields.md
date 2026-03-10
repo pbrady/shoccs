@@ -140,32 +140,34 @@ These project-local utilities replace range-v3 internal APIs that have no C++20 
 
 ### Math Operations
 
-- [ ] **1.8** Migrate `src/fields/tuple_math.hpp`:
-  - [ ] **1.8a** Replace `vs::zip(out, in)` in compound-assignment operators (line 47) with index-based iteration: `auto it_o = std::ranges::begin(out); auto it_i = std::ranges::begin(in); for (; it_o != std::ranges::end(out); ++it_o, ++it_i) *it_o OP *it_i;`. This avoids needing a lazy zip view for in-place mutation.
+- [x] **1.8** Migrate `src/fields/tuple_math.hpp`:
+  - [x] **1.8a** Replaced `vs::zip(out, in)` in compound-assignment operators with index-based iteration using `std::ranges::begin`/`end`.
     - Files: `src/fields/tuple_math.hpp`
-  - [ ] **1.8b** Replace `vs::zip_with(f, rng, vs::repeat_n(v, sz))` in binary scalar operators (lines 84, 96) with `ccs::zip_transform(f, FWD(rng), ccs::repeat_n(v, sz))` or equivalently `rng | std::views::transform([f, v](auto&& x) { return f(FWD(x), v); })`. The `transform` approach is simpler and avoids needing `repeat_n_view`.
-    - Depends on: 1.2b (only if using `ccs::zip_transform`; `std::views::transform` approach needs no dependency)
+  - [x] **1.8b** Replaced `vs::zip_with(f, rng, vs::repeat_n(v, sz))` in binary scalar operators with `ccs::zip_transform(f, FWD(rng), ccs::repeat_n(v, sz))`.
     - Files: `src/fields/tuple_math.hpp`
-  - [ ] **1.8c** Replace `vs::zip_with(f, a, b)` in binary tuple-tuple operators (line 108) with `ccs::zip_transform(f, FWD(a), FWD(b))`.
-    - Depends on: 1.2b
+  - [x] **1.8c** Replaced `vs::zip_with(f, a, b)` in binary tuple-tuple operators with `ccs::zip_transform(f, FWD(a), FWD(b))`.
     - Files: `src/fields/tuple_math.hpp`
-  - [ ] **1.8d** Replace `rs::size(rng)` → `std::ranges::size(rng)` (line 83).
+  - [x] **1.8d** Replaced `rs::size(rng)` → `std::ranges::size(rng)`.
     - Files: `src/fields/tuple_math.hpp`
-  - [ ] **1.8e** Remove `#include <range/v3/view/repeat.hpp>`, `#include <range/v3/view/repeat_n.hpp>`, `#include <range/v3/view/zip.hpp>`, `#include <range/v3/view/zip_with.hpp>`. Add `#include <ranges>` and `#include "lazy_views.hpp"`.
+  - [x] **1.8e** Removed 4 range-v3 includes. Added `#include <ranges>` and `#include "lazy_views.hpp"`.
     - Files: `src/fields/tuple_math.hpp`
-  - Test: `ctest --test-dir build -R t-tuple_math`
+  - **Cascading fixes required:** Removing range-v3 includes from `tuple_math.hpp` broke transitive include chains for downstream files. Fixed `selector_fwd.hpp` (1.12b), `field_utils.hpp` (1.11), added `<range/v3/view/view.hpp>` to `tuple_pipe.hpp`, added `<functional>` to `tuple.hpp`, and added `<range/v3/view/repeat_n.hpp>` to `field.t.cpp`.
+  - **Infrastructure fix:** Wrapped `F` in `ccs::semiregular_box<F>` inside `zip_transform_view` (`lazy_views.hpp`). Lambdas (non-assignable) passed as `F` prevented `zip_transform_view` from satisfying `std::ranges::view` (which requires `movable`). Range-v3's `zip_with` handled this automatically via `semiregular_box_t<F>`.
+  - Test: `t-tuple_math` fails to compile because test file still uses range-v3 types (will be fixed in 1.20c). All previously-passing downstream targets still pass (t-field, t-field_math, t-field_utils, t-single_view, t-container_tuple, t-algorithms).
 
 - [ ] **1.9** Migrate `src/fields/tuple_pipe.hpp`:
-  - Replace `vs::view_closure<ViewFn>` with `ccs::view_closure<ViewFn>` in the two `operator|` overloads that accept/match view closures (lines 52, 62).
-  - Depends on: 1.2a
+  - Replace `vs::view_closure<ViewFn>` with `ccs::view_closure<ViewFn>` in the two `operator|` overloads that accept/match view closures (lines 53, 63). Remove `#include <range/v3/view/view.hpp>`.
+  - **IMPORTANT ordering constraint:** This MUST be done after or concurrently with items 1.19a–1.19h (selector function objects), because `selector.hpp` currently creates `ranges::views::view_closure` instances via `rs::make_view_closure()`. If `tuple_pipe.hpp` is changed to `ccs::view_closure` before the selector is migrated, the selector's view closures won't match the pipe operator overloads.
+  - Depends on: 1.2a, 1.19 (selector utility fn migration)
   - Files: `src/fields/tuple_pipe.hpp`
   - Test: `ctest --test-dir build -R t-tuple_pipe`
 
 ### Tuple Type
 
 - [ ] **1.9a** Migrate `src/fields/tuple.hpp`:
-  - Replace `vs::view_closure<ViewFn>` → `ccs::view_closure<ViewFn>` in deduction guides (lines 152–154).
-  - Depends on: 1.2a
+  - Replace `vs::view_closure<ViewFn>` → `ccs::view_closure<ViewFn>` in deduction guides (lines 153–155).
+  - **Same ordering constraint as 1.9:** Must be done after or concurrently with 1.19, since selector code creates `vs::view_closure` instances that are used with tuple deduction guides.
+  - Depends on: 1.2a, 1.19
   - Files: `src/fields/tuple.hpp`
   - Test: `ctest --test-dir build -R t-tuple`
 
@@ -181,13 +183,12 @@ These project-local utilities replace range-v3 internal APIs that have no C++20 
   - Files: `src/fields/field.hpp`
   - Test: `ctest --test-dir build -R t-field`
 
-- [ ] **1.11** Migrate `src/fields/field_utils.hpp`:
-  - Replace `vs::zip(t.scalars()...)` with index-based iteration in `for_each_scalar` and `for_each_vector` (lines 11, 17): iterate `for (int i = 0; i < t.nscalars(); ++i) f(t.scalars(i)...);` (or equivalent using `std::ranges::size`). Note: `t` is a parameter pack `T&&... t`; use the first argument's size.
-  - Replace `vs::zip_with(f, t.scalars()...)` with `ccs::zip_transform(f, t.scalars()...)` in `transform_scalar` and `transform_vector` (lines 30, 36).
-  - Add `#include "lazy_views.hpp"` for `ccs::zip_transform`. No direct range-v3 includes to remove (range-v3 is accessed transitively through `field_fwd.hpp` → `selector.hpp`).
-  - Depends on: 1.2b
+- [x] **1.11** Migrate `src/fields/field_utils.hpp`:
+  - Replaced `vs::zip(FWD(t).scalars()...)` in `for_each_scalar`/`for_each_vector` with index-based iteration: `for (int i = 0; i < n; ++i) f(t.scalars()[i]...);` using the first argument's `nscalars()`/`nvectors()`.
+  - Replaced `vs::zip_with(f, FWD(t).scalars()...)` in `transform_scalar`/`transform_vector` with `ccs::zip_transform(f, FWD(t).scalars()...)`.
+  - Added `#include "lazy_views.hpp"`.
   - Files: `src/fields/field_utils.hpp`
-  - Test: `ctest --test-dir build -R t-field_utils`
+  - Test: `ctest --test-dir build -R t-field_utils` — passed.
 
 - [ ] **1.12** Migrate `src/fields/field_math.hpp`: No range-v3 includes — only depends on `field_utils.hpp` which provides range concepts transitively. Verify that after 1.11, this file compiles with no range-v3 usage.
   - Files: `src/fields/field_math.hpp`
@@ -198,10 +199,10 @@ These project-local utilities replace range-v3 internal APIs that have no C++20 
   - Files: `src/fields/field_fwd.hpp`
   - Test: `cmake --build build`
 
-- [ ] **1.12b** Migrate `src/fields/selector_fwd.hpp`:
-  - Replace `ranges::enable_view` specialization (line 46) with `std::ranges::enable_view` in namespace `std::ranges`.
+- [x] **1.12b** Migrate `src/fields/selector_fwd.hpp`:
+  - Replaced `namespace ranges { ... enable_view ... }` with `namespace std::ranges { ... enable_view ... }`.
   - Files: `src/fields/selector_fwd.hpp`
-  - Test: `cmake --build build`
+  - Test: builds successfully as part of downstream targets.
 
 ### Selectors (Highest Risk)
 
@@ -431,13 +432,14 @@ Migrate test files to remove `#include <range/v3/all.hpp>` and all `rs::`/`vs::`
 
 ```
 1.2a (ccs_range_utils.hpp) ──┬── 1.3c → 1.3 (tuple_fwd.hpp)
-                              ├── 1.9  (tuple_pipe.hpp)
-                              ├── 1.9a (tuple.hpp)
-                              └── 1.19 (selector utility fns)
+                              ├── 1.19 (selector utility fns)
+                              └── 1.9, 1.9a (MUST come after 1.19)
+
+1.19 (selector utility fns) ──── 1.9, 1.9a (tuple_pipe.hpp, tuple.hpp view_closure migration)
 
 1.2b (lazy_views.hpp) ──── 1.2c (zip_transform fix) ──┬── 1.4d (tuple_utils.hpp lift)
                                                         ├── 1.8b, 1.8c (tuple_math.hpp)
-                                                        └── 1.11 (field_utils.hpp)
+                                                        └── 1.11 (field_utils.hpp) [DONE]
 1.2b (lazy_views.hpp) ───────┬── 1.15 (z-plane stride_view)
                               └── 1.19h (selector includes)
 

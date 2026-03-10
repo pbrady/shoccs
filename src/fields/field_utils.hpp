@@ -2,19 +2,27 @@
 
 #include "field_fwd.hpp"
 
+#include "lazy_views.hpp"
+
 namespace ccs
 {
 
 template <Field... T, typename F>
 constexpr void for_each_scalar(F&& f, T&&... t)
 {
-    for (auto&& s : vs::zip(FWD(t).scalars()...)) { std::apply(f, FWD(s)); }
+    const auto n = std::get<0>(std::forward_as_tuple(t...)).nscalars();
+    for (int i = 0; i < n; ++i) {
+        f(t.scalars()[i]...);
+    }
 }
 
 template <Field... T, typename F>
 constexpr void for_each_vector(F&& f, T&&... t)
 {
-    for (auto&& s : vs::zip(FWD(t).vectors()...)) { std::apply(f, FWD(s)); }
+    const auto n = std::get<0>(std::forward_as_tuple(t...)).nvectors();
+    for (int i = 0; i < n; ++i) {
+        f(t.vectors()[i]...);
+    }
 }
 
 template <Field... T, typename F>
@@ -27,13 +35,13 @@ constexpr void for_each(F&& f, T&&... t)
 template <Field... T, typename F>
 constexpr auto transform_scalar(F&& f, T&&... t)
 {
-    return vs::zip_with(f, FWD(t).scalars()...);
+    return ccs::zip_transform(f, FWD(t).scalars()...);
 }
 
 template <Field... T, typename F>
 constexpr auto transform_vector(F&& f, T&&... t)
 {
-    return vs::zip_with(f, FWD(t).vectors()...);
+    return ccs::zip_transform(f, FWD(t).vectors()...);
 }
 
 template <Field... T, typename F>

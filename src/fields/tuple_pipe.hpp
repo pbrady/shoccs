@@ -2,6 +2,8 @@
 
 #include "tuple_utils.hpp"
 
+#include <range/v3/view/view.hpp>
+
 namespace ccs::detail
 {
 template <typename T>

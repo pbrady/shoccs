@@ -40,7 +40,7 @@ struct selection;
 
 } // namespace ccs
 
-namespace ranges
+namespace std::ranges
 {
 template <ccs::ListIndex L, ccs::Tuple R, typename Fn>
 inline constexpr bool enable_view<ccs::selection<L, R, Fn>> = enable_view<R>;

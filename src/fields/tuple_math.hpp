@@ -2,11 +2,10 @@
 
 #include "tuple_utils.hpp"
 
-#include <range/v3/view/repeat.hpp>
-#include <range/v3/view/repeat_n.hpp>
-#include <range/v3/view/zip.hpp>
-#include <range/v3/view/zip_with.hpp>
+#include <ranges>
 #include <tuple>
+
+#include "lazy_views.hpp"
 
 namespace ccs::detail
 {
@@ -44,7 +43,9 @@ private:
     {                                                                                    \
         for_each(                                                                        \
             [](auto&& out, auto&& in) {                                                  \
-                for (auto&& [o, i] : vs::zip(out, in)) o f i;                            \
+                auto it_o = std::ranges::begin(out);                                      \
+                auto it_i = std::ranges::begin(in);                                      \
+                for (; it_o != std::ranges::end(out); ++it_o, ++it_i) *it_o f *it_i;    \
             },                                                                           \
             u,                                                                           \
             FWD(v));                                                                     \
@@ -80,8 +81,8 @@ private:
     {                                                                                    \
         return transform(                                                                \
             [v](auto&& rng) {                                                            \
-                const auto sz = rs::size(rng);                                           \
-                return vs::zip_with(f, FWD(rng), vs::repeat_n(v, sz));                   \
+                const auto sz = std::ranges::size(rng);                                    \
+                return ccs::zip_transform(f, FWD(rng), ccs::repeat_n(v, sz));            \
             },                                                                           \
             FWD(u));                                                                     \
     }                                                                                    \
@@ -92,8 +93,8 @@ private:
     {                                                                                    \
         return transform(                                                                \
             [v](auto&& rng) {                                                            \
-                const auto sz = rs::size(rng);                                           \
-                return vs::zip_with(f, vs::repeat_n(v, sz), FWD(rng));                   \
+                const auto sz = std::ranges::size(rng);                                    \
+                return ccs::zip_transform(f, ccs::repeat_n(v, sz), FWD(rng));            \
             },                                                                           \
             FWD(u));                                                                     \
     }                                                                                    \
@@ -105,7 +106,7 @@ private:
         op(U&& u, V&& v)                                                                 \
     {                                                                                    \
         return transform(                                                                \
-            [](auto&& a, auto&& b) { return vs::zip_with(f, FWD(a), FWD(b)); },          \
+            [](auto&& a, auto&& b) { return ccs::zip_transform(f, FWD(a), FWD(b)); },    \
             FWD(u),                                                                      \
             FWD(v));                                                                     \
     }

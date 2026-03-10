@@ -6,6 +6,8 @@
 #include "tuple_utils.hpp"
 #include "view_tuple.hpp"
 
+#include <functional>
+
 namespace ccs
 {
 

@@ -8,6 +8,8 @@
 #include <type_traits>
 #include <utility>
 
+#include "ccs_range_utils.hpp"
+
 namespace ccs
 {
 
@@ -182,7 +184,7 @@ template <typename F, typename... Rngs>
 class zip_transform_view
     : public std::ranges::view_interface<zip_transform_view<F, Rngs...>>
 {
-    F f_;
+    semiregular_box<F> f_;
     std::tuple<Rngs...> rngs_;
 
     using iterator = detail::zip_transform_iterator<F, Rngs...>;
@@ -199,7 +201,7 @@ public:
     {
         return std::apply(
             [this](auto&... rngs) {
-                return iterator{&f_, std::ranges::begin(rngs)...};
+                return iterator{&f_.get(), std::ranges::begin(rngs)...};
             },
             rngs_);
     }
@@ -208,7 +210,7 @@ public:
     {
         return std::apply(
             [this](const auto&... rngs) {
-                return iterator{&f_, std::ranges::begin(rngs)...};
+                return iterator{&f_.get(), std::ranges::begin(rngs)...};
             },
             rngs_);
     }
@@ -217,7 +219,7 @@ public:
     {
         return std::apply(
             [this](auto&... rngs) {
-                return iterator{&f_, std::ranges::end(rngs)...};
+                return iterator{&f_.get(), std::ranges::end(rngs)...};
             },
             rngs_);
     }
@@ -226,7 +228,7 @@ public:
     {
         return std::apply(
             [this](const auto&... rngs) {
-                return iterator{&f_, std::ranges::end(rngs)...};
+                return iterator{&f_.get(), std::ranges::end(rngs)...};
             },
             rngs_);
     }
