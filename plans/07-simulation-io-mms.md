@@ -49,8 +49,14 @@ ctest --test-dir build
     - Add `#include "fields/lazy_views.hpp"`.
     - Line 74: Replace `vs::cartesian_product(x(), y(), z())` with `ccs::cartesian_product(x(), y(), z())`.
     - File: `src/mesh/cartesian.hpp`.
-  - **7.1c** Migrate `cartesian.cpp` constructor (lines 12–34):
-    - Remove `#include <range/v3/all.hpp>`, add `#include <algorithm>` and `#include <numeric>`.
+  - **7.1c** Add shared `ccs::linear_distribute` helper to `src/fields/lazy_views.hpp`:
+    - A free function: `template<typename T> std::vector<T> linear_distribute(T mn, T mx, int n)` that generates `n` linearly-spaced values from `mn` to `mx`.
+    - Implementation: `v[i] = n > 1 ? mn + i * (mx - mn) / (n - 1) : mn`.
+    - File: `src/fields/lazy_views.hpp` (append after `stride_view`).
+    - Used by: 7.1d (cartesian.cpp) and 7.13a/b/c (stencil tests).
+    - Ordering: Must precede 7.1d and 7.13.
+  - **7.1d** Migrate `cartesian.cpp` constructor (lines 3, 13–34):
+    - Remove `#include <range/v3/all.hpp>` (line 3), add `#include <algorithm>`, `#include <numeric>`, and `#include "fields/lazy_views.hpp"`.
     - Lines 13–15 (`concat_copy` with `rs::copy`, `vs::concat`, `vs::repeat`, `vs::take`): Replace with an explicit loop that copies up to 3 values from `in`, padding with `val`:
       ```cpp
       auto concat_copy = [](auto&& in, auto val, auto&& out) {
@@ -74,18 +80,10 @@ ctest --test-dir build
           h_[i] = (n_[i] - 1) ? (max_[i] - min_[i]) / (n_[i] - 1) : null_v<>;
       ```
     - Line 30 (`rs::count_if`): Replace with `std::count_if(n_.begin(), n_.end(), …)`.
-    - Lines 32–34 (`vs::linear_distribute | rs::to<vector>`): Replace with a helper lambda:
-      ```cpp
-      auto linear_distribute = [](real mn, real mx, int n) {
-          std::vector<real> v(n);
-          for (int i = 0; i < n; ++i)
-              v[i] = n > 1 ? mn + i * (mx - mn) / (n - 1) : mn;
-          return v;
-      };
-      ```
+    - Lines 32–34 (`vs::linear_distribute | rs::to<vector>`): Replace with `ccs::linear_distribute(min_[i], max_[i], n_[i])` (from 7.1c).
     - File: `src/mesh/cartesian.cpp`.
   - Test: `ctest --test-dir build -R t-cartesian`
-  - Ordering: 7.1a must precede 7.1b. 7.1c is independent of 7.1a/7.1b.
+  - Ordering: 7.1a must precede 7.1b. 7.1c must precede 7.1d. 7.1d is independent of 7.1a/7.1b.
 
 - [ ] **7.2** Migrate `selections.hpp`
   - **7.2a** Rewrite `YPlaneView` as a `std::ranges::view_interface` class (lines 26–163):
@@ -197,7 +195,7 @@ ctest --test-dir build
   - Test: `ctest --test-dir build -R t-field_io`
 
 - [ ] **7.9** Migrate `field_data.cpp` (lines 4–6, 19–31, 43, 50–52):
-  - Remove all three `#include <range/v3/…>` headers.
+  - Remove all three `#include <range/v3/…>` headers (lines 4–6: `for_each`, `reverse_copy` (stale/unused), `transform`).
   - **`write_geom` method** (lines 16–37):
     - Lines 19–31: Replace `rs::for_each(rng | vs::transform(&mesh_object_info::position), lambda)` with a range-for loop:
       ```cpp
@@ -255,21 +253,24 @@ These files still have range-v3 usage from earlier phases and must be cleaned be
   - Test: `ctest --test-dir build -R t-simulation_cycle` (scalar_wave is used by simulation tests).
 
 - [ ] **7.13** Migrate stencil test files (heavy range-v3: `vs::linear_distribute`, `rs::inner_product`, `vs::concat`, `vs::single`, `rs::to`, `rs::fill`, `vs::take_exactly`, `vs::drop`):
-  - **7.13a** `src/stencils/polyE2_1.t.cpp`: Replace all range-v3 patterns with explicit loops / `std::inner_product` / manual vector construction. Remove `#include <range/v3/all.hpp>`.
-    - `vs::linear_distribute(a, b, n) | rs::to<T>()` → use same `linear_distribute` helper as 7.1c.
-    - `rs::inner_product(a, b, init)` → `std::inner_product(a.begin(), a.end(), b.begin(), init)`.
+  - **7.13a** `src/stencils/polyE2_1.t.cpp`: Replace all range-v3 patterns with explicit loops / `std::inner_product` / manual vector construction. Remove `#include <range/v3/all.hpp>`, add `#include <numeric>`, `#include <ranges>`, `#include "fields/lazy_views.hpp"`.
+    - Lines 19, 24: `constexpr auto gt = vs::transform(gf)` and `constexpr auto bt = vs::transform(bf)` — change `constexpr` to `const` and replace `vs::transform` with `std::views::transform`. These are namespace-scope pipeable closure variables used as `mesh | gt`.
+    - `vs::linear_distribute(a, b, n) | rs::to<T>()` → `ccs::linear_distribute(a, b, n)` (from 7.1c; already returns `std::vector`).
+    - `rs::inner_product(a, b, init)` → `std::inner_product(a.begin(), a.end(), b.begin(), init)` (from `<numeric>`).
     - `vs::concat(vs::single(x), mesh) | rs::to<T>()` → construct vector manually: `T m = {x}; m.insert(m.end(), mesh.begin(), mesh.end());`.
     - `c | vs::drop(i * t) | vs::take_exactly(t)` → `std::span(c).subspan(i * t, t)`.
-    - `vs::transform(f)` → `std::views::transform(f)`.
+    - Inline `vs::transform(f)` in pipelines → `std::views::transform(f)`.
     - Remove `range-v3::range-v3` link from `src/stencils/CMakeLists.txt` line 21.
-  - **7.13b** `src/stencils/E2_2.t.cpp`: Same patterns as 7.13a.
-    - Also replace `rs::fill(cw, 0.0)` → `std::ranges::fill(cw, 0.0)`.
+  - **7.13b** `src/stencils/E2_2.t.cpp`: Same patterns as 7.13a (no constexpr globals, but has inline `vs::transform(f)` in pipelines at lines 127, 172).
+    - Also replace `rs::fill(cw, 0.0)` → `std::ranges::fill(cw, 0.0)` (line 194).
+    - Note: lines inside `#if 0` blocks (209–284, 287–453) can be migrated or left since they're compiled out.
     - Remove `range-v3::range-v3` link from `src/stencils/CMakeLists.txt` line 14.
-  - **7.13c** `src/stencils/E4_2.t.cpp`: Same patterns as 7.13a (has `vs::linear_distribute`, `rs::inner_product`, `vs::concat`, `vs::single`, `rs::to`, `vs::transform`).
+  - **7.13c** `src/stencils/E4_2.t.cpp`: Same patterns as 7.13a.
+    - Lines 23, 27, 30: `constexpr auto f4 = vs::transform(f4_f)`, `constexpr auto f3 = vs::transform(f3_f)`, `constexpr auto f2 = vs::transform(f2_f)` — change `constexpr` to `const` and replace `vs::transform` with `std::views::transform`. Used as pipeable closures in `mesh | f4`, `m | f2`, etc.
     - Remove `range-v3::range-v3` link from `src/stencils/CMakeLists.txt` line 15.
   - Files: `src/stencils/polyE2_1.t.cpp`, `src/stencils/E2_2.t.cpp`, `src/stencils/E4_2.t.cpp`, `src/stencils/CMakeLists.txt`.
   - Test: `ctest --test-dir build -L stencils`
-  - Note: A shared `linear_distribute` helper function should be placed somewhere reusable (e.g., in a test utility header or in `lazy_views.hpp`) since both 7.1c and 7.13* need it.
+  - Ordering: Depends on 7.1c (shared `ccs::linear_distribute` helper).
 
 ### Test Migration
 
@@ -309,7 +310,7 @@ These files still have range-v3 usage from earlier phases and must be cleaned be
 - [ ] **7.18** Clean up test files with stale range-v3 includes (no actual usage):
   - `src/mesh/cartesian.t.cpp` line 6: Remove `#include <range/v3/view/single.hpp>` (unused).
   - `src/simulation/simulation_cycle.t.cpp` line 11: Remove `#include <range/v3/all.hpp>` (unused).
-  - `src/io/format_test.cpp`: Not compiled (standalone demo). Remove `#include <range/v3/all.hpp>` and replace `vs::iota`/`vs::repeat_n` with `std::views::iota` and `ccs::repeat_n` (or just delete this file since it's not part of the build).
+  - Note: `src/io/format_test.cpp` is handled by **7.24a** (deletion of dead code files).
   - Files that have NO range-v3 usage (confirmed clean, no action needed):
     - `src/mesh/object_geometry.t.cpp`, `src/mesh/shapes.t.cpp`
     - `src/io/interval.t.cpp`, `src/io/logging.t.cpp`
@@ -333,10 +334,22 @@ These files still have range-v3 usage from earlier phases and must be cleaned be
 - [ ] **7.21** Remove `find_package(range-v3 REQUIRED)` from `config/shoccsConfig.cmake.in` (line 8).
 - [ ] **7.22** Remove `"range-v3@0.12:"` from `.devcontainer/spack.yaml` (line 17).
 - [ ] **7.23** Remove `rs`/`vs` namespace aliases and the `namespace ranges::views {}` forward declaration from `src/types.hpp` (lines 15–17, 28–29).
-- [ ] **7.24** Sweep: Remove `#include <range/v3/...>` from any remaining files (e.g., `src/fields/tuple_fwd.hpp` has a commented-out `rs::` reference on line 262 — remove it). Also clean up excluded files that still use range-v3:
-  - `src/operators/directional.cpp` (commented out of CMake line 21): has heavy range-v3 usage (`vs::stride`, `vs::enumerate`, `vs::drop`, `vs::take`, `vs::take_exactly`, `vs::reverse`, `vs::chunk`, `vs::for_each` — 5 includes, 6 API call sites). Either fully migrate (replace `vs::stride` with `ccs::stride`, `vs::drop`/`vs::take` with `std::views::` equivalents, `vs::take_exactly` with `std::views::take`, `vs::reverse` with `std::views::reverse`, `vs::enumerate` with `std::views::enumerate` (C++23) or index loop, `vs::chunk`/`vs::for_each` with explicit loops) or delete the file since it is not compiled.
-  - `src/operators/directional.t.cpp` (same CMake line): has heavy range-v3 usage (`vs::generate_n`, `vs::filter`, `vs::transform`, `rs::to`, `rs::fill`, `rs::equal` — 7 includes, 6+ API call sites). Same options: fully migrate or delete.
-  - Note: Simply removing `#include` lines is NOT sufficient for these files — they have range-v3 API calls throughout the code.
+- [ ] **7.24** Sweep: Remove all remaining range-v3 references from the codebase.
+  - **7.24a** Delete dead code files with heavy range-v3/cppcoro usage (see decision D10 in `plans/meta.md`):
+    - Delete `src/operators/directional.cpp` — commented out of CMake line 21; uses `cppcoro::generator`, older `geometry`/`domain_boundaries` API that no longer exists, 5 range-v3 includes, 6+ API call sites. Not compiled or tested.
+    - Delete `src/operators/directional.t.cpp` — same: 7 range-v3 includes, `vs::generate_n`, `vs::filter`, `vs::transform`, `rs::to`, `rs::fill`, `rs::equal`, old `mesh` constructor API.
+    - Delete `src/operators/directional.hpp` — header for the dead directional code.
+    - Delete `src/io/format_test.cpp` — standalone demo, not in the build. Uses `vs::iota`, `vs::repeat_n`, `range/v3/all.hpp`.
+    - Files: `src/operators/directional.cpp`, `src/operators/directional.t.cpp`, `src/operators/directional.hpp`, `src/io/format_test.cpp`.
+  - **7.24b** Clean up commented-out CMake references to range-v3 and deleted files:
+    - `src/operators/CMakeLists.txt` line 21: Remove commented-out `#add_unit_test(directional ...)` line.
+    - `src/geometry/CMakeLists.txt` lines 1–10: All content is commented out and references `range-v3::range-v3` on line 7. Delete this entire file (the geometry code was moved to `src/mesh/` in prior refactoring).
+    - Files: `src/operators/CMakeLists.txt`, `src/geometry/CMakeLists.txt`.
+  - **7.24c** Remove range-v3 comments from source files:
+    - `src/fields/tuple_fwd.hpp` line 262: Remove commented-out `// concept AnyOutputRange = rs::range<T>&& ...` line. Lines 20–21 and 119 mention "range-v3" in descriptive comments — update to say "C++20" or remove the range-v3 reference.
+    - `src/mesh/selections.hpp` lines 21–24: Update comment "range-v3 building blocks" to reflect the C++20 rewrite.
+    - Files: `src/fields/tuple_fwd.hpp`, `src/mesh/selections.hpp`.
+  - Test: build succeeds.
 - [ ] **7.25** Full build and test: `cmake --build build && ctest --test-dir build` — all pass.
 
 ---
@@ -344,14 +357,15 @@ These files still have range-v3 usage from earlier phases and must be cleaned be
 ## Ordering Constraints
 
 1. **7.1a** (add `ccs::cartesian_product_view`) must precede **7.1b**, **7.2d**, and any code depending on `ccs::cartesian_product`.
-2. **7.2a–7.2c** (YPlaneView, plane_fn, FView rewrites) are independent of each other.
-3. **7.2d** (replace `rs::make_view_closure` in utility functions) should be done after 7.2a–7.2c and 7.1a.
-4. **7.3**, **7.4** depend on 7.2 (they include selections.hpp transitively).
-5. **7.6** (manufactured_solutions.hpp) should precede **7.15** (mms.t.cpp) since the test pipes through `ms(time)`.
-6. **7.7** (mms.cpp CMake cleanup) is independent.
-7. **7.12** (scalar_wave.cpp) is independent of mesh/IO items.
-8. **7.13** (stencil tests) is independent of other items.
-9. **7.20–7.25** (Final Cleanup) must come last, after all code migration items.
+2. **7.1c** (add `ccs::linear_distribute`) must precede **7.1d** (cartesian.cpp migration) and **7.13** (stencil tests).
+3. **7.2a–7.2c** (YPlaneView, plane_fn, FView rewrites) are independent of each other.
+4. **7.2d** (replace `rs::make_view_closure` in utility functions) should be done after 7.2a–7.2c and 7.1a.
+5. **7.3**, **7.4** depend on 7.2 (they include selections.hpp transitively).
+6. **7.6** (manufactured_solutions.hpp) should precede **7.15** (mms.t.cpp) since the test pipes through `ms(time)`.
+7. **7.7** (mms.cpp CMake cleanup) is independent.
+8. **7.12** (scalar_wave.cpp) is independent of mesh/IO items. No CMake changes needed (shoccs-system doesn't link range-v3 directly).
+9. **7.13** (stencil tests) depends on **7.1c** (shared `ccs::linear_distribute`).
+10. **7.20–7.25** (Final Cleanup) must come last, after all code migration items.
 
 ---
 

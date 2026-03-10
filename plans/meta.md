@@ -121,6 +121,15 @@ All project-local utilities go in `src/fields/ccs_range_utils.hpp`, are header-o
 - (c) Replace all lazy views with eager `std::vector`-based computation
 **Considerations:** Option (b) would be simpler but requires verifying compiler/Kokkos C++23 support. Option (c) changes performance characteristics of lazy expression trees in `tuple_math`. Option (a) is safest for Phase 1.
 
+### D10: Dead Code Cleanup for `directional.cpp`/`directional.t.cpp`
+**Decision:** **(a) Delete these files entirely.**
+`directional.cpp`, `directional.t.cpp`, and `directional.hpp` are commented out of `src/operators/CMakeLists.txt` (line 21). They use an older API (`geometry` class, `domain_boundaries`, `mesh` constructor with positional args) that no longer exists in the current codebase, and have heavy range-v3 + cppcoro dependencies (5+ range-v3 includes in the .cpp, 7 includes in the test, cppcoro generator). Migrating these files would require both range-v3 removal AND API updates for a code path that is not compiled or tested. The `directional` operator was superseded by the `derivative` operator. Similarly, `src/io/format_test.cpp` is a standalone demo (not in the build) with range-v3 usage — delete it too.
+**Options:**
+- **(a) Delete the files entirely** ← CHOSEN
+- (b) Fully migrate range-v3 usage and update to current API
+- (c) Keep files as-is (dead code with range-v3 dependencies)
+**Considerations:** Option (b) would require updating to APIs that no longer exist (`geometry`, `domain_boundaries`). The functionality can be reimplemented from scratch if needed in the future. Option (a) is the pragmatic choice for achieving zero range-v3 references.
+
 ### D9: `vs::cartesian_product` Replacement Strategy
 **Decision:** **(a) Add a project-local `ccs::cartesian_product_view` to `src/fields/lazy_views.hpp`.**
 `vs::cartesian_product(x, y, z)` is used in `cartesian.hpp` (`domain()`) and `selections.hpp` (`location()`). C++23 has `std::views::cartesian_product` but C++20 does not. The project targets C++20 (per `CMAKE_CXX_STANDARD 20`).
@@ -165,7 +174,7 @@ ctest --test-dir build -R t-dense
 ## Files Excluded from Migration Scope
 
 - `src/systems/cc_elliptic.hpp/cpp` — Legacy code using old inheritance-based API; references missing `pudding_limits.hpp`. Dead code.
-- `src/operators/directional.hpp/cpp` — Commented out of CMakeLists. Uses older `geometry`/`domain_boundaries` API. Can be migrated later if re-enabled.
+- `src/operators/directional.hpp/cpp/t.cpp` — Commented out of CMakeLists. Uses older `geometry`/`domain_boundaries` API. **Decision D10: delete in Phase 7 (item 7.24a).**
 - `src/operators/discrete_operator.hpp` — Stub, unused.
 - `src/operators/divergence.hpp` — Stub, unused.
 - `src/sentinels.hpp` — Empty file.
