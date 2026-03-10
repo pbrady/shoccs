@@ -888,91 +888,134 @@ namespace detail
 // predicate view is used to select elements from a different range if the predicate range
 // is true
 template <typename Rng, typename Pred, typename Fn>
-class predicate_view : public rs::view_adaptor<predicate_view<Rng, Pred, Fn>, Rng>
+class predicate_view
+    : public std::ranges::view_interface<predicate_view<Rng, Pred, Fn>>
 {
+    using base_iter_t = std::ranges::iterator_t<Rng>;
+    using pred_iter_t = std::ranges::iterator_t<Pred>;
 
-    friend rs::range_access;
+    Rng base_;
+    Pred pred_;
+    ccs::semiregular_box<Fn> f;
 
-    class adaptor : public rs::adaptor_base
-    {
-        predicate_view* rng_;
-
-    public:
-        adaptor() = default;
-        constexpr adaptor(predicate_view* rng) : rng_{rng} {}
-
-        //        template <typename R>
-        static constexpr auto begin(predicate_view& rng) { return *rng.begin_; }
-
-        // template <typename I>
-        constexpr void next(rs::iterator_t<Rng>& it) const
-        {
-            rng_->satisfy_forward(++it, true);
-        }
-
-        constexpr void prev(rs::iterator_t<Rng>& it) const { rng_->satisfy_reverse(it); }
-
-        void advance() = delete;
-        void distance_to() = delete;
-    };
-
-    adaptor begin_adaptor()
-    {
-        cache_begin();
-        return {this};
-    }
-
-    adaptor end_adaptor()
-    {
-        cache_begin();
-        return {this};
-    }
-
-    constexpr void satisfy_forward(rs::iterator_t<Rng>& it, bool step_pred = false)
-    {
-        const auto last = rs::end(this->base());
-        const auto pred_last = rs::end(this->pred);
-
-        if (step_pred) ++pred_it;
-
-        while (it != last && pred_it != pred_last && !(*pred_it)) {
-            ++it;
-            ++pred_it;
-        }
-    }
-
-    constexpr void satisfy_reverse(rs::iterator_t<Rng>& it)
-    {
-        do {
-            --it;
-            --pred_it;
-        } while (!(*pred_it));
-    }
-
-    constexpr void cache_begin()
-    {
-        if (begin_) return;
-
-        auto it = rs::begin(this->base());
-        pred_it = rs::begin(pred);
-        satisfy_forward(it);
-        begin_.emplace(MOVE(it));
-    }
-
-    Pred pred;
-    rs::semiregular_box_t<Fn> f;
-
-    std::optional<rs::iterator_t<Rng>> begin_;
-    rs::iterator_t<Pred> pred_it;
+    std::optional<base_iter_t> cached_begin_;
+    pred_iter_t cached_pred_begin_{};
 
 public:
+    class iterator
+    {
+        base_iter_t base_it_{};
+        base_iter_t base_end_{};
+        pred_iter_t pred_it_{};
+        pred_iter_t pred_end_{};
+
+        constexpr void satisfy_forward()
+        {
+            while (base_it_ != base_end_ && pred_it_ != pred_end_ && !(*pred_it_)) {
+                ++base_it_;
+                ++pred_it_;
+            }
+        }
+
+    public:
+        using difference_type = std::ranges::range_difference_t<Rng>;
+        using value_type = std::ranges::range_value_t<Rng>;
+        using reference = std::ranges::range_reference_t<Rng>;
+        using iterator_concept = std::bidirectional_iterator_tag;
+        using iterator_category = std::bidirectional_iterator_tag;
+
+        iterator() = default;
+
+        constexpr iterator(base_iter_t base_it,
+                           base_iter_t base_end,
+                           pred_iter_t pred_it,
+                           pred_iter_t pred_end,
+                           bool do_satisfy = false)
+            : base_it_{std::move(base_it)}
+            , base_end_{std::move(base_end)}
+            , pred_it_{std::move(pred_it)}
+            , pred_end_{std::move(pred_end)}
+        {
+            if (do_satisfy) satisfy_forward();
+        }
+
+        constexpr reference operator*() const { return *base_it_; }
+
+        constexpr iterator& operator++()
+        {
+            ++base_it_;
+            ++pred_it_;
+            satisfy_forward();
+            return *this;
+        }
+
+        constexpr iterator operator++(int)
+        {
+            auto tmp = *this;
+            ++*this;
+            return tmp;
+        }
+
+        constexpr iterator& operator--()
+        {
+            do {
+                --base_it_;
+                --pred_it_;
+            } while (!(*pred_it_));
+            return *this;
+        }
+
+        constexpr iterator operator--(int)
+        {
+            auto tmp = *this;
+            --*this;
+            return tmp;
+        }
+
+        friend constexpr bool operator==(const iterator& a, const iterator& b)
+        {
+            return a.base_it_ == b.base_it_;
+        }
+    };
+
     predicate_view() = default;
 
     explicit constexpr predicate_view(Rng&& rng, Pred p, Fn f)
-        : predicate_view::view_adaptor{FWD(rng)}, pred{MOVE(p)}, f{MOVE(f)}
+        : base_{FWD(rng)}, pred_{MOVE(p)}, f{MOVE(f)}
     {
-        assert(rs::size(rng) == rs::size(p));
     }
+
+    constexpr auto begin()
+    {
+        if (!cached_begin_) {
+            auto it = std::ranges::begin(base_);
+            auto pit = std::ranges::begin(pred_);
+            auto base_end = std::ranges::end(base_);
+            auto pred_end = std::ranges::end(pred_);
+            // skip initial false predicates
+            while (it != base_end && pit != pred_end && !(*pit)) {
+                ++it;
+                ++pit;
+            }
+            cached_begin_.emplace(it);
+            cached_pred_begin_ = pit;
+        }
+        return iterator(*cached_begin_,
+                         std::ranges::end(base_),
+                         cached_pred_begin_,
+                         std::ranges::end(pred_));
+    }
+
+    constexpr auto end()
+    {
+        return iterator(std::ranges::end(base_),
+                         std::ranges::end(base_),
+                         std::ranges::end(pred_),
+                         std::ranges::end(pred_));
+    }
+
+    constexpr auto& base() & { return base_; }
+    constexpr const auto& base() const& { return base_; }
 
     template <typename U>
     constexpr auto apply(U&& u) const

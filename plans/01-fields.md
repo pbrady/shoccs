@@ -250,17 +250,16 @@ All selector items depend on: 1.2a (ccs_range_utils.hpp) and 1.3 (tuple_fwd.hpp 
   - Files: `src/fields/selector.hpp`
   - Test: `t-selector` test file still uses range-v3 (will compile after 1.20e). All downstream targets (t-field, t-field_utils, t-field_math, t-single_view, t-container_tuple, t-algorithms) build and pass.
 
-- [ ] **1.18** Replace `predicate_view` in `src/fields/selector.hpp`:
-  - Currently: Inherits `rs::view_adaptor<predicate_view<Rng, Pred, Fn>, Rng>` with filter-style iteration (lines 780–877).
-  - Replace: Rewrite as a class inheriting from `std::ranges::view_interface<predicate_view<Rng, Pred, Fn>>`. Implement:
-    - Store: base range, predicate range `Pred`, `ccs::semiregular_box<Fn> f`, cached begin.
-    - Define a custom `iterator` that skips elements where the predicate is false (same `satisfy_forward`/`satisfy_reverse` logic from lines 821–839).
-    - Must model `std::bidirectional_iterator` (current view supports `next` and `prev` but not `advance`/`distance_to`).
-    - Note: The predicate is a *range* (not a callable) — iteration advances both the base and predicate iterators in lockstep.
-  - Replace `rs::semiregular_box_t` → `ccs::semiregular_box`.
-  - Replace `rs::begin`/`rs::end`/`rs::size`/`rs::iterator_t` → `std::ranges` equivalents.
-  - Files: `src/fields/selector.hpp` (lines 776–940)
-  - Test: `ctest --test-dir build -R t-selector`
+- [x] **1.18** Replace `predicate_view` in `src/fields/selector.hpp`:
+  - Rewrote as a class inheriting from `std::ranges::view_interface<predicate_view<Rng, Pred, Fn>>` with a custom `iterator` class implementing filter-style bidirectional iteration.
+  - Iterator stores: `base_it_`, `base_end_`, `pred_it_`, `pred_end_`. Advances both base and predicate iterators in lockstep, skipping elements where predicate is false (`satisfy_forward`). Supports `operator--` via `satisfy_reverse` logic (decrement until predicate is true).
+  - Models `std::bidirectional_iterator` (no random access, matching original).
+  - `begin()` caches the initial satisfied position (both base and predicate iterators) via `cached_begin_` and `cached_pred_begin_` members.
+  - `end()` returns iterator at `std::ranges::end(base_)` / `std::ranges::end(pred_)`.
+  - Added `base()` accessor (needed by `apply()` for nested view composition).
+  - Replaced `rs::view_adaptor` → `std::ranges::view_interface`, `rs::semiregular_box_t` → `ccs::semiregular_box`, `rs::begin`/`rs::end`/`rs::size`/`rs::iterator_t` → `std::ranges` equivalents. Removed `adaptor` inner class, `friend rs::range_access`, `begin_adaptor`/`end_adaptor` methods.
+  - Files: `src/fields/selector.hpp`
+  - Test: `t-selector` test file still uses range-v3 (will compile after 1.20e). All downstream targets (t-field, t-field_utils, t-field_math, t-single_view, t-container_tuple, t-algorithms) build and pass.
 
 - [ ] **1.19** Replace range-v3 utility usage in selector function objects (`selection`, `plane_selection_fn`, `multi_slice_fn`, `optional_view_fn`, `predicate_view_fn`):
   - [ ] **1.19a** In `selection<L,R,Fn>` struct (line 48): Replace `rs::semiregular_box_t<Fn>` → `ccs::semiregular_box<Fn>`.
