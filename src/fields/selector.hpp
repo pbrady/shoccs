@@ -1,5 +1,6 @@
 #pragma once
 
+#include <cassert>
 #include <optional>
 
 #include "tuple.hpp"
@@ -983,6 +984,7 @@ public:
     explicit constexpr predicate_view(Rng&& rng, Pred p, Fn f)
         : base_{FWD(rng)}, pred_{MOVE(p)}, f{MOVE(f)}
     {
+        assert(std::ranges::size(base_) == std::ranges::size(pred_));
     }
 
     constexpr auto begin()
