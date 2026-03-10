@@ -24,7 +24,7 @@ struct container_tuple {
     // allow for constructing and assigning from input_ranges
     template <NonTupleRange... Ranges>
         requires(ConstructibleFromRange<Args, Ranges>&&...)
-    constexpr container_tuple(Ranges&&... r) : c{Args{rs::begin(r), rs::end(r)}...} {}
+    constexpr container_tuple(Ranges&&... r) : c{Args{std::ranges::begin(r), std::ranges::end(r)}...} {}
 
     template <TupleToTuple<container_tuple> T>
     constexpr container_tuple(T&& t) : c{to<std::tuple<Args...>>(FWD(t))}

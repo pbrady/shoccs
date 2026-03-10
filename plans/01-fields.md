@@ -108,21 +108,21 @@ These project-local utilities replace range-v3 internal APIs that have no C++20 
     - Files: `src/fields/tuple_utils.hpp`
   - Test: `ctest --test-dir build -R t-tuple_utils` — 15 passed, 2 failed (pre-existing: `resize_and_copy tuples to tuples`). Downstream targets (t-container_tuple, t-field, t-field_utils, t-field_math) now fail because they relied on transitive range-v3 includes through tuple_utils.hpp; will be fixed by items 1.5–1.9.
 
-- [ ] **1.5** Migrate `src/fields/algorithms.hpp`:
-  - Replace `rs::minmax` → `std::ranges::minmax`, `rs::min` → `std::ranges::min`, `rs::max` → `std::ranges::max`, `rs::minmax_result` → `std::ranges::minmax_result`.
-  - Replace `rs::begin`/`rs::end` → `std::ranges::begin`/`end`.
-  - Replace `rs::range_value_t` → `std::ranges::range_value_t`.
-  - Remove `#include <range/v3/algorithm/max.hpp>`, etc. Add `#include <algorithm>`, `#include <ranges>`.
+- [x] **1.5** Migrate `src/fields/algorithms.hpp`:
+  - Replaced `rs::minmax` → `std::ranges::minmax`, `rs::min` → `std::ranges::min`, `rs::max` → `std::ranges::max`, `rs::minmax_result` → `std::ranges::minmax_result`.
+  - Replaced `rs::begin`/`rs::end` → `std::ranges::begin`/`end`.
+  - Replaced `rs::range_value_t` → `std::ranges::range_value_t`.
+  - Removed 3 range-v3 includes. Added `#include <algorithm>`, `#include <ranges>`.
   - Files: `src/fields/algorithms.hpp`
-  - Test: `ctest --test-dir build -R t-algorithms`
+  - Test: `ctest --test-dir build -R t-algorithms` — 1 passed.
 
 ### View/Container Tuple
 
-- [ ] **1.6** Migrate `src/fields/container_tuple.hpp`:
-  - Replace `rs::begin(r)`/`rs::end(r)` → `std::ranges::begin(r)`/`std::ranges::end(r)` in the range constructor (line 27).
+- [x] **1.6** Migrate `src/fields/container_tuple.hpp`:
+  - Replaced `rs::begin(r)`/`rs::end(r)` → `std::ranges::begin(r)`/`std::ranges::end(r)` in the range constructor (line 27).
   - No direct range-v3 includes to remove (container_tuple.hpp gets range-v3 transitively through `tuple_utils.hpp`, which is already migrated in 1.4).
   - Files: `src/fields/container_tuple.hpp`
-  - Test: `ctest --test-dir build -R t-container_tuple`
+  - Test: `ctest --test-dir build -R t-container_tuple` — 1 passed.
 
 - [ ] **1.7** Migrate `src/fields/view_tuple.hpp`:
   - [ ] **1.7a** Replace `vs::all`/`vs::all_t` with `std::views::all`/`std::views::all_t` throughout (lines 34, 44, 48, 53, 75, etc.). Used in `view_tuple_base` member `std::tuple<vs::all_t<Args>...> v` and constructors/assignment.
