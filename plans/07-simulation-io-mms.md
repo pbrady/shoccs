@@ -40,7 +40,7 @@ ctest --test-dir build
 Note: `shoccs-mesh` does not link `range-v3::range-v3` in `src/mesh/CMakeLists.txt`, so no CMake changes are needed for items 7.1–7.5. Range-v3 headers are found via spack's global include path; once the `#include <range/v3/...>` directives are removed, the dependency is gone.
 
 - [ ] **7.1** Migrate `cartesian.hpp` and `cartesian.cpp`
-  - **7.1a** Add `ccs::cartesian_product_view` to `src/fields/lazy_views.hpp` (see decision D9 in `plans/meta.md`).
+  - [x] **7.1a** Add `ccs::cartesian_product_view` to `src/fields/lazy_views.hpp` (see decision D9 in `plans/meta.md`). **DONE** — added ~150 lines: forward-only iterator with triple-nested increment, view_interface base, deduction guide, factory CPO. Compiles and passes t-cartesian, t-field tests.
     - A lazy view over three ranges yielding `std::tuple<range_reference_t<R1>, range_reference_t<R2>, range_reference_t<R3>>` in triple-nested-loop order (first range slowest, third fastest).
     - Template signature: `template <std::ranges::forward_range R1, std::ranges::forward_range R2, std::ranges::forward_range R3> requires (std::ranges::view<R1> && std::ranges::view<R2> && std::ranges::view<R3>)`.
     - Inherit from `std::ranges::view_interface<cartesian_product_view<R1, R2, R3>>`.
@@ -78,7 +78,7 @@ Note: `shoccs-mesh` does not link `range-v3::range-v3` in `src/mesh/CMakeLists.t
     - Add `#include "fields/lazy_views.hpp"`.
     - Line 74: Replace `vs::cartesian_product(x(), y(), z())` with `ccs::cartesian_product(x(), y(), z())`.
     - File: `src/mesh/cartesian.hpp`.
-  - **7.1c** Add shared `ccs::linear_distribute` helper to `src/fields/lazy_views.hpp`:
+  - [x] **7.1c** Add shared `ccs::linear_distribute` helper to `src/fields/lazy_views.hpp`: **DONE** — added template function returning `std::vector<T>`, ~7 lines.
     - A free function: `template<typename T> std::vector<T> linear_distribute(T mn, T mx, int n)` that generates `n` linearly-spaced values from `mn` to `mx`.
     - Implementation: `v[i] = n > 1 ? mn + i * (mx - mn) / (n - 1) : mn`.
     - File: `src/fields/lazy_views.hpp` (append after `stride_view`).

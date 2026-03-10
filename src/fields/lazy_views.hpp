@@ -5,8 +5,10 @@
 #include <initializer_list>
 #include <iterator>
 #include <ranges>
+#include <tuple>
 #include <type_traits>
 #include <utility>
+#include <vector>
 
 #include "ccs_range_utils.hpp"
 
@@ -615,5 +617,189 @@ struct stride_fn {
     }
 };
 inline constexpr stride_fn stride{};
+
+// ===========================================================================
+// cartesian_product_view<R1, R2, R3>
+//
+// Lazy view over three ranges yielding
+// std::tuple<range_reference_t<R1>, range_reference_t<R2>, range_reference_t<R3>>
+// in triple-nested-loop order (R1 slowest, R3 fastest).
+// Models forward_range and sized_range (if all bases are sized).
+// ===========================================================================
+template <std::ranges::forward_range R1,
+          std::ranges::forward_range R2,
+          std::ranges::forward_range R3>
+    requires(std::ranges::view<R1> && std::ranges::view<R2> && std::ranges::view<R3>)
+class cartesian_product_view
+    : public std::ranges::view_interface<cartesian_product_view<R1, R2, R3>>
+{
+    R1 r1_;
+    R2 r2_;
+    R3 r3_;
+
+public:
+    class iterator
+    {
+        std::ranges::iterator_t<R1> it1_{};
+        std::ranges::iterator_t<R2> it2_{};
+        std::ranges::iterator_t<R3> it3_{};
+        std::ranges::iterator_t<R2> begin2_{};
+        std::ranges::sentinel_t<R2> end2_{};
+        std::ranges::iterator_t<R3> begin3_{};
+        std::ranges::sentinel_t<R3> end3_{};
+
+    public:
+        using value_type = std::tuple<std::ranges::range_value_t<R1>,
+                                      std::ranges::range_value_t<R2>,
+                                      std::ranges::range_value_t<R3>>;
+        using reference = std::tuple<std::ranges::range_reference_t<R1>,
+                                     std::ranges::range_reference_t<R2>,
+                                     std::ranges::range_reference_t<R3>>;
+        using difference_type = std::ptrdiff_t;
+        using iterator_concept = std::forward_iterator_tag;
+
+        iterator() = default;
+
+        constexpr iterator(std::ranges::iterator_t<R1> it1,
+                           std::ranges::iterator_t<R2> it2,
+                           std::ranges::iterator_t<R3> it3,
+                           std::ranges::iterator_t<R2> begin2,
+                           std::ranges::sentinel_t<R2> end2,
+                           std::ranges::iterator_t<R3> begin3,
+                           std::ranges::sentinel_t<R3> end3)
+            : it1_{std::move(it1)}
+            , it2_{std::move(it2)}
+            , it3_{std::move(it3)}
+            , begin2_{std::move(begin2)}
+            , end2_{std::move(end2)}
+            , begin3_{std::move(begin3)}
+            , end3_{std::move(end3)}
+        {
+        }
+
+        constexpr reference operator*() const { return reference{*it1_, *it2_, *it3_}; }
+
+        constexpr iterator& operator++()
+        {
+            ++it3_;
+            if (it3_ == end3_) {
+                it3_ = begin3_;
+                ++it2_;
+                if (it2_ == end2_) {
+                    it2_ = begin2_;
+                    ++it1_;
+                }
+            }
+            return *this;
+        }
+
+        constexpr iterator operator++(int)
+        {
+            auto tmp = *this;
+            ++*this;
+            return tmp;
+        }
+
+        friend constexpr bool operator==(const iterator& a, const iterator& b)
+        {
+            return a.it1_ == b.it1_ && a.it2_ == b.it2_ && a.it3_ == b.it3_;
+        }
+    };
+
+    cartesian_product_view() = default;
+
+    constexpr cartesian_product_view(R1 r1, R2 r2, R3 r3)
+        : r1_{std::move(r1)}, r2_{std::move(r2)}, r3_{std::move(r3)}
+    {
+    }
+
+    constexpr iterator begin()
+    {
+        if (std::ranges::empty(r1_) || std::ranges::empty(r2_) ||
+            std::ranges::empty(r3_))
+            return end();
+        return iterator{std::ranges::begin(r1_), std::ranges::begin(r2_),
+                        std::ranges::begin(r3_), std::ranges::begin(r2_),
+                        std::ranges::end(r2_), std::ranges::begin(r3_),
+                        std::ranges::end(r3_)};
+    }
+
+    constexpr iterator begin() const
+    {
+        if (std::ranges::empty(r1_) || std::ranges::empty(r2_) ||
+            std::ranges::empty(r3_))
+            return end();
+        return iterator{std::ranges::begin(r1_), std::ranges::begin(r2_),
+                        std::ranges::begin(r3_), std::ranges::begin(r2_),
+                        std::ranges::end(r2_), std::ranges::begin(r3_),
+                        std::ranges::end(r3_)};
+    }
+
+    constexpr iterator end()
+    {
+        return iterator{std::ranges::end(r1_), std::ranges::begin(r2_),
+                        std::ranges::begin(r3_), std::ranges::begin(r2_),
+                        std::ranges::end(r2_), std::ranges::begin(r3_),
+                        std::ranges::end(r3_)};
+    }
+
+    constexpr iterator end() const
+    {
+        return iterator{std::ranges::end(r1_), std::ranges::begin(r2_),
+                        std::ranges::begin(r3_), std::ranges::begin(r2_),
+                        std::ranges::end(r2_), std::ranges::begin(r3_),
+                        std::ranges::end(r3_)};
+    }
+
+    constexpr auto size() const
+        requires(std::ranges::sized_range<const R1> && std::ranges::sized_range<const R2> &&
+                 std::ranges::sized_range<const R3>)
+    {
+        return std::ranges::size(r1_) * std::ranges::size(r2_) *
+               std::ranges::size(r3_);
+    }
+
+    constexpr auto size()
+        requires(std::ranges::sized_range<R1> && std::ranges::sized_range<R2> &&
+                 std::ranges::sized_range<R3>)
+    {
+        return std::ranges::size(r1_) * std::ranges::size(r2_) *
+               std::ranges::size(r3_);
+    }
+};
+
+template <typename R1, typename R2, typename R3>
+cartesian_product_view(R1&&, R2&&, R3&&)
+    -> cartesian_product_view<std::views::all_t<R1>,
+                              std::views::all_t<R2>,
+                              std::views::all_t<R3>>;
+
+// Factory function
+struct cartesian_product_fn {
+    template <std::ranges::viewable_range R1,
+              std::ranges::viewable_range R2,
+              std::ranges::viewable_range R3>
+    constexpr auto operator()(R1&& r1, R2&& r2, R3&& r3) const
+    {
+        return cartesian_product_view(std::views::all(std::forward<R1>(r1)),
+                                      std::views::all(std::forward<R2>(r2)),
+                                      std::views::all(std::forward<R3>(r3)));
+    }
+};
+inline constexpr cartesian_product_fn cartesian_product{};
+
+// ===========================================================================
+// linear_distribute(mn, mx, n)
+//
+// Returns std::vector<T> of n linearly-spaced values from mn to mx.
+// ===========================================================================
+template <typename T>
+std::vector<T> linear_distribute(T mn, T mx, int n)
+{
+    std::vector<T> v(n);
+    for (int i = 0; i < n; ++i)
+        v[i] = n > 1 ? mn + i * (mx - mn) / (n - 1) : mn;
+    return v;
+}
 
 } // namespace ccs
