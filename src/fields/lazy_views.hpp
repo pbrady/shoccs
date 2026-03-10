@@ -12,6 +12,31 @@
 
 #include "ccs_range_utils.hpp"
 
+// ===========================================================================
+// basic_common_reference specialization for std::tuple (C++23 P2321R2 backport)
+//
+// In C++20, std::common_reference<tuple<const T&,...>&&, tuple<T,...>&> has no
+// type because tuple lacks common_reference specializations. This means
+// iterators with reference=tuple<const T&,...> and value_type=tuple<T,...>
+// don't satisfy std::indirectly_readable → std::input_iterator. This backport
+// enables cartesian_product_view::iterator (and similar) to model standard
+// iterator concepts, so std::views::transform etc. can pipe through them.
+// ===========================================================================
+namespace std
+{
+template <typename... Ts,
+          typename... Us,
+          template <class>
+          class TQual,
+          template <class>
+          class UQual>
+    requires(sizeof...(Ts) == sizeof...(Us)) &&
+            requires { typename tuple<common_reference_t<TQual<Ts>, UQual<Us>>...>; }
+struct basic_common_reference<tuple<Ts...>, tuple<Us...>, TQual, UQual> {
+    using type = tuple<common_reference_t<TQual<Ts>, UQual<Us>>...>;
+};
+} // namespace std
+
 namespace ccs
 {
 

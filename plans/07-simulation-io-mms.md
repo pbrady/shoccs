@@ -35,15 +35,13 @@ ctest --test-dir build
 
 ## Items
 
-**Build-breakage status (updated review 7.7):** Four files currently fail to compile:
+**Build-breakage status (updated after 7.1e):** Three files still fail to compile:
 - `field_data.cpp` (`vs::zip` lost transitively) → fix: **7.9**
 - `xdmf.cpp` (`vs::repeat_n` lost transitively) → fix: **7.10**
-- `heat.cpp` (`m.xyz | m_sol(time)` — `ccs::tuple` piped with `std::views::transform` closure) → fix: **7.1e** (see below). 7.3 + 7.6 are done but did NOT fix this; the root cause is **7.1e**, not the range-v3/C++20 mismatch originally diagnosed.
-- `scalar_wave.cpp` (same `ccs::tuple` pipe issue + own range-v3 usage) → fix: **7.1e** + **7.12**
+- `heat.cpp` — 7.1e fixed the `operator|` pipe error, but now exposes separate pre-existing issues: (1) `multi_slice_view::iterator::operator+=` on non-random-access base iterator (selector.hpp:583), (2) missing `.base()` members on `multi_slice_view`/`predicate_view` iterators, (3) missing `fmt::join` (heat.cpp:167), (4) `zip_transform_view::begin() const` creates wrong iterator type. These need separate investigation/fixes.
+- `scalar_wave.cpp` (own range-v3 `#include` + `vs::transform` usage) → fix: **7.12**
 
-**Root cause for heat.cpp/scalar_wave.cpp (discovered review 7.7):** `ccs::cartesian_product_view::iterator` (added in 7.1a) does NOT satisfy `std::indirectly_readable` because `std::common_reference<std::tuple<const T&, ...>&&, std::tuple<T, ...>&>` has no `type` in C++20. (C++23 P2321R2 adds tuple `common_reference` specializations, but this codebase uses `-std=gnu++20`.) This means `cartesian_product_view` does not satisfy `std::ranges::input_range`, so standard constrained range adaptors (e.g., `std::views::transform`) reject it during constraint checking. The `ccs::tuple` `operator|` overload in `tuple_pipe.hpp` checks `PipeableOver` (via `is_pipeable` trait), which tests `requires(F f, T t) { t | f; }` on each leaf — this fails because `cpv | std::views::transform(lambda)` fails the `__adaptor_invocable` constraint. Fix is **7.1e** below.
-
-This blocks test targets: `t-mesh` (also needs **7.14**), `t-field_io`, `t-xdmf`, `t-simulation_cycle`, `t-heat`, `t-hyperbolic_eigenvalues`. Tests that still work: `t-cartesian`, `t-object_geometry`, `t-shapes`, `t-mms`, `t-selections`. To restore the full build, prioritize **7.1e**, **7.9**, **7.10**, and **7.14**. Individual test targets can be built with `cmake --build build --target <target>` to bypass unrelated library failures.
+This blocks test targets: `t-mesh` (also needs **7.14**), `t-field_io`, `t-xdmf`, `t-simulation_cycle`, `t-heat`, `t-hyperbolic_eigenvalues`. Tests that still work: `t-cartesian`, `t-object_geometry`, `t-shapes`, `t-mms`, `t-selections`. To restore the full build, prioritize **7.8**/**7.9**/**7.10** (I/O), **7.12** (scalar_wave), and **7.14** (mesh.t.cpp). Individual test targets can be built with `cmake --build build --target <target>` to bypass unrelated library failures.
 
 ### Mesh (High Complexity)
 
@@ -123,20 +121,9 @@ Note: `shoccs-mesh` does not link `range-v3::range-v3` in `src/mesh/CMakeLists.t
     - File: `src/mesh/cartesian.cpp`.
   - Test: `ctest --test-dir build -R t-cartesian`
   - Ordering: 7.1a must precede 7.1b. 7.1c must precede 7.1d. 7.1d is independent of 7.1a/7.1b.
-  - [ ] **7.1e** Fix `cartesian_product_view::iterator` to satisfy `std::indirectly_readable` (review finding from 7.7): The iterator defines `value_type = std::tuple<range_value_t<R1>, range_value_t<R2>, range_value_t<R3>>` and `reference = std::tuple<range_reference_t<R1>, range_reference_t<R2>, range_reference_t<R3>>`. In C++20, `std::common_reference<reference&&, value_type&>` has no `type` because C++20 lacks `common_reference` specializations for `std::tuple` (added in C++23 P2321R2). This means the iterator doesn't satisfy `std::indirectly_readable` → `std::input_iterator` → the view doesn't satisfy `std::ranges::input_range`. Standard constrained adaptors (`std::views::transform`, etc.) refuse to pipe through it.
-    - **Fix options (pick one):**
-      - **(a) Recommended:** Add a `std::basic_common_reference` specialization in `lazy_views.hpp` that provides `common_reference` for `tuple<range_reference_t<R>..., >` and `tuple<range_value_t<R>...>`. For the specific case of `tuple<const T&, ...>` and `tuple<T, ...>`, the common reference type is `tuple<const T&, ...>`. A minimal specialization covering the 3-element tuple case used by `cartesian_product_view` suffices.
-      - **(b) Alternative:** Change `reference` to equal `value_type` (return tuples by value, making both types `tuple<V1, V2, V3>`). Simpler but incurs copy overhead and changes semantics.
-      - **(c) Alternative:** Wrap `std::views::transform(lambda)` in `ccs::make_view_closure(...)` in `manufactured_solutions.hpp` (and `scalar_wave.cpp`), so `tuple_pipe.hpp` uses the unconstrained `ccs::view_closure::operator|` instead of the standard constrained `operator|`. This is a workaround, not a fix — the iterator would still not satisfy standard iterator concepts.
-    - **Verification:** After the fix, the following must hold:
-      ```cpp
-      using cpv_t = ccs::cartesian_product_view<std::span<const double>, std::span<const double>, std::span<const double>>;
-      static_assert(std::ranges::input_range<cpv_t>);
-      static_assert(std::ranges::forward_range<cpv_t>);
-      ```
-    - **Test:** Add static_asserts to existing `t-cartesian` test. Then build `t-heat` (currently fails) to verify the fix unblocks it.
-    - File: `src/fields/lazy_views.hpp` (iterator type aliases and/or `basic_common_reference` specialization).
-    - Ordering: Must be done before **7.12** (scalar_wave.cpp) and before any test that exercises `m.xyz | std::views::transform(...)` (i.e., before heat/scalar_wave can compile).
+  - [x] **7.1e** Fix `cartesian_product_view::iterator` to satisfy `std::indirectly_readable` (review finding from 7.7): **DONE** — implemented option (a): added `std::basic_common_reference` specialization for `std::tuple` (general N-element, backporting C++23 P2321R2) in `lazy_views.hpp`. Added `static_assert(std::ranges::input_range<cpv_t>)` and `static_assert(std::ranges::forward_range<cpv_t>)` to `cartesian.t.cpp`. t-cartesian passes. The original `operator|` error in heat.cpp (`m.xyz | m_sol(time)`) is now resolved. heat.cpp still has separate pre-existing errors: (1) `multi_slice_view::iterator::operator+=` on non-random-access base, (2) missing `.base()` member, (3) missing `fmt::join`, (4) `zip_transform_view::begin() const` mismatched iterator types — these are NOT related to 7.1e and need separate fixes.
+    - File: `src/fields/lazy_views.hpp` (added `basic_common_reference` specialization before `namespace ccs`), `src/mesh/cartesian.t.cpp` (added static_asserts).
+    - Test: `ctest -R t-cartesian` passes. All previously-passing tests still pass.
 
 - [x] **7.2** Migrate `selections.hpp`
   - [x] **7.2a** Rewrite `YPlaneView` as a `std::ranges::view_interface` class (lines 26–163): **DONE** — replaced `rs::view_adaptor` with `std::ranges::view_interface`, standalone `iterator` class with full random-access support, deduction guide uses `std::views::all_t`, factory uses `ccs::make_view_closure`/`ccs::bind_back`. Also added `#include "fields/ccs_range_utils.hpp"` and `#include "fields/lazy_views.hpp"`, removed 4 of 7 range-v3 includes. Standalone compile test passes: random_access_range, sized_range, correct element selection.
@@ -430,7 +417,7 @@ These files still have range-v3 usage from earlier phases and must be cleaned be
 10. **7.13** (stencil tests) depends on **7.1c** (shared `ccs::linear_distribute`).
 11. **7.20–7.25** (Final Cleanup) must come last, after all code migration items.
 12. **Build-unblocking priority:** The build is currently broken (see status note above). To restore it, **7.1e** must be done first (unblocks heat.cpp/scalar_wave.cpp), then **7.9** + **7.10** (unblock shoccs-io), then **7.14** (unblock t-mesh).
-13. **7.2e** (compile-instantiation test for `selections.hpp`) is done. **7.2f** (FView end() bug fix + multi-line test) is done. **7.3**, **7.4**, **7.5**, **7.6**, and **7.7** are done. Next: **7.1e** (critical — unblocks heat.cpp), then **7.8**/**7.9**/**7.10**/**7.12**/**7.14**.
+13. **7.1e** is done (common_reference fix). **7.2e**, **7.2f**, **7.3**, **7.4**, **7.5**, **7.6**, **7.7** are done. Next: **7.8** (field_io.cpp), then **7.9** (field_data.cpp), **7.10** (xdmf.cpp), **7.11** (simulation verification), **7.12** (scalar_wave.cpp), **7.13** (stencil tests), **7.14** (mesh.t.cpp).
 
 ---
 
