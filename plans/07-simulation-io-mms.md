@@ -229,7 +229,7 @@ These files still have range-v3 usage from earlier phases and must be cleaned be
   - File: `src/systems/scalar_wave.cpp`.
   - Test: scalar_wave.cpp.o compiles; t-simulation_cycle and t-heat link successfully.
 
-- [ ] **7.13** Migrate stencil test files (heavy range-v3: `vs::linear_distribute`, `rs::inner_product`, `vs::concat`, `vs::single`, `rs::to`, `rs::fill`, `vs::take_exactly`, `vs::drop`):
+- [x] **7.13** Migrate stencil test files (heavy range-v3: `vs::linear_distribute`, `rs::inner_product`, `vs::concat`, `vs::single`, `rs::to`, `rs::fill`, `vs::take_exactly`, `vs::drop`): **DONE** — all 3 test files migrated, `#if 0` blocks deleted from E2_2.t.cpp, `range-v3::range-v3` removed from CMakeLists.txt. t-polyE2_1, t-E2_2, t-E4_2 all pass.
   - **CRITICAL**: When replacing `rs::inner_product(v, view_expr, init)` with `std::inner_product(v.begin(), v.end(), view_expr.begin(), init)`, the view expression (e.g., `mesh | f4`) MUST be stored in a named variable. A temporary view's iterator can dangle because `transform_view::iterator` stores a pointer to the parent view for the invocable. Correct pattern:
     ```cpp
     auto view = m | f4;  // store the view
