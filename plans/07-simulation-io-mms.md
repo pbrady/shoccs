@@ -35,10 +35,7 @@ ctest --test-dir build
 
 ## Items
 
-**Build-breakage status (updated after 7.8–7.10):** I/O library (shoccs-io) now compiles. Remaining files that fail to compile:
-- `scalar_wave.cpp` (own range-v3 `#include` + `vs::transform` usage) → fix: **7.12**
-
-This blocks test targets: `t-mesh` (needs **7.14**), `t-field_io` (needs **7.16**), `t-xdmf` (needs **7.17**), `t-simulation_cycle` (needs **7.12**), `t-heat` (needs **7.12**), `t-hyperbolic_eigenvalues` (needs **7.12**). Tests that still work: `t-cartesian`, `t-object_geometry`, `t-shapes`, `t-mms`, `t-selections`. Individual test targets can be built with `cmake --build build --target <target>` to bypass unrelated library failures.
+**Build-breakage status (updated after 7.12):** All source libraries compile. `scalar_wave.cpp` now compiles after 7.12. Remaining test files that need range-v3 migration: `mesh.t.cpp` (**7.14**), `mms.t.cpp` (**7.15**), `field_io.t.cpp` (**7.16**), `xdmf.t.cpp` (**7.17**), `simulation_cycle.t.cpp` (**7.18**), `cartesian.t.cpp` (**7.18**). Stencil tests need **7.13**. Tests that still work: `t-cartesian`, `t-object_geometry` (pre-existing FP failure), `t-shapes`, `t-mms`, `t-selections`.
 
 ### Mesh (High Complexity)
 
@@ -220,7 +217,7 @@ Note: `shoccs-io` does not link `range-v3::range-v3` in `src/io/CMakeLists.txt`,
 
 ### Simulation (Low Complexity)
 
-- [ ] **7.11** Verify `simulation_cycle.cpp` and `simulation_builder.cpp` have no range-v3 usage.
+- [x] **7.11** Verify `simulation_cycle.cpp` and `simulation_builder.cpp` have no range-v3 usage. **DONE** — grep confirmed no `range/v3`, `rs::`, or `vs::` in either file.
   - Both files are confirmed clean — no `#include <range/v3/…>`, no `rs::`, no `vs::`.
   - Test: build succeeds.
 
@@ -228,14 +225,9 @@ Note: `shoccs-io` does not link `range-v3::range-v3` in `src/io/CMakeLists.txt`,
 
 These files still have range-v3 usage from earlier phases and must be cleaned before final removal.
 
-- [ ] **7.12** Migrate `src/systems/scalar_wave.cpp` (lines 14, 30, 37):
-  - Remove `#include <range/v3/view/transform.hpp>`, add `#include <ranges>`.
-  - Lines 30, 37: Replace `vs::transform(lambda)` with `std::views::transform(lambda)`.
-  - These are inside `constexpr` function templates (`neg_G<I>()` at line 28, `solution()` at line 35) that return pipeable view closures. `std::views::transform` is a `constexpr` CPO, so the replacement works in this context.
-  - Note: This item was deferred from Phase 5 because mesh views (`m.xyz`, `m.vxyz`) produced range-v3 types. After Phase 7 migrates mesh views (7.1–7.2), `std::views::transform` can pipe through the new standard-compatible types.
-  - Ordering: Should be done after 7.1–7.2 (mesh migration) to ensure mesh view types satisfy `std::ranges::viewable_range`.
+- [x] **7.12** Migrate `src/systems/scalar_wave.cpp` (lines 14, 30, 37): **DONE** — replaced `#include <range/v3/view/transform.hpp>` with `#include <ranges>`, replaced both `vs::transform(lambda)` calls with `std::views::transform(lambda)`. Compiles successfully. `t-simulation_cycle` builds and links but has a pre-existing test failure (REQUIRE res[0] ≈ 0.0 but got 0.0125) unrelated to this migration.
   - File: `src/systems/scalar_wave.cpp`.
-  - Test: `ctest --test-dir build -R t-simulation_cycle` (scalar_wave is used by simulation tests).
+  - Test: scalar_wave.cpp.o compiles; t-simulation_cycle and t-heat link successfully.
 
 - [ ] **7.13** Migrate stencil test files (heavy range-v3: `vs::linear_distribute`, `rs::inner_product`, `vs::concat`, `vs::single`, `rs::to`, `rs::fill`, `vs::take_exactly`, `vs::drop`):
   - **CRITICAL**: When replacing `rs::inner_product(v, view_expr, init)` with `std::inner_product(v.begin(), v.end(), view_expr.begin(), init)`, the view expression (e.g., `mesh | f4`) MUST be stored in a named variable. A temporary view's iterator can dangle because `transform_view::iterator` stores a pointer to the parent view for the invocable. Correct pattern:

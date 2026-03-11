@@ -11,7 +11,7 @@
 
 #include <fmt/ranges.h>
 #include <iterator>
-#include <range/v3/view/transform.hpp>
+#include <ranges>
 
 namespace ccs::systems
 {
@@ -27,14 +27,14 @@ constexpr real twoPI = 2 * std::numbers::pi_v<real>;
 template <int I>
 constexpr auto neg_G(const real3& center, real radius)
 {
-    return vs::transform([=](auto&& location) {
+    return std::views::transform([=](auto&& location) {
         return -(get<I>(location) - get<I>(center)) / length(location - center);
     });
 }
 
 constexpr auto solution(const real3& center, real radius, real time)
 {
-    return vs::transform([=](auto&& location) {
+    return std::views::transform([=](auto&& location) {
         return std::sin(twoPI * (length(location - center) - radius - time));
     });
 }
