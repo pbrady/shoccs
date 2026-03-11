@@ -17,9 +17,6 @@ using namespace boost::mp11;
 
 // Concept for being able to apply std::views::all.  Need to exclude int3 as
 // an "Allable" range to trigger proper tuple construction calls.
-// Note: C++20 viewable_range is broader than range-v3's (allows rvalue non-view
-// movable types). We use the narrower range-v3 semantics to preserve existing
-// behavior in viewable_range_by_value and CTAD deduction guides.
 template <typename T>
 concept All = std::ranges::range<T&> &&
     (std::is_lvalue_reference_v<T> || std::ranges::view<std::remove_cvref_t<T>>) &&
@@ -116,8 +113,8 @@ concept OwningTuple = detail::has_container_tuple<std::remove_cvref_t<T>>::value
 
 //
 // The concepts are supposed to work with all manner of the tuples in the code (i.e.
-// ViewTuples, ContainerTuples, Tuples, std::tuple, ...).  Some of the range-v3 ranges
-// result in custom range tuples so we have to be strict about what we call tuple_like
+// ViewTuples, ContainerTuples, Tuples, std::tuple, ...).  We have to be strict about
+// what we call tuple_like
 //
 namespace detail
 {
@@ -257,9 +254,6 @@ concept SimilarTuples =
 //
 template <typename T>
 concept Range = std::ranges::input_range<T> &&(!std::same_as<int3, std::remove_cvref_t<T>>);
-
-// template <typename T>
-// concept AnyOutputRange = rs::range<T>&& rs::output_range<T, rs::range_value_t<T>>;
 
 //
 // Trait for OutputRange.  Used to constrain self-modify math operations.

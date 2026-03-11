@@ -167,7 +167,7 @@ template <typename... Args>
 tuple(Args&&...) -> tuple<viewable_range_by_value<Args>...>;
 // tuple(Args&&...) -> tuple<Args...>;
 
-// need to caputre view closures by value to meet range-v3 concepts
+// need to capture view closures by value to meet range concepts
 template <typename... ViewFn>
 tuple(ccs::view_closure<ViewFn>&...) -> tuple<ccs::view_closure<ViewFn>...>;
 template <typename... ViewFn>

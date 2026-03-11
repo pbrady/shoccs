@@ -201,7 +201,7 @@ inline constexpr bind_back_fn bind_back{};
 // compose(f, g)
 //
 // Returns a callable h such that h(args...) = f(g(args...)).
-// This matches range-v3's parameter order: compose(second, first).
+// Parameter order: compose(second, first), i.e. h(x) = second(first(x)).
 // ---------------------------------------------------------------------------
 struct compose_fn {
     template <typename F, typename G>

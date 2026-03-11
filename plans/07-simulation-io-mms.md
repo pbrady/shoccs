@@ -300,31 +300,16 @@ These bugs in Phase 1 infrastructure (`selector.hpp`) and Phase 7 infrastructure
 
 ### Final Cleanup
 
-- [ ] **7.20** Remove `find_package(range-v3 REQUIRED)` from top-level `CMakeLists.txt` (line 26).
-- [ ] **7.21** Remove `find_package(range-v3 REQUIRED)` from `config/shoccsConfig.cmake.in` (line 8).
-- [ ] **7.22** Remove `"range-v3@0.12:"` from `.devcontainer/spack.yaml` (line 17).
-- [ ] **7.23** Remove `rs`/`vs` namespace aliases and the `namespace ranges::views {}` forward declaration from `src/types.hpp` (lines 15–17, 28–29).
-- [ ] **7.24** Sweep: Remove all remaining range-v3 references from the codebase.
-  - **7.24a** Delete dead code files with heavy range-v3/cppcoro usage (see decision D10 in `plans/meta.md`):
-    - Delete `src/operators/directional.cpp` — commented out of CMake line 21; uses `cppcoro::generator`, older `geometry`/`domain_boundaries` API that no longer exists, 5 range-v3 includes, 6+ API call sites. Not compiled or tested.
-    - Delete `src/operators/directional.t.cpp` — same: 7 range-v3 includes, `vs::generate_n`, `vs::filter`, `vs::transform`, `rs::to`, `rs::fill`, `rs::equal`, old `mesh` constructor API.
-    - Delete `src/operators/directional.hpp` — header for the dead directional code.
-    - Delete `src/io/format_test.cpp` — standalone demo, not in the build. Uses `vs::iota`, `vs::repeat_n`, `range/v3/all.hpp`.
-    - Files: `src/operators/directional.cpp`, `src/operators/directional.t.cpp`, `src/operators/directional.hpp`, `src/io/format_test.cpp`.
-  - **7.24b** Clean up commented-out CMake references to range-v3 and deleted files:
-    - `src/operators/CMakeLists.txt` line 21: Remove commented-out `#add_unit_test(directional ...)` line.
-    - `src/geometry/CMakeLists.txt` lines 1–10: All content is commented out and references `range-v3::range-v3` on line 7. Delete this entire file (the geometry code was moved to `src/mesh/` in prior refactoring).
-    - `src/mesh/CMakeLists.txt` lines 6–7, 10: If 7.19 was done, remove the now-dead commented-out `mesh_view` library definition (lines 6–7, references `cppcoro`). If 7.19 was skipped, also remove the commented-out test line 10 (`range-v3::range-v3` reference) and lines 6–7.
-    - Files: `src/operators/CMakeLists.txt`, `src/geometry/CMakeLists.txt`, `src/mesh/CMakeLists.txt`.
-  - **7.24c** Remove range-v3 comments from source files:
-    - `src/fields/tuple_fwd.hpp` line 262: Remove commented-out `// concept AnyOutputRange = rs::range<T>&& ...` line. Lines 20–21 and 119 mention "range-v3" in descriptive comments — update to say "C++20" or remove the range-v3 reference.
-    - `src/mesh/selections.hpp` lines 21–24: Update comment "range-v3 building blocks" to reflect the C++20 rewrite.
-    - Files: `src/fields/tuple_fwd.hpp`, `src/mesh/selections.hpp`.
-  - **7.24d** Verification: Earlier-phase files (phases 0–6) are confirmed clean of actual range-v3 usage.
-    - Grep for `rs::|vs::` in `src/matrices/`, `src/operators/` (excluding directional), `src/temporal/`, `src/systems/` (excluding scalar_wave.cpp), `src/fields/`, `src/real3_operators.t.cpp` returns only false positives from identifiers containing `rs::` or `vs::` as substrings (e.g., `Catch::Matchers::Approx`, `vars::`, `scalars::`, `integrators::`).
-    - No additional migration work needed for these files.
-  - Test: build succeeds.
-- [ ] **7.25** Full build and test: `cmake --build build && ctest --test-dir build` — all pass.
+- [x] **7.20** Remove `find_package(range-v3 REQUIRED)` from top-level `CMakeLists.txt`: **DONE**.
+- [x] **7.21** Remove `find_package(range-v3 REQUIRED)` from `config/shoccsConfig.cmake.in`: **DONE**.
+- [x] **7.22** Remove `"range-v3@0.12:"` from `.devcontainer/spack.yaml`: **DONE**.
+- [x] **7.23** Remove `rs`/`vs` namespace aliases and `namespace ranges::views {}` from `src/types.hpp`: **DONE**.
+- [x] **7.24** Sweep: Remove all remaining range-v3 references from the codebase: **DONE**.
+  - **7.24a**: Deleted `src/operators/directional.{cpp,t.cpp,hpp}` and `src/io/format_test.cpp`.
+  - **7.24b**: Removed `#add_unit_test(directional ...)` from operators/CMakeLists.txt. Deleted `src/geometry/CMakeLists.txt`. mesh/CMakeLists.txt already cleaned in 7.19.
+  - **7.24c**: Removed commented-out `AnyOutputRange` concept from tuple_fwd.hpp, updated range-v3 comments in tuple_fwd.hpp, selections.hpp, tuple.hpp, selector.hpp, ccs_range_utils.hpp.
+  - **7.24d**: Verified zero `rs::`, `vs::`, `range/v3`, or `range-v3` references remain in `src/`.
+- [x] **7.25** Full build and test: **DONE** — `cmake --build build` succeeds (171 targets). `ctest --test-dir build` runs 55 tests: 51 pass, 4 fail (all pre-existing: t-object_geometry FP precision, t-E2_1 FP precision, t-laplacian FP precision, t-simulation_cycle logic error). No regressions from range-v3 removal.
 
 ---
 

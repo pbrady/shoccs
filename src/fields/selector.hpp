@@ -890,7 +890,7 @@ constexpr inline auto optional_view = ::ccs::detail::optional_view_fn{};
 } // namespace sel
 
 //
-// indirect selction based on predicate ranges (modeled after remove_if from range-v3)
+// indirect selection based on predicate ranges
 //
 namespace detail
 {

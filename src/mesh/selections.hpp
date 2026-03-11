@@ -41,7 +41,7 @@ inline constexpr bool is_Rz_selection_v =
 namespace detail
 {
 // y-plane view: selects elements where y == j from a flat 3D grid.
-// Formulated as a custom view because naive range-v3 building blocks
+// Formulated as a custom view because naive C++20 building blocks
 // (chunk | stride | join) did not produce output iterators.
 // This will need to be revisited if the layout changes.
 template <typename Rng>

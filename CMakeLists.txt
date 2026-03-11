@@ -23,7 +23,6 @@ include(CTest)
 
 find_package(sol2 REQUIRED)
 find_package(fmt 8 REQUIRED)
-find_package(range-v3 REQUIRED)
 find_package(pugixml 1.10 REQUIRED)
 find_package(spdlog 1.9 REQUIRED)
 find_package(cxxopts REQUIRED)
