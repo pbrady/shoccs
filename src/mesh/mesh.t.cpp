@@ -14,7 +14,7 @@
 #include <sol/sol.hpp>
 #include <spdlog/spdlog.h>
 
-#include <range/v3/all.hpp>
+#include <ranges>
 
 using namespace ccs;
 
@@ -249,9 +249,9 @@ TEST_CASE("selections")
 
     randomize();
     scalar<T> u{m.ss()};
-    u | sel::D = m.xyz | vs::transform([](auto&& xyz) { return get<0>(xyz); });
+    u | sel::D = m.xyz | std::views::transform([](auto&& xyz) { return get<0>(xyz); });
     // test whole field comparison
-    REQUIRE(rs::equal(u | sel::D, u | m.fluid));
+    REQUIRE(std::ranges::equal(u | sel::D, u | m.fluid));
 }
 
 TEST_CASE("selections with object")
@@ -289,39 +289,39 @@ TEST_CASE("selections with object")
     {
         const bcs::Object obj_bcs = {bcs::Floating};
         u | m.dirichlet(obj_bcs) = -1;
-        REQUIRE(rs::count(u | sel::Rx, -1) == 0);
-        REQUIRE(rs::count(u | sel::Ry, -1) == 0);
-        REQUIRE(rs::count(u | sel::Rz, -1) == 0);
+        REQUIRE(std::ranges::count(u | sel::Rx, -1) == 0);
+        REQUIRE(std::ranges::count(u | sel::Ry, -1) == 0);
+        REQUIRE(std::ranges::count(u | sel::Rz, -1) == 0);
     }
 
     {
         const bcs::Object obj_bcs = {bcs::Dirichlet};
         u | m.dirichlet(obj_bcs) = -1;
-        REQUIRE(rs::count(u | sel::Rx, -1) == (integer)rs::size(u | sel::Rx));
-        REQUIRE(rs::count(u | sel::Ry, -1) == (integer)rs::size(u | sel::Ry));
-        REQUIRE(rs::count(u | sel::Rz, -1) == (integer)rs::size(u | sel::Rz));
+        REQUIRE(std::ranges::count(u | sel::Rx, -1) == (integer)std::ranges::size(u | sel::Rx));
+        REQUIRE(std::ranges::count(u | sel::Ry, -1) == (integer)std::ranges::size(u | sel::Ry));
+        REQUIRE(std::ranges::count(u | sel::Rz, -1) == (integer)std::ranges::size(u | sel::Rz));
     }
 
     {
         using F = decltype(u | m.fluid);
 
-        REQUIRE(rs::bidirectional_range<F>);
-        REQUIRE(!rs::contiguous_range<F>);
-        REQUIRE(rs::random_access_range<F>);
-        REQUIRE(rs::sized_range<F>);
+        REQUIRE(std::ranges::bidirectional_range<F>);
+        REQUIRE(!std::ranges::contiguous_range<F>);
+        REQUIRE(std::ranges::random_access_range<F>);
+        REQUIRE(std::ranges::sized_range<F>);
     }
 
-    auto nsolid = rs::count(u | sel::D, -1);
+    auto nsolid = std::ranges::count(u | sel::D, -1);
     REQUIRE(nsolid > 0);
-    auto nfluid = rs::count(u | sel::D, 1);
+    auto nfluid = std::ranges::count(u | sel::D, 1);
     REQUIRE(nfluid > 0);
 
     REQUIRE(nfluid + nsolid == m.size());
-    REQUIRE(nfluid == (integer)rs::size(u | m.fluid));
+    REQUIRE(nfluid == (integer)std::ranges::size(u | m.fluid));
 
     scalar<T> v{m.ss()};
 
-    v | sel::D = m.xyz | vs::transform([center = real3{0.01, -0.01, 0.5}](auto&& loc) {
+    v | sel::D = m.xyz | std::views::transform([center = real3{0.01, -0.01, 0.5}](auto&& loc) {
                      return length(loc - center) > 0.25 ? 1 : -1;
                  });
 

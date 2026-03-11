@@ -3,7 +3,6 @@
 #include <catch2/catch_approx.hpp>
 #include <catch2/catch_test_macros.hpp>
 
-#include <range/v3/view/single.hpp>
 
 #include <sol/sol.hpp>
 #include <spdlog/spdlog.h>

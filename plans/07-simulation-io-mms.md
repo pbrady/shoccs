@@ -289,48 +289,15 @@ These bugs in Phase 1 infrastructure (`selector.hpp`) and Phase 7 infrastructure
 
 ### Test Migration
 
-- [ ] **7.14** Migrate `src/mesh/mesh.t.cpp` (heavy range-v3):
-  - Remove `#include <range/v3/all.hpp>`, add `#include <ranges>`.
-  - Line 252: `m.xyz | vs::transform(…)` → `m.xyz | std::views::transform(…)`.
-  - Line 254: `rs::equal(a, b)` → `std::ranges::equal(a, b)`.
-  - Lines 292–294, 300–302, 314, 316, 320: `rs::count(…)` → `std::ranges::count(…)`.
-  - Lines 300–302, 320: `rs::size(…)` → `std::ranges::size(…)`.
-  - Lines 308–311: `rs::bidirectional_range<F>`, `rs::contiguous_range<F>`, `rs::random_access_range<F>`, `rs::sized_range<F>` → `std::ranges::` equivalents.
-  - Line 324: `vs::transform(…)` → `std::views::transform(…)`.
-  - File: `src/mesh/mesh.t.cpp`.
-  - Test: `ctest --test-dir build -R t-mesh`
+- [x] **7.14** Migrate `src/mesh/mesh.t.cpp` (heavy range-v3): **DONE** — replaced `#include <range/v3/all.hpp>` with `#include <ranges>`, replaced all `vs::transform` → `std::views::transform`, `rs::equal` → `std::ranges::equal`, `rs::count` → `std::ranges::count`, `rs::size` → `std::ranges::size`, `rs::bidirectional_range` etc. → `std::ranges::` equivalents. t-mesh passes.
 
-- [ ] **7.15** Migrate `src/mms/mms.t.cpp` (lines 12–13, 52):
-  - Remove `#include <range/v3/range/conversion.hpp>` and `#include <range/v3/view/single.hpp>`, add `#include <ranges>`.
-  - Line 52: `vs::single(loc) | ms(time) | rs::to<std::vector<real>>()` → replace with explicit evaluation:
-    ```cpp
-    auto view = std::views::single(loc) | ms(time);
-    auto t = std::vector<real>(std::ranges::begin(view), std::ranges::end(view));
-    ```
-  - File: `src/mms/mms.t.cpp`.
-  - Test: `ctest --test-dir build -R t-mms`
+- [x] **7.15** Migrate `src/mms/mms.t.cpp` (lines 12–13, 52): **DONE** — removed 2 range-v3 includes, added `#include <ranges>`, replaced `vs::single | ms(time) | rs::to<>` with iterator-pair vector construction. t-mms passes.
 
-- [ ] **7.16** Migrate `src/io/field_io.t.cpp` (lines 6, 68–69):
-  - Remove `#include <range/v3/view/iota.hpp>`, add `#include <ranges>`.
-  - Lines 68–69: `vs::iota(0, 24)` → `std::views::iota(0, 24)`.
-  - File: `src/io/field_io.t.cpp`.
-  - Test: `ctest --test-dir build -R t-field_io`
+- [x] **7.16** Migrate `src/io/field_io.t.cpp` (lines 6, 68–69): **DONE** — replaced `#include <range/v3/view/iota.hpp>` with `#include <ranges>`, `vs::iota` → `std::views::iota`. t-field_io passes.
 
-- [ ] **7.17** Migrate `src/io/xdmf.t.cpp` (line 27):
-  - Line 27: `rs::size(get<0>(t))` → `std::ranges::size(get<0>(t))` or `get<0>(t).size()`.
-  - No range-v3 include to remove (it gets `rs::size` through the `rs` alias in types.hpp which resolves to range-v3).
-  - File: `src/io/xdmf.t.cpp`.
-  - Test: `ctest --test-dir build -R t-xdmf`
+- [x] **7.17** Migrate `src/io/xdmf.t.cpp` (line 27): **DONE** — replaced `rs::size(get<0>(t))` with `get<0>(t).size()`. t-xdmf passes.
 
-- [ ] **7.18** Clean up test files with stale range-v3 includes (no actual usage):
-  - `src/mesh/cartesian.t.cpp` line 6: Remove `#include <range/v3/view/single.hpp>` (unused).
-  - `src/simulation/simulation_cycle.t.cpp` line 11: Remove `#include <range/v3/all.hpp>` (unused).
-  - Note: `src/io/format_test.cpp` is handled by **7.24a** (deletion of dead code files).
-  - Files that have NO range-v3 usage (confirmed clean, no action needed):
-    - `src/mesh/object_geometry.t.cpp`, `src/mesh/shapes.t.cpp`
-    - `src/io/interval.t.cpp`, `src/io/logging.t.cpp`
-    - `src/indexing.t.cpp`, `src/index_view.t.cpp`, `src/real3_operators.t.cpp`
-  - Test: build succeeds.
+- [x] **7.18** Clean up test files with stale range-v3 includes (no actual usage): **DONE** — removed `#include <range/v3/view/single.hpp>` from cartesian.t.cpp, removed `#include <range/v3/all.hpp>` from simulation_cycle.t.cpp. t-cartesian passes; simulation_cycle.t.cpp builds.
 
 - [ ] **7.19** Migrate `src/mesh/mesh_view.t.cpp` (commented out test, optional):
   - This test is currently **commented out** in `src/mesh/CMakeLists.txt` line 10.

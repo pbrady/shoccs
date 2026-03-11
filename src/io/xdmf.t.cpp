@@ -24,7 +24,7 @@ TEST_CASE("header")
 
     auto writer = xdmf{tmp, ix, dom};
     T t{};
-    REQUIRE(rs::size(get<0>(t)) == 0);
+    REQUIRE(get<0>(t).size() == 0);
 
     writer.write(0, 0.0, var_names, file_names, T{}, logger);
 

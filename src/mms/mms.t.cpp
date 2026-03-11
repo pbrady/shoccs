@@ -9,8 +9,7 @@
 #include <spdlog/spdlog.h>
 #include <string>
 
-#include <range/v3/range/conversion.hpp>
-#include <range/v3/view/single.hpp>
+#include <ranges>
 
 using namespace ccs;
 using Catch::Matchers::Approx;
@@ -49,7 +48,8 @@ TEST_CASE("gauss1d")
 
     REQUIRE(ms(time, loc) == Catch::Approx(0.0003319785015967778));
 
-    auto t = vs::single(loc) | ms(time) | rs::to<std::vector<real>>();
+    auto view = std::views::single(loc) | ms(time);
+    auto t = std::vector<real>(std::ranges::begin(view), std::ranges::end(view));
     REQUIRE(t[0] == Catch::Approx(0.0003319785015967778));
 
     REQUIRE(ms.ddt(time, loc) == Catch::Approx(-0.000975554445371058));

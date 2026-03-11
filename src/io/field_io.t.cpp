@@ -3,7 +3,7 @@
 
 #include <catch2/catch_test_macros.hpp>
 
-#include <range/v3/view/iota.hpp>
+#include <ranges>
 #include <sol/sol.hpp>
 
 using namespace ccs;
@@ -65,8 +65,8 @@ TEST_CASE("field_io - data")
 
     auto&& [u, v] = f.scalars(0, 1);
 
-    u | sel::D = vs::iota(0, 24);
-    v | sel::D = vs::iota(24, 48);
+    u | sel::D = std::views::iota(0, 24);
+    v | sel::D = std::views::iota(24, 48);
 
     REQUIRE(io.write(names, f, step, 0.0, T{}));
 }
