@@ -5,6 +5,7 @@
 #include <cmath>
 #include <numbers>
 
+#include <fmt/ranges.h>
 #include <sol/sol.hpp>
 
 #include "operators/discrete_operator.hpp"

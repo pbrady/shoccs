@@ -35,13 +35,12 @@ ctest --test-dir build
 
 ## Items
 
-**Build-breakage status (updated after 7.1e):** Three files still fail to compile:
+**Build-breakage status (updated after 7.H1–7.H6):** heat.cpp now compiles. Remaining files that fail to compile:
 - `field_data.cpp` (`vs::zip` lost transitively) → fix: **7.9**
 - `xdmf.cpp` (`vs::repeat_n` lost transitively) → fix: **7.10**
-- `heat.cpp` — 7.1e fixed the `operator|` pipe error, but now exposes separate pre-existing issues: (1) `zip_transform_view::begin() const` creates wrong iterator type → fix: **7.H1**, (2) `multi_slice_view::iterator::operator++` unconditionally uses `operator+=` on non-random-access base → fix: **7.H2**, (3) missing `.base()` accessors on `multi_slice_view`/`predicate_view` and their iterators → fix: **7.H3**, (4) missing `fmt::join` (heat.cpp:167) → fix: **7.H4**.
 - `scalar_wave.cpp` (own range-v3 `#include` + `vs::transform` usage) → fix: **7.12**
 
-This blocks test targets: `t-mesh` (also needs **7.14**), `t-field_io`, `t-xdmf`, `t-simulation_cycle`, `t-heat`, `t-hyperbolic_eigenvalues`. Tests that still work: `t-cartesian`, `t-object_geometry`, `t-shapes`, `t-mms`, `t-selections`. To restore the full build, prioritize **7.H1**–**7.H4** (heat.cpp blockers), **7.8**/**7.9**/**7.10** (I/O), **7.12** (scalar_wave), and **7.14** (mesh.t.cpp). Individual test targets can be built with `cmake --build build --target <target>` to bypass unrelated library failures.
+This blocks test targets: `t-mesh` (also needs **7.14**), `t-field_io`, `t-xdmf`, `t-simulation_cycle`, `t-heat`, `t-hyperbolic_eigenvalues`. Tests that still work: `t-cartesian`, `t-object_geometry`, `t-shapes`, `t-mms`, `t-selections`. To restore the full build, prioritize **7.8**/**7.9**/**7.10** (I/O), **7.12** (scalar_wave), and **7.14** (mesh.t.cpp). Individual test targets can be built with `cmake --build build --target <target>` to bypass unrelated library failures.
 
 ### Mesh (High Complexity)
 
@@ -326,36 +325,25 @@ These files still have range-v3 usage from earlier phases and must be cleaned be
 
 These bugs in Phase 1 infrastructure (`selector.hpp`) and Phase 7 infrastructure (`lazy_views.hpp`) were masked by the `operator|` pipe error that 7.1e fixed. They must be resolved for `heat.cpp` to compile and for `t-heat`/`t-simulation_cycle` to pass.
 
-- [ ] **7.H1** Fix `zip_transform_view::begin() const` / `end() const` iterator type mismatch (`src/fields/lazy_views.hpp`):
-  - **Bug:** `begin() const` (line 236) and `end() const` (line 254) call `std::ranges::begin(rngs)...` on `const Rngs&`, which returns `iterator_t<const Rngs>`. But the `iterator` type alias is `detail::zip_transform_iterator<F, Rngs...>` whose constructor expects `iterator_t<Rngs>...` (non-const). This type mismatch causes a compilation error when `zip_transform_view` is used as a const range (e.g., stored as a const member in a `ccs::tuple`).
-  - **Fix:** Add a `const_iterator` type: `using const_iterator = detail::zip_transform_iterator<F, const Rngs...>;` (or parameterize the iterator on `const`-qualified ranges). Have `begin() const` and `end() const` return `const_iterator`. Ensure `zip_transform_iterator` works correctly when instantiated with `const Rngs...` — `iterator_t<const Rng>` may differ from `iterator_t<Rng>`.
+- [x] **7.H1** Fix `zip_transform_view::begin() const` / `end() const` iterator type mismatch (`src/fields/lazy_views.hpp`): **DONE** — added `using const_iterator = detail::zip_transform_iterator<F, const Rngs...>` and updated `begin() const`/`end() const` to return `const_iterator`.
   - File: `src/fields/lazy_views.hpp`.
-  - Test: `cmake --build build --target src/systems/CMakeFiles/shoccs-system.dir/heat.cpp.o` compiles (after all 7.H items).
-  - Ordering: Must precede heat.cpp compilation. Independent of 7.H2–7.H4.
 
-- [ ] **7.H2** Fix `multi_slice_view::iterator::operator++` unconditional `operator+=` on base iterator (`src/fields/selector.hpp:583`):
-  - **Bug:** `operator++()` at line 583 uses `base_it_ += (slice_->first - i_)` to jump to the next slice. This requires `operator+=` on the base iterator, but when the base range is only forward or bidirectional (not random-access), this fails to compile. The base range in the heat.cpp instantiation is a `ccs::tuple<...>` whose iterator does not support `operator+=`.
-  - **Fix options:**
-    - **(a)** Replace `base_it_ += n` with `std::ranges::advance(base_it_, n)`, which works for forward/bidirectional iterators (O(n) steps).
-    - **(b)** Constrain `multi_slice_view` to require `random_access_range` on the base — but this would break the heat.cpp use case.
-  - Option (a) is recommended: it preserves the current semantics while supporting non-random-access bases.
-  - File: `src/fields/selector.hpp` (line 583, possibly other `operator+=` sites in `multi_slice_view::iterator`).
-  - Test: same as 7.H1.
-  - Ordering: Must precede heat.cpp compilation. Independent of 7.H1, 7.H3, 7.H4.
-
-- [ ] **7.H3** Add `.base()` accessors to `multi_slice_view`, `predicate_view`, and their iterators (`src/fields/selector.hpp`):
-  - **Bug:** `heat.cpp:81` calls `rng.base()` on a `multi_slice_view` instance and `max_el.base()` on its iterator. These accessors were available in the range-v3 `view_adaptor` base class but are missing from the C++20 rewrites done in Phase 1 (items 1.16, 1.18).
-  - **Fix:** Add `constexpr auto& base() { return base_; }` and `constexpr const auto& base() const { return base_; }` to both `multi_slice_view` and `predicate_view`. Add `constexpr auto base() const { return base_it_; }` to their iterator classes.
+- [x] **7.H2** Fix `multi_slice_view::iterator::operator++` unconditional `operator+=` on base iterator (`src/fields/selector.hpp`): **DONE** — replaced `base_it_ += n` and `base_it_ -= n` with `std::ranges::advance(base_it_, n)` in `operator++()` and `operator--()`.
   - File: `src/fields/selector.hpp`.
-  - Test: same as 7.H1.
-  - Ordering: Must precede heat.cpp compilation. Independent of 7.H1, 7.H2, 7.H4.
 
-- [ ] **7.H4** Add `#include <fmt/ranges.h>` to `heat.cpp` for `fmt::join` (`src/systems/heat.cpp:167`):
-  - **Bug:** `fmt::join` requires `<fmt/ranges.h>` which was previously available transitively through range-v3 includes. After the Phase 5 migration removed the range-v3 include, the transitive path was lost. (Same issue already identified and fixed for `scalar_wave.cpp` in plan 5.2 and `stencil.cpp` in plan 3.)
-  - **Fix:** Add `#include <fmt/ranges.h>` to `src/systems/heat.cpp`.
+- [x] **7.H3** Add `.base()` accessors to `multi_slice_view`, `predicate_view`, and their iterators (`src/fields/selector.hpp`): **DONE** — added `base()` to `multi_slice_view` (view + iterator) and `predicate_view::iterator`. `predicate_view` already had `base()`.
+  - File: `src/fields/selector.hpp`.
+
+- [x] **7.H4** Add `#include <fmt/ranges.h>` to `heat.cpp` for `fmt::join` (`src/systems/heat.cpp:167`): **DONE**.
   - File: `src/systems/heat.cpp`.
-  - Test: same as 7.H1.
-  - Ordering: Must precede heat.cpp compilation. Independent of 7.H1–7.H3.
+
+- [x] **7.H5** Fix `optional_view::begin()` ternary type mismatch when `iterator_t != sentinel_t` (`src/fields/selector.hpp`): **DONE** — replaced `keep_bounds_ ? begin(base_) : end(base_)` ternary with `auto it = begin(base_); if (!keep_bounds_) advance(it, end(base_)); return it;` to avoid type mismatch when the base range uses different iterator/sentinel types (e.g., `counted_iterator` vs `default_sentinel_t` from `std::views::take`).
+  - File: `src/fields/selector.hpp`.
+
+- [x] **7.H6** Fix `plane_view<1>::iterator` unconditional `operator+=`/`-=` on base iterator (`src/fields/selector.hpp`): **DONE** — replaced all `base_it_ += n` and `base_it_ -= n` in `operator++()`, `operator--()`, and `operator+=(n)` with `std::ranges::advance(base_it_, n)`.
+  - File: `src/fields/selector.hpp`.
+
+- Test: `cmake --build build --target src/systems/CMakeFiles/shoccs-system.dir/heat.cpp.o` compiles successfully. t-heat still blocked on I/O library migration (7.8-7.10). All previously-passing tests (t-cartesian, t-selections, t-shapes, t-mms) still pass.
 
 ### Test Migration
 
@@ -457,9 +445,9 @@ These bugs in Phase 1 infrastructure (`selector.hpp`) and Phase 7 infrastructure
 10. **7.13** (stencil tests) depends on **7.1c** (shared `ccs::linear_distribute`).
 11. **7.20–7.25** (Final Cleanup) must come last, after all code migration items.
 12. **Build-unblocking priority:** The build is currently broken (see status note above). To restore heat.cpp: **7.H1**–**7.H4** (all four needed). To restore shoccs-io: **7.9** + **7.10**. To restore t-mesh: **7.14**.
-13. **7.H1–7.H4** (heat.cpp build fixes) are independent of each other and of **7.8**–**7.14**. They can be done in any order but must all be complete before heat.cpp compiles. They are independent of the I/O migration items (**7.8**–**7.10**), so both tracks can proceed in parallel.
+13. **7.H1–7.H6** (heat.cpp build fixes) are done. heat.cpp compiles successfully.
 14. **7.1f** (C++23 guard) is low priority and independent of all other items.
-15. **7.1e** is done (common_reference fix). **7.2e**, **7.2f**, **7.3**, **7.4**, **7.5**, **7.6**, **7.7** are done. Next: **7.H1**–**7.H4** (heat.cpp blockers, highest priority), then **7.8** (field_io.cpp), **7.9** (field_data.cpp), **7.10** (xdmf.cpp), **7.11** (simulation verification), **7.12** (scalar_wave.cpp), **7.13** (stencil tests), **7.14** (mesh.t.cpp).
+15. **7.H1**–**7.H6** are done (heat.cpp now compiles). Next: **7.8** (field_io.cpp), **7.9** (field_data.cpp), **7.10** (xdmf.cpp), **7.11** (simulation verification), **7.12** (scalar_wave.cpp), **7.13** (stencil tests), **7.14** (mesh.t.cpp).
 
 ---
 

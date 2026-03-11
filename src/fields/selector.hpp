@@ -256,7 +256,7 @@ public:
             if (k_ == nz_ && i_ != nx_ - 1) {
                 k_ = 0;
                 ++i_;
-                base_it_ += (ny_ - 1) * nz_;
+                std::ranges::advance(base_it_, (ny_ - 1) * nz_);
             }
             return *this;
         }
@@ -275,7 +275,7 @@ public:
             if (k_ < 0) {
                 k_ = nz_ - 1;
                 --i_;
-                base_it_ -= (ny_ - 1) * nz_;
+                std::ranges::advance(base_it_, -((ny_ - 1) * nz_));
             }
             return *this;
         }
@@ -305,7 +305,7 @@ public:
                     k1 = nz_;
                 }
 
-                base_it_ += line_offset * (i1 - i_) + (k1 - k_);
+                std::ranges::advance(base_it_, line_offset * (i1 - i_) + (k1 - k_));
                 i_ = i1;
                 k_ = k1;
             } else {
@@ -315,7 +315,7 @@ public:
                 diff_t i1 = i_ + qr.quot;
                 diff_t k1 = nz_ - 1 + qr.rem;
 
-                base_it_ += line_offset * (i1 - i_) + (k1 - k_);
+                std::ranges::advance(base_it_, line_offset * (i1 - i_) + (k1 - k_));
                 i_ = i1;
                 k_ = k1;
             }
@@ -580,7 +580,7 @@ public:
             ++base_it_;
             ++multi_i_;
             if (i_ == slice_->last && ++slice_ != last_slice_) {
-                base_it_ += (slice_->first - i_);
+                std::ranges::advance(base_it_, slice_->first - i_);
                 i_ = slice_->first;
             }
             return *this;
@@ -603,7 +603,7 @@ public:
                 --slice_;
             } else if (i_ < slice_->first) {
                 --slice_;
-                base_it_ -= (i_ - (slice_->last - 1));
+                std::ranges::advance(base_it_, slice_->last - 1 - i_);
                 i_ = slice_->last - 1;
             }
             return *this;
@@ -694,6 +694,8 @@ public:
             return a.multi_i_ - b.multi_i_;
         }
 
+        constexpr auto base() const { return base_it_; }
+
         friend constexpr bool operator==(const iterator& a, const iterator& b)
         {
             return a.multi_i_ == b.multi_i_;
@@ -738,6 +740,9 @@ public:
         std::ranges::advance(it, i);
         return iterator(std::move(it), last, last, i, total);
     }
+
+    constexpr auto& base() & { return base_; }
+    constexpr const auto& base() const& { return base_; }
 
     template <typename U>
         requires std::invocable<Fn, U>
@@ -824,7 +829,9 @@ public:
 
     constexpr auto begin()
     {
-        return keep_bounds_ ? std::ranges::begin(base_) : std::ranges::end(base_);
+        auto it = std::ranges::begin(base_);
+        if (!keep_bounds_) std::ranges::advance(it, std::ranges::end(base_));
+        return it;
     }
 
     constexpr auto end() { return std::ranges::end(base_); }
@@ -973,6 +980,8 @@ public:
             --*this;
             return tmp;
         }
+
+        constexpr auto base() const { return base_it_; }
 
         friend constexpr bool operator==(const iterator& a, const iterator& b)
         {

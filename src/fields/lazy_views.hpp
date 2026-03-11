@@ -215,6 +215,7 @@ class zip_transform_view
     std::tuple<Rngs...> rngs_;
 
     using iterator = detail::zip_transform_iterator<F, Rngs...>;
+    using const_iterator = detail::zip_transform_iterator<F, const Rngs...>;
 
 public:
     zip_transform_view() = default;
@@ -237,7 +238,7 @@ public:
     {
         return std::apply(
             [this](const auto&... rngs) {
-                return iterator{&f_.get(), std::ranges::begin(rngs)...};
+                return const_iterator{&f_.get(), std::ranges::begin(rngs)...};
             },
             rngs_);
     }
@@ -255,7 +256,7 @@ public:
     {
         return std::apply(
             [this](const auto&... rngs) {
-                return iterator{&f_.get(), std::ranges::end(rngs)...};
+                return const_iterator{&f_.get(), std::ranges::end(rngs)...};
             },
             rngs_);
     }
