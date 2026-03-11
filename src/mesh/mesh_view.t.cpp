@@ -3,21 +3,19 @@
 #include <catch2/catch_approx.hpp>
 #include <catch2/catch_test_macros.hpp>
 
-#include <range/v3/range/conversion.hpp>
-#include <range/v3/view/zip.hpp>
-
 TEST_CASE("location-2D")
 {
     using namespace ccs;
 
-    auto m = mesh::cartesian{real3{-1, 1}, real3{0, 2}, int3{2, 3, 1}};
+    auto m = cartesian{int3{2, 3, 1}, real3{-1, 1}, real3{0, 2}};
 
     SECTION("X")
     {
         std::vector<real3> c{
             {-1, 1, 0}, {0, 1, 0}, {-1, 1.5, 0}, {0, 1.5, 0}, {-1, 2, 0}, {0, 2, 0}};
         auto g = mesh::location_view<0>(m);
-        for (auto&& [x, y] : vs::zip(c, g)) REQUIRE(x == y);
+        REQUIRE(c.size() == g.size());
+        for (std::size_t i = 0; i < c.size(); ++i) REQUIRE(c[i] == g[i]);
     }
 
     SECTION("Y")
@@ -25,7 +23,8 @@ TEST_CASE("location-2D")
         std::vector<real3> c{
             {-1, 1, 0}, {-1, 1.5, 0}, {-1, 2, 0}, {0, 1, 0}, {0, 1.5, 0}, {0, 2, 0}};
         auto g = mesh::location_view<1>(m);
-        for (auto&& [x, y] : vs::zip(c, g)) REQUIRE(x == y);
+        REQUIRE(c.size() == g.size());
+        for (std::size_t i = 0; i < c.size(); ++i) REQUIRE(c[i] == g[i]);
     }
 }
 
@@ -33,7 +32,7 @@ TEST_CASE("location-3D")
 {
     using namespace ccs;
 
-    auto m = mesh::cartesian{real3{-1, 1, 3}, real3{0, 2, 4}, int3{2, 2, 3}};
+    auto m = cartesian{int3{2, 2, 3}, real3{-1, 1, 3}, real3{0, 2, 4}};
 
     SECTION("X")
     {
@@ -50,7 +49,8 @@ TEST_CASE("location-3D")
                              {-1, 2, 4},
                              {0, 2, 4}};
         auto g = mesh::location_view<0>(m);
-        for (auto&& [x, y] : vs::zip(c, g)) REQUIRE(x == y);
+        REQUIRE(c.size() == g.size());
+        for (std::size_t i = 0; i < c.size(); ++i) REQUIRE(c[i] == g[i]);
     }
 
     SECTION("Y")
@@ -68,7 +68,8 @@ TEST_CASE("location-3D")
                              {0, 1, 4},
                              {0, 2, 4}};
         auto g = mesh::location_view<1>(m);
-        for (auto&& [x, y] : vs::zip(c, g)) REQUIRE(x == y);
+        REQUIRE(c.size() == g.size());
+        for (std::size_t i = 0; i < c.size(); ++i) REQUIRE(c[i] == g[i]);
     }
 
     SECTION("Z")
@@ -85,7 +86,7 @@ TEST_CASE("location-3D")
                              {0, 2, 3},
                              {0, 2, 3.5},
                              {0, 2, 4}};
-        auto r = location_view<2>(m) | rs::to<std::vector<real3>>();
+        auto r = mesh::location_view<2>(m);
         REQUIRE(c == r);
     }
 }
@@ -94,11 +95,11 @@ TEST_CASE("plane")
 {
     using namespace ccs;
 
-    auto m = mesh::cartesian{real3{-1, 1, 3}, real3{0, 2, 4}, int3{2, 2, 3}};
+    auto m = cartesian{int3{2, 2, 3}, real3{-1, 1, 3}, real3{0, 2, 4}};
 
     SECTION("X")
     {
-        auto x = mesh::location_view<0>(m, 0) | rs::to<std::vector<real3>>();
+        auto x = mesh::location_view<0>(m, 0);
 
         REQUIRE(x == std::vector<real3>{{-1, 1, 3},
                                         {-1, 1, 3.5},
@@ -106,7 +107,7 @@ TEST_CASE("plane")
                                         {-1, 2, 3},
                                         {-1, 2, 3.5},
                                         {-1, 2, 4}});
-        x = mesh::location_view<0>(m, -1) | rs::to<std::vector<real3>>();
+        x = mesh::location_view<0>(m, -1);
         REQUIRE(
             x ==
             std::vector<real3>{
@@ -115,12 +116,12 @@ TEST_CASE("plane")
 
     SECTION("Y")
     {
-        auto y = mesh::location_view<1>(m, 0) | rs::to<std::vector<real3>>();
+        auto y = mesh::location_view<1>(m, 0);
         REQUIRE(
             y ==
             std::vector<real3>{
                 {-1, 1, 3}, {-1, 1, 3.5}, {-1, 1, 4}, {0, 1, 3}, {0, 1, 3.5}, {0, 1, 4}});
-        y = mesh::location_view<1>(m, -1) | rs::to<std::vector<real3>>();
+        y = mesh::location_view<1>(m, -1);
         REQUIRE(
             y ==
             std::vector<real3>{
@@ -129,9 +130,9 @@ TEST_CASE("plane")
 
     SECTION("Z")
     {
-        auto z = mesh::location_view<2>(m, 0) | rs::to<std::vector<real3>>();
+        auto z = mesh::location_view<2>(m, 0);
         REQUIRE(z == std::vector<real3>{{-1, 1, 3}, {-1, 2, 3}, {0, 1, 3}, {0, 2, 3}});
-        z = mesh::location_view<2>(m, -1) | rs::to<std::vector<real3>>();
+        z = mesh::location_view<2>(m, -1);
         REQUIRE(z == std::vector<real3>{{-1, 1, 4}, {-1, 2, 4}, {0, 1, 4}, {0, 2, 4}});
     }
 }

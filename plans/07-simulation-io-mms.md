@@ -118,11 +118,7 @@ Note: `shoccs-mesh` does not link `range-v3::range-v3` in `src/mesh/CMakeLists.t
   - [x] **7.1e** Fix `cartesian_product_view::iterator` to satisfy `std::indirectly_readable` (review finding from 7.7): **DONE** — implemented option (a): added `std::basic_common_reference` specialization for `std::tuple` (general N-element, backporting C++23 P2321R2) in `lazy_views.hpp`. Added `static_assert(std::ranges::input_range<cpv_t>)` and `static_assert(std::ranges::forward_range<cpv_t>)` to `cartesian.t.cpp`. t-cartesian passes. The original `operator|` error in heat.cpp (`m.xyz | m_sol(time)`) is now resolved. heat.cpp still has separate pre-existing errors: (1) `multi_slice_view::iterator::operator+=` on non-random-access base, (2) missing `.base()` member, (3) missing `fmt::join`, (4) `zip_transform_view::begin() const` mismatched iterator types — these are NOT related to 7.1e and need separate fixes.
     - File: `src/fields/lazy_views.hpp` (added `basic_common_reference` specialization before `namespace ccs`), `src/mesh/cartesian.t.cpp` (added static_asserts).
     - Test: `ctest -R t-cartesian` passes. All previously-passing tests still pass.
-  - [ ] **7.1f** Add C++23 preprocessor guard around `basic_common_reference` specialization (review finding from 7.1e): The specialization added in 7.1e backports C++23 P2321R2 for `std::tuple`. When the project upgrades from C++20 to C++23, the standard library will already provide this specialization, causing a redefinition error.
-    - **Fix:** Wrap the specialization (lazy_views.hpp:25-38, the `namespace std { ... basic_common_reference ... }` block) in `#if __cplusplus < 202302L` / `#endif`. Alternatively, use the feature-test macro `#if !defined(__cpp_lib_ranges_zip)` (defined in C++23 when tuple common_reference is available).
-    - File: `src/fields/lazy_views.hpp`.
-    - Test: `ctest -R t-cartesian` still passes.
-    - Ordering: Independent; low priority. Can be done anytime before **7.25**.
+  - [x] **7.1f** Add C++23 preprocessor guard around `basic_common_reference` specialization: **DONE** — wrapped in `#if !defined(__cpp_lib_ranges_zip)` / `#endif`. t-cartesian passes.
 
 - [x] **7.2** Migrate `selections.hpp`
   - [x] **7.2a** Rewrite `YPlaneView` as a `std::ranges::view_interface` class (lines 26–163): **DONE** — replaced `rs::view_adaptor` with `std::ranges::view_interface`, standalone `iterator` class with full random-access support, deduction guide uses `std::views::all_t`, factory uses `ccs::make_view_closure`/`ccs::bind_back`. Also added `#include "fields/ccs_range_utils.hpp"` and `#include "fields/lazy_views.hpp"`, removed 4 of 7 range-v3 includes. Standalone compile test passes: random_access_range, sized_range, correct element selection.
@@ -299,16 +295,8 @@ These bugs in Phase 1 infrastructure (`selector.hpp`) and Phase 7 infrastructure
 
 - [x] **7.18** Clean up test files with stale range-v3 includes (no actual usage): **DONE** — removed `#include <range/v3/view/single.hpp>` from cartesian.t.cpp, removed `#include <range/v3/all.hpp>` from simulation_cycle.t.cpp. t-cartesian passes; simulation_cycle.t.cpp builds.
 
-- [ ] **7.19** Migrate `src/mesh/mesh_view.t.cpp` (commented out test, optional):
-  - This test is currently **commented out** in `src/mesh/CMakeLists.txt` line 10.
-  - If re-enabling: replace `vs::zip(c, g)` (4 uses) with index-based comparison loops; replace `rs::to<vector<real3>>()` calls — but `location_view` already returns `std::vector<real3>` so the `| rs::to<>` is redundant; just use `auto r = location_view<2>(m);`.
-  - Remove `#include <range/v3/range/conversion.hpp>` and `#include <range/v3/view/zip.hpp>`.
-  - Uncomment CMake line 10 (adjust link targets since `cppcoro` and `range-v3::range-v3` are no longer needed):
-    ```cmake
-    add_unit_test(mesh_view "mesh" shoccs-mesh)
-    ```
-  - File: `src/mesh/mesh_view.t.cpp`, `src/mesh/CMakeLists.txt`.
-  - Test: `ctest --test-dir build -R t-mesh_view`
+- [x] **7.19** Migrate `src/mesh/mesh_view.t.cpp` (commented out test): **DONE** — removed range-v3 includes, replaced `vs::zip(c, g)` with index-based loops, removed redundant `| rs::to<>` calls, fixed constructor arg order (`n, min, max`), fixed `location_view<2>` namespace qualification. Uncommented and updated CMake line. Removed dead `mesh_view` library definition. t-mesh_view passes.
+  - Files: `src/mesh/mesh_view.t.cpp`, `src/mesh/CMakeLists.txt`.
 
 ### Final Cleanup
 

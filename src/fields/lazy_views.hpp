@@ -22,6 +22,7 @@
 // enables cartesian_product_view::iterator (and similar) to model standard
 // iterator concepts, so std::views::transform etc. can pipe through them.
 // ===========================================================================
+#if !defined(__cpp_lib_ranges_zip)
 namespace std
 {
 template <typename... Ts,
@@ -36,6 +37,7 @@ struct basic_common_reference<tuple<Ts...>, tuple<Us...>, TQual, UQual> {
     using type = tuple<common_reference_t<TQual<Ts>, UQual<Us>>...>;
 };
 } // namespace std
+#endif
 
 namespace ccs
 {
