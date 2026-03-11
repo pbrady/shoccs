@@ -7,8 +7,6 @@
 #include "temporal/step_controller.hpp"
 
 #include <fmt/core.h>
-#include <range/v3/range/conversion.hpp>
-#include <range/v3/view/transform.hpp>
 
 #include <sol/sol.hpp>
 
@@ -49,10 +47,10 @@ bool field_io::write(std::span<const std::string> names,
     int n = dump_interval.current_dump();
 
     // prepare data for xdmf writer
-    auto xmf_file_names = names | vs::transform([n, l = suffix_length](auto&& name) {
-                              return fmt::format("{}.{:0{}d}", name, n, l);
-                          }) |
-                          rs::to<std::vector<std::string>>();
+    std::vector<std::string> xmf_file_names;
+    xmf_file_names.reserve(names.size());
+    for (auto&& name : names)
+        xmf_file_names.push_back(fmt::format("{}.{:0{}d}", name, n, suffix_length));
 
     xdmf_w.write(n, step, names, xmf_file_names, r, logger);
 
@@ -61,9 +59,10 @@ bool field_io::write(std::span<const std::string> names,
         field_data_w.write_geom(file_names, r);
     }
 
-    auto data_file_names = xmf_file_names |
-                           vs::transform([io](auto&& name) { return io / name; }) |
-                           rs::to<std::vector<std::string>>();
+    std::vector<std::string> data_file_names;
+    data_file_names.reserve(xmf_file_names.size());
+    for (auto&& name : xmf_file_names)
+        data_file_names.push_back(io / name);
 
     field_data_w.write(f, data_file_names);
 

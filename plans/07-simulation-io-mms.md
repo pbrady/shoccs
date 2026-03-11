@@ -35,12 +35,10 @@ ctest --test-dir build
 
 ## Items
 
-**Build-breakage status (updated after 7.H1–7.H6):** heat.cpp now compiles. Remaining files that fail to compile:
-- `field_data.cpp` (`vs::zip` lost transitively) → fix: **7.9**
-- `xdmf.cpp` (`vs::repeat_n` lost transitively) → fix: **7.10**
+**Build-breakage status (updated after 7.8–7.10):** I/O library (shoccs-io) now compiles. Remaining files that fail to compile:
 - `scalar_wave.cpp` (own range-v3 `#include` + `vs::transform` usage) → fix: **7.12**
 
-This blocks test targets: `t-mesh` (also needs **7.14**), `t-field_io`, `t-xdmf`, `t-simulation_cycle`, `t-heat`, `t-hyperbolic_eigenvalues`. Tests that still work: `t-cartesian`, `t-object_geometry`, `t-shapes`, `t-mms`, `t-selections`. To restore the full build, prioritize **7.8**/**7.9**/**7.10** (I/O), **7.12** (scalar_wave), and **7.14** (mesh.t.cpp). Individual test targets can be built with `cmake --build build --target <target>` to bypass unrelated library failures.
+This blocks test targets: `t-mesh` (needs **7.14**), `t-field_io` (needs **7.16**), `t-xdmf` (needs **7.17**), `t-simulation_cycle` (needs **7.12**), `t-heat` (needs **7.12**), `t-hyperbolic_eigenvalues` (needs **7.12**). Tests that still work: `t-cartesian`, `t-object_geometry`, `t-shapes`, `t-mms`, `t-selections`. Individual test targets can be built with `cmake --build build --target <target>` to bypass unrelated library failures.
 
 ### Mesh (High Complexity)
 
@@ -208,65 +206,17 @@ Note: `shoccs-mesh` does not link `range-v3::range-v3` in `src/mesh/CMakeLists.t
 
 Note: `shoccs-io` does not link `range-v3::range-v3` in `src/io/CMakeLists.txt`, so no CMake changes are needed for items 7.8–7.10.
 
-- [ ] **7.8** Migrate `field_io.cpp` (lines 10–11, 52–55, 64–66):
-  - Remove `#include <range/v3/range/conversion.hpp>` and `#include <range/v3/view/transform.hpp>`.
-  - Lines 52–55: Replace `names | vs::transform(…) | rs::to<vector<string>>()` with an explicit loop:
-    ```cpp
-    std::vector<std::string> xmf_file_names;
-    xmf_file_names.reserve(names.size());
-    for (auto&& name : names)
-        xmf_file_names.push_back(fmt::format("{}.{:0{}d}", name, n, suffix_length));
-    ```
-  - Lines 64–66: Replace `xmf_file_names | vs::transform(…) | rs::to<vector<string>>()` with same pattern:
-    ```cpp
-    std::vector<std::string> data_file_names;
-    data_file_names.reserve(xmf_file_names.size());
-    for (auto&& name : xmf_file_names)
-        data_file_names.push_back(io / name);
-    ```
+- [x] **7.8** Migrate `field_io.cpp` (lines 10–11, 52–55, 64–66): **DONE** — removed both range-v3 includes, replaced two `| vs::transform(...) | rs::to<vector<string>>()` pipelines with explicit loops using `reserve`/`push_back`. Compiles (shoccs-io links).
   - File: `src/io/field_io.cpp`.
-  - Test: `ctest --test-dir build -R t-field_io`
+  - Test: `ctest --test-dir build -R t-field_io` (blocked on 7.16 test migration)
 
-- [ ] **7.9** Migrate `field_data.cpp` (lines 4–6, 19–31, 43, 50–52):
-  - Remove all three `#include <range/v3/…>` headers (lines 4–6: `for_each`, `reverse_copy` (stale/unused), `transform`).
-  - **`write_geom` method** (lines 16–37):
-    - Lines 19–31: Replace `rs::for_each(rng | vs::transform(&mesh_object_info::position), lambda)` with a range-for loop:
-      ```cpp
-      for (auto&& info : rng) {
-          auto&& pos = info.position;
-          // ... same body as the lambda
-      }
-      ```
-    - Lines 25, 29: Replace `rs::size(tmp)` and `rs::size(pos)` with `tmp.size()` and `pos.size()` (both are `real3` = `std::array<real,3>`, which has `.size()`).
-  - **`write` method** (lines 39–59):
-    - Line 43: Replace `vs::zip(filenames, f.scalars())` with an index-based loop (`f.scalars()` returns `std::vector<scalar_view>&`, which supports `operator[]`):
-      ```cpp
-      auto& scalars = f.scalars();
-      for (size_t idx = 0; idx < filenames.size(); ++idx) {
-          auto& fname = filenames[idx];
-          auto& sc = scalars[idx];
-          // ... rest of body
-      }
-      ```
-    - Lines 50, 52: Replace `rs::size(rng)` with `rng.size()` or `std::ranges::size(rng)`.
+- [x] **7.9** Migrate `field_data.cpp` (lines 4–6, 19–31, 43, 50–52): **DONE** — removed all 3 range-v3 includes. Replaced `rs::for_each(rng | vs::transform(...), lambda)` with range-for loop accessing `info.position` directly. Replaced `rs::size(...)` with `.size()`. Replaced `vs::zip(filenames, f.scalars())` with index-based loop. Compiles (shoccs-io links).
   - File: `src/io/field_data.cpp`.
-  - Test: `ctest --test-dir build -R t-field_io`
+  - Test: `ctest --test-dir build -R t-field_io` (blocked on 7.16 test migration)
 
-- [ ] **7.10** Migrate `xdmf.cpp` (lines 12, 51, 69, 84, 86–88, 128–130):
-  - Remove `#include <range/v3/view/zip.hpp>`, add `#include "fields/lazy_views.hpp"`.
-  - Line 51 (`rs::size(rng)`): Replace with `std::ranges::size(rng)`.
-  - Line 69 (`vs::zip(var_names, file_names)`): Replace with an index-based loop:
-    ```cpp
-    for (size_t i = 0; i < var_names.size(); ++i) {
-        auto& v = var_names[i];
-        auto& f = file_names[i];
-        // ... rest of body
-    }
-    ```
-  - Line 84 (`vs::repeat_n(0, f_sz)`): Replace with `ccs::repeat_n(0, f_sz)` (from `lazy_views.hpp`).
-  - Lines 86–88, 128–130 (`rs::size(x)`, `rs::size(get<0>(t))`, etc.): Replace with `std::ranges::size(…)` or `.size()` on spans.
+- [x] **7.10** Migrate `xdmf.cpp` (lines 12, 51, 69, 84, 86–88, 128–130): **DONE** — replaced `#include <range/v3/view/zip.hpp>` with `#include "fields/lazy_views.hpp"`. Replaced `rs::size(...)` with `std::ranges::size(...)` or `.size()` (6 occurrences). Replaced `vs::zip(var_names, file_names)` with index-based loop. Replaced `vs::repeat_n(0, f_sz)` with `ccs::repeat_n(0, f_sz)`. Compiles (shoccs-io links).
   - File: `src/io/xdmf.cpp`.
-  - Test: `ctest --test-dir build -R t-xdmf`
+  - Test: `ctest --test-dir build -R t-xdmf` (blocked on 7.17 test migration)
 
 ### Simulation (Low Complexity)
 
