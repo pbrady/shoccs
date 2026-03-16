@@ -1,23 +1,42 @@
 # SHOCCS Kokkos Migration — Meta Plan
 
-**Purpose:** Cross-cutting decisions and phase ordering for the range-v3 to Kokkos migration.
+**Purpose:** Cross-cutting decisions and phase ordering for the range-v3 → Kokkos migration and DSL restructuring.
 
 ---
 
 ## Phase Ordering
 
-Plans must be executed in this order due to dependency chains:
+### Completed: range-v3 Removal (Phases 0–7)
 
-| Phase | Plan File | Depends On |
-|-------|-----------|------------|
-| 0 | `00-foundation.md` | Nothing |
-| 1 | `01-fields.md` | Phase 0 |
-| 2 | `02-matrices.md` | Phases 0, 1 |
-| 3 | `03-stencils.md` | Phase 0 |
-| 4 | `04-operators.md` | Phases 0–3 |
-| 5 | `05-systems.md` | Phases 0–4 |
-| 6 | `06-temporal.md` | Phases 0, 1 |
-| 7 | `07-simulation-io-mms.md` | Phases 0–6 |
+| Phase | Plan File | Status |
+|-------|-----------|--------|
+| 0 | `00-foundation.md` | DONE |
+| 1 | `01-fields.md` | DONE |
+| 2 | `02-matrices.md` | DONE |
+| 3 | `03-stencils.md` | DONE |
+| 4 | `04-operators.md` | DONE |
+| 5 | `05-systems.md` | DONE |
+| 6 | `06-temporal.md` | DONE |
+| 7 | `07-simulation-io-mms.md` | DONE |
+
+### Active: DSL Restructuring and Kokkos Execution (Phases 8–14)
+
+| Phase | Plan File | Depends On | Goal |
+|-------|-----------|------------|------|
+| 8 | `08-registry-and-handles.md` | Phases 0–7 | Field registry + handle types + span bridge |
+| 9 | `09-field-lifecycle.md` | Phase 8 | Migrate system/integrator/sim_cycle to registry + field_ref |
+| 10 | `10-expression-templates.md` | Phases 8, 9 | Expression templates + Kokkos parallel_for dispatch |
+| 11 | `11-selector-migration.md` | Phases 8, 9 | Selection descriptors replace iterator-based views |
+| 12 | `12-legacy-removal.md` | Phases 8–11 | Delete old tuple infrastructure, rewrite tests |
+| 13 | `13-kokkos-parallel.md` | Phases 8, 10 | Parallelize matrix-vector products (block, circulant) |
+| 14 | `14-kokkos-gpu.md` | Phases 8–13 | GPU execution: device memory, host mirrors, KOKKOS_LAMBDA |
+
+### Design Documents
+
+| Document | Purpose |
+|----------|---------|
+| `kokkos-view-migration-impact.md` | Impact analysis of Kokkos::View on current storage/DSL |
+| `dsl-restructuring-proposal.md` | Full design proposal with review findings |
 
 ---
 
@@ -176,6 +195,42 @@ ctest --test-dir build -L simulation
 # Run a specific test
 ctest --test-dir build -R t-dense
 ```
+
+---
+
+## DSL Restructuring Decisions (Phases 8–14)
+
+### D-R1: Centralized Registry — Storage Never Moves
+**Decision:** All field buffer storage lives in a `field_registry` singleton (or simulation-scoped local). The registry is never copied, moved, or passed by value. Only `field_ref` handles (trivially-copyable integer structs) flow through the system.
+**Why:** Eliminates the `container_tuple`/`view_tuple` re-anchoring machinery (~310 lines), prevents the 3× heap allocation in `system::rhs`, and makes `swap(u0, u1)` a 2-integer swap.
+
+### D-R2: Max Capacity at Compile Time, Runtime Allocation
+**Decision:** `field_registry<MaxSlots, MaxScalars, MaxVectors>` uses `std::array<Kokkos::View<real*>, N>` with compile-time max capacity. Runtime `n_scalars`/`n_vectors` tracks active slots. Unused slots are default-constructed Views (24 bytes, no allocation).
+**Why:** Preserves a single non-templated `field_ref` type for the system/integrator interface (no variant dispatch, no template cascading). All current systems use `(ns,nv) ≤ (1,0)`.
+
+### D-R3: field_ref Replaces field_span and field_view
+**Decision:** `field_ref { int slot; int n_scalars; int n_vectors; }` (12 bytes, trivially copyable) replaces `field_span` and `field_view` as the type passed through the system/integrator chain. Const-correctness moves to the function signature (`const field_registry&` vs `field_registry&`).
+**Why:** Eliminates heap allocation on every by-value pass of `field_span`/`field_view`.
+
+### D-R4: Expression Nodes Carry Raw Pointers, Not Registry References
+**Decision:** `handle_expr { real* ptr; }` pre-extracts pointers from the registry on the host before `KOKKOS_LAMBDA` capture. The registry reference never enters a kernel.
+**Why:** `field_registry` contains `std::vector`/`std::array` (not trivially copyable). `KOKKOS_LAMBDA` requires trivially copyable captures for GPU compatibility.
+
+### D-R5: Handles Store Only Buffer Index, Not Length
+**Decision:** `buf_handle { int id; }` stores only the buffer index. Lengths are queried from the registry at kernel-launch time (`registry.size(handle)`).
+**Why:** Cached lengths become stale if Views are resized. A single query at launch time is negligible cost.
+
+### D-R6: Coexistence — New System Introduced Alongside Old
+**Decision:** Phases 8–11 introduce the registry/handle/expression/selector system as new code alongside the existing tuple infrastructure. Phase 12 deletes the old code. No existing tests break until Phase 12 rewrites them.
+**Why:** Allows incremental validation. Each phase can be tested independently.
+
+### D-R7: Selection Descriptors Replace Iterator-Based Views
+**Decision:** Pre-computed `contiguous_selection`, `strided_selection`, and `gather_selection` descriptors replace `plane_view<0/1/2>`, `multi_slice_view`, and `predicate_view`. Index arrays for gather selections are built once at mesh construction time and cached.
+**Why:** Iterator-based views hold host pointers and `std::optional` state — incompatible with `KOKKOS_LAMBDA`. Descriptors are trivially copyable.
+
+### D-R8: Aliasing Detection in Expression Assignment
+**Decision:** `assign()` checks at runtime (pointer comparison) that the destination buffer does not appear in the source expression. If aliased, evaluation stages through a temporary buffer. Mutating operators (`+=`, `-=`) are always safe (element-wise, no neighbor dependencies).
+**Why:** `Kokkos::parallel_for` has no ordering guarantees between iterations.
 
 ---
 
