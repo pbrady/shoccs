@@ -20,10 +20,6 @@ class scalar_wave
 
     gradient grad;
 
-    // required data
-    // std::vector<double> grad_c;
-    // std::vector<double> grad_u;
-
     real3 center; // center of the circular wave
     real radius;
 

@@ -5,6 +5,7 @@
 #include "shoccs_config.hpp"
 
 #include <array>
+#include <cassert>
 #include <functional>
 #include <limits>
 #include <type_traits>
@@ -85,6 +86,11 @@ inline bool contains_ptr(const unary_expr<Op, Arg>& e, const real* target)
 // assign: evaluate expression into destination buffer via parallel_for.
 // If the destination pointer appears in the expression tree (aliasing),
 // stage through a temporary Kokkos::View to avoid data races (D-ET3).
+//
+// IMPORTANT: Requires synchronous execution_space (DefaultHostExecutionSpace).
+// Expr captures raw real* pointers whose lifetime is only guaranteed for the
+// duration of this call. For async/device execution spaces, Expr must capture
+// Kokkos::View instead of raw pointers.
 // ---------------------------------------------------------------------------
 
 template <typename Expr>
@@ -144,6 +150,7 @@ auto operator+(scalar_expr<E1> a, scalar_expr<E2> b)
 {
     scalar_expr<binary_expr<std::plus<>, E1, E2>> result{};
     for (int i = 0; i < 4; ++i) {
+        assert(a.sizes[i] == b.sizes[i]);
         result.exprs[i] = {std::plus<>{}, a.exprs[i], b.exprs[i]};
         result.sizes[i] = a.sizes[i];
     }
@@ -156,6 +163,7 @@ auto operator-(scalar_expr<E1> a, scalar_expr<E2> b)
 {
     scalar_expr<binary_expr<std::minus<>, E1, E2>> result{};
     for (int i = 0; i < 4; ++i) {
+        assert(a.sizes[i] == b.sizes[i]);
         result.exprs[i] = {std::minus<>{}, a.exprs[i], b.exprs[i]};
         result.sizes[i] = a.sizes[i];
     }
@@ -168,6 +176,7 @@ auto operator*(scalar_expr<E1> a, scalar_expr<E2> b)
 {
     scalar_expr<binary_expr<std::multiplies<>, E1, E2>> result{};
     for (int i = 0; i < 4; ++i) {
+        assert(a.sizes[i] == b.sizes[i]);
         result.exprs[i] = {std::multiplies<>{}, a.exprs[i], b.exprs[i]};
         result.sizes[i] = a.sizes[i];
     }
@@ -180,6 +189,7 @@ auto operator/(scalar_expr<E1> a, scalar_expr<E2> b)
 {
     scalar_expr<binary_expr<std::divides<>, E1, E2>> result{};
     for (int i = 0; i < 4; ++i) {
+        assert(a.sizes[i] == b.sizes[i]);
         result.exprs[i] = {std::divides<>{}, a.exprs[i], b.exprs[i]};
         result.sizes[i] = a.sizes[i];
     }
@@ -365,6 +375,9 @@ void assign_scalar(field_registry<MS, MaxS, MaxV>& reg,
 // Mutating operators (+=, -=, *=, /=): no aliasing check needed (D-ET3).
 // Element-wise compound-assign is always safe since each thread accesses
 // only dst[i].
+//
+// Same synchronous execution_space requirement as assign() — Expr captures
+// raw real* pointers valid only for the duration of the call.
 // ---------------------------------------------------------------------------
 
 template <typename Expr>

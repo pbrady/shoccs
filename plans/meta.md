@@ -288,6 +288,13 @@ Tests that don't allocate Views (e.g., handle arithmetic tests) continue using `
 **Decision:** Replace the tuple-based `scalar_span = scalar<std::span<real>>` and `scalar_view = scalar<std::span<const real>>` with simple structs holding 4 named span members (`D`, `Rx`, `Ry`, `Rz`). The span bridge functions (`extract_scalar_span`/`extract_scalar_view` in `field_registry.hpp`) are updated to construct these structs directly.
 **Why:** The span bridge is used by `heat.cpp`, `scalar_wave.cpp`, and test files. The types must persist for Phase 12 coexistence, but can be trivially decoupled from the tuple hierarchy. Named members (`s.D`) are clearer than tuple-indexed access (`get<0>(get<0>(s))`).
 
+### D15-1: Block Disjointness Assertion Placement
+**Decision:** **(b) Assert in `block::builder::to_block()` at construction time, not in `operator()` per call.**
+**Why:** Construction-time checking is cheaper (runs once per block), catches bugs earlier (at setup rather than first matvec), and avoids debug-mode overhead on the hot path. Inner blocks are immutable after construction, so the invariant can't be violated after the check.
+**Options:**
+- (a) Per-call check in `block::operator()` before `parallel_for`
+- **(b) Construction-time check in `builder::to_block()`** ← CHOSEN
+
 ---
 
 ## Files Excluded from Migration Scope

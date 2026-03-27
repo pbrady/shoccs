@@ -47,6 +47,11 @@ class manufactured_solution
         virtual ~any_sol() = default;
 
         virtual any_sol* clone() const = 0;
+
+        // Returns true if operator() and other evaluation methods are safe
+        // to call concurrently from multiple threads (e.g. pure-math Gauss MMS).
+        // Returns false for Lua-backed MMS which uses a non-thread-safe Lua state.
+        virtual bool is_thread_safe() const { return true; }
     };
 
     template <ManufacturedSolution M>
@@ -59,6 +64,14 @@ class manufactured_solution
         any_sol_impl(M&& m) : m{std::move(m)} {}
 
         any_sol_impl* clone() const override { return new any_sol_impl(m); }
+
+        bool is_thread_safe() const override
+        {
+            if constexpr (requires { { M::thread_safe } -> std::convertible_to<bool>; })
+                return M::thread_safe;
+            else
+                return true;
+        }
 
         real operator()(real time, const real3& loc) const override
         {
@@ -129,6 +142,8 @@ public:
         }
 
         explicit operator bool() const { return s != nullptr; }
+
+        bool is_thread_safe() const { return s && s->is_thread_safe(); }
 
         static std::optional<manufactured_solution>
         from_lua(const sol::table&, int dims = 3, const logs& = {});

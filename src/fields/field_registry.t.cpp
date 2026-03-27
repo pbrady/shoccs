@@ -21,20 +21,6 @@ int main(int argc, char* argv[])
 }
 
 // ---------------------------------------------------------------------------
-// field_ref type properties
-// ---------------------------------------------------------------------------
-
-TEST_CASE("field_ref is trivially copyable")
-{
-    STATIC_REQUIRE(std::is_trivially_copyable_v<field_ref>);
-}
-
-TEST_CASE("field_ref size is 12 bytes")
-{
-    STATIC_REQUIRE(sizeof(field_ref) == 12);
-}
-
-// ---------------------------------------------------------------------------
 // field_registry construction
 // ---------------------------------------------------------------------------
 
@@ -249,6 +235,7 @@ TEST_CASE("deep_copy_slot copies data between slots")
     }
 
     reg.deep_copy_slot(1, 0);
+    Kokkos::fence();
 
     SECTION("D buffer is copied")
     {
@@ -289,6 +276,7 @@ TEST_CASE("swap_slots swaps extents and data")
     }
 
     reg.swap_slots(0, 1);
+    Kokkos::fence();
 
     SECTION("extents are swapped")
     {

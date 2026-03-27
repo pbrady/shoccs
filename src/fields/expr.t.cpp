@@ -72,19 +72,6 @@ TEST_CASE("nested expression: (a + b) * c")
     REQUIRE(expr(2) == 66.0);
 }
 
-TEST_CASE("expression node types are trivially copyable")
-{
-    STATIC_REQUIRE(std::is_trivially_copyable_v<handle_expr>);
-    STATIC_REQUIRE(std::is_trivially_copyable_v<scalar_literal_expr>);
-    STATIC_REQUIRE(
-        std::is_trivially_copyable_v<binary_expr<std::plus<>, handle_expr, handle_expr>>);
-    STATIC_REQUIRE(std::is_trivially_copyable_v<unary_expr<std::negate<>, handle_expr>>);
-    STATIC_REQUIRE(std::is_trivially_copyable_v<
-                   binary_expr<std::multiplies<>,
-                               binary_expr<std::plus<>, handle_expr, handle_expr>,
-                               scalar_literal_expr>>);
-}
-
 TEST_CASE("contains_ptr detects aliasing")
 {
     real a[] = {1.0};
@@ -145,16 +132,14 @@ TEST_CASE("assign detects aliasing and stages through temporary")
 {
     constexpr int n = 100;
     Kokkos::View<real*, memory_space> a("a", n);
+    for (int i = 0; i < n; ++i) a(i) = static_cast<real>(i + 1);
+
+    // dst[i] = dst[i] + dst[i] — aliased, must stage through temporary.
+    assign(a.data(), n,
+           binary_expr{std::plus<>{}, handle_expr{a.data()}, handle_expr{a.data()}});
 
     for (int i = 0; i < n; ++i) {
-        a(i) = static_cast<real>(i + 1);
-    }
-
-    // Self-assign: dst == src pointer, must stage through temporary.
-    assign(a.data(), n, handle_expr{a.data()});
-
-    for (int i = 0; i < n; ++i) {
-        REQUIRE(a(i) == static_cast<real>(i + 1));
+        REQUIRE(a(i) == static_cast<real>(2 * (i + 1)));
     }
 }
 

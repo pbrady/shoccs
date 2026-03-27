@@ -1,5 +1,7 @@
 #include "circulant.hpp"
 
+#include "kokkos_types.hpp"
+
 #include <cassert>
 #include <numeric>
 
@@ -32,17 +34,51 @@ void circulant::operator()(std::span<const real> x, std::span<real> b, Op op) co
     x = x.subspan(row_offset() - st * (size() / 2));
     b = b.subspan(row_offset());
 
+    const auto nr = rows();
+    const auto* vp = v.data();
+    const auto vs = static_cast<integer>(v.size());
+    const auto* xp = x.data();
+    auto* bp = b.data();
+
+    // Kokkos forbids nested parallel_for. When circulant is called from within
+    // block::operator()'s parallel_for, fall back to serial loops. The outer
+    // block-level parallelism still provides the main performance benefit.
+    // Standalone calls (not nested) use parallel_for over rows.
+    const bool nested = execution_space::in_parallel();
+
     if (st == 1) {
-        for (integer i = 0; i < rows(); i++) {
-            auto dot = std::inner_product(v.begin(), v.end(), x.data() + i, 0.0);
-            op(b[i], dot);
+        if (nested) {
+            for (integer i = 0; i < nr; i++) {
+                auto dot = std::inner_product(vp, vp + vs, xp + i, 0.0);
+                op(bp[i], dot);
+            }
+        } else {
+            Kokkos::parallel_for(
+                Kokkos::RangePolicy<execution_space>(0, nr),
+                [=](int i) {
+                    auto dot = std::inner_product(vp, vp + vs, xp + i, 0.0);
+                    op(bp[i], dot);
+                });
+            Kokkos::fence();
         }
     } else {
-        for (integer i = 0; i < rows(); i++) {
-            real dot = 0.0;
-            for (integer j = 0; j < size(); j++)
-                dot += v[j] * x[(i + j) * st];
-            op(b[i * st], dot);
+        if (nested) {
+            for (integer i = 0; i < nr; i++) {
+                real dot = 0.0;
+                for (integer j = 0; j < vs; j++)
+                    dot += vp[j] * xp[(i + j) * st];
+                op(bp[i * st], dot);
+            }
+        } else {
+            Kokkos::parallel_for(
+                Kokkos::RangePolicy<execution_space>(0, nr),
+                [=](int i) {
+                    real dot = 0.0;
+                    for (integer j = 0; j < vs; j++)
+                        dot += vp[j] * xp[(i + j) * st];
+                    op(bp[i * st], dot);
+                });
+            Kokkos::fence();
         }
     }
 }

@@ -270,20 +270,3 @@ TEST_CASE("paired handle_for_each on vector handles")
     }
 }
 
-// ---------------------------------------------------------------------------
-// Trivial copyability (documentation / replication of handle.hpp asserts)
-// ---------------------------------------------------------------------------
-
-TEST_CASE("handle types are trivially copyable")
-{
-    STATIC_REQUIRE(std::is_trivially_copyable_v<buf_handle>);
-    STATIC_REQUIRE(std::is_trivially_copyable_v<scalar_handle>);
-    STATIC_REQUIRE(std::is_trivially_copyable_v<vector_handle>);
-}
-
-TEST_CASE("handle types are aggregates (structural types)")
-{
-    STATIC_REQUIRE(std::is_aggregate_v<buf_handle>);
-    STATIC_REQUIRE(std::is_aggregate_v<scalar_handle>);
-    STATIC_REQUIRE(std::is_aggregate_v<vector_handle>);
-}

@@ -2,6 +2,7 @@
 #include "derivative.hpp"
 
 #include <catch2/catch_approx.hpp>
+#include <catch2/catch_session.hpp>
 #include <catch2/catch_test_macros.hpp>
 #include <catch2/matchers/catch_matchers_vector.hpp>
 
@@ -10,6 +11,15 @@
 
 #include <algorithm>
 #include <sol/sol.hpp>
+
+#include <Kokkos_Core.hpp>
+
+// Custom main: Kokkos must be initialized before parallel_for calls.
+int main(int argc, char* argv[])
+{
+    Kokkos::ScopeGuard kokkos(argc, argv);
+    return Catch::Session().run(argc, argv);
+}
 
 using namespace ccs;
 using Catch::Matchers::Approx;

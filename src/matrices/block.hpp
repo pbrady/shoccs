@@ -2,6 +2,9 @@
 
 #include "inner_block.hpp"
 
+#include "kokkos_types.hpp"
+
+#include <cassert>
 #include <concepts>
 
 namespace ccs::matrix
@@ -30,7 +33,12 @@ public:
     template <typename Op = eq_t>
     void operator()(std::span<const real> x, std::span<real> b, Op op = {}) const
     {
-        for (auto&& block : blocks) { block(x, b, op); }
+        const auto n = static_cast<int>(blocks.size());
+        const auto* bp = blocks.data();
+        Kokkos::parallel_for(
+            Kokkos::RangePolicy<execution_space>(0, n),
+            [=](int i) { bp[i](x, b, op); });
+        Kokkos::fence();
     }
 
     void visit(visitor& v) const
@@ -52,6 +60,22 @@ struct block::builder {
         requires std::constructible_from<inner_block, Args...>
     void add_inner_block(Args&&... args) { b.emplace_back(std::forward<Args>(args)...); }
 
-    block to_block() && { return block{MOVE(b)}; }
+    block to_block() &&
+    {
+#ifndef NDEBUG
+        // Verify output row ranges are disjoint.
+        for (std::size_t i = 0; i < b.size(); ++i) {
+            auto lo_i = b[i].row_offset();
+            auto hi_i = lo_i + b[i].rows() * b[i].stride();
+            for (std::size_t j = i + 1; j < b.size(); ++j) {
+                auto lo_j = b[j].row_offset();
+                auto hi_j = lo_j + b[j].rows() * b[j].stride();
+                assert((hi_i <= lo_j || hi_j <= lo_i) &&
+                       "block inner_blocks have overlapping output row ranges");
+            }
+        }
+#endif
+        return block{MOVE(b)};
+    }
 };
 } // namespace ccs::matrix

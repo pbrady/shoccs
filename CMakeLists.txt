@@ -77,6 +77,7 @@ install(
       shoccs-integrate
       shoccs-stencils
       shoccs-utils
+      shoccs-random
     EXPORT shoccs
 )
 install(EXPORT shoccs

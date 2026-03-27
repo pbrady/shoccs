@@ -1,8 +1,7 @@
 #pragma once
 
+#include "kokkos_types.hpp"
 #include "types.hpp"
-
-#include <algorithm>
 
 namespace ccs
 {
@@ -35,10 +34,24 @@ struct scalar_span {
         requires std::is_arithmetic_v<T>
     scalar_span& operator=(T val)
     {
-        std::ranges::fill(D, static_cast<real>(val));
-        std::ranges::fill(Rx, static_cast<real>(val));
-        std::ranges::fill(Ry, static_cast<real>(val));
-        std::ranges::fill(Rz, static_cast<real>(val));
+        const real v = static_cast<real>(val);
+        real* d_ptr = D.data();
+        real* rx_ptr = Rx.data();
+        real* ry_ptr = Ry.data();
+        real* rz_ptr = Rz.data();
+        Kokkos::parallel_for(
+            Kokkos::RangePolicy<execution_space>(0, static_cast<int>(D.size())),
+            KOKKOS_LAMBDA(int i) { d_ptr[i] = v; });
+        Kokkos::parallel_for(
+            Kokkos::RangePolicy<execution_space>(0, static_cast<int>(Rx.size())),
+            KOKKOS_LAMBDA(int i) { rx_ptr[i] = v; });
+        Kokkos::parallel_for(
+            Kokkos::RangePolicy<execution_space>(0, static_cast<int>(Ry.size())),
+            KOKKOS_LAMBDA(int i) { ry_ptr[i] = v; });
+        Kokkos::parallel_for(
+            Kokkos::RangePolicy<execution_space>(0, static_cast<int>(Rz.size())),
+            KOKKOS_LAMBDA(int i) { rz_ptr[i] = v; });
+        Kokkos::fence();
         return *this;
     }
 

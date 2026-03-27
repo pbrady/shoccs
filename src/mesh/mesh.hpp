@@ -95,6 +95,7 @@ public:
 
     const gather_selection& fluid_desc() const { return fluid_desc_; }
 
+    // Indices into R(dir); R(dir) buffer layout matches the data buffer by construction.
     gather_selection dirichlet_object_desc(int dir, const bcs::Object& o) const
     {
         return make_gather_from_predicate(
@@ -104,6 +105,7 @@ public:
             });
     }
 
+    // Indices into R(dir); R(dir) buffer layout matches the data buffer by construction.
     gather_selection non_dirichlet_object_desc(int dir, const bcs::Object& o) const
     {
         return make_gather_from_predicate(

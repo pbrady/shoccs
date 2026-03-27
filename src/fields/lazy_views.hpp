@@ -53,22 +53,21 @@ class repeat_n_view : public std::ranges::view_interface<repeat_n_view<T>>
 public:
     class iterator
     {
-        const T* value_;
+        T value_;
         std::ptrdiff_t pos_;
 
     public:
         using difference_type = std::ptrdiff_t;
         using value_type = T;
         using reference = const T&;
-        using pointer = const T*;
         using iterator_concept = std::random_access_iterator_tag;
         using iterator_category = std::random_access_iterator_tag;
 
         iterator() = default;
-        constexpr iterator(const T* v, std::ptrdiff_t p) : value_{v}, pos_{p} {}
+        constexpr iterator(T v, std::ptrdiff_t p) : value_{std::move(v)}, pos_{p} {}
 
-        constexpr reference operator*() const { return *value_; }
-        constexpr reference operator[](difference_type) const { return *value_; }
+        constexpr reference operator*() const { return value_; }
+        constexpr reference operator[](difference_type) const { return value_; }
 
         constexpr iterator& operator++()
         {
@@ -136,8 +135,8 @@ public:
     {
     }
 
-    constexpr iterator begin() const { return {&value_, 0}; }
-    constexpr iterator end() const { return {&value_, count_}; }
+    constexpr iterator begin() const { return {value_, 0}; }
+    constexpr iterator end() const { return {value_, count_}; }
     constexpr std::ptrdiff_t size() const { return count_; }
 };
 

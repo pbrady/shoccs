@@ -16,6 +16,7 @@ inline void slot_zero(sim_registry& reg, field_ref ref)
         for (auto bh : sh.all())
             Kokkos::deep_copy(reg.view(ref, bh), 0.0);
     }
+    Kokkos::fence();
 }
 
 // dst[i] = src[i] + coeff * rhs[i]  for all allocated buffers.
@@ -35,6 +36,7 @@ inline void slot_assign_lc(sim_registry& reg, field_ref dst,
                 KOKKOS_LAMBDA(int i) { d[i] = s0[i] + coeff * r[i]; });
         }
     }
+    Kokkos::fence();
 }
 
 // dst[i] += coeff * src[i]  for all allocated buffers.
@@ -53,6 +55,7 @@ inline void slot_accumulate(sim_registry& reg, field_ref dst,
                 KOKKOS_LAMBDA(int i) { d[i] += coeff * r[i]; });
         }
     }
+    Kokkos::fence();
 }
 
 } // namespace ccs

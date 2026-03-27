@@ -7,6 +7,7 @@
 #include <catch2/catch_approx.hpp>
 #include <catch2/catch_session.hpp>
 #include <catch2/catch_test_macros.hpp>
+#include <catch2/matchers/catch_matchers_floating_point.hpp>
 #include <sol/sol.hpp>
 
 #include <algorithm>
@@ -88,7 +89,7 @@ TEST_CASE("scalar_wave - update_boundary")
 
     // After initialize at t=0, maximum error should be zero
     auto st = sys.stats(reg, u0_ref, u0_ref, step);
-    REQUIRE(st.stats[0] == 0);
+    REQUIRE_THAT(st.stats[0], Catch::Matchers::WithinAbs(0.0, 1e-13));
 
     // Call update_boundary at t=0.25 — boundary values should change from
     // the t=0 values written by initialize.  Directly verify that D-buffer

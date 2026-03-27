@@ -110,46 +110,6 @@ TEST_CASE("gather_selection element and count")
 }
 
 // ---------------------------------------------------------------------------
-// 11.1a — Plane factory functions
-// ---------------------------------------------------------------------------
-
-TEST_CASE("make_x_plane_desc")
-{
-    // 8x6x4 mesh
-    index_extents ext{{8, 6, 4}};
-
-    auto desc = make_x_plane_desc(ext, 2);
-    REQUIRE(desc.count() == 24); // ny * nz = 6 * 4
-    REQUIRE(desc.offset_ == 48); // 2 * 24
-    REQUIRE(desc.element(0) == 48);
-    REQUIRE(desc.element(23) == 71);
-}
-
-TEST_CASE("make_y_plane_desc")
-{
-    index_extents ext{{8, 6, 4}};
-
-    auto desc = make_y_plane_desc(ext, 3);
-    REQUIRE(desc.count() == 32); // nz * nx = 4 * 8
-    REQUIRE(desc.offset_ == 12); // 3 * nz = 3 * 4
-    REQUIRE(desc.inner_count_ == 4);
-    REQUIRE(desc.outer_count_ == 8);
-    REQUIRE(desc.outer_stride_ == 24); // ny * nz = 6 * 4
-}
-
-TEST_CASE("make_z_plane_desc")
-{
-    index_extents ext{{8, 6, 4}};
-
-    auto desc = make_z_plane_desc(ext, 2);
-    REQUIRE(desc.count() == 48); // nx * ny = 8 * 6
-    REQUIRE(desc.offset_ == 2);
-    REQUIRE(desc.inner_count_ == 1);
-    REQUIRE(desc.outer_count_ == 48);
-    REQUIRE(desc.outer_stride_ == 4); // nz
-}
-
-// ---------------------------------------------------------------------------
 // 11.1a — Cross-check: plane descriptors match expected flat indices
 // ---------------------------------------------------------------------------
 

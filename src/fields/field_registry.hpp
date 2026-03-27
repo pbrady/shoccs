@@ -134,26 +134,36 @@ public:
 
     Kokkos::View<real*>& view(field_ref ref, buf_handle h)
     {
+        assert(ref.slot >= 0 && ref.slot < MaxSlots);
+        assert(h.id >= 0 && h.id < buffers_per_slot);
         return buffers_[ref.slot * buffers_per_slot + h.id];
     }
 
     const Kokkos::View<real*>& view(field_ref ref, buf_handle h) const
     {
+        assert(ref.slot >= 0 && ref.slot < MaxSlots);
+        assert(h.id >= 0 && h.id < buffers_per_slot);
         return buffers_[ref.slot * buffers_per_slot + h.id];
     }
 
     real* data(field_ref ref, buf_handle h)
     {
+        assert(ref.slot >= 0 && ref.slot < MaxSlots);
+        assert(h.id >= 0 && h.id < buffers_per_slot);
         return view(ref, h).data();
     }
 
     const real* data(field_ref ref, buf_handle h) const
     {
+        assert(ref.slot >= 0 && ref.slot < MaxSlots);
+        assert(h.id >= 0 && h.id < buffers_per_slot);
         return view(ref, h).data();
     }
 
     int size(field_ref ref, buf_handle h) const
     {
+        assert(ref.slot >= 0 && ref.slot < MaxSlots);
+        assert(h.id >= 0 && h.id < buffers_per_slot);
         return static_cast<int>(view(ref, h).extent(0));
     }
 
@@ -169,6 +179,7 @@ public:
 
         for (int i = 0; i < buffers_per_slot; ++i) {
             if (buffers_[src_base + i].extent(0) > 0) {
+                assert(buffers_[dst_base + i].extent(0) == buffers_[src_base + i].extent(0));
                 Kokkos::deep_copy(buffers_[dst_base + i],
                                   buffers_[src_base + i]);
             }

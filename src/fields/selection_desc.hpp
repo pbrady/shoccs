@@ -4,6 +4,8 @@
 #include "kokkos_types.hpp"
 #include "mesh/mesh_types.hpp"
 
+#include <cassert>
+#include <limits>
 #include <span>
 
 namespace ccs
@@ -28,6 +30,7 @@ struct contiguous_selection {
 // Strided pattern: outer_count blocks of inner_count contiguous elements,
 // separated by outer_stride.
 // Used for y-plane (inner_count = nz) and z-plane (inner_count = 1).
+// Invariant: inner_count_ must be > 0 (used as divisor in element()).
 struct strided_selection {
     int offset_;
     int inner_count_;
@@ -75,6 +78,7 @@ inline contiguous_selection make_x_plane_desc(index_extents ext, int i)
 {
     int ny = ext[1];
     int nz = ext[2];
+    assert(static_cast<long>(ny) * nz <= std::numeric_limits<int>::max());
     return {i * ny * nz, ny * nz};
 }
 
@@ -83,6 +87,8 @@ inline strided_selection make_y_plane_desc(index_extents ext, int j)
     int nx = ext[0];
     int ny = ext[1];
     int nz = ext[2];
+    assert(nz > 0);
+    assert(static_cast<long>(ny) * nz <= std::numeric_limits<int>::max());
     return {j * nz, nz, nx, ny * nz};
 }
 
@@ -91,6 +97,8 @@ inline strided_selection make_z_plane_desc(index_extents ext, int k)
     int nx = ext[0];
     int ny = ext[1];
     int nz = ext[2];
+    assert(static_cast<long>(nx) * ny > 0);
+    assert(static_cast<long>(nx) * ny <= std::numeric_limits<int>::max());
     return {k, 1, nx * ny, nz};
 }
 
@@ -111,8 +119,10 @@ inline gather_selection make_gather_from_slices(std::span<const index_slice> sli
 
     int pos = 0;
     for (auto& s : slices)
-        for (integer idx = s.first; idx < s.last; ++idx)
+        for (integer idx = s.first; idx < s.last; ++idx) {
+            assert(idx <= std::numeric_limits<int>::max());
             h(pos++) = static_cast<int>(idx);
+        }
 
     Kokkos::deep_copy(indices, h);
     return gather_selection{indices};
@@ -123,6 +133,9 @@ inline gather_selection make_gather_from_slices(std::span<const index_slice> sli
 // Collects indices i where pred(infos[i]) is true.
 // ---------------------------------------------------------------------------
 
+// The returned indices are positions within the `infos` span. Callers must
+// ensure the data buffer at the same position holds the value associated
+// with infos[i].
 template <typename Pred>
 gather_selection make_gather_from_predicate(std::span<const mesh_object_info> infos, Pred pred)
 {
@@ -148,6 +161,9 @@ gather_selection make_gather_from_predicate(std::span<const mesh_object_info> in
 // Selected operations: assign, fill, and plus-assign over descriptor-selected
 // elements. These dispatch via Kokkos::parallel_for and replace iterator-based
 // selector view operations on hot paths.
+//
+// Same synchronous execution_space requirement as assign() in expr.hpp —
+// dst and Expr capture raw real* pointers valid only for the call duration.
 // ---------------------------------------------------------------------------
 
 template <typename Desc, typename Expr>

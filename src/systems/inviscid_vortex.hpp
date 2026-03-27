@@ -14,33 +14,10 @@ class inviscid_vortex
 {
     // only require one operator
     divergence div;
-#if 0
-    // required data
-    std::vector<real_t> P;
-    std::vector<real_t> div_u;
-    std::vector<real_t> work;
-
-    std::array<real_t, 2> center; // initial center of the vortex
-    real_t eps;                   // vortex strength
-    real_t M0;                    // background Mach number
-
-    system_stats stats0;            // the stats associated with the previous timestep
-    real_t stats_begin_accumulate; // time when accumululated errors begin;
-#endif
 
 public:
     inviscid_vortex() = default;
 
-#if 0
-    euler_vortex(cart_mesh&& cart,
-                 mesh&& cut_mesh,
-                 discrete_operator&& grad,
-                 field_io& io,
-                 std::array<real_t, 2> center,
-                 real_t eps,
-                 real_t M0,
-                 real_t stats_begin_accumulate);
-#endif
     bool valid(const system_stats&) const;
 
     void log(const system_stats&, const step_controller&);

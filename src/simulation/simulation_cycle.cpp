@@ -4,6 +4,7 @@
 #include "io/logging.hpp"
 #include <sol/sol.hpp>
 
+#include <cassert>
 #include <iostream>
 #include <string>
 
@@ -50,6 +51,9 @@ real3 simulation_cycle::run()
         rk_ref   = reg.allocate_vector(2, v, d_sz, rx_sz, ry_sz, rz_sz);
         srhs_ref = reg.allocate_vector(3, v, d_sz, rx_sz, ry_sz, rz_sz);
     }
+    // For zero-field systems (nscalars==0, nvectors==0), refs retain their
+    // initial {slot, 0, 0} state — slot_ops correctly no-op.
+    assert(u0_ref.n_scalars == sz.nscalars && u0_ref.n_vectors == sz.nvectors);
     sys.initialize(reg, u0_ref, controller);
     reg.deep_copy_slot(u1_ref.slot, u0_ref.slot);
 

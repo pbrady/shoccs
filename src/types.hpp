@@ -67,7 +67,7 @@ enum class dim { X, Y, Z };
 // types for matrix/operator accumulation policy
 struct eq_t {
     template <typename X, typename Y>
-    constexpr void operator()(X& x, Y&& y)
+    constexpr void operator()(X& x, Y&& y) const
     {
         x = FWD(y);
     }
@@ -75,7 +75,7 @@ struct eq_t {
 
 struct plus_eq_t {
     template <typename X, typename Y>
-    constexpr void operator()(X& x, Y&& y)
+    constexpr void operator()(X& x, Y&& y) const
     {
         x += FWD(y);
     }
