@@ -216,72 +216,9 @@ euler_vortex::euler_vortex(cart_mesh&& cart_,
 }
 #endif
 
-void inviscid_vortex::operator()(field&, const step_controller&) {}
-
-system_stats
-inviscid_vortex::stats(const field&, const field&, const step_controller&) const
-{
-    return {};
-}
-
 bool inviscid_vortex::valid(const system_stats&) const { return false; }
 
-real inviscid_vortex::timestep_size(const field&, const step_controller&) const
-{
-
-    auto&& [rho, rhoU, rhoV, rhoE, P] =
-        U.scalars(vars::rho, vars::rhoU, vars::rhoV, vars::rhoE, vars::P);
-
-    const auto d =
-        std::ranges::max((max_abs(rhoU / rho, rhoV / rho) + sqrt(g * P / rho)) | sel::D);
-
-    // return cfl *
-    // std::min({cart.delta(0), cart.delta(1), cart.delta(2)}) / d;
-    return 1 / d;
-    //    return null_v<>;
-};
-
-void inviscid_vortex::rhs(field_view field, real, field_span field_rhs)
-{
-    auto&& [rho, rhoU, rhoV, rhoE, P] =
-        field.scalars(vars::rho, vars::rhoU, vars::rhoV, vars::rhoE, vars::P);
-
-    // rhs(rho) == - div(rho * vec(u))
-    {
-        auto&& rhs = field_rhs.scalars(vars::rho);
-        // rhs = divergence(field::Vector{rhoU, rhoV});
-    }
-
-    // rhs(rhoU) == - dp/dx - div(rhoU * vec(U))
-    {
-        auto&& rhs = field_rhs.scalars(vars::rhoU);
-        // rhs = divergence(field::Vector{P + rhoU * rhoU / rho, rhoU * rhoV / rho});
-    }
-
-    // rhs(rhoV) == -dp/dy - div(rhoV * vec(U))
-    {
-        auto&& rhs = field_rhs.scalars(vars::rhoU);
-        // rhs = divergence(field::Vector{rhoV * rhoU / rho, P + rhoV * rhoV / rho});
-    }
-
-    // rhs(rhoE) == - div(vec(u) (rhoE + P))
-    {
-        auto&& rhs = field_rhs.scalars(vars::rhoE);
-        // rhs = divergence(field::Vector{rhoU * (rhoE + P) / rho, rhoV * (rhoE + P) /
-        // rho});
-    }
-
-    // field_rhs *= -1;
-}
-
-void inviscid_vortex::update_boundary(field_span, real) {}
-
 real3 inviscid_vortex::summary(const system_stats&) const { return {}; }
-
-bool inviscid_vortex::write(field_io&, field_view, const step_controller&, real)
-{
-    return false;
-}
 
 void inviscid_vortex::log(const system_stats&, const step_controller&)
 {
@@ -289,6 +226,33 @@ void inviscid_vortex::log(const system_stats&, const step_controller&)
 }
 
 system_size inviscid_vortex::size() const { return {}; }
+
+void inviscid_vortex::rhs(const sim_registry&, field_ref,
+                           sim_registry&, field_ref, real)
+{
+}
+
+void inviscid_vortex::update_boundary(sim_registry&, field_ref, real) {}
+
+real inviscid_vortex::timestep_size(const sim_registry&, field_ref,
+                                     const step_controller&) const
+{
+    return 1.0;
+}
+
+system_stats inviscid_vortex::stats(const sim_registry&, field_ref,
+                                     field_ref, const step_controller&) const
+{
+    return {};
+}
+
+void inviscid_vortex::initialize(sim_registry&, field_ref, const step_controller&) {}
+
+bool inviscid_vortex::write(field_io&, const sim_registry&, field_ref,
+                             const step_controller&, real)
+{
+    return false;
+}
 
 #if 0
 real euler_vortex::system_timestep_size(real cfl) const

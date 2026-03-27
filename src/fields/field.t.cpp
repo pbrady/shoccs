@@ -159,13 +159,4 @@ TEST_CASE("assignment")
     REQUIRE((a == integer_scalar(2)));
     z = -1;
     REQUIRE((b == integer_scalar(-1)));
-
-    auto f = [](field_span fs) {
-        auto&& [u, v] = fs.scalars(1, 0);
-        u = 10;
-        v = 11;
-    };
-    x = f;
-    REQUIRE((a == integer_scalar(11)));
-    REQUIRE((b == integer_scalar(10)));
 }

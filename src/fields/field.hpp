@@ -53,21 +53,6 @@ public:
     {
     }
 
-    // construction from an invocable
-    template <std::invocable<field&> F>
-    field(F&& f)
-    {
-        std::invoke(FWD(f), *this);
-    }
-
-    // assignment from an invocable of the same type
-    template <std::invocable<field&> F>
-    field& operator=(F&& f)
-    {
-        std::invoke(FWD(f), *this);
-        return *this;
-    }
-
     template <Field F>
     requires std::is_assignable_v<std::ranges::range_reference_t<S>, scalar_ref_t<F>> &&
         std::is_assignable_v<std::ranges::range_reference_t<V>, vector_ref_t<F>>

@@ -1,16 +1,31 @@
-#include <catch2/catch_approx.hpp>
+#include <Kokkos_Core.hpp>
+#include <catch2/catch_session.hpp>
 #include <catch2/catch_test_macros.hpp>
 #include <catch2/matchers/catch_matchers_floating_point.hpp>
 
 #include <sol/sol.hpp>
-#include <spdlog/spdlog.h>
 
 #include "integrator.hpp"
 #include "systems/system.hpp"
 
 using namespace ccs;
 
-TEST_CASE("integrator - euler")
+// ---------------------------------------------------------------------------
+// Custom main: Kokkos must be initialized before any test allocates Views.
+// ---------------------------------------------------------------------------
+
+int main(int argc, char* argv[])
+{
+    Kokkos::ScopeGuard kokkos(argc, argv);
+    return Catch::Session().run(argc, argv);
+}
+
+// ---------------------------------------------------------------------------
+// Registry-based euler integration test using the heat system.
+// Mirrors the existing euler.t.cpp but uses sim_registry + field_ref.
+// ---------------------------------------------------------------------------
+
+TEST_CASE("euler registry-based step")
 {
     sol::state lua;
     lua.open_libraries(sol::lib::base, sol::lib::math);
@@ -55,7 +70,6 @@ TEST_CASE("integrator - euler")
                 type = "lua",
                 call = function(time, loc)
                     local x, y, z = loc[1], loc[2], loc[3]
-                    -- return time + x * x * (y + z) + x - 1
                     return (time +
                         x * x * (y + z) + y * y * (x + z) + z * z * (x + y) +
                         3 * x * y * z + x + y + z)
@@ -68,7 +82,6 @@ TEST_CASE("integrator - euler")
                     return 2. * x * (y + z) + y * y + z * z + 3. * y * z + 1,
                             x * x + 2. * y * (x + z) + z * z + 3. * x * z + 1,
                             x * x + y * y + 2. * z * (x + y) + 3. * x * y + 1
-
                 end,
                 lap = function(time, loc)
                     local x, y, z = loc[1], loc[2], loc[3]
@@ -80,32 +93,49 @@ TEST_CASE("integrator - euler")
             }
         }
     )");
-    using namespace si;
 
     auto sys_opt = system::from_lua(lua["simulation"]);
     REQUIRE(!!sys_opt);
     auto& sys = *sys_opt;
 
-    auto it_opt = integrator::from_lua(lua["simulation"]);
-    REQUIRE(!!it_opt);
-    auto& it = *it_opt;
-
     auto st_opt = step_controller::from_lua(lua["simulation"]);
     REQUIRE(!!st_opt);
     auto& step = *st_opt;
 
-    field f{sys(step)};
-    sys.update_boundary(f, step);
+    // Set up registry with 3 slots: u0(0), u1(1), system_rhs(2)
+    sim_registry reg;
+    auto sz = sys.size();
 
-    const real dt = *sys.timestep_size(f, step);
+    // Extract scalar sizes from system_size
+    auto& ss = sz.scalar_size;
+    int d_sz  = get<0>(get<0>(ss));
+    int rx_sz = get<0>(get<1>(ss));
+    int ry_sz = get<1>(get<1>(ss));
+    int rz_sz = get<2>(get<1>(ss));
 
-    field g{sys.size()};
-    g = it(sys, f, step, dt);
+    // Allocate slots with matching scalar layout
+    field_ref u0_ref{0}, u1_ref{1}, srhs_ref{2};
+    for (int s = 0; s < sz.nscalars; ++s) {
+        u0_ref   = reg.allocate_scalar(0, s, d_sz, rx_sz, ry_sz, rz_sz);
+        u1_ref   = reg.allocate_scalar(1, s, d_sz, rx_sz, ry_sz, rz_sz);
+        srhs_ref = reg.allocate_scalar(2, s, d_sz, rx_sz, ry_sz, rz_sz);
+    }
+
+    // Initialize u0 with the system's initial condition
+    sys.initialize(reg, u0_ref, step);
+    sys.update_boundary(reg, u0_ref, step);
+
+    // Get timestep
+    const real dt = *sys.timestep_size(reg, u0_ref, step);
+
+    // Perform one euler step using the registry-based interface
+    integrators::euler euler_integrator;
+    euler_integrator(sys, reg, u0_ref, u1_ref, srhs_ref, step, dt);
 
     step.advance(dt);
-    sys.update_boundary(g, step);
+    sys.update_boundary(reg, u1_ref, step);
 
-    // at this point, all fluid points in g should have a value of m_sol(time, loc)
-    auto stats = sys.stats(f, g, step);
+    // At this point, all fluid points in u1 should match the manufactured solution
+    auto stats = sys.stats(reg, u0_ref, u1_ref, step);
     REQUIRE_THAT(stats.stats[0], Catch::Matchers::WithinAbs(0.0, 1e-13));
 }

@@ -30,22 +30,6 @@ hyperbolic_eigenvalues::hyperbolic_eigenvalues(mesh&& m,
     logger.set_pattern("%Y-%m-%d %H:%M:%S.%f,%v");
 }
 
-//
-// Compute the max eigenvalues
-//
-system_stats
-hyperbolic_eigenvalues::stats(const field&, const field&, const step_controller&) const
-{
-
-    auto p = m.Rx() | std::views::transform([this](auto&& info) {
-                 return object_bcs[info.shape_id] == bcs::Dirichlet;
-             });
-    auto v = eigenvalue_visitor{m.extents(), p, std::vector<bool>{}, std::vector<bool>{}};
-    grad.visit(v);
-
-    return system_stats{.stats = {-m.h(0) * std::ranges::min(v.eigenvalues_real())}};
-}
-
 real3 hyperbolic_eigenvalues::summary(const system_stats& stats) const
 {
     return {stats.stats[0], 0.0, 0.0};
@@ -74,23 +58,41 @@ hyperbolic_eigenvalues::from_lua(const sol::table& tbl, const logs& logger)
         return std::nullopt;
 }
 
-//
-// Dummy routines
-//
-real hyperbolic_eigenvalues::timestep_size(const field&, const step_controller&) const
+bool hyperbolic_eigenvalues::valid(const system_stats&) const { return true; }
+
+void hyperbolic_eigenvalues::rhs(const sim_registry&, field_ref,
+                                  sim_registry&, field_ref, real)
+{
+}
+
+void hyperbolic_eigenvalues::update_boundary(sim_registry&, field_ref, real) {}
+
+real hyperbolic_eigenvalues::timestep_size(const sim_registry&, field_ref,
+                                            const step_controller&) const
 {
     return 1.0;
 }
 
-void hyperbolic_eigenvalues::operator()(field&, const step_controller&) {}
+system_stats hyperbolic_eigenvalues::stats(const sim_registry&, field_ref,
+                                            field_ref,
+                                            const step_controller&) const
+{
+    auto p = m.Rx() | std::views::transform([this](auto&& info) {
+                 return object_bcs[info.shape_id] == bcs::Dirichlet;
+             });
+    auto v = eigenvalue_visitor{m.extents(), p, std::vector<bool>{}, std::vector<bool>{}};
+    grad.visit(v);
 
-bool hyperbolic_eigenvalues::valid(const system_stats&) const { return true; }
+    return system_stats{.stats = {-m.h(0) * std::ranges::min(v.eigenvalues_real())}};
+}
 
-void hyperbolic_eigenvalues::rhs(field_view, real, field_span) {}
+void hyperbolic_eigenvalues::initialize(sim_registry&, field_ref,
+                                         const step_controller&)
+{
+}
 
-void hyperbolic_eigenvalues::update_boundary(field_span, real) {}
-
-bool hyperbolic_eigenvalues::write(field_io&, field_view, const step_controller&, real)
+bool hyperbolic_eigenvalues::write(field_io&, const sim_registry&, field_ref,
+                                    const step_controller&, real)
 {
     return true;
 }

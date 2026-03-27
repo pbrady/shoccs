@@ -1,16 +1,31 @@
-#include <catch2/catch_approx.hpp>
+#include <Kokkos_Core.hpp>
+#include <catch2/catch_session.hpp>
 #include <catch2/catch_test_macros.hpp>
 #include <catch2/matchers/catch_matchers_floating_point.hpp>
 
 #include <sol/sol.hpp>
-#include <spdlog/spdlog.h>
 
 #include "integrator.hpp"
 #include "systems/system.hpp"
 
 using namespace ccs;
 
-TEST_CASE("integrator - rk4")
+// ---------------------------------------------------------------------------
+// Custom main: Kokkos must be initialized before any test allocates Views.
+// ---------------------------------------------------------------------------
+
+int main(int argc, char* argv[])
+{
+    Kokkos::ScopeGuard kokkos(argc, argv);
+    return Catch::Session().run(argc, argv);
+}
+
+// ---------------------------------------------------------------------------
+// Registry-based rk4 integration test using the heat system.
+// Mirrors the existing rk4.t.cpp but uses sim_registry + field_ref.
+// ---------------------------------------------------------------------------
+
+TEST_CASE("rk4 registry-based step")
 {
     sol::state lua;
     lua.open_libraries(sol::lib::base, sol::lib::math);
@@ -83,27 +98,44 @@ TEST_CASE("integrator - rk4")
     REQUIRE(!!sys_opt);
     auto& sys = *sys_opt;
 
-    auto it_opt = integrator::from_lua(lua["simulation"]);
-    REQUIRE(!!it_opt);
-    auto& it = *it_opt;
-
     auto st_opt = step_controller::from_lua(lua["simulation"]);
     REQUIRE(!!st_opt);
     auto& step = *st_opt;
 
-    // // Initialize array with system and ensure zero error
-    field f{sys(step)};
-    sys.update_boundary(f, step);
+    // Set up registry with 4 slots: u0(0), u1(1), rk_rhs(2), system_rhs(3)
+    sim_registry reg;
+    auto sz = sys.size();
 
-    field g{sys.size()};
+    // Extract scalar sizes from system_size
+    auto& ss = sz.scalar_size;
+    int d_sz  = get<0>(get<0>(ss));
+    int rx_sz = get<0>(get<1>(ss));
+    int ry_sz = get<1>(get<1>(ss));
+    int rz_sz = get<2>(get<1>(ss));
 
-    const real dt = *sys.timestep_size(f, step);
+    // Allocate 4 slots with matching scalar layout
+    field_ref u0_ref{0}, u1_ref{1}, rk_ref{2}, srhs_ref{3};
+    for (int s = 0; s < sz.nscalars; ++s) {
+        u0_ref   = reg.allocate_scalar(0, s, d_sz, rx_sz, ry_sz, rz_sz);
+        u1_ref   = reg.allocate_scalar(1, s, d_sz, rx_sz, ry_sz, rz_sz);
+        rk_ref   = reg.allocate_scalar(2, s, d_sz, rx_sz, ry_sz, rz_sz);
+        srhs_ref = reg.allocate_scalar(3, s, d_sz, rx_sz, ry_sz, rz_sz);
+    }
 
-    g = it(sys, f, step, dt);
+    // Initialize u0 with the system's initial condition
+    sys.initialize(reg, u0_ref, step);
+    sys.update_boundary(reg, u0_ref, step);
+
+    // Get timestep
+    const real dt = *sys.timestep_size(reg, u0_ref, step);
+
+    // Perform one rk4 step using the registry-based interface
+    integrators::rk4 rk4_integrator;
+    rk4_integrator(sys, reg, u0_ref, u1_ref, rk_ref, srhs_ref, step, dt);
 
     step.advance(dt);
 
-    // at this point, all fluid points in g should have a value of m_sol(time, loc)
-    auto stats = sys.stats(f, g, step);
+    // At this point, all fluid points in u1 should match the manufactured solution
+    auto stats = sys.stats(reg, u0_ref, u1_ref, step);
     REQUIRE_THAT(stats.stats[0], Catch::Matchers::WithinAbs(0.0, 1e-13));
 }

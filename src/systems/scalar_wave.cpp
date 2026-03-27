@@ -18,8 +18,6 @@ namespace ccs::systems
 namespace
 {
 constexpr auto abs = lift([](auto&& x) { return std::abs(x); });
-// system variables to be used in this system
-enum class scalars : int { u };
 
 constexpr real twoPI = 2 * std::numbers::pi_v<real>;
 
@@ -80,67 +78,6 @@ scalar_wave::scalar_wave(mesh&& m_,
     logger.set_pattern("%Y-%m-%d %H:%M:%S.%f,%v");
 }
 
-real scalar_wave::timestep_size(const field&, const step_controller& step) const
-{
-    const auto h_min = std::ranges::min(m.h());
-    return step.hyperbolic_cfl() * h_min;
-}
-
-//
-// sets the field f to the solution
-//
-void scalar_wave::operator()(field& f, const step_controller& c)
-{
-
-    // extract the field components to initialize
-    auto&& u = f.scalars(scalars::u);
-    auto sol = m.xyz | solution(center, radius, c);
-
-    u | sel::D = 0;
-    u | m.fluid = sol;
-    u | sel::R = sol;
-}
-
-//
-// Compute the linf error as well as the min/max of the field
-//
-system_stats
-scalar_wave::stats(const field&, const field& f, const step_controller& c) const
-{
-    auto&& u = f.scalars(scalars::u);
-
-    auto sol = m.xyz | solution(center, radius, c);
-    auto [u_min, u_max] = minmax(u | m.fluid_all(object_bcs));
-
-    real err = max(abs(u - sol) | m.fluid_all(object_bcs));
-    // Extra info for debugging:
-    auto linf = abs(u - sol);
-    auto fluid_error = linf | m.fluid_all(object_bcs);
-    auto max_el = transform(std::ranges::max_element, fluid_error);
-    auto err_pairs = transform(
-        [](auto&& rng, auto&& max_el) {
-            if (std::ranges::end(rng) != max_el)
-                return std::pair{
-                    *max_el, (real)std::ranges::distance(std::ranges::begin(rng.base()), max_el.base())};
-            else
-                return std::pair{0.0, (real)0};
-        },
-        fluid_error,
-        max_el);
-
-    auto&& [d, rx, ry, rz] = err_pairs;
-    return system_stats{.stats = {err,
-                                  u_min,
-                                  u_max,
-                                  d.first,
-                                  d.second,
-                                  rx.first,
-                                  rx.second,
-                                  ry.first,
-                                  ry.second,
-                                  rz.first,
-                                  rz.second}};
-}
 
 //
 // Determine if the computed field is valid by checking the linf error
@@ -151,46 +88,9 @@ bool scalar_wave::valid(const system_stats& stats) const
     return std::isfinite(v) && std::abs(v) <= max_error;
 }
 
-//
-// rhs = - grad(G) . grad(u) -> dot(neg_G, du)
-//
-void scalar_wave::rhs(field_view f, real, field_span rhs)
-{
-    auto&& u = f.scalars(scalars::u);
-    auto&& u_rhs = rhs.scalars(scalars::u);
-
-    du = grad(u);
-    u_rhs = dot(grad_G, du);
-}
-
 real3 scalar_wave::summary(const system_stats& stats) const
 {
     return {stats.stats[0], stats.stats[1], stats.stats[2]};
-}
-
-//
-// Must be called before computing the rhs
-//
-void scalar_wave::update_boundary(field_span f, real time)
-{
-    auto&& u = f.scalars(scalars::u);
-    auto sol = m.xyz | solution(center, radius, time);
-
-    u | m.dirichlet(grid_bcs, object_bcs) = sol;
-}
-
-bool scalar_wave::write(field_io& io, field_view f, const step_controller& c, real dt)
-{
-    auto&& u = f.scalars(scalars::u);
-    auto sol = m.xyz | solution(center, radius, (real)c);
-
-    error = 0;
-    error | m.fluid_all(object_bcs) = abs(u - sol);
-    error | m.dirichlet(grid_bcs, object_bcs) = 0;
-
-    field_view io_view{std::vector<scalar_view>{u, error}, std::vector<vector_view>{}};
-
-    return io.write(io_names, io_view, c, dt, m.R());
 }
 
 void scalar_wave::log(const system_stats& stats, const step_controller& step)
@@ -263,6 +163,100 @@ std::optional<scalar_wave> scalar_wave::from_lua(const sol::table& tbl,
     }
 
     return std::nullopt;
+}
+
+void scalar_wave::rhs(const sim_registry& reg, field_ref input,
+                      sim_registry& out_reg, field_ref output, real /*time*/)
+{
+    constexpr auto sh = scalar_handle{0};
+    auto u = extract_scalar_view(reg, input, sh);
+    auto u_rhs = extract_scalar_span(out_reg, output, sh);
+
+    du = grad(u);
+    u_rhs = dot(grad_G, du);
+}
+
+void scalar_wave::update_boundary(sim_registry& reg, field_ref ref, real time)
+{
+    constexpr auto sh = scalar_handle{0};
+    auto u = extract_scalar_span(reg, ref, sh);
+    auto sol = m.xyz | solution(center, radius, time);
+
+    u | m.dirichlet(grid_bcs, object_bcs) = sol;
+}
+
+real scalar_wave::timestep_size(const sim_registry&, field_ref,
+                                const step_controller& step) const
+{
+    const auto h_min = std::ranges::min(m.h());
+    return step.hyperbolic_cfl() * h_min;
+}
+
+system_stats scalar_wave::stats(const sim_registry& reg, field_ref /*u0*/,
+                                field_ref u1, const step_controller& c) const
+{
+    constexpr auto sh = scalar_handle{0};
+    auto u = extract_scalar_view(reg, u1, sh);
+
+    auto sol = m.xyz | solution(center, radius, c);
+    auto [u_min, u_max] = minmax(u | m.fluid_all(object_bcs));
+
+    real err = max(abs(u - sol) | m.fluid_all(object_bcs));
+    auto linf = abs(u - sol);
+    auto fluid_error = linf | m.fluid_all(object_bcs);
+    auto max_el = transform(std::ranges::max_element, fluid_error);
+    auto err_pairs = transform(
+        [](auto&& rng, auto&& max_el) {
+            if (std::ranges::end(rng) != max_el)
+                return std::pair{
+                    *max_el,
+                    (real)std::ranges::distance(std::ranges::begin(rng.base()),
+                                                max_el.base())};
+            else
+                return std::pair{0.0, (real)0};
+        },
+        fluid_error,
+        max_el);
+
+    auto&& [d, rx, ry, rz] = err_pairs;
+    return system_stats{.stats = {err,
+                                  u_min,
+                                  u_max,
+                                  d.first,
+                                  d.second,
+                                  rx.first,
+                                  rx.second,
+                                  ry.first,
+                                  ry.second,
+                                  rz.first,
+                                  rz.second}};
+}
+
+void scalar_wave::initialize(sim_registry& reg, field_ref ref, const step_controller& c)
+{
+    constexpr auto sh = scalar_handle{0};
+    auto u = extract_scalar_span(reg, ref, sh);
+    auto sol = m.xyz | solution(center, radius, c);
+
+    u | sel::D = 0;
+    u | m.fluid = sol;
+    u | sel::R = sol;
+}
+
+bool scalar_wave::write(field_io& io, const sim_registry& reg, field_ref ref,
+                        const step_controller& c, real dt)
+{
+    constexpr auto sh = scalar_handle{0};
+    auto u = extract_scalar_view(reg, ref, sh);
+    auto sol = m.xyz | solution(center, radius, (real)c);
+
+    error = 0;
+    error | m.fluid_all(object_bcs) = abs(u - sol);
+    error | m.dirichlet(grid_bcs, object_bcs) = 0;
+
+    field_view io_view{std::vector<scalar_view>{u, error}, std::vector<vector_view>{}};
+
+    return io.write(io_names, io_view, c, dt, m.R());
 }
 
 } // namespace ccs::systems

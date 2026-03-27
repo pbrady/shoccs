@@ -1,6 +1,7 @@
 #pragma once
 
 #include "fields/field.hpp"
+#include "fields/field_registry.hpp"
 #include "io/field_io.hpp"
 #include "mesh/mesh.hpp"
 #include "mms/manufactured_solutions.hpp"
@@ -44,24 +45,23 @@ public:
 
     static std::optional<heat> from_lua(const sol::table&, const logs& = {});
 
-    void operator()(field&, const step_controller&);
-
-    system_stats stats(const field& u0, const field& u1, const step_controller&) const;
-
     bool valid(const system_stats&) const;
 
-    real timestep_size(const field&, const step_controller&) const;
-
-    void rhs(field_view, real, field_span) const;
-
-    void update_boundary(field_span, real time);
-
     void log(const system_stats&, const step_controller&);
-
-    bool write(field_io&, field_view, const step_controller&, real);
 
     real3 summary(const system_stats&) const;
 
     system_size size() const;
+
+    void rhs(const sim_registry& reg, field_ref input,
+             sim_registry& out_reg, field_ref output, real time) const;
+    void update_boundary(sim_registry& reg, field_ref ref, real time);
+    real timestep_size(const sim_registry& reg, field_ref ref,
+                       const step_controller&) const;
+    system_stats stats(const sim_registry& reg, field_ref u0,
+                       field_ref u1, const step_controller&) const;
+    void initialize(sim_registry& reg, field_ref ref, const step_controller&);
+    bool write(field_io& io, const sim_registry& reg, field_ref ref,
+               const step_controller& c, real dt);
 };
 } // namespace ccs::systems

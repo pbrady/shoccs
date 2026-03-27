@@ -1,5 +1,6 @@
 #include "simulation_cycle.hpp"
 
+#include "fields/field_registry.hpp"
 #include "io/logging.hpp"
 #include <sol/sol.hpp>
 
@@ -27,35 +28,56 @@ simulation_cycle::simulation_cycle(system&& sys,
 real3 simulation_cycle::run()
 {
     logger(spdlog::level::info, "begin time stepping");
-    // a non-zero time would typically correspond to some kind of restart
-    // functionality
-    field u0{sys(controller)};
-    field u1{u0};
 
-    sys.update_boundary(u0, controller);
+    // Registry-based field allocation (9.5a)
+    sim_registry reg;
+    auto sz = sys.size();
+    auto& ss = sz.scalar_size;
+    int d_sz  = get<0>(get<0>(ss));
+    int rx_sz = get<0>(get<1>(ss));
+    int ry_sz = get<1>(get<1>(ss));
+    int rz_sz = get<2>(get<1>(ss));
 
-    system_stats stats = sys.stats(u0, u1, controller);
+    field_ref u0_ref{0}, u1_ref{1}, rk_ref{2}, srhs_ref{3};
+    for (int s = 0; s < sz.nscalars; ++s) {
+        u0_ref   = reg.allocate_scalar(0, s, d_sz, rx_sz, ry_sz, rz_sz);
+        u1_ref   = reg.allocate_scalar(1, s, d_sz, rx_sz, ry_sz, rz_sz);
+        rk_ref   = reg.allocate_scalar(2, s, d_sz, rx_sz, ry_sz, rz_sz);
+        srhs_ref = reg.allocate_scalar(3, s, d_sz, rx_sz, ry_sz, rz_sz);
+    }
+    for (int v = 0; v < sz.nvectors; ++v) {
+        u0_ref   = reg.allocate_vector(0, v, d_sz, rx_sz, ry_sz, rz_sz);
+        u1_ref   = reg.allocate_vector(1, v, d_sz, rx_sz, ry_sz, rz_sz);
+        rk_ref   = reg.allocate_vector(2, v, d_sz, rx_sz, ry_sz, rz_sz);
+        srhs_ref = reg.allocate_vector(3, v, d_sz, rx_sz, ry_sz, rz_sz);
+    }
+    sys.initialize(reg, u0_ref, controller);
+    reg.deep_copy_slot(u1_ref.slot, u0_ref.slot);
+
+    sys.update_boundary(reg, u0_ref, controller);
+
+    system_stats stats = sys.stats(reg, u0_ref, u1_ref, controller);
 
     sys.log(stats, controller);
 
     // initial write
-    sys.write(io, u0, controller, .0);
+    sys.write(io, reg, u0_ref, controller, .0);
 
     while (controller && sys.valid(stats)) {
 
-        const std::optional<real> dt = sys.timestep_size(u0, controller);
+        const std::optional<real> dt = sys.timestep_size(reg, u0_ref, controller);
         if (!dt) {
             logger(spdlog::level::info, "required timestep too small");
             return {null_v<real>}; //{huge<double>, time};
         }
-        u1 = integrate(sys, u0, controller, *dt);
+        integrate(sys, reg, u0_ref, u1_ref, rk_ref, srhs_ref, controller, *dt);
 
         // update time and step to reflect u1 data
         controller.advance(*dt);
 
         // compute statistics and handle io
-        stats = sys.stats(u0, u1, controller);
-        sys.write(io, u1, controller, *dt);
+        stats = sys.stats(reg, u0_ref, u1_ref, controller);
+        sys.write(io, reg, u1_ref, controller, *dt);
         sys.log(stats, controller);
 
         logger(spdlog::level::info,
@@ -64,9 +86,8 @@ real3 simulation_cycle::run()
                (int)controller,
                *dt,
                stats.stats[0]);
-        // prepare for next iteration to overwrite u0
-        using std::swap;
-        swap(u0, u1);
+        // swap slot data so u0_ref now points to latest solution
+        reg.swap_slots(u0_ref.slot, u1_ref.slot);
     }
 
     // only return Linf if system ends in a valid state

@@ -232,6 +232,42 @@ ctest --test-dir build -R t-dense
 **Decision:** `assign()` checks at runtime (pointer comparison) that the destination buffer does not appear in the source expression. If aliased, evaluation stages through a temporary buffer. Mutating operators (`+=`, `-=`) are always safe (element-wise, no neighbor dependencies).
 **Why:** `Kokkos::parallel_for` has no ordering guarantees between iterations.
 
+### D-R10: Simulation Registry Concrete Type
+**Decision:** A single concrete type alias `sim_registry = field_registry<8, 8, 4>` is used throughout the simulation chain (system, integrator, simulation_cycle). MaxSlots=8 (rk4 uses 4 slots: u0, u1, rk_rhs, system_rhs; 8 provides headroom). MaxS=8, MaxV=4 matches `general_layout` and accommodates all current systems (heat: 1,0; scalar_wave: 1,0; eigenvalues: 0,0).
+**Why:** The `system` and `integrator` variant wrappers are non-template classes. Their new registry-based methods need a concrete registry type in the signature. Templating the wrappers would cascade template parameters through the entire simulation chain. Using a fixed alias avoids this while providing sufficient capacity for all systems.
+
+### D-R11: Integrator Scratch Slot Ownership
+**Decision:** Scratch slots (rk_rhs, system_rhs) are allocated by `simulation_cycle::run()` and passed as `field_ref` tokens to the integrator. The integrator does not own or allocate scratch storage.
+**Why:** Centralizing allocation in `simulation_cycle::run()` keeps the registry as a single-owner local. It also eliminates the lazy `ensure_size()` pattern where integrators resize their owned `field` members on first call.
+
+### D-R12: System Adapter Delegation vs Standalone
+**Decision:** Registry-based adapter methods in concrete systems follow two patterns:
+- **Delegating**: Methods whose existing signatures already use `field_view`/`field_span` (non-owning types): `rhs`, `update_boundary`, `write`. The adapter constructs a temporary `field_view`/`field_span` from extracted `scalar_view`/`scalar_span` and calls the existing method.
+- **Standalone**: Methods whose existing signatures use `const field&`/`field&` (owning types): `stats`, `timestep_size`, `operator()`/`initialize`. The adapter implements the logic directly using extracted `scalar_view`/`scalar_span`, since `field_view` is not assignment-compatible with `const field&` (they are different template instantiations of `detail::field`; conversion would require deep-copying all `std::vector<real>` buffers). The DSL operators (`|`, `sel::D`, mesh selections, `abs`, `max`, etc.) work generically on any `Scalar` type, so the adapter body is identical to the existing method body operating on `scalar_view`/`scalar_span` instead of `scalar_real`.
+**Why:** `field = detail::field<std::vector<scalar_real>, std::vector<vector_real>>` is an owning type (backed by `std::vector<real>`). `field_view = detail::field<std::vector<scalar_view>, std::vector<vector_view>>` uses `std::span<const real>`. These are separate template instantiations — passing a `field_view` as `const field&` would require constructing a temporary `field` that copies all data, defeating the zero-copy goal. The standalone adapter avoids this by working directly on spans.
+
+### D-R9: Kokkos Test Initialization Pattern
+**Decision:** Tests that allocate `Kokkos::View` must provide a custom `main()` using `Kokkos::ScopeGuard` + Catch2 v3's `Catch::Session`. These tests link `Catch2::Catch2` (not `Catch2::Catch2WithMain`) and define:
+```cpp
+#include <Kokkos_Core.hpp>
+#include <catch2/catch_session.hpp>
+int main(int argc, char* argv[]) {
+    Kokkos::ScopeGuard kokkos(argc, argv);
+    return Catch::Session().run(argc, argv);
+}
+```
+Tests that don't allocate Views (e.g., handle arithmetic tests) continue using `add_unit_test()` with `Catch2::Catch2WithMain`.
+**Why:** `Kokkos::View` allocation requires `Kokkos::initialize()` to have been called. The existing `add_unit_test()` CMake function links `Catch2::Catch2WithMain`, which provides its own `main()` — incompatible with a custom main. Manually defining the test executable avoids this conflict.
+
+### D-R13: Slot-Level Element-Wise Helper Functions
+**Decision:** Extract three free functions in `src/temporal/slot_ops.hpp` for element-wise slot arithmetic: `slot_zero`, `slot_assign_lc` (dst = src + c * rhs), and `slot_accumulate` (dst += c * src). Both `rk4` and `euler` include this header. The helpers iterate over allocated buffers using `field_ref.n_scalars` (not `buffers_per_slot`) so unallocated buffer indices are never touched.
+**Why:** rk4 uses `slot_assign_lc` (4 stages) + `slot_accumulate` (4 stages) + `slot_zero` (2 calls). euler uses `slot_assign_lc` (1 call) + `slot_zero` (1 call). Duplicating the triple-nested loop in both files would be ~40 lines of identical code. A shared header avoids DRY violations and ensures consistent iteration patterns.
+
+### D-R14: handle_expr Const-Correctness for Expression Templates
+**Decision:** TBD — either (a) use a single `handle_expr { real* ptr; }` and `const_cast` for const-registry reads, or (b) make `handle_expr` a template `handle_expr<T>` where `T` is `real*` or `const real*`, or (c) add a separate `const_handle_expr { const real* ptr; }`.
+**Why:** `bind_scalar` from a `const field_registry&` yields `const real*` pointers, but expression nodes must be trivially copyable and capturable by `KOKKOS_LAMBDA`. The choice affects how `operator+` etc. compose expressions from const and mutable sources. For Phase 10 (host-only, mutable-registry only), option (a) suffices. The decision should be revisited in Phase 14 (GPU) if const-correctness matters for device memory.
+**Status:** For Phase 10, use mutable `bind_scalar` only (single `handle_expr { real* ptr; }`). Const variant deferred.
+
 ---
 
 ## Files Excluded from Migration Scope

@@ -1,5 +1,6 @@
 #include "heat.hpp"
 #include "fields/algorithms.hpp"
+#include "fields/expr.hpp"
 #include "fields/selector.hpp"
 #include "real3_operators.hpp"
 #include <cmath>
@@ -45,118 +46,11 @@ heat::heat(mesh&& m,
     logger.set_pattern("%Y-%m-%d %H:%M:%S.%f,%v");
 }
 
-//
-// sets the field f to the solution
-//
-void heat::operator()(field& f, const step_controller& c)
-{
-    if (!m_sol) return;
 
-    auto&& u = f.scalars(scalars::u);
-    auto sol = m.xyz | m_sol(c.simulation_time());
-
-    u | sel::D = 0;
-    u | m.fluid = sol;
-    u | sel::R = sol;
-}
-
-//
-// Compute the linf error as well as the min/max of the field
-//
-system_stats heat::stats(const field&, const field& f, const step_controller& step) const
-{
-    auto&& u = f.scalars(scalars::u);
-
-    auto sol = m.xyz | m_sol(step.simulation_time());
-    auto [u_min, u_max] = minmax(u | m.fluid_all(object_bcs));
-
-    real err = max(abs(u - sol) | m.fluid_all(object_bcs));
-    // Extra info for debugging:
-    auto linf = abs(u - sol);
-    auto fluid_error = linf | m.fluid_all(object_bcs);
-    auto max_el = transform(std::ranges::max_element, fluid_error);
-    auto err_pairs = transform(
-        [](auto&& rng, auto&& max_el) {
-            if (std::ranges::end(rng) != max_el)
-                return std::pair{
-                    *max_el, (real)std::ranges::distance(std::ranges::begin(rng.base()), max_el.base())};
-            else
-                return std::pair{0.0, (real)0};
-        },
-        fluid_error,
-        max_el);
-
-    auto&& [d, rx, ry, rz] = err_pairs;
-    return system_stats{.stats = {err,
-                                  u_min,
-                                  u_max,
-                                  d.first,
-                                  d.second,
-                                  rx.first,
-                                  rx.second,
-                                  ry.first,
-                                  ry.second,
-                                  rz.first,
-                                  rz.second}};
-}
-
-//
-// Determine if the computed field is valid by checking the linf error
-//
 bool heat::valid(const system_stats& stats) const
 {
     const auto& v = stats.stats[0];
     return std::isfinite(v) && std::abs(v) <= 1e6;
-}
-
-//
-// parabolic timestep constraint
-//
-real heat::timestep_size(const field&, const step_controller& step) const
-{
-    const auto h_min = std::ranges::min(m.h());
-    return step.parabolic_cfl() * h_min * h_min / (4 * diffusivity);
-};
-
-//
-// rhs = diffusivity * lap(f) + (dQ/dt - diffusivity * lap(Q))
-//
-// Q is the manufactured solution
-//
-void heat::rhs(field_view f, real time, field_span rhs) const
-{
-    auto&& u_rhs = rhs.scalars(scalars::u);
-    auto&& u = f.scalars(scalars::u);
-
-    // rhs = diffusivity * lap(u) + (dS/dt - diffusivity * lap(S))
-    u_rhs = lap(u, neumann_u);
-    u_rhs *= diffusivity;
-
-    if (m_sol) {
-        const auto src =
-            (m.xyz | m_sol.ddt(time)) - (diffusivity * (m.xyz | m_sol.laplacian(time)));
-
-        u_rhs | m.fluid_all(object_bcs) += src;
-        u_rhs | m.dirichlet(grid_bcs, object_bcs) = 0;
-    }
-}
-
-//
-// Sets the dirichlet boundary values on f at given time.
-// Also updates the internal neumann_u to apply neumann boundary conditions.
-// This routine MUST be called before evaluating the rhs of the system
-//
-void heat::update_boundary(field_span f, real time)
-{
-    auto&& u = f.scalars(scalars::u);
-    auto l = m.xyz;
-
-    u | m.dirichlet(grid_bcs, object_bcs) = l | m_sol(time);
-
-    // set possible neumann bcs;
-    neumann_u | m.neumann<0>(grid_bcs) = l | m_sol.gradient(0, time);
-    neumann_u | m.neumann<1>(grid_bcs) = l | m_sol.gradient(1, time);
-    neumann_u | m.neumann<2>(grid_bcs) = l | m_sol.gradient(2, time);
 }
 
 void heat::log(const system_stats& stats, const step_controller& step)
@@ -166,20 +60,6 @@ void heat::log(const system_stats& stats, const step_controller& step)
            (real)step,
            (int)step,
            fmt::join(stats.stats, ","));
-}
-
-bool heat::write(field_io& io, field_view f, const step_controller& c, real dt)
-{
-    auto&& u = f.scalars(scalars::u);
-    auto sol = m.xyz | m_sol(c.simulation_time());
-
-    error = 0;
-    error | m.fluid_all(object_bcs) = abs(u - sol);
-    error | m.dirichlet(grid_bcs, object_bcs) = 0;
-
-    field_view io_view{std::vector<scalar_view>{u, error}, std::vector<vector_view>{}};
-
-    return io.write(io_names, io_view, c, dt, m.R());
 }
 
 //
@@ -219,5 +99,115 @@ std::optional<heat> heat::from_lua(const sol::table& tbl, const logs& logger)
 }
 
 system_size heat::size() const { return {1, 0, m.ss()}; }
+
+void heat::rhs(const sim_registry& reg, field_ref input,
+               sim_registry& out_reg, field_ref output, real time) const
+{
+    constexpr auto sh = scalar_handle{0};
+    auto u = extract_scalar_view(reg, input, sh);
+    auto u_rhs = extract_scalar_span(out_reg, output, sh);
+
+    // rhs = diffusivity * lap(u) + (dS/dt - diffusivity * lap(S))
+    u_rhs = lap(u, neumann_u);
+    times_assign_scalar(out_reg, output, sh, diffusivity);
+
+    if (m_sol) {
+        const auto src =
+            (m.xyz | m_sol.ddt(time)) - (diffusivity * (m.xyz | m_sol.laplacian(time)));
+
+        u_rhs | m.fluid_all(object_bcs) += src;
+        u_rhs | m.dirichlet(grid_bcs, object_bcs) = 0;
+    }
+}
+
+void heat::update_boundary(sim_registry& reg, field_ref ref, real time)
+{
+    constexpr auto sh = scalar_handle{0};
+    auto u = extract_scalar_span(reg, ref, sh);
+    auto l = m.xyz;
+
+    u | m.dirichlet(grid_bcs, object_bcs) = l | m_sol(time);
+
+    // set possible neumann bcs
+    neumann_u | m.neumann<0>(grid_bcs) = l | m_sol.gradient(0, time);
+    neumann_u | m.neumann<1>(grid_bcs) = l | m_sol.gradient(1, time);
+    neumann_u | m.neumann<2>(grid_bcs) = l | m_sol.gradient(2, time);
+}
+
+real heat::timestep_size(const sim_registry&, field_ref,
+                         const step_controller& step) const
+{
+    const auto h_min = std::ranges::min(m.h());
+    return step.parabolic_cfl() * h_min * h_min / (4 * diffusivity);
+}
+
+system_stats heat::stats(const sim_registry& reg, field_ref /*u0*/,
+                          field_ref u1, const step_controller& step) const
+{
+    constexpr auto sh = scalar_handle{0};
+    auto u = extract_scalar_view(reg, u1, sh);
+
+    auto sol = m.xyz | m_sol(step.simulation_time());
+    auto [u_min, u_max] = minmax(u | m.fluid_all(object_bcs));
+
+    real err = max(abs(u - sol) | m.fluid_all(object_bcs));
+    auto linf = abs(u - sol);
+    auto fluid_error = linf | m.fluid_all(object_bcs);
+    auto max_el = transform(std::ranges::max_element, fluid_error);
+    auto err_pairs = transform(
+        [](auto&& rng, auto&& max_el) {
+            if (std::ranges::end(rng) != max_el)
+                return std::pair{
+                    *max_el,
+                    (real)std::ranges::distance(std::ranges::begin(rng.base()),
+                                                max_el.base())};
+            else
+                return std::pair{0.0, (real)0};
+        },
+        fluid_error,
+        max_el);
+
+    auto&& [d, rx, ry, rz] = err_pairs;
+    return system_stats{.stats = {err,
+                                  u_min,
+                                  u_max,
+                                  d.first,
+                                  d.second,
+                                  rx.first,
+                                  rx.second,
+                                  ry.first,
+                                  ry.second,
+                                  rz.first,
+                                  rz.second}};
+}
+
+void heat::initialize(sim_registry& reg, field_ref ref, const step_controller& c)
+{
+    if (!m_sol) return;
+
+    constexpr auto sh = scalar_handle{0};
+    auto u = extract_scalar_span(reg, ref, sh);
+    auto sol = m.xyz | m_sol(c.simulation_time());
+
+    u | sel::D = 0;
+    u | m.fluid = sol;
+    u | sel::R = sol;
+}
+
+bool heat::write(field_io& io, const sim_registry& reg, field_ref ref,
+                 const step_controller& c, real dt)
+{
+    constexpr auto sh = scalar_handle{0};
+    auto u = extract_scalar_view(reg, ref, sh);
+    auto sol = m.xyz | m_sol(c.simulation_time());
+
+    error = 0;
+    error | m.fluid_all(object_bcs) = abs(u - sol);
+    error | m.dirichlet(grid_bcs, object_bcs) = 0;
+
+    field_view io_view{std::vector<scalar_view>{u, error}, std::vector<vector_view>{}};
+
+    return io.write(io_names, io_view, c, dt, m.R());
+}
 
 } // namespace ccs::systems

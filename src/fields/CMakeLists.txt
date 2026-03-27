@@ -1,7 +1,7 @@
 add_library(fields INTERFACE)
 
 target_include_directories(fields INTERFACE $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/..>)
-target_link_libraries(fields INTERFACE Boost::boost)
+target_link_libraries(fields INTERFACE Boost::boost Kokkos::kokkos)
 
 add_unit_test(range_concepts "concepts" fields)
 add_unit_test(tuple_utils "fields" fields)
@@ -18,4 +18,16 @@ add_unit_test(single_view "fields" fields)
 add_unit_test(field "fields" fields)
 add_unit_test(field_utils "fields" fields)
 add_unit_test(field_math "fields" fields)
+add_unit_test(handle "fields" fields)
 
+if (BUILD_TESTING)
+  add_executable(t-field_registry field_registry.t.cpp)
+  target_link_libraries(t-field_registry Catch2::Catch2 fields Kokkos::kokkos)
+  add_test(NAME t-field_registry COMMAND t-field_registry)
+  set_tests_properties(t-field_registry PROPERTIES LABELS "fields")
+
+  add_executable(t-expr expr.t.cpp)
+  target_link_libraries(t-expr Catch2::Catch2 fields Kokkos::kokkos)
+  add_test(NAME t-expr COMMAND t-expr)
+  set_tests_properties(t-expr PROPERTIES LABELS "fields")
+endif()
