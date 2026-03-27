@@ -56,6 +56,7 @@ using lit = std::integral_constant<int, N>;
 
 struct system_stats {
     std::vector<real> stats;
+    real wall_time_s = 0.0;
 };
 
 template <typename T = real>

@@ -33,6 +33,10 @@ find_package(Boost REQUIRED) # for header only mp11
 find_package(lapackpp REQUIRED)
 find_package(Kokkos REQUIRED)
 
+option(BUILD_BENCHMARKS "Build Google Benchmark suite" OFF)
+if (BUILD_BENCHMARKS)
+  find_package(benchmark REQUIRED)
+endif()
 
 include(GNUInstallDirs)
 
@@ -57,9 +61,11 @@ if(NOT APPLE)
   set(CMAKE_INSTALL_RPATH $ORIGIN)
 endif()
 
-add_subdirectory(external)
 add_subdirectory(src)
 add_subdirectory(docs)
+if (BUILD_BENCHMARKS)
+  add_subdirectory(benchmarks)
+endif()
 
 
 install(

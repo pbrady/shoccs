@@ -3,6 +3,8 @@
 #include "step_controller.hpp"
 #include "systems/system.hpp"
 
+#include <Kokkos_Profiling_ScopedRegion.hpp>
+
 namespace ccs::integrators
 {
 
@@ -11,6 +13,7 @@ void euler::operator()(system& sys, sim_registry& reg,
                        field_ref system_rhs_ref,
                        const step_controller& ctrl, real dt)
 {
+    Kokkos::Profiling::ScopedRegion step_region("euler::step");
     const real time = ctrl;
 
     // Copy u0 into output so the pre-built RHS graph (bound to the output

@@ -9,6 +9,8 @@
 
 #include <sol/sol.hpp>
 
+#include <Kokkos_Profiling_ScopedRegion.hpp>
+
 #include <fmt/ranges.h>
 #include <ranges>
 
@@ -95,7 +97,7 @@ scalar_wave::scalar_wave(mesh&& m_,
     logger.set_pattern("%v");
     logger(spdlog::level::info,
            "Timestamp,Time,Step,Linf,Min,Max,Domain_Linf,Domain_ic,Rx_Linf,Rx_ic,Ry_"
-           "Linf,Ry_ic,Rz_Linf,Rz_ic");
+           "Linf,Ry_ic,Rz_Linf,Rz_ic,Wall_ms");
     logger.set_pattern("%Y-%m-%d %H:%M:%S.%f,%v");
 }
 
@@ -117,10 +119,11 @@ real3 scalar_wave::summary(const system_stats& stats) const
 void scalar_wave::log(const system_stats& stats, const step_controller& step)
 {
     logger(spdlog::level::info,
-           "{},{},{}",
+           "{},{},{},{:.3f}",
            (real)step,
            (int)step,
-           fmt::join(stats.stats, ","));
+           fmt::join(stats.stats, ","),
+           stats.wall_time_s * 1000.0);
 }
 
 system_size scalar_wave::size() const
@@ -192,6 +195,7 @@ std::optional<scalar_wave> scalar_wave::from_lua(const sol::table& tbl,
 void scalar_wave::rhs(const sim_registry& reg, field_ref input,
                       sim_registry& out_reg, field_ref output, real /*time*/)
 {
+    Kokkos::Profiling::ScopedRegion region("scalar_wave::rhs");
     constexpr auto sh = scalar_handle{0};
     auto u = extract_scalar_view(reg, input, sh);
 
@@ -324,6 +328,7 @@ void scalar_wave::submit_rhs_graph()
 
 void scalar_wave::update_boundary(sim_registry& reg, field_ref ref, real time)
 {
+    Kokkos::Profiling::ScopedRegion region("scalar_wave::update_boundary");
     constexpr auto sh = scalar_handle{0};
 
     // Evaluate solution at all mesh locations
@@ -359,6 +364,7 @@ real scalar_wave::timestep_size(const sim_registry&, field_ref,
 system_stats scalar_wave::stats(const sim_registry& reg, field_ref /*u0*/,
                                 field_ref u1, const step_controller& c) const
 {
+    Kokkos::Profiling::ScopedRegion region("scalar_wave::stats");
     constexpr auto sh = scalar_handle{0};
     auto u = extract_scalar_view(reg, u1, sh);
 

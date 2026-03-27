@@ -6,6 +6,7 @@
 #include "kokkos_types.hpp"
 
 #include <Kokkos_Graph.hpp>
+#include <Kokkos_Profiling_ScopedRegion.hpp>
 
 #include <cassert>
 #include <concepts>
@@ -179,6 +180,7 @@ public:
     template <typename Op = eq_t>
     void operator()(std::span<const real> x, std::span<real> b, Op op = {}) const
     {
+        Kokkos::Profiling::ScopedRegion region("block::operator()");
         const auto n = num_lines();
         if (n == 0) return;
 

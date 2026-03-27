@@ -10,6 +10,8 @@
 #include <fmt/ranges.h>
 #include <sol/sol.hpp>
 
+#include <Kokkos_Profiling_ScopedRegion.hpp>
+
 #include <iterator>
 
 namespace ccs::systems
@@ -43,7 +45,7 @@ heat::heat(mesh&& m,
     logger.set_pattern("%v");
     logger(spdlog::level::info,
            "Timestamp,Time,Step,Linf,Min,Max,Domain_Linf,Domain_ic,Rx_Linf,Rx_ic,Ry_"
-           "Linf,Ry_ic,Rz_Linf,Rz_ic");
+           "Linf,Ry_ic,Rz_Linf,Rz_ic,Wall_ms");
 
     logger.set_pattern("%Y-%m-%d %H:%M:%S.%f,%v");
 }
@@ -58,10 +60,11 @@ bool heat::valid(const system_stats& stats) const
 void heat::log(const system_stats& stats, const step_controller& step)
 {
     logger(spdlog::level::info,
-           "{},{},{}",
+           "{},{},{},{:.3f}",
            (real)step,
            (int)step,
-           fmt::join(stats.stats, ","));
+           fmt::join(stats.stats, ","),
+           stats.wall_time_s * 1000.0);
 }
 
 //
@@ -116,6 +119,7 @@ void heat::fill_source(real time)
 void heat::rhs(const sim_registry& reg, field_ref input,
                sim_registry& out_reg, field_ref output, real time)
 {
+    Kokkos::Profiling::ScopedRegion region("heat::rhs");
     constexpr auto sh = scalar_handle{0};
     auto u = extract_scalar_view(reg, input, sh);
     auto u_rhs = extract_scalar_span(out_reg, output, sh);
@@ -291,6 +295,7 @@ void heat::submit_rhs_graph()
 
 void heat::update_boundary(sim_registry& reg, field_ref ref, real time)
 {
+    Kokkos::Profiling::ScopedRegion region("heat::update_boundary");
     constexpr auto sh = scalar_handle{0};
     // Evaluate manufactured solution at all mesh locations
     std::vector<real> sol_d(m.size());
@@ -358,6 +363,7 @@ real heat::timestep_size(const sim_registry&, field_ref,
 system_stats heat::stats(const sim_registry& reg, field_ref /*u0*/,
                           field_ref u1, const step_controller& step) const
 {
+    Kokkos::Profiling::ScopedRegion region("heat::stats");
     constexpr auto sh = scalar_handle{0};
     auto u = extract_scalar_view(reg, u1, sh);
 

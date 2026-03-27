@@ -22,6 +22,10 @@ spack:
     - lapackpp
     # Kokkos (parallel execution framework)
     - "kokkos@5.0: cxxstd=20 +serial +openmp"
+    # Kokkos profiling tools (runtime profiling via KOKKOS_TOOLS_LIBS)
+    - kokkos-tools
+    # Microbenchmark framework (Google Benchmark)
+    - benchmark
     - "cmake@3.24:"
     - ninja
 

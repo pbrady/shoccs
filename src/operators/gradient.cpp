@@ -2,6 +2,8 @@
 
 #include "io/logging.hpp"
 
+#include <Kokkos_Profiling_ScopedRegion.hpp>
+
 #include <fmt/ranges.h>
 #include <string>
 #include <vector>
@@ -33,6 +35,7 @@ std::function<void(scalar_span, scalar_span, scalar_span)>
 gradient::operator()(scalar_view u) const
 {
     return [this, u](scalar_span du_x, scalar_span du_y, scalar_span du_z) {
+        Kokkos::Profiling::ScopedRegion region("gradient::operator()");
         du_x = 0;
         du_y = 0;
         du_z = 0;

@@ -1,5 +1,7 @@
 #include "derivative.hpp"
 
+#include <Kokkos_Profiling_ScopedRegion.hpp>
+
 #include <algorithm>
 #include <cassert>
 #include <ranges>
@@ -501,6 +503,7 @@ template <typename Op>
     requires std::invocable<Op, real&, real>
 void derivative::operator()(scalar_view u, scalar_span du, Op op) const
 {
+    Kokkos::Profiling::ScopedRegion region("derivative::operator()");
     apply_kernels(u, du, op);
     Kokkos::fence("derivative::operator() complete");
 }
@@ -509,6 +512,7 @@ template <typename Op>
     requires std::invocable<Op, real&, real>
 void derivative::operator()(scalar_view u, scalar_view nu, scalar_span du, Op op) const
 {
+    Kokkos::Profiling::ScopedRegion region("derivative::operator()");
     apply_kernels(u, du, op);
     N(nu.D, du.D);
     Kokkos::fence("derivative::operator() with Neumann complete");
@@ -586,6 +590,7 @@ void derivative::build_graph(scalar_view u, scalar_view nu, scalar_span du, Op o
 
 void derivative::submit_graph()
 {
+    Kokkos::Profiling::ScopedRegion region("derivative::submit_graph()");
     graph_->submit();
     Kokkos::fence("derivative::submit_graph() complete");
 }

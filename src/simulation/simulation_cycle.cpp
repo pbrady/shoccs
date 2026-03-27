@@ -2,6 +2,8 @@
 
 #include "fields/field_registry.hpp"
 #include "io/logging.hpp"
+#include <Kokkos_Profiling_ScopedRegion.hpp>
+#include <Kokkos_Timer.hpp>
 #include <sol/sol.hpp>
 
 #include <cassert>
@@ -28,6 +30,7 @@ simulation_cycle::simulation_cycle(system&& sys,
 
 real3 simulation_cycle::run()
 {
+    Kokkos::Profiling::ScopedRegion run_region("simulation_cycle::run");
     logger(spdlog::level::info, "begin time stepping");
 
     // Registry-based field allocation (9.5a)
@@ -71,6 +74,8 @@ real3 simulation_cycle::run()
     // matching the rk4 integrator's convention.
     sys.build_rhs_graph(reg, u1_ref, reg, srhs_ref);
 
+    Kokkos::Timer cumulative_timer;
+
     while (controller && sys.valid(stats)) {
 
         const std::optional<real> dt = sys.timestep_size(reg, u0_ref, controller);
@@ -78,27 +83,51 @@ real3 simulation_cycle::run()
             logger(spdlog::level::info, "required timestep too small");
             return {null_v<real>}; //{huge<double>, time};
         }
-        integrate(sys, reg, u0_ref, u1_ref, rk_ref, srhs_ref, controller, *dt);
+
+        Kokkos::Timer step_timer;
+
+        {
+            Kokkos::Profiling::ScopedRegion integrate_region(
+                "simulation_cycle::integrate");
+            integrate(
+                sys, reg, u0_ref, u1_ref, rk_ref, srhs_ref, controller, *dt);
+        }
 
         // update time and step to reflect u1 data
         controller.advance(*dt);
 
         // compute statistics and handle io
-        stats = sys.stats(reg, u0_ref, u1_ref, controller);
-        sys.write(io, reg, u1_ref, controller, *dt);
+        {
+            Kokkos::Profiling::ScopedRegion stats_region(
+                "simulation_cycle::stats");
+            stats = sys.stats(reg, u0_ref, u1_ref, controller);
+        }
+        {
+            Kokkos::Profiling::ScopedRegion write_region(
+                "simulation_cycle::write");
+            sys.write(io, reg, u1_ref, controller, *dt);
+        }
+        stats.wall_time_s = step_timer.seconds();
         sys.log(stats, controller);
 
+        const double step_wall_ms = stats.wall_time_s * 1000.0;
+
         logger(spdlog::level::info,
-               "time= {}  step={}, dt={}, s0={}",
+               "time= {}  step={}, dt={}, s0={}, wall={:.3f}ms",
                (real)controller,
                (int)controller,
                *dt,
-               stats.stats[0]);
+               stats.stats[0],
+               step_wall_ms);
         // Copy latest solution to u0 for next iteration.
         // Uses deep_copy (not swap_slots) to preserve stable data pointers
         // required by the pre-built RHS graph.
         reg.deep_copy_slot(u0_ref.slot, u1_ref.slot);
     }
+
+    logger(spdlog::level::info,
+           "cumulative wall time: {:.3f}s",
+           cumulative_timer.seconds());
 
     // only return Linf if system ends in a valid state
     if (controller) {

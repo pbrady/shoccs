@@ -2,6 +2,8 @@
 
 #include "io/logging.hpp"
 
+#include <Kokkos_Profiling_ScopedRegion.hpp>
+
 #include <fmt/ranges.h>
 #include <string>
 #include <vector>
@@ -35,6 +37,7 @@ laplacian::laplacian(const mesh& m,
 std::function<void(scalar_span)> laplacian::operator()(scalar_view u) const
 {
     return [this, u](scalar_span du) {
+        Kokkos::Profiling::ScopedRegion region("laplacian::operator()");
         du = 0;
         if (ex[0] > 1) dx(u, du, plus_eq);
         if (ex[1] > 1) dy(u, du, plus_eq);
@@ -46,6 +49,7 @@ std::function<void(scalar_span)> laplacian::operator()(scalar_view u,
                                                        scalar_view nu) const
 {
     return [this, u, nu](scalar_span du) {
+        Kokkos::Profiling::ScopedRegion region("laplacian::operator()");
         du = 0;
         // accumulate results into du
         if (ex[0] > 1) dx(u, nu, du, plus_eq);
@@ -71,6 +75,7 @@ void laplacian::build_graph(scalar_view u, scalar_view nu, scalar_span du)
 
 void laplacian::submit_graph()
 {
+    Kokkos::Profiling::ScopedRegion region("laplacian::submit_graph()");
     graph_->submit();
     Kokkos::fence("laplacian::submit_graph() complete");
 }
