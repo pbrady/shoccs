@@ -10,12 +10,26 @@ target_include_directories(shoccs-matrices PUBLIC $<BUILD_INTERFACE:${CMAKE_CURR
 target_link_libraries(shoccs-matrices PUBLIC fields)
 
 
-add_unit_test(dense "matrices" shoccs-matrices shoccs-random)
 add_unit_test(csr "matrices" shoccs-matrices shoccs-random)
-add_unit_test(unit_stride_visitor "matrices" shoccs-matrices)
-add_unit_test(coefficient_visitor "matrices" shoccs-matrices)
 
 if (BUILD_TESTING)
+  add_executable(t-dense dense.t.cpp)
+  target_link_libraries(t-dense Catch2::Catch2 shoccs-matrices shoccs-random Kokkos::kokkos)
+  add_test(NAME t-dense COMMAND t-dense)
+  set_tests_properties(t-dense PROPERTIES LABELS "matrices")
+endif()
+
+if (BUILD_TESTING)
+  add_executable(t-unit_stride_visitor unit_stride_visitor.t.cpp)
+  target_link_libraries(t-unit_stride_visitor Catch2::Catch2 shoccs-matrices Kokkos::kokkos)
+  add_test(NAME t-unit_stride_visitor COMMAND t-unit_stride_visitor)
+  set_tests_properties(t-unit_stride_visitor PROPERTIES LABELS "matrices")
+
+  add_executable(t-coefficient_visitor coefficient_visitor.t.cpp)
+  target_link_libraries(t-coefficient_visitor Catch2::Catch2 shoccs-matrices Kokkos::kokkos)
+  add_test(NAME t-coefficient_visitor COMMAND t-coefficient_visitor)
+  set_tests_properties(t-coefficient_visitor PROPERTIES LABELS "matrices")
+
   add_executable(t-block block.t.cpp)
   target_link_libraries(t-block Catch2::Catch2 shoccs-matrices shoccs-random Kokkos::kokkos)
   add_test(NAME t-block COMMAND t-block)

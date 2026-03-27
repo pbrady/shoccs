@@ -94,11 +94,8 @@ ARG SPACK_MIRROR_URL=""
 USER $USERNAME
 WORKDIR /home/$USERNAME
 
-# Clone and configure Spack (use latest release)
-RUN git clone --depth=1 https://github.com/spack/spack.git /home/$USERNAME/spack \
-    && cd /home/$USERNAME/spack \
-    && git fetch --depth=1 origin releases/latest \
-    && git checkout FETCH_HEAD
+# Clone and configure Spack (use develop branch for Kokkos 5.0+ recipes)
+RUN git clone --depth=1 -b develop https://github.com/spack/spack.git /home/$USERNAME/spack
 
 # Copy the spack environment file
 COPY --chown=$USERNAME:$USERNAME .devcontainer/spack.yaml /home/$USERNAME/shoccs-env/spack.yaml

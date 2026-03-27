@@ -66,6 +66,11 @@ real3 simulation_cycle::run()
     // initial write
     sys.write(io, reg, u0_ref, controller, .0);
 
+    // Build RHS graph once for graph-capable systems (heat, scalar_wave).
+    // Uses u1_ref as the RHS input slot and srhs_ref as the RHS output slot,
+    // matching the rk4 integrator's convention.
+    sys.build_rhs_graph(reg, u1_ref, reg, srhs_ref);
+
     while (controller && sys.valid(stats)) {
 
         const std::optional<real> dt = sys.timestep_size(reg, u0_ref, controller);
@@ -89,8 +94,10 @@ real3 simulation_cycle::run()
                (int)controller,
                *dt,
                stats.stats[0]);
-        // swap slot data so u0_ref now points to latest solution
-        reg.swap_slots(u0_ref.slot, u1_ref.slot);
+        // Copy latest solution to u0 for next iteration.
+        // Uses deep_copy (not swap_slots) to preserve stable data pointers
+        // required by the pre-built RHS graph.
+        reg.deep_copy_slot(u0_ref.slot, u1_ref.slot);
     }
 
     // only return Linf if system ends in a valid state

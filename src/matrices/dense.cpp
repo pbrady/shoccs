@@ -16,19 +16,21 @@ void dense::operator()(std::span<const real> x, std::span<real> b, Op op) const
     x = x.subspan(col_offset());
     b = b.subspan(row_offset());
     const auto st = stride();
+    const auto* vp = v_d.data();
+    const auto nc = columns();
 
     if (st == 1) {
         for (integer i = 0; i < rows(); i++) {
             auto dot = std::inner_product(
-                v.data() + i * columns(), v.data() + (i + 1) * columns(),
+                vp + i * nc, vp + (i + 1) * nc,
                 x.data(), 0.0);
             op(b[i], dot);
         }
     } else {
         for (integer i = 0; i < rows(); i++) {
             real dot = 0.0;
-            for (integer j = 0; j < columns(); j++)
-                dot += v[i * columns() + j] * x[j * st];
+            for (integer j = 0; j < nc; j++)
+                dot += vp[i * nc + j] * x[j * st];
             op(b[i * st], dot);
         }
     }

@@ -38,6 +38,36 @@ void system::rhs(const sim_registry& creg, field_ref input,
     std::visit([&](auto&& s) { s.rhs(creg, input, reg, output, time); }, v);
 }
 
+void system::build_rhs_graph(const sim_registry& creg, field_ref input,
+                             sim_registry& reg, field_ref output)
+{
+    std::visit([&](auto&& s) {
+        if constexpr (requires {
+            s.build_rhs_graph(std::declval<scalar_view>(),
+                              std::declval<scalar_span>());
+        }) {
+            constexpr auto sh = scalar_handle{0};
+            auto u = extract_scalar_view(creg, input, sh);
+            auto du = extract_scalar_span(reg, output, sh);
+            s.build_rhs_graph(u, du);
+        }
+    }, v);
+}
+
+void system::submit_rhs_graph(const sim_registry& creg, field_ref input,
+                              sim_registry& reg, field_ref output, real time)
+{
+    std::visit([&](auto&& s) {
+        if constexpr (requires { s.submit_rhs_graph(); }) {
+            if constexpr (requires { s.fill_source(time); })
+                s.fill_source(time);
+            s.submit_rhs_graph();
+        } else {
+            s.rhs(creg, input, reg, output, time);
+        }
+    }, v);
+}
+
 void system::update_boundary(sim_registry& reg, field_ref ref, real time)
 {
     std::visit([&](auto&& s) { s.update_boundary(reg, ref, time); }, v);

@@ -6,6 +6,8 @@
 #include "mms/manufactured_solutions.hpp"
 #include "operators/laplacian.hpp"
 #include "temporal/step_controller.hpp"
+#include <Kokkos_Graph.hpp>
+#include <optional>
 #include <sol/forward.hpp>
 
 namespace ccs::systems
@@ -25,11 +27,15 @@ class heat
     real diffusivity;
 
     std::vector<real> neumann_d, neumann_rx, neumann_ry, neumann_rz;
+    std::vector<real> src_d, src_rx, src_ry, src_rz;
     std::vector<real> error_d, error_rx, error_ry, error_rz;
 
     logs logger;
 
     std::vector<std::string> io_names = {"U", "Error"};
+
+    // Pre-built graph for submit_rhs_graph().
+    std::optional<Kokkos::Experimental::Graph<execution_space>> rhs_graph_;
 
 public:
     heat() = default;
@@ -52,8 +58,12 @@ public:
 
     system_size size() const;
 
+    void fill_source(real time);
+
     void rhs(const sim_registry& reg, field_ref input,
-             sim_registry& out_reg, field_ref output, real time) const;
+             sim_registry& out_reg, field_ref output, real time);
+    void build_rhs_graph(scalar_view u, scalar_span du);
+    void submit_rhs_graph();
     void update_boundary(sim_registry& reg, field_ref ref, real time);
     real timestep_size(const sim_registry& reg, field_ref ref,
                        const step_controller&) const;

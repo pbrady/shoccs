@@ -50,6 +50,10 @@ public:
     // Registry-based dispatch methods
     void rhs(const sim_registry& creg, field_ref input,
              sim_registry& reg, field_ref output, real time);
+    void build_rhs_graph(const sim_registry& creg, field_ref input,
+                         sim_registry& reg, field_ref output);
+    void submit_rhs_graph(const sim_registry& creg, field_ref input,
+                          sim_registry& reg, field_ref output, real time);
     void update_boundary(sim_registry& reg, field_ref ref, real time);
     system_stats stats(const sim_registry& reg, field_ref u0,
                        field_ref u1, const step_controller&) const;

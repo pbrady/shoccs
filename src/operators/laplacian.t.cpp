@@ -262,6 +262,78 @@ TEST_CASE("E2_2 Domain")
     }
 }
 
+TEST_CASE("laplacian graph matches eager")
+{
+    const auto extents = int3{5, 6, 7};
+    auto m = mesh{index_extents{extents},
+                  domain_extents{.min = {0.1, 0.2, 0.3}, .max = {1, 2, 2.2}}};
+    const auto objectBcs = bcs::Object{};
+    auto u = eval_at_mesh(m, f2);
+
+    SECTION("non-Neumann DDFFFD")
+    {
+        const auto gridBcs = bcs::Grid{bcs::dd, bcs::ff, bcs::fd};
+
+        auto lap = laplacian{m, stencils::second::E2, gridBcs, objectBcs};
+
+        // Eager
+        auto du_eager = make_scalar(m);
+        scalar_span du_sp_eager = du_eager;
+        du_sp_eager = lap(u);
+
+        // Graph
+        auto du_graph = make_scalar(m);
+        scalar_span du_sp_graph = du_graph;
+        lap.build_graph(u, du_sp_graph);
+        lap.submit_graph();
+
+        REQUIRE_THAT(du_graph.d_vec, Approx(du_eager.d_vec));
+    }
+
+    SECTION("Neumann DDFFND")
+    {
+        const auto gridBcs = bcs::Grid{bcs::dd, bcs::ff, bcs::nd};
+        auto nu = eval_at_mesh(m, f2_dz);
+
+        auto lap = laplacian{m, stencils::second::E2, gridBcs, objectBcs};
+
+        // Eager
+        auto du_eager = make_scalar(m);
+        scalar_span du_sp_eager = du_eager;
+        du_sp_eager = lap(u, nu);
+
+        // Graph
+        auto du_graph = make_scalar(m);
+        scalar_span du_sp_graph = du_graph;
+        lap.build_graph(u, nu, du_sp_graph);
+        lap.submit_graph();
+
+        REQUIRE_THAT(du_graph.d_vec, Approx(du_eager.d_vec));
+    }
+
+    SECTION("graph resubmit produces same result")
+    {
+        const auto gridBcs = bcs::Grid{bcs::dd, bcs::ff, bcs::fd};
+
+        auto lap = laplacian{m, stencils::second::E2, gridBcs, objectBcs};
+
+        auto du_graph = make_scalar(m);
+        scalar_span du_sp = du_graph;
+        lap.build_graph(u, du_sp);
+        lap.submit_graph();
+        auto first = du_graph.d_vec;
+
+        // Zero and resubmit — same result expected
+        std::ranges::fill(du_graph.d_vec, 0.0);
+        std::ranges::fill(du_graph.rx_vec, 0.0);
+        std::ranges::fill(du_graph.ry_vec, 0.0);
+        std::ranges::fill(du_graph.rz_vec, 0.0);
+        lap.submit_graph();
+
+        REQUIRE_THAT(du_graph.d_vec, Approx(first));
+    }
+}
+
 TEST_CASE("E2 with Dirichlet Objects")
 {
     sol::state lua;

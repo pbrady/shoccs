@@ -6,6 +6,8 @@
 #include "temporal/step_controller.hpp"
 #include "types.hpp"
 
+#include <Kokkos_Graph.hpp>
+#include <optional>
 #include <sol/forward.hpp>
 
 namespace ccs::systems
@@ -39,6 +41,9 @@ class scalar_wave
     logs logger;
     std::vector<std::string> io_names = {"U", "Error"};
 
+    // Pre-built graph for submit_rhs_graph().
+    std::optional<Kokkos::Experimental::Graph<execution_space>> rhs_graph_;
+
 public:
     scalar_wave() = default;
 
@@ -63,6 +68,8 @@ public:
 
     void rhs(const sim_registry& reg, field_ref input,
              sim_registry& out_reg, field_ref output, real time);
+    void build_rhs_graph(scalar_view u, scalar_span du);
+    void submit_rhs_graph();
     void update_boundary(sim_registry& reg, field_ref ref, real time);
     real timestep_size(const sim_registry& reg, field_ref ref,
                        const step_controller&) const;

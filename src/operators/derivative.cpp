@@ -499,6 +499,7 @@ void derivative::operator()(scalar_view u, scalar_span du, Op op) const
     default:
         B(u.Rz, du.D);
     }
+    Kokkos::fence("derivative::operator() complete");
 }
 
 template <typename Op>
@@ -507,6 +508,83 @@ void derivative::operator()(scalar_view u, scalar_view nu, scalar_span du, Op op
 {
     (*this)(u, du, op);
     N(nu.D, du.D);
+    Kokkos::fence("derivative::operator() with Neumann complete");
+}
+
+template <typename Op>
+    requires std::invocable<Op, real&, real>
+void derivative::build_graph(scalar_view u, scalar_span du, Op op)
+{
+    const real* u_D = u.D.data();
+    const real* u_Rx = u.Rx.data();
+    const real* u_Ry = u.Ry.data();
+    const real* u_Rz = u.Rz.data();
+    real* du_D = du.D.data();
+    real* du_Rx = du.Rx.data();
+    real* du_Ry = du.Ry.data();
+    real* du_Rz = du.Rz.data();
+    const real* b_src = (dir == 0) ? u_Rx : (dir == 1) ? u_Ry : u_Rz;
+
+    graph_ = Kokkos::Experimental::create_graph(
+        execution_space{}, [&](auto root) {
+            // R-space chains (3 independent pairs)
+            auto bfx = Bfx.graph_node(root, u_D, du_Rx);
+            Brx.graph_node(bfx, u_Rx, du_Rx);
+
+            auto bfy = Bfy.graph_node(root, u_D, du_Ry);
+            Bry.graph_node(bfy, u_Ry, du_Ry);
+
+            auto bfz = Bfz.graph_node(root, u_D, du_Rz);
+            Brz.graph_node(bfz, u_Rz, du_Rz);
+
+            // D-space chain
+            auto o = O.graph_node(root, u_D, du_D, op);
+            B.graph_node(o, b_src, du_D);
+        });
+
+    graph_->instantiate();
+}
+
+template <typename Op>
+    requires std::invocable<Op, real&, real>
+void derivative::build_graph(scalar_view u, scalar_view nu, scalar_span du, Op op)
+{
+    const real* u_D = u.D.data();
+    const real* u_Rx = u.Rx.data();
+    const real* u_Ry = u.Ry.data();
+    const real* u_Rz = u.Rz.data();
+    const real* nu_D = nu.D.data();
+    real* du_D = du.D.data();
+    real* du_Rx = du.Rx.data();
+    real* du_Ry = du.Ry.data();
+    real* du_Rz = du.Rz.data();
+    const real* b_src = (dir == 0) ? u_Rx : (dir == 1) ? u_Ry : u_Rz;
+
+    graph_ = Kokkos::Experimental::create_graph(
+        execution_space{}, [&](auto root) {
+            // R-space chains (3 independent pairs)
+            auto bfx = Bfx.graph_node(root, u_D, du_Rx);
+            Brx.graph_node(bfx, u_Rx, du_Rx);
+
+            auto bfy = Bfy.graph_node(root, u_D, du_Ry);
+            Bry.graph_node(bfy, u_Ry, du_Ry);
+
+            auto bfz = Bfz.graph_node(root, u_D, du_Rz);
+            Brz.graph_node(bfz, u_Rz, du_Rz);
+
+            // D-space chain with Neumann
+            auto o = O.graph_node(root, u_D, du_D, op);
+            auto b = B.graph_node(o, b_src, du_D);
+            N.graph_node(b, nu_D, du_D);
+        });
+
+    graph_->instantiate();
+}
+
+void derivative::submit_graph()
+{
+    graph_->submit();
+    Kokkos::fence("derivative::submit_graph() complete");
 }
 
 template void derivative::operator()<eq_t>(scalar_view, scalar_span, eq_t) const;
@@ -519,5 +597,10 @@ derivative::operator()<eq_t>(scalar_view, scalar_view, scalar_span, eq_t) const;
 
 template void
 derivative::operator()<plus_eq_t>(scalar_view, scalar_view, scalar_span, plus_eq_t) const;
+
+template void derivative::build_graph<eq_t>(scalar_view, scalar_span, eq_t);
+template void derivative::build_graph<plus_eq_t>(scalar_view, scalar_span, plus_eq_t);
+template void derivative::build_graph<eq_t>(scalar_view, scalar_view, scalar_span, eq_t);
+template void derivative::build_graph<plus_eq_t>(scalar_view, scalar_view, scalar_span, plus_eq_t);
 
 } // namespace ccs

@@ -280,6 +280,94 @@ void scalar_wave::rhs(const sim_registry& reg, field_ref input,
     dot_spans(u_rhs.Rz, gGx.Rz, dux.Rz, gGy.Rz, duy.Rz, gGz.Rz, duz.Rz);
 }
 
+void scalar_wave::build_rhs_graph(scalar_view u, scalar_span du)
+{
+    // Gradient scratch buffers (member data — stable pointers)
+    scalar_span dux{du_xd, du_xrx, du_xry, du_xrz};
+    scalar_span duy{du_yd, du_yrx, du_yry, du_yrz};
+    scalar_span duz{du_zd, du_zrx, du_zry, du_zrz};
+
+    // Wave speed coefficients (member data — stable pointers)
+    const real* gx_d = gG_xd.data();
+    const real* gy_d = gG_yd.data();
+    const real* gz_d = gG_zd.data();
+    const real* gx_rx = gG_xrx.data();
+    const real* gy_rx = gG_yrx.data();
+    const real* gz_rx = gG_zrx.data();
+    const real* gx_ry = gG_xry.data();
+    const real* gy_ry = gG_yry.data();
+    const real* gz_ry = gG_zry.data();
+    const real* gx_rz = gG_xrz.data();
+    const real* gy_rz = gG_yrz.data();
+    const real* gz_rz = gG_zrz.data();
+
+    // Gradient scratch pointers
+    const real* dux_d = du_xd.data();
+    const real* duy_d = du_yd.data();
+    const real* duz_d = du_zd.data();
+    const real* dux_rx = du_xrx.data();
+    const real* duy_rx = du_yrx.data();
+    const real* duz_rx = du_zrx.data();
+    const real* dux_ry = du_xry.data();
+    const real* duy_ry = du_yry.data();
+    const real* duz_ry = du_zry.data();
+    const real* dux_rz = du_xrz.data();
+    const real* duy_rz = du_yrz.data();
+    const real* duz_rz = du_zrz.data();
+
+    // Output pointers and sizes
+    real* d_ptr = du.D.data();
+    real* rx_ptr = du.Rx.data();
+    real* ry_ptr = du.Ry.data();
+    real* rz_ptr = du.Rz.data();
+    const int n_d = static_cast<int>(du.D.size());
+    const int n_rx = static_cast<int>(du.Rx.size());
+    const int n_ry = static_cast<int>(du.Ry.size());
+    const int n_rz = static_cast<int>(du.Rz.size());
+
+    rhs_graph_ = Kokkos::Experimental::create_graph(
+        execution_space{}, [&](auto root) {
+            using rp_t = Kokkos::RangePolicy<execution_space>;
+
+            // 1. Gradient: zeros scratch, then dx/dy/dz in parallel
+            auto grad_done = grad.add_graph_nodes(root, u, dux, duy, duz);
+
+            // 2. Dot product: du[i] = gGx[i]*dux[i] + gGy[i]*duy[i] + gGz[i]*duz[i]
+            grad_done.then_parallel_for(
+                "sw_dot_D", rp_t(0, n_d),
+                KOKKOS_LAMBDA(int i) {
+                    d_ptr[i] = gx_d[i] * dux_d[i] + gy_d[i] * duy_d[i] +
+                               gz_d[i] * duz_d[i];
+                });
+            grad_done.then_parallel_for(
+                "sw_dot_Rx", rp_t(0, n_rx),
+                KOKKOS_LAMBDA(int i) {
+                    rx_ptr[i] = gx_rx[i] * dux_rx[i] + gy_rx[i] * duy_rx[i] +
+                                gz_rx[i] * duz_rx[i];
+                });
+            grad_done.then_parallel_for(
+                "sw_dot_Ry", rp_t(0, n_ry),
+                KOKKOS_LAMBDA(int i) {
+                    ry_ptr[i] = gx_ry[i] * dux_ry[i] + gy_ry[i] * duy_ry[i] +
+                                gz_ry[i] * duz_ry[i];
+                });
+            grad_done.then_parallel_for(
+                "sw_dot_Rz", rp_t(0, n_rz),
+                KOKKOS_LAMBDA(int i) {
+                    rz_ptr[i] = gx_rz[i] * dux_rz[i] + gy_rz[i] * duy_rz[i] +
+                                gz_rz[i] * duz_rz[i];
+                });
+        });
+
+    rhs_graph_->instantiate();
+}
+
+void scalar_wave::submit_rhs_graph()
+{
+    rhs_graph_->submit();
+    Kokkos::fence("scalar_wave::submit_rhs_graph() complete");
+}
+
 void scalar_wave::update_boundary(sim_registry& reg, field_ref ref, real time)
 {
     constexpr auto sh = scalar_handle{0};

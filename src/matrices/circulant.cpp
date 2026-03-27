@@ -10,8 +10,12 @@ namespace ccs::matrix
 
 circulant::circulant(integer rows, std::span<const real> coeffs)
     : matrix_base{rows, rows + (integer)coeffs.size() - 1, (integer)coeffs.size() / 2},
-      v{coeffs}
+      v_d("circulant_coeffs", coeffs.size())
 {
+    auto h_view = Kokkos::View<const real*, Kokkos::HostSpace,
+                               Kokkos::MemoryTraits<Kokkos::Unmanaged>>(
+        coeffs.data(), coeffs.size());
+    Kokkos::deep_copy(v_d, h_view);
 }
 
 circulant::circulant(integer rows,
@@ -19,8 +23,12 @@ circulant::circulant(integer rows,
                      integer stride,
                      std::span<const real> coeffs)
     : matrix_base{rows, rows + (integer)coeffs.size() - 1, row_offset, -1, stride},
-      v{coeffs}
+      v_d("circulant_coeffs", coeffs.size())
 {
+    auto h_view = Kokkos::View<const real*, Kokkos::HostSpace,
+                               Kokkos::MemoryTraits<Kokkos::Unmanaged>>(
+        coeffs.data(), coeffs.size());
+    Kokkos::deep_copy(v_d, h_view);
 }
 
 template <typename Op>
@@ -35,51 +43,27 @@ void circulant::operator()(std::span<const real> x, std::span<real> b, Op op) co
     b = b.subspan(row_offset());
 
     const auto nr = rows();
-    const auto* vp = v.data();
-    const auto vs = static_cast<integer>(v.size());
+    const auto* vp = v_d.data();
+    const auto vs = static_cast<integer>(v_d.extent(0));
     const auto* xp = x.data();
     auto* bp = b.data();
 
-    // Kokkos forbids nested parallel_for. When circulant is called from within
-    // block::operator()'s parallel_for, fall back to serial loops. The outer
-    // block-level parallelism still provides the main performance benefit.
-    // Standalone calls (not nested) use parallel_for over rows.
-    const bool nested = execution_space::in_parallel();
-
     if (st == 1) {
-        if (nested) {
-            for (integer i = 0; i < nr; i++) {
+        Kokkos::parallel_for(
+            Kokkos::RangePolicy<execution_space>(0, nr),
+            [=](int i) {
                 auto dot = std::inner_product(vp, vp + vs, xp + i, 0.0);
                 op(bp[i], dot);
-            }
-        } else {
-            Kokkos::parallel_for(
-                Kokkos::RangePolicy<execution_space>(0, nr),
-                [=](int i) {
-                    auto dot = std::inner_product(vp, vp + vs, xp + i, 0.0);
-                    op(bp[i], dot);
-                });
-            Kokkos::fence();
-        }
+            });
     } else {
-        if (nested) {
-            for (integer i = 0; i < nr; i++) {
+        Kokkos::parallel_for(
+            Kokkos::RangePolicy<execution_space>(0, nr),
+            [=](int i) {
                 real dot = 0.0;
                 for (integer j = 0; j < vs; j++)
                     dot += vp[j] * xp[(i + j) * st];
                 op(bp[i * st], dot);
-            }
-        } else {
-            Kokkos::parallel_for(
-                Kokkos::RangePolicy<execution_space>(0, nr),
-                [=](int i) {
-                    real dot = 0.0;
-                    for (integer j = 0; j < vs; j++)
-                        dot += vp[j] * xp[(i + j) * st];
-                    op(bp[i * st], dot);
-                });
-            Kokkos::fence();
-        }
+            });
     }
 }
 

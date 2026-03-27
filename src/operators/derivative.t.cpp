@@ -420,6 +420,98 @@ TEST_CASE("Identity with Objects")
     REQUIRE_THAT(du_x.d_vec, Approx(du_z.d_vec));
 }
 
+TEST_CASE("graph matches eager")
+{
+    const auto extents = int3{5, 7, 6};
+    auto m = mesh{index_extents{extents},
+                  domain_extents{.min = {-1, -1, 0}, .max = {1, 2, 2.2}}};
+
+    const auto gridBcs = bcs::Grid{bcs::ff, bcs::ff, bcs::ff};
+    const auto objectBcs = bcs::Object{};
+
+    randomize();
+    auto u = make_scalar(m);
+    std::ranges::generate(u.d_vec, g);
+
+    SECTION("Identity non-Neumann eq")
+    {
+        for (int i = 0; i < 3; i++) {
+            auto d = derivative{i, m, stencils::identity, gridBcs, objectBcs};
+
+            auto du_eager = make_scalar(m);
+            d(u, du_eager);
+
+            auto du_graph = make_scalar(m);
+            d.build_graph(u, du_graph);
+            d.submit_graph();
+
+            REQUIRE_THAT(du_graph.d_vec, Approx(du_eager.d_vec));
+            REQUIRE_THAT(du_graph.rx_vec, Approx(du_eager.rx_vec));
+            REQUIRE_THAT(du_graph.ry_vec, Approx(du_eager.ry_vec));
+            REQUIRE_THAT(du_graph.rz_vec, Approx(du_eager.rz_vec));
+        }
+    }
+
+    SECTION("Identity non-Neumann plus_eq")
+    {
+        for (int i = 0; i < 3; i++) {
+            auto d = derivative{i, m, stencils::identity, gridBcs, objectBcs};
+
+            auto du_eager = make_scalar(m);
+            fill_scalar(du_eager, 1.0);
+            d(u, du_eager, plus_eq);
+
+            auto du_graph = make_scalar(m);
+            fill_scalar(du_graph, 1.0);
+            d.build_graph(u, du_graph, plus_eq);
+            d.submit_graph();
+
+            REQUIRE_THAT(du_graph.d_vec, Approx(du_eager.d_vec));
+        }
+    }
+
+    SECTION("graph resubmit produces same result")
+    {
+        auto d = derivative{0, m, stencils::identity, gridBcs, objectBcs};
+
+        auto du_graph = make_scalar(m);
+        d.build_graph(u, du_graph);
+        d.submit_graph();
+        auto first = du_graph.d_vec;
+
+        fill_scalar(du_graph, 0.0);
+        d.submit_graph();
+
+        REQUIRE_THAT(du_graph.d_vec, Approx(first));
+    }
+}
+
+TEST_CASE("graph matches eager with Neumann")
+{
+    const auto extents = int3{10, 13, 17};
+    auto m = mesh{index_extents{extents},
+                  domain_extents{.min = {0.1, 0.2, 0.3}, .max = {1, 2, 2.2}}};
+
+    const auto objectBcs = bcs::Object{};
+    const auto gridBcs = bcs::Grid{bcs::dd, bcs::ff, bcs::nn};
+
+    auto u = eval_at_mesh(m, f2);
+    auto nu = eval_at_mesh(m, f2_dz);
+
+    auto d = derivative(2, m, stencils::second::E2, gridBcs, objectBcs);
+
+    auto du_eager = make_scalar(m);
+    d(u, nu, du_eager);
+
+    auto du_graph = make_scalar(m);
+    d.build_graph(u, nu, du_graph);
+    d.submit_graph();
+
+    add_offset(du_eager, 1.0);
+    add_offset(du_graph, 1.0);
+    REQUIRE_THAT(du_graph.d_vec, Approx(du_eager.d_vec));
+}
+
 TEST_CASE("E2 with Objects")
 {
     const auto extents = int3{25, 26, 27};

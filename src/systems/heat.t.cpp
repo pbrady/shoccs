@@ -728,3 +728,147 @@ TEST_CASE("heat - eval_at_locations parallel path (gaussian MMS)")
         REQUIRE(u.Rz[i] <= 1.0 + 1e-10);
     }
 }
+
+// 17d.5c: Verify graph-based RHS matches eager RHS for heat system.
+// Uses the E2 setup with Dirichlet + Neumann grid BCs and a Dirichlet object,
+// exercising all graph branches: laplacian, diffusivity scaling, source scatter,
+// and BC fill (both grid Dirichlet and object Dirichlet).
+TEST_CASE("heat - graph matches eager")
+{
+    sol::state lua;
+    lua.open_libraries(sol::lib::base, sol::lib::math);
+    lua.script(R"(
+        simulation = {
+            mesh = {
+                index_extents = {21, 22, 23},
+                domain_bounds = {
+                    min = {1, 1.1, 0.3},
+                    max = {3, 3.3, 2.2}
+                }
+            },
+            domain_boundaries = {
+                xmin = "dirichlet",
+                ymin = "neumann",
+                ymax = "neumann",
+                zmax = "dirichlet"
+            },
+            shapes = {
+                {
+                    type = "sphere",
+                    center = {2.0001, 2.5656565, 1.313131311},
+                    radius = 0.25,
+                    boundary_condition = "dirichlet"
+                }
+            },
+            scheme = {
+                order = 2,
+                type = "E2"
+            },
+            system = {
+                type = "heat",
+                diffusivity = 0.1
+            },
+            manufactured_solution = {
+                type = "lua",
+                call = function(time, loc)
+                    local x, y, z = loc[1], loc[2], loc[3]
+                    return (math.sin(time) +
+                        x * x * (y + z) + y * y * (x + z) + z * z * (x + y) +
+                        3 * x * y * z + x + y + z)
+                end,
+                ddt = function(time, loc)
+                    return math.cos(time)
+                end,
+                grad = function(time, loc)
+                    local x, y, z = loc[1], loc[2], loc[3]
+                    return 2. * x * (y + z) + y * y + z * z + 3. * y * z + 1,
+                            x * x + 2. * y * (x + z) + z * z + 3. * x * z + 1,
+                            x * x + y * y + 2. * z * (x + y) + 3. * x * y + 1
+                end,
+                lap = function(time, loc)
+                    local x, y, z = loc[1], loc[2], loc[3]
+                    return 2. * (y + z) + 2. * (x + z) + 2. * (x + y)
+                end,
+                div = function(time, loc)
+                    return 0.0
+                end
+            }
+        }
+    )");
+
+    auto heat_opt = systems::heat::from_lua(lua["simulation"]);
+    REQUIRE(!!heat_opt);
+    auto& h = *heat_opt;
+    step_controller step{};
+
+    auto sz = h.size();
+    sim_registry reg;
+
+    // Allocate 3 slots: u0 (input), rhs_eager, rhs_graph
+    field_ref u0_ref{0}, rhs_ref{1}, rhs2_ref{2};
+    for (int s = 0; s < sz.nscalars; ++s) {
+        u0_ref = reg.allocate_scalar(0, s, sz.d_size, sz.rx_size, sz.ry_size, sz.rz_size);
+        rhs_ref = reg.allocate_scalar(1, s, sz.d_size, sz.rx_size, sz.ry_size, sz.rz_size);
+        rhs2_ref = reg.allocate_scalar(2, s, sz.d_size, sz.rx_size, sz.ry_size, sz.rz_size);
+    }
+
+    h.initialize(reg, u0_ref, step);
+    h.update_boundary(reg, u0_ref, (real)step);
+
+    // Eager path
+    h.rhs(reg, u0_ref, reg, rhs_ref, (real)step);
+    constexpr auto sh = scalar_handle{0};
+    auto eager = extract_scalar_span(reg, rhs_ref, sh);
+
+    // Save eager results
+    std::vector<real> exp_d(eager.D.begin(), eager.D.end());
+    std::vector<real> exp_rx(eager.Rx.begin(), eager.Rx.end());
+    std::vector<real> exp_ry(eager.Ry.begin(), eager.Ry.end());
+    std::vector<real> exp_rz(eager.Rz.begin(), eager.Rz.end());
+
+    // Graph path
+    auto u = extract_scalar_view(reg, u0_ref, sh);
+    auto du = extract_scalar_span(reg, rhs2_ref, sh);
+
+    h.fill_source((real)step);
+    h.build_rhs_graph(u, du);
+    h.submit_rhs_graph();
+
+    // Compare all 4 buffers
+    for (int i = 0; i < sz.d_size; ++i) {
+        INFO("D[" << i << "]");
+        REQUIRE(du.D[i] == Catch::Approx(exp_d[i]));
+    }
+    for (int i = 0; i < sz.rx_size; ++i) {
+        INFO("Rx[" << i << "]");
+        REQUIRE(du.Rx[i] == Catch::Approx(exp_rx[i]));
+    }
+    for (int i = 0; i < sz.ry_size; ++i) {
+        INFO("Ry[" << i << "]");
+        REQUIRE(du.Ry[i] == Catch::Approx(exp_ry[i]));
+    }
+    for (int i = 0; i < sz.rz_size; ++i) {
+        INFO("Rz[" << i << "]");
+        REQUIRE(du.Rz[i] == Catch::Approx(exp_rz[i]));
+    }
+
+    SECTION("resubmit produces same result") {
+        // Zero graph output, refill source, resubmit
+        std::ranges::fill(du.D, 0.0);
+        std::ranges::fill(du.Rx, 0.0);
+        std::ranges::fill(du.Ry, 0.0);
+        std::ranges::fill(du.Rz, 0.0);
+
+        h.fill_source((real)step);
+        h.submit_rhs_graph();
+
+        for (int i = 0; i < sz.d_size; ++i) {
+            INFO("D[" << i << "] resubmit");
+            REQUIRE(du.D[i] == Catch::Approx(exp_d[i]));
+        }
+        for (int i = 0; i < sz.rx_size; ++i) {
+            INFO("Rx[" << i << "] resubmit");
+            REQUIRE(du.Rx[i] == Catch::Approx(exp_rx[i]));
+        }
+    }
+}

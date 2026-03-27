@@ -3,6 +3,10 @@
 #include "common.hpp"
 #include "matrix_visitor.hpp"
 
+#include "kokkos_types.hpp"
+
+#include <Kokkos_Graph.hpp>
+
 #include <compare>
 #include <ranges>
 #include <vector>
@@ -37,6 +41,24 @@ public:
     integer size() const { return (integer)w.size(); }
 
     void operator()(std::span<const real> x, std::span<real> b) const;
+
+    // Chain a RangePolicy graph node that performs the CSR matvec (always +=).
+    // For 0-row matrices, the node executes zero iterations.
+    template <typename NodeType>
+    auto graph_node(NodeType parent, const real* x_ptr, real* b_ptr) const
+    {
+        const auto nr = rows();
+        const auto* wp = w.data();
+        const auto* vp = v.data();
+        const auto* up = u.data();
+        return parent.then_parallel_for(
+            "csr_matvec",
+            Kokkos::RangePolicy<execution_space>(0, nr),
+            KOKKOS_LAMBDA(integer row) {
+                for (integer i = up[row]; i < up[row + 1]; i++)
+                    b_ptr[row] += wp[i] * x_ptr[vp[i]];
+            });
+    }
 
     struct builder;
 

@@ -128,6 +128,9 @@ TEST_CASE("rk4 registry-based step")
     // Get timestep
     const real dt = *sys.timestep_size(reg, u0_ref, step);
 
+    // Build RHS graph (u1 is the RHS input slot, srhs is the RHS output slot)
+    sys.build_rhs_graph(reg, u1_ref, reg, srhs_ref);
+
     // Perform one rk4 step using the registry-based interface
     integrators::rk4 rk4_integrator;
     rk4_integrator(sys, reg, u0_ref, u1_ref, rk_ref, srhs_ref, step, dt);

@@ -25,7 +25,7 @@ void rk4::operator()(system& sys, sim_registry& reg,
             slot_assign_lc(reg, output, u0, dt * rki[i], system_rhs_ref);
             sys.update_boundary(reg, output, time + dt * rki[i]);
         }
-        sys.rhs(reg, output, reg, system_rhs_ref, time + dt * rki[i]);
+        sys.submit_rhs_graph(reg, output, reg, system_rhs_ref, time + dt * rki[i]);
         slot_accumulate(reg, rk_rhs_ref, dt * rkf[i], system_rhs_ref);
     }
 

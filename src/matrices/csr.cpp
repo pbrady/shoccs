@@ -48,7 +48,6 @@ void csr::operator()(std::span<const real> x, std::span<real> b) const
             for (integer i = u_ptr[row]; i < u_ptr[row + 1]; i++)
                 b_ptr[row] += w_ptr[i] * x_ptr[v_ptr[i]];
         });
-    Kokkos::fence();
 }
 
 std::span<const integer> csr::column_indices(integer row) const

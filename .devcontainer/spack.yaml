@@ -21,7 +21,7 @@ spack:
     - boost
     - lapackpp
     # Kokkos (parallel execution framework)
-    - kokkos cxxstd=20 +serial +openmp
+    - "kokkos@5.0: cxxstd=20 +serial +openmp"
     - "cmake@3.24:"
     - ninja
 

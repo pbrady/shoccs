@@ -98,6 +98,8 @@ heat::heat(mesh&& m,
       diffusivity{diffusivity},
       neumann_d(this->m.size()), neumann_rx(this->m.Rx().size()),
       neumann_ry(this->m.Ry().size()), neumann_rz(this->m.Rz().size()),
+      src_d(this->m.size()), src_rx(this->m.Rx().size()),
+      src_ry(this->m.Ry().size()), src_rz(this->m.Rz().size()),
       error_d(this->m.size()), error_rx(this->m.Rx().size()),
       error_ry(this->m.Ry().size()), error_rz(this->m.Rz().size()),
       logger{build_logger, "system", "system.csv"}
@@ -169,8 +171,16 @@ system_size heat::size() const
     return {1, 0, m.size(), (integer)m.Rx().size(), (integer)m.Ry().size(), (integer)m.Rz().size()};
 }
 
+void heat::fill_source(real time)
+{
+    scalar_span src{src_d, src_rx, src_ry, src_rz};
+    eval_at_locations(m, [&](const real3& loc) {
+        return m_sol.ddt(time, loc) - diffusivity * m_sol.laplacian(time, loc);
+    }, src, m_sol.is_thread_safe());
+}
+
 void heat::rhs(const sim_registry& reg, field_ref input,
-               sim_registry& out_reg, field_ref output, real time) const
+               sim_registry& out_reg, field_ref output, real time)
 {
     constexpr auto sh = scalar_handle{0};
     auto u = extract_scalar_view(reg, input, sh);
@@ -181,15 +191,9 @@ void heat::rhs(const sim_registry& reg, field_ref input,
     times_assign_scalar(out_reg, output, sh, diffusivity);
 
     if (m_sol) {
-        // Evaluate source expression at all mesh locations
-        std::vector<real> src_d(m.size());
-        std::vector<real> src_rx(m.Rx().size());
-        std::vector<real> src_ry(m.Ry().size());
-        std::vector<real> src_rz(m.Rz().size());
+        // Evaluate source expression into member buffers
+        fill_source(time);
         scalar_span src{src_d, src_rx, src_ry, src_rz};
-        eval_at_locations(m, [&](const real3& loc) {
-            return m_sol.ddt(time, loc) - diffusivity * m_sol.laplacian(time, loc);
-        }, src, m_sol.is_thread_safe());
 
         // Shared destination pointers
         real* rhs_D = out_reg.data(output, sh.D());
@@ -217,6 +221,138 @@ void heat::rhs(const sim_registry& reg, field_ref input,
             fill_selected(out_reg.data(output, R[dir]), gd, 0.0);
         }
     }
+}
+
+void heat::build_rhs_graph(scalar_view u, scalar_span du)
+{
+    scalar_view nu{neumann_d, neumann_rx, neumann_ry, neumann_rz};
+    const real k = diffusivity;
+
+    // Extract du pointers and sizes for graph node lambdas
+    real* d_ptr = du.D.data();
+    real* rx_ptr = du.Rx.data();
+    real* ry_ptr = du.Ry.data();
+    real* rz_ptr = du.Rz.data();
+    const int n_d = static_cast<int>(du.D.size());
+    const int n_rx = static_cast<int>(du.Rx.size());
+    const int n_ry = static_cast<int>(du.Ry.size());
+    const int n_rz = static_cast<int>(du.Rz.size());
+
+    // Pre-compute source pointers (stable member data)
+    real* src_d_ptr = src_d.data();
+    real* src_rx_ptr = src_rx.data();
+    real* src_ry_ptr = src_ry.data();
+    real* src_rz_ptr = src_rz.data();
+
+    // Pre-compute descriptors for source scatter and BC fill
+    gather_selection fluid = m.fluid_desc();
+    gather_selection nd_rx = m.non_dirichlet_object_desc(0, object_bcs);
+    gather_selection nd_ry = m.non_dirichlet_object_desc(1, object_bcs);
+    gather_selection nd_rz = m.non_dirichlet_object_desc(2, object_bcs);
+
+    // Flatten all Dirichlet grid face indices into a single gather_selection
+    gather_selection dir_d;
+    {
+        std::vector<int> indices;
+        for_each_grid_bc_desc<bcs::Dirichlet>(grid_bcs, m.extents(), [&](auto desc) {
+            for (int i = 0; i < desc.count(); ++i)
+                indices.push_back(desc.element(i));
+        });
+        Kokkos::View<int*, memory_space> idx("dir_d_idx", indices.size());
+        auto h = Kokkos::create_mirror_view(idx);
+        for (size_t i = 0; i < indices.size(); ++i)
+            h(i) = indices[i];
+        Kokkos::deep_copy(idx, h);
+        dir_d = gather_selection{idx};
+    }
+
+    gather_selection dir_rx = m.dirichlet_object_desc(0, object_bcs);
+    gather_selection dir_ry = m.dirichlet_object_desc(1, object_bcs);
+    gather_selection dir_rz = m.dirichlet_object_desc(2, object_bcs);
+
+    bool has_sol = !!m_sol;
+
+    rhs_graph_ = Kokkos::Experimental::create_graph(
+        execution_space{}, [&](auto root) {
+            using rp_t = Kokkos::RangePolicy<execution_space>;
+
+            // 1. Laplacian: zeros du, then accumulates dx + dy + dz with Neumann
+            auto lap_done = lap.add_graph_nodes(root, u, nu, du);
+
+            // 2. Scale all 4 buffers by diffusivity
+            auto s_d = lap_done.then_parallel_for(
+                "heat_scale_D", rp_t(0, n_d),
+                KOKKOS_LAMBDA(int i) { d_ptr[i] *= k; });
+            auto s_rx = lap_done.then_parallel_for(
+                "heat_scale_Rx", rp_t(0, n_rx),
+                KOKKOS_LAMBDA(int i) { rx_ptr[i] *= k; });
+            auto s_ry = lap_done.then_parallel_for(
+                "heat_scale_Ry", rp_t(0, n_ry),
+                KOKKOS_LAMBDA(int i) { ry_ptr[i] *= k; });
+            auto s_rz = lap_done.then_parallel_for(
+                "heat_scale_Rz", rp_t(0, n_rz),
+                KOKKOS_LAMBDA(int i) { rz_ptr[i] *= k; });
+
+            if (!has_sol) return;
+
+            // 3. Source scatter: plus_assign at selected indices
+            auto src_d_node = s_d.then_parallel_for(
+                "heat_src_D", rp_t(0, fluid.count()),
+                KOKKOS_LAMBDA(int i) {
+                    int idx = fluid.element(i);
+                    d_ptr[idx] += src_d_ptr[idx];
+                });
+            auto src_rx_node = s_rx.then_parallel_for(
+                "heat_src_Rx", rp_t(0, nd_rx.count()),
+                KOKKOS_LAMBDA(int i) {
+                    int idx = nd_rx.element(i);
+                    rx_ptr[idx] += src_rx_ptr[idx];
+                });
+            auto src_ry_node = s_ry.then_parallel_for(
+                "heat_src_Ry", rp_t(0, nd_ry.count()),
+                KOKKOS_LAMBDA(int i) {
+                    int idx = nd_ry.element(i);
+                    ry_ptr[idx] += src_ry_ptr[idx];
+                });
+            auto src_rz_node = s_rz.then_parallel_for(
+                "heat_src_Rz", rp_t(0, nd_rz.count()),
+                KOKKOS_LAMBDA(int i) {
+                    int idx = nd_rz.element(i);
+                    rz_ptr[idx] += src_rz_ptr[idx];
+                });
+
+            // 4. BC fill: zero Dirichlet indices
+            // D: grid Dirichlet faces
+            if (dir_d.count() > 0) {
+                src_d_node.then_parallel_for(
+                    "heat_fill_dir_D", rp_t(0, dir_d.count()),
+                    KOKKOS_LAMBDA(int i) { d_ptr[dir_d.element(i)] = 0; });
+            }
+            // Rx/Ry/Rz: object Dirichlet
+            if (dir_rx.count() > 0) {
+                src_rx_node.then_parallel_for(
+                    "heat_fill_dir_Rx", rp_t(0, dir_rx.count()),
+                    KOKKOS_LAMBDA(int i) { rx_ptr[dir_rx.element(i)] = 0; });
+            }
+            if (dir_ry.count() > 0) {
+                src_ry_node.then_parallel_for(
+                    "heat_fill_dir_Ry", rp_t(0, dir_ry.count()),
+                    KOKKOS_LAMBDA(int i) { ry_ptr[dir_ry.element(i)] = 0; });
+            }
+            if (dir_rz.count() > 0) {
+                src_rz_node.then_parallel_for(
+                    "heat_fill_dir_Rz", rp_t(0, dir_rz.count()),
+                    KOKKOS_LAMBDA(int i) { rz_ptr[dir_rz.element(i)] = 0; });
+            }
+        });
+
+    rhs_graph_->instantiate();
+}
+
+void heat::submit_rhs_graph()
+{
+    rhs_graph_->submit();
+    Kokkos::fence("heat::submit_rhs_graph() complete");
 }
 
 void heat::update_boundary(sim_registry& reg, field_ref ref, real time)

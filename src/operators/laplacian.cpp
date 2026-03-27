@@ -54,4 +54,26 @@ std::function<void(scalar_span)> laplacian::operator()(scalar_view u,
         if (ex[2] > 1) dz(u, nu, du, plus_eq);
     };
 }
+void laplacian::build_graph(scalar_view u, scalar_span du)
+{
+    graph_ = Kokkos::Experimental::create_graph(
+        execution_space{}, [&](auto root) { add_graph_nodes(root, u, du); });
+
+    graph_->instantiate();
+}
+
+void laplacian::build_graph(scalar_view u, scalar_view nu, scalar_span du)
+{
+    graph_ = Kokkos::Experimental::create_graph(
+        execution_space{}, [&](auto root) { add_graph_nodes(root, u, nu, du); });
+
+    graph_->instantiate();
+}
+
+void laplacian::submit_graph()
+{
+    graph_->submit();
+    Kokkos::fence("laplacian::submit_graph() complete");
+}
+
 } // namespace ccs
