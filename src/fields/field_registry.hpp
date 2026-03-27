@@ -28,6 +28,18 @@ namespace ccs
 {
 
 // ---------------------------------------------------------------------------
+// system_size: plain sizing token for field allocation.
+// ---------------------------------------------------------------------------
+
+struct system_size {
+    integer nscalars{};
+    integer nvectors{};
+    integer d_size{}, rx_size{}, ry_size{}, rz_size{};
+
+    constexpr friend auto operator<=>(const system_size&, const system_size&) = default;
+};
+
+// ---------------------------------------------------------------------------
 // field_ref: lightweight slot token (trivially copyable, fits in SBO).
 // ---------------------------------------------------------------------------
 
@@ -201,8 +213,7 @@ scalar_span extract_scalar_span(field_registry<MaxSlots, MaxS, MaxV>& reg,
         return {reg.data(ref, bh),
                 static_cast<std::size_t>(reg.size(ref, bh))};
     };
-    return scalar_span{tuple{sp(h.D())},
-                        tuple{sp(h.Rx()), sp(h.Ry()), sp(h.Rz())}};
+    return scalar_span{sp(h.D()), sp(h.Rx()), sp(h.Ry()), sp(h.Rz())};
 }
 
 template <int MaxSlots, int MaxS, int MaxV>
@@ -213,8 +224,7 @@ scalar_view extract_scalar_view(const field_registry<MaxSlots, MaxS, MaxV>& reg,
         return {reg.data(ref, bh),
                 static_cast<std::size_t>(reg.size(ref, bh))};
     };
-    return scalar_view{tuple{sp(h.D())},
-                        tuple{sp(h.Rx()), sp(h.Ry()), sp(h.Rz())}};
+    return scalar_view{sp(h.D()), sp(h.Rx()), sp(h.Ry()), sp(h.Rz())};
 }
 
 // ---------------------------------------------------------------------------

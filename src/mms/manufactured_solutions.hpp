@@ -1,6 +1,6 @@
 #pragma once
 
-#include "fields/tuple_utils.hpp"
+#include "types.hpp"
 #include "io/logging.hpp"
 #include <array>
 #include <cassert>
@@ -163,43 +163,44 @@ public:
             return s->laplacian(time, loc);
         }
 
-        template <TupleLike L>
-        requires ArrayFromTuple<real3, L> real operator()(real time, L&& loc) const
+        template <typename L>
+            requires(!std::same_as<real3, std::remove_cvref_t<L>>)
+        real operator()(real time, L&& loc) const
         {
             assert(s);
-            return (*s)(time, to<real3>(FWD(loc)));
+            return (*s)(time, real3{std::get<0>(loc), std::get<1>(loc), std::get<2>(loc)});
         }
 
-        template <TupleLike L>
-            requires ArrayFromTuple<real3, L> real ddt(real time, L&& loc)
-        const
+        template <typename L>
+            requires(!std::same_as<real3, std::remove_cvref_t<L>>)
+        real ddt(real time, L&& loc) const
         {
             assert(s);
-            return s->ddt(time, to<real3>(FWD(loc)));
+            return s->ddt(time, real3{std::get<0>(loc), std::get<1>(loc), std::get<2>(loc)});
         }
 
-        template <TupleLike L>
-            requires ArrayFromTuple<real3, L> real3 gradient(real time, L&& loc)
-        const
+        template <typename L>
+            requires(!std::same_as<real3, std::remove_cvref_t<L>>)
+        real3 gradient(real time, L&& loc) const
         {
             assert(s);
-            return s->gradient(time, to<real3>(FWD(loc)));
+            return s->gradient(time, real3{std::get<0>(loc), std::get<1>(loc), std::get<2>(loc)});
         }
 
-        template <TupleLike L>
-            requires ArrayFromTuple<real3, L> real divergence(real time, L&& loc)
-        const
+        template <typename L>
+            requires(!std::same_as<real3, std::remove_cvref_t<L>>)
+        real divergence(real time, L&& loc) const
         {
             assert(s);
-            return s->divergence(time, to<real3>(FWD(loc)));
+            return s->divergence(time, real3{std::get<0>(loc), std::get<1>(loc), std::get<2>(loc)});
         }
 
-        template <TupleLike L>
-            requires ArrayFromTuple<real3, L> real laplacian(real time, L&& loc)
-        const
+        template <typename L>
+            requires(!std::same_as<real3, std::remove_cvref_t<L>>)
+        real laplacian(real time, L&& loc) const
         {
             assert(s);
-            return s->laplacian(time, to<real3>(FWD(loc)));
+            return s->laplacian(time, real3{std::get<0>(loc), std::get<1>(loc), std::get<2>(loc)});
         }
 
         auto operator()(real time) const

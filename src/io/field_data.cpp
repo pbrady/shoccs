@@ -6,9 +6,7 @@ namespace ccs
 {
 
 void field_data::write_geom(std::span<const std::string> filenames,
-                            tuple<std::span<const mesh_object_info>,
-                                  std::span<const mesh_object_info>,
-                                  std::span<const mesh_object_info>> t) const
+                            std::array<std::span<const mesh_object_info>, 3> t) const
 {
     auto f = [&]<int I>() {
         auto rng = get<I>(t);
@@ -33,28 +31,28 @@ void field_data::write_geom(std::span<const std::string> filenames,
     f.template operator()<2>();
 }
 
-void field_data::write(field_view f, std::span<const std::string> filenames) const
+void field_data::write(std::span<const scalar_view> scalars,
+                       std::span<const std::string> filenames) const
 {
     unsigned long sz = ix[0] * ix[1] * ix[2] * sizeof(real);
 
-    auto& scalars = f.scalars();
     for (size_t idx = 0; idx < filenames.size(); ++idx) {
         auto& fname = filenames[idx];
         auto& sc = scalars[idx];
         std::ofstream o(fname);
 
-        const real* d = get<si::D>(sc).data();
+        const real* d = sc.D.data();
         o.write(reinterpret_cast<const char*>(d), sz);
 
-        auto g = [&]<int I>(auto&& r) {
-            if (auto&& rng = get<I>(r); rng.size() > 0) {
+        auto write_component = [&](std::span<const real> rng) {
+            if (rng.size() > 0) {
                 d = rng.data();
                 o.write(reinterpret_cast<const char*>(d), rng.size() * sizeof(*d));
             }
         };
-        g.template operator()<0>(sc | sel::R);
-        g.template operator()<1>(sc | sel::R);
-        g.template operator()<2>(sc | sel::R);
+        write_component(sc.Rx);
+        write_component(sc.Ry);
+        write_component(sc.Rz);
     }
 }
 

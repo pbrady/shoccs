@@ -1,6 +1,5 @@
 #pragma once
 
-#include "fields/field.hpp"
 #include "fields/field_registry.hpp"
 #include "io/field_io.hpp"
 #include "operators/divergence.hpp"
@@ -15,8 +14,6 @@ class inviscid_vortex
 {
     // only require one operator
     divergence div;
-
-    field U;
 #if 0
     // required data
     std::vector<real_t> P;

@@ -133,17 +133,7 @@ mesh::mesh(const index_extents& extents,
            const logs& build_logger)
     : cart{extents.extents, bounds.min, bounds.max},
       geometry{shapes, cart},
-      logger{build_logger, "geometry", "geometry.csv"},
-      xmin{sel::xmin(extents)},
-      xmax{sel::xmax(extents)},
-      ymin{sel::ymin(extents)},
-      ymax{sel::ymax(extents)},
-      zmin{sel::zmin(extents)},
-      zmax{sel::zmax(extents)},
-      xyz{cart.domain(), geometry.domain()},
-      vxyz{tuple{tuple{cart.domain(), geometry.domain()},
-                 tuple{cart.domain(), geometry.domain()},
-                 tuple{cart.domain(), geometry.domain()}}}
+      logger{build_logger, "geometry", "geometry.csv"}
 
 {
     init_line<0>(lines_[0], cart.extents(), geometry.R(0));
@@ -153,7 +143,7 @@ mesh::mesh(const index_extents& extents,
     // setup fluid selector
     int i = extents[2] > 1 ? 2 : extents[1] > 1 ? 1 : 0;
     init_slices(fluid_slices, lines_[i], extents);
-    fluid = sel::multi_slice(fluid_slices);
+    fluid_desc_ = make_gather_from_slices(fluid_slices);
 
     logger.set_pattern("%v");
     logger(spdlog::level::info, "Timestamp,direction,ic,psi,x,y,z,i,j,k");

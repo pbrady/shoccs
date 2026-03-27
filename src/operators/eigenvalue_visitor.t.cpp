@@ -5,7 +5,6 @@
 #include <catch2/catch_test_macros.hpp>
 #include <catch2/matchers/catch_matchers_vector.hpp>
 
-#include "fields/tuple_utils.hpp"
 #include "identity_stencil.hpp"
 #include "stencils/stencil.hpp"
 
@@ -55,7 +54,8 @@ TEST_CASE("identity")
     auto v = eigenvalue_visitor{mesh_opt->extents(), B{true, false}, B{}, B{}};
     v.visit(dx);
 
-    auto eigs = to<T>(v.eigenvalues_real());
+    auto er = v.eigenvalues_real();
+    auto eigs = T(er.begin(), er.end());
     REQUIRE(eigs.size() == 10u);
 
     T exact(eigs.size(), 1.0);
@@ -109,7 +109,8 @@ TEST_CASE("e2-poly")
     auto v = eigenvalue_visitor{mesh_opt->extents(), B{true, false}, B{}, B{}};
     v.visit(dx);
 
-    auto eigs = to<T>(v.eigenvalues_real());
+    auto er = v.eigenvalues_real();
+    auto eigs = T(er.begin(), er.end());
     REQUIRE(eigs.size() == 20u);
 
     REQUIRE(std::ranges::max(eigs) == Catch::Approx(0.19628372852526094));

@@ -1,7 +1,6 @@
 #include <catch2/catch_approx.hpp>
 #include <catch2/catch_test_macros.hpp>
 
-#include "fields/tuple_utils.hpp"
 #include "manufactured_solutions.hpp"
 #include "std_matchers.hpp"
 
@@ -197,7 +196,7 @@ TEST_CASE("lua")
 
     sol::protected_function grad = t["grad"];
     std::tuple<real, real, real> res = grad(time, loc);
-    real3 g = to<real3>(res);
+    real3 g{std::get<0>(res), std::get<1>(res), std::get<2>(res)};
     REQUIRE_THAT(ms.gradient(time, loc), Approx(g));
     REQUIRE(ms.laplacian(time, loc) == Catch::Approx(t["lap"](time, loc)));
 }

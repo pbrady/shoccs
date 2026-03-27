@@ -1,7 +1,7 @@
 #pragma once
 
 #include "derivative.hpp"
-#include "fields/vector.hpp"
+#include "fields/scalar.hpp"
 #include "operator_visitor.hpp"
 
 namespace ccs
@@ -23,7 +23,7 @@ public:
              const bcs::Object&,
              const logs& = {});
 
-    std::function<void(vector_span)> operator()(scalar_view) const;
+    std::function<void(scalar_span, scalar_span, scalar_span)> operator()(scalar_view) const;
 
     void visit(operator_visitor& v) const { return v.visit(dx); }
 };

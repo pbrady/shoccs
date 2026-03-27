@@ -1,5 +1,4 @@
 #include "derivative.hpp"
-#include "fields/selector.hpp"
 
 #include <algorithm>
 #include <cassert>
@@ -475,43 +474,39 @@ derivative::derivative(int dir,
 }
 
 template <typename Op>
-    requires(!Scalar<Op>)
+    requires std::invocable<Op, real&, real>
 void derivative::operator()(scalar_view u, scalar_span du, Op op) const
 {
-    using namespace si;
-
     // update points in R
-    Bfx(get<D>(u), get<Rx>(du));
-    Bfy(get<D>(u), get<Ry>(du));
-    Bfz(get<D>(u), get<Rz>(du));
+    Bfx(u.D, du.Rx);
+    Bfy(u.D, du.Ry);
+    Bfz(u.D, du.Rz);
 
-    Brx(get<Rx>(u), get<Rx>(du));
-    Bry(get<Ry>(u), get<Ry>(du));
-    Brz(get<Rz>(u), get<Rz>(du));
+    Brx(u.Rx, du.Rx);
+    Bry(u.Ry, du.Ry);
+    Brz(u.Rz, du.Rz);
 
     // update fluid domain
-    O(get<D>(u), get<D>(du), op);
+    O(u.D, du.D, op);
     // This is ugly
     switch (dir) {
     case 0:
-        B(get<Rx>(u), get<D>(du));
+        B(u.Rx, du.D);
         break;
     case 1:
-        B(get<Ry>(u), get<D>(du));
+        B(u.Ry, du.D);
         break;
     default:
-        B(get<Rz>(u), get<D>(du));
+        B(u.Rz, du.D);
     }
 }
 
 template <typename Op>
-    requires(!Scalar<Op>)
+    requires std::invocable<Op, real&, real>
 void derivative::operator()(scalar_view u, scalar_view nu, scalar_span du, Op op) const
 {
-    using namespace si;
-
     (*this)(u, du, op);
-    N(get<D>(nu), get<D>(du));
+    N(nu.D, du.D);
 }
 
 template void derivative::operator()<eq_t>(scalar_view, scalar_span, eq_t) const;

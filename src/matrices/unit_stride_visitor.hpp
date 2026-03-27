@@ -1,7 +1,6 @@
 #pragma once
 
 #include "common.hpp"
-#include "fields/tuple_fwd.hpp"
 #include "matrix_visitor.hpp"
 
 #include <ranges>

@@ -4,7 +4,6 @@
 #include "indexing.hpp"
 #include "mesh_types.hpp"
 
-#include "fields/tuple.hpp"
 #include "io/logging.hpp"
 
 #include "fields/lazy_views.hpp"
@@ -71,7 +70,7 @@ public:
     constexpr std::span<const real> y() const { return y_; }
     constexpr std::span<const real> z() const { return z_; }
 
-    constexpr auto domain() const { return tuple{ccs::cartesian_product(x(), y(), z())}; }
+    constexpr auto domain() const { return ccs::cartesian_product(x(), y(), z()); }
 
     constexpr real3 h() const { return h_; }
     constexpr real h(int i) const { return h_[i]; }

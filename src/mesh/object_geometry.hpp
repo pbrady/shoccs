@@ -63,7 +63,7 @@ public:
     auto domain() const
     {
         auto t = std::views::transform(&mesh_object_info::position);
-        return tuple{Rx() | t, Ry() | t, Rz() | t};
+        return std::tuple{Rx() | t, Ry() | t, Rz() | t};
     }
 
     // details about points in solid

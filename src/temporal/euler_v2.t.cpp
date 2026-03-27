@@ -107,11 +107,10 @@ TEST_CASE("euler registry-based step")
     auto sz = sys.size();
 
     // Extract scalar sizes from system_size
-    auto& ss = sz.scalar_size;
-    int d_sz  = get<0>(get<0>(ss));
-    int rx_sz = get<0>(get<1>(ss));
-    int ry_sz = get<1>(get<1>(ss));
-    int rz_sz = get<2>(get<1>(ss));
+    int d_sz  = sz.d_size;
+    int rx_sz = sz.rx_size;
+    int ry_sz = sz.ry_size;
+    int rz_sz = sz.rz_size;
 
     // Allocate slots with matching scalar layout
     field_ref u0_ref{0}, u1_ref{1}, srhs_ref{2};

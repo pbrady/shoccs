@@ -40,7 +40,10 @@ void hyperbolic_eigenvalues::log(const system_stats& stats, const step_controlle
     logger(spdlog::level::info, "{}", stats.stats[0]);
 }
 
-system_size hyperbolic_eigenvalues::size() const { return {0, 0, m.ss()}; }
+system_size hyperbolic_eigenvalues::size() const
+{
+    return {0, 0, m.size(), (integer)m.Rx().size(), (integer)m.Ry().size(), (integer)m.Rz().size()};
+}
 
 std::optional<hyperbolic_eigenvalues>
 hyperbolic_eigenvalues::from_lua(const sol::table& tbl, const logs& logger)

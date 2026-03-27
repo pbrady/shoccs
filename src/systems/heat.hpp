@@ -1,6 +1,5 @@
 #pragma once
 
-#include "fields/field.hpp"
 #include "fields/field_registry.hpp"
 #include "io/field_io.hpp"
 #include "mesh/mesh.hpp"
@@ -25,8 +24,8 @@ class heat
     laplacian lap;
     real diffusivity;
 
-    scalar_real neumann_u;
-    scalar_real error;
+    std::vector<real> neumann_d, neumann_rx, neumann_ry, neumann_rz;
+    std::vector<real> error_d, error_rx, error_ry, error_rz;
 
     logs logger;
 

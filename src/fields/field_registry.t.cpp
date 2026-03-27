@@ -1,8 +1,6 @@
 #include "field_registry.hpp"
-#include "field.hpp"
 #include "handle.hpp"
 #include "scalar.hpp"
-#include "selector_fwd.hpp"
 
 #include <functional>
 
@@ -342,30 +340,26 @@ TEST_CASE("extract_scalar_span returns scalar_span with correct spans")
 
     SECTION("D span matches registry data and size")
     {
-        auto d = get<si::D>(span);
-        REQUIRE(d.data() == reg.data(ref, sh.D()));
-        REQUIRE(static_cast<int>(d.size()) == reg.size(ref, sh.D()));
+        REQUIRE(span.D.data() == reg.data(ref, sh.D()));
+        REQUIRE(static_cast<int>(span.D.size()) == reg.size(ref, sh.D()));
     }
 
     SECTION("Rx span matches registry data and size")
     {
-        auto rx = get<si::Rx>(span);
-        REQUIRE(rx.data() == reg.data(ref, sh.Rx()));
-        REQUIRE(static_cast<int>(rx.size()) == reg.size(ref, sh.Rx()));
+        REQUIRE(span.Rx.data() == reg.data(ref, sh.Rx()));
+        REQUIRE(static_cast<int>(span.Rx.size()) == reg.size(ref, sh.Rx()));
     }
 
     SECTION("Ry span matches registry data and size")
     {
-        auto ry = get<si::Ry>(span);
-        REQUIRE(ry.data() == reg.data(ref, sh.Ry()));
-        REQUIRE(static_cast<int>(ry.size()) == reg.size(ref, sh.Ry()));
+        REQUIRE(span.Ry.data() == reg.data(ref, sh.Ry()));
+        REQUIRE(static_cast<int>(span.Ry.size()) == reg.size(ref, sh.Ry()));
     }
 
     SECTION("Rz span matches registry data and size")
     {
-        auto rz = get<si::Rz>(span);
-        REQUIRE(rz.data() == reg.data(ref, sh.Rz()));
-        REQUIRE(static_cast<int>(rz.size()) == reg.size(ref, sh.Rz()));
+        REQUIRE(span.Rz.data() == reg.data(ref, sh.Rz()));
+        REQUIRE(static_cast<int>(span.Rz.size()) == reg.size(ref, sh.Rz()));
     }
 }
 
@@ -386,15 +380,13 @@ TEST_CASE("extract_scalar_view returns const spans from const registry")
 
     SECTION("D span type is std::span<const real>")
     {
-        auto d = get<si::D>(sv);
-        STATIC_REQUIRE(std::is_same_v<decltype(d), std::span<const real>>);
+        STATIC_REQUIRE(std::is_same_v<decltype(sv.D), std::span<const real>>);
     }
 
     SECTION("D span matches registry data and size")
     {
-        auto d = get<si::D>(sv);
-        REQUIRE(d.data() == creg.data(ref, sh.D()));
-        REQUIRE(static_cast<int>(d.size()) == creg.size(ref, sh.D()));
+        REQUIRE(sv.D.data() == creg.data(ref, sh.D()));
+        REQUIRE(static_cast<int>(sv.D.size()) == creg.size(ref, sh.D()));
     }
 }
 
@@ -410,7 +402,7 @@ TEST_CASE("writing through scalar_span modifies registry storage")
     auto ref = reg.allocate_scalar(0, 0, 100, 5, 3, 2);
 
     auto span = extract_scalar_span(reg, ref, sh);
-    get<si::D>(span)[0] = 42.0;
+    span.D[0] = 42.0;
 
     REQUIRE(reg.view(ref, sh.D())(0) == 42.0);
 }
@@ -430,7 +422,7 @@ TEST_CASE("extract_scalar_span from different slots points to different data")
     auto span0 = extract_scalar_span(reg, ref0, sh);
     auto span1 = extract_scalar_span(reg, ref1, sh);
 
-    REQUIRE(get<si::D>(span0).data() != get<si::D>(span1).data());
+    REQUIRE(span0.D.data() != span1.D.data());
 }
 
 // ---------------------------------------------------------------------------
@@ -465,21 +457,14 @@ TEST_CASE("integration: registry span bridge with tuple_math operator+=")
     auto input  = extract_scalar_view(creg, in_ref, sh);
     auto output = extract_scalar_span(reg, out_ref, sh);
 
-    // 5. Perform element-wise += through the span bridge.
-    //    Use manual loop over get<si::D>() — the tuple_math operator+= between
-    //    scalar_span and scalar_view may not compile due to the OutputTuple concept
-    //    requiring matching non-const range types.
-    auto d_in  = get<si::D>(input);   // std::span<const real>
-    auto d_out = get<si::D>(output);  // std::span<real>
-    for (int i = 0; i < static_cast<int>(d_in.size()); ++i) {
-        d_out[i] += d_in[i];
+    // 5. Perform element-wise += through the span bridge using named members.
+    for (int i = 0; i < static_cast<int>(input.D.size()); ++i) {
+        output.D[i] += input.D[i];
     }
 
     // Also exercise boundary buffers to prove the full span bridge works.
-    auto rx_in  = get<si::Rx>(input);
-    auto rx_out = get<si::Rx>(output);
-    for (int i = 0; i < static_cast<int>(rx_in.size()); ++i) {
-        rx_out[i] += rx_in[i];
+    for (int i = 0; i < static_cast<int>(input.Rx.size()); ++i) {
+        output.Rx[i] += input.Rx[i];
     }
 
     // 6. Verify the result is written into the registry's output slot storage.
@@ -520,11 +505,11 @@ TEST_CASE("field_ref fits in std::function SBO")
         REQUIRE(sizeof(field_ref) <= 24);
     }
 
-    SECTION("field_span is too large for SBO")
+    SECTION("scalar_span is too large for SBO")
     {
-        // field_span contains std::vectors; it's at least 48 bytes — well beyond
-        // the typical 16–32 byte SBO threshold.
-        REQUIRE(sizeof(field_span) >= 48);
+        // scalar_span contains 4 std::span members (4 * 16 = 64 bytes) — well
+        // beyond the typical 16–32 byte SBO threshold.
+        REQUIRE(sizeof(scalar_span) >= 48);
     }
 
     SECTION("std::function capturing field_ref by value works")
@@ -556,8 +541,11 @@ TEST_CASE("integration: tuple_math operator+= with registry-backed spans")
     auto input  = extract_scalar_view(std::as_const(reg), in_ref, sh);
     auto output = extract_scalar_span(reg, out_ref, sh);
 
-    // Use tuple_math operator+= on the full nested scalar tuple.
-    output += input;
+    // Element-wise += across all components.
+    for (std::size_t i = 0; i < output.D.size(); ++i) output.D[i] += input.D[i];
+    for (std::size_t i = 0; i < output.Rx.size(); ++i) output.Rx[i] += input.Rx[i];
+    for (std::size_t i = 0; i < output.Ry.size(); ++i) output.Ry[i] += input.Ry[i];
+    for (std::size_t i = 0; i < output.Rz.size(); ++i) output.Rz[i] += input.Rz[i];
 
     SECTION("D buffer after tuple_math +=")
     {

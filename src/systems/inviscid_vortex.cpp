@@ -1,5 +1,4 @@
 #include "inviscid_vortex.hpp"
-#include "fields/selector.hpp"
 
 #include "real3_operators.hpp"
 #include <cmath>
@@ -14,10 +13,6 @@ namespace ccs::systems
 constexpr real g = 1.4;
 constexpr real g1 = 0.4;
 constexpr real twoPi = 2 * std::numbers::pi_v<real>;
-
-constexpr auto max_abs =
-    lift([](auto&& a, auto&& b) { return std::max(std::abs(a), std::abs(b)); });
-constexpr auto sqrt = lift([](auto&& x) { return std::sqrt(x); });
 
 enum class vars { rho, rhoU, rhoV, rhoE, P };
 

@@ -268,6 +268,26 @@ Tests that don't allocate Views (e.g., handle arithmetic tests) continue using `
 **Why:** `bind_scalar` from a `const field_registry&` yields `const real*` pointers, but expression nodes must be trivially copyable and capturable by `KOKKOS_LAMBDA`. The choice affects how `operator+` etc. compose expressions from const and mutable sources. For Phase 10 (host-only, mutable-registry only), option (a) suffices. The decision should be revisited in Phase 14 (GPU) if const-correctness matters for device memory.
 **Status:** For Phase 10, use mutable `bind_scalar` only (single `handle_expr { real* ptr; }`). Const variant deferred.
 
+### D-R15: Unified strided_selection for y-plane and z-plane
+**Decision:** A single `strided_selection{offset, inner_count, outer_count, outer_stride}` struct handles both y-plane and z-plane access patterns. The z-plane is the degenerate case where `inner_count = 1`.
+**Why:** y-plane selects `nx` groups of `nz` contiguous elements with `ny*nz` stride between groups. z-plane selects `nx*ny` single elements with `nz` stride. Both follow the formula `element(i) = offset + (i / inner_count) * outer_stride + (i % inner_count)`. Unifying avoids a separate type while keeping both patterns efficient.
+
+### D-R16: assign_selected Uses Absolute Indices
+**Decision:** `assign_selected(dst, desc, expr)` evaluates `dst[desc.element(i)] = expr(desc.element(i))` — the expression is called with the **absolute** flat index from `desc.element(i)`, not the relative selection index `i`.
+**Why:** In BC application, source data is typically a full-domain buffer (e.g., manufactured solution evaluated at all grid points). Using absolute indices means `handle_expr{sol_ptr}` naturally reads `sol_ptr[flat_index]` without needing a separate index mapping. Source values are pre-evaluated into scratch buffers using the existing tuple DSL (D-R6 coexistence).
+
+### D-R17: lazy_views.hpp Retention Scope (Phase 12)
+**Decision:** After Phase 12, keep `stride_view`/`stride`, `repeat_n_view`/`repeat_n`, `cartesian_product_view`/`cartesian_product`, `linear_distribute`, and the C++20 `std::basic_common_reference` backport in `lazy_views.hpp`. Delete `zip_transform_view`/`zip_transform` (~250 lines) and remove `#include "ccs_range_utils.hpp"`.
+**Why:** Codebase analysis confirms ongoing production usage: `stride` (matrix tests), `repeat_n` (`xdmf.cpp`), `cartesian_product` (`cartesian.hpp` `domain()`), `linear_distribute` (`cartesian.cpp`, stencil tests). Only `zip_transform_view` is replaced by expression templates.
+
+### D-R18: system_size Redesign (Phase 12)
+**Decision:** Replace `scalar<integer> scalar_size` member in `system_size` with 4 plain integer fields: `integer d_size, rx_size, ry_size, rz_size`. Move `system_size` from `field_fwd.hpp` to `field_registry.hpp`, removing its dependency on `scalar.hpp` → `tuple.hpp`. (`field_registry.hpp` chosen over a new `system_size.hpp` because it already defines the related `field_ref` type and is already `#include`d by all system files that use `system_size`.)
+**Why:** `system_size` is used by all system `.hpp/.cpp` files. Its `scalar<integer>` member creates a transitive dependency on the entire tuple infrastructure being deleted. Plain integer fields eliminate this dependency while preserving the same information.
+
+### D-R19: scalar_span/scalar_view Simplification (Phase 12)
+**Decision:** Replace the tuple-based `scalar_span = scalar<std::span<real>>` and `scalar_view = scalar<std::span<const real>>` with simple structs holding 4 named span members (`D`, `Rx`, `Ry`, `Rz`). The span bridge functions (`extract_scalar_span`/`extract_scalar_view` in `field_registry.hpp`) are updated to construct these structs directly.
+**Why:** The span bridge is used by `heat.cpp`, `scalar_wave.cpp`, and test files. The types must persist for Phase 12 coexistence, but can be trivially decoupled from the tuple hierarchy. Named members (`s.D`) are clearer than tuple-indexed access (`get<0>(get<0>(s))`).
+
 ---
 
 ## Files Excluded from Migration Scope

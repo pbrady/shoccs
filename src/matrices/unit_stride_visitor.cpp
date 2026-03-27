@@ -3,6 +3,8 @@
 #include "csr.hpp"
 #include "dense.hpp"
 
+#include <cassert>
+
 namespace ccs::matrix
 {
 

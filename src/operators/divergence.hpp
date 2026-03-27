@@ -1,4 +1,4 @@
-#include "fields/field.hpp"
+#pragma once
 
 namespace ccs
 {
@@ -6,9 +6,9 @@ namespace ccs
 struct divergence {
 
     template <typename U>
-    constexpr auto operator()(U&&)
+    constexpr int operator()(U&&)
     {
-        return field{};
+        return 0;
     }
 };
 } // namespace ccs

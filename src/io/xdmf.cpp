@@ -25,9 +25,7 @@ void append_xdmf(pugi::xml_document& doc,
                  std::span<const std::string> var_names,
                  std::span<const std::string> file_names,
                  const std::string& dimensions,
-                 tuple<std::span<const mesh_object_info>,
-                       std::span<const mesh_object_info>,
-                       std::span<const mesh_object_info>> t,
+                 std::array<std::span<const mesh_object_info>, 3> t,
                  unsigned long f_sz)
 {
     // Get first grid node
@@ -92,9 +90,7 @@ void append_xdmf(pugi::xml_document& doc,
 
 std::string header(const int3& i,
                    const domain_extents& d,
-                   tuple<std::span<const mesh_object_info>,
-                         std::span<const mesh_object_info>,
-                         std::span<const mesh_object_info>> t)
+                   std::array<std::span<const mesh_object_info>, 3> t)
 {
     auto&& [min, max] = d;
     real3 dxyz = (max - min) / clamp_lo(i - 1.0, 1.0);
@@ -141,9 +137,7 @@ void xdmf::write(int grid_number,
                  real time,
                  std::span<const std::string> var_names,
                  std::span<const std::string> file_names,
-                 tuple<std::span<const mesh_object_info>,
-                       std::span<const mesh_object_info>,
-                       std::span<const mesh_object_info>> tp,
+                 std::array<std::span<const mesh_object_info>, 3> tp,
                  const logs& logger) const
 {
 

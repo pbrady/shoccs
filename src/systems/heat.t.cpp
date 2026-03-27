@@ -25,11 +25,10 @@ int main(int argc, char* argv[])
 static std::pair<field_ref, field_ref> setup_registry(sim_registry& reg, ccs::system& sys)
 {
     auto sz = sys.size();
-    auto& ss = sz.scalar_size;
-    int d_sz  = get<0>(get<0>(ss));
-    int rx_sz = get<0>(get<1>(ss));
-    int ry_sz = get<1>(get<1>(ss));
-    int rz_sz = get<2>(get<1>(ss));
+    int d_sz  = sz.d_size;
+    int rx_sz = sz.rx_size;
+    int ry_sz = sz.ry_size;
+    int rz_sz = sz.rz_size;
 
     field_ref u0_ref{0}, rhs_ref{1};
     for (int s = 0; s < sz.nscalars; ++s) {
@@ -116,7 +115,7 @@ TEST_CASE("heat - E2")
     auto u0_scalar = extract_scalar_span(reg, u0_ref, sh);
 
     // only solid points will be zero
-    const integer solid_points = std::ranges::count(u0_scalar | sel::D, 0.0);
+    const integer solid_points = std::ranges::count(u0_scalar.D, 0.0);
     // maximum error should be zero
     auto st = sys.stats(reg, u0_ref, u0_ref, step);
     REQUIRE(st.stats[0] == 0);
@@ -129,14 +128,14 @@ TEST_CASE("heat - E2")
 
     // at this point, all fluid points in rhs should have a value of cos(time) -> 1
     // and solid points should remain at zero
-    const integer rhs_solid_points = std::ranges::count(u_rhs | sel::D, 0.0);
+    const integer rhs_solid_points = std::ranges::count(u_rhs.D, 0.0);
     // these zeros include the zeroed rhs contributions to the dirichlet planar bcs
     int3 n{21, 22, 23};
     integer x_sz = n[1] * n[2];
     integer z_sz = n[0] * n[1];
     REQUIRE(solid_points == rhs_solid_points - (x_sz + z_sz - n[1]));
 
-    auto d_rng = u_rhs | sel::D;
+    auto d_rng = u_rhs.D;
     real sum = std::accumulate(std::ranges::begin(d_rng), std::ranges::end(d_rng), 0.0);
 
     REQUIRE(sum == Catch::Approx((real)n[0] * n[1] * n[2] - rhs_solid_points));
@@ -230,7 +229,7 @@ TEST_CASE("heat - E2 - floating")
     auto u0_scalar = extract_scalar_span(reg, u0_ref, sh);
 
     // only solid points will be zero
-    const integer solid_points = std::ranges::count(u0_scalar | sel::D, 0.0);
+    const integer solid_points = std::ranges::count(u0_scalar.D, 0.0);
     // maximum error should be zero
     auto st = sys.stats(reg, u0_ref, u0_ref, step);
     REQUIRE(st.stats[0] == 0);
@@ -243,23 +242,26 @@ TEST_CASE("heat - E2 - floating")
 
     // at this point, all fluid points in rhs should have a value of cos(time) -> 1
     // and solid points should remain at zero
-    const integer rhs_solid_points = std::ranges::count(u_rhs | sel::D, 0.0);
+    const integer rhs_solid_points = std::ranges::count(u_rhs.D, 0.0);
     // these zeros include the zeroed rhs contributions to the dirichlet planar bcs
     int3 n{21, 22, 23};
     integer x_sz = n[1] * n[2];
     integer z_sz = n[0] * n[1];
     REQUIRE(solid_points == rhs_solid_points - (x_sz + z_sz - n[1]));
 
-    auto sum = transform([](auto&& ui) { return std::accumulate(std::ranges::begin(ui), std::ranges::end(ui), 0.0); }, u_rhs);
+    real sum_d  = std::accumulate(u_rhs.D.begin(),  u_rhs.D.end(),  0.0);
+    real sum_rx = std::accumulate(u_rhs.Rx.begin(), u_rhs.Rx.end(), 0.0);
+    real sum_ry = std::accumulate(u_rhs.Ry.begin(), u_rhs.Ry.end(), 0.0);
+    real sum_rz = std::accumulate(u_rhs.Rz.begin(), u_rhs.Rz.end(), 0.0);
 
-    REQUIRE(get<si::D>(sum) ==
+    REQUIRE(sum_d ==
             Catch::Approx((real)n[0] * n[1] * n[2] - rhs_solid_points));
 
-    auto ss = sys.size().scalar_size;
+    auto sz2 = sys.size();
 
-    REQUIRE(get<si::Rx>(sum) == Catch::Approx((real)get<si::Rx>(ss)));
-    REQUIRE(get<si::Ry>(sum) == Catch::Approx((real)get<si::Ry>(ss)));
-    REQUIRE(get<si::Rz>(sum) == Catch::Approx((real)get<si::Rz>(ss)));
+    REQUIRE(sum_rx == Catch::Approx((real)sz2.rx_size));
+    REQUIRE(sum_ry == Catch::Approx((real)sz2.ry_size));
+    REQUIRE(sum_rz == Catch::Approx((real)sz2.rz_size));
 }
 
 TEST_CASE("2D heat - E2 - floating")
@@ -344,7 +346,7 @@ TEST_CASE("2D heat - E2 - floating")
     auto u0_scalar = extract_scalar_span(reg, u0_ref, sh);
 
     // only solid points will be zero
-    const integer solid_points = std::ranges::count(u0_scalar | sel::D, 0.0);
+    const integer solid_points = std::ranges::count(u0_scalar.D, 0.0);
     // maximum error should be zero
     auto st = sys.stats(reg, u0_ref, u0_ref, step);
     REQUIRE(st.stats[0] == 0);
@@ -357,19 +359,21 @@ TEST_CASE("2D heat - E2 - floating")
 
     // at this point, all fluid points in rhs should have a value of cos(time) -> 1
     // and solid points should remain at zero
-    const integer rhs_solid_points = std::ranges::count(u_rhs | sel::D, 0.0);
+    const integer rhs_solid_points = std::ranges::count(u_rhs.D, 0.0);
     // these zeros include the zeroed rhs contributions to the dirichlet planar bcs
     int3 n{21, 22, 1};
     integer x_sz = n[1];
     REQUIRE(solid_points == rhs_solid_points - x_sz);
 
-    auto sum = transform([](auto&& ui) { return std::accumulate(std::ranges::begin(ui), std::ranges::end(ui), 0.0); }, u_rhs);
+    real sum_d  = std::accumulate(u_rhs.D.begin(),  u_rhs.D.end(),  0.0);
+    real sum_rx = std::accumulate(u_rhs.Rx.begin(), u_rhs.Rx.end(), 0.0);
+    real sum_ry = std::accumulate(u_rhs.Ry.begin(), u_rhs.Ry.end(), 0.0);
 
-    REQUIRE(get<si::D>(sum) ==
+    REQUIRE(sum_d ==
             Catch::Approx((real)n[0] * n[1] * n[2] - rhs_solid_points));
 
-    auto ss = sys.size().scalar_size;
+    auto sz2 = sys.size();
 
-    REQUIRE(get<si::Rx>(sum) == Catch::Approx((real)get<si::Rx>(ss)));
-    REQUIRE(get<si::Ry>(sum) == Catch::Approx((real)get<si::Ry>(ss)));
+    REQUIRE(sum_rx == Catch::Approx((real)sz2.rx_size));
+    REQUIRE(sum_ry == Catch::Approx((real)sz2.ry_size));
 }

@@ -1,6 +1,5 @@
 #pragma once
 
-#include "fields/field.hpp"
 #include "fields/field_registry.hpp"
 #include "io/field_io.hpp"
 #include "operators/gradient.hpp"
@@ -28,10 +27,16 @@ class scalar_wave
     real3 center; // center of the circular wave
     real radius;
 
-    vector_real grad_G;
-    vector_real du;
+    // Wave speed coefficients (3 spatial components x {D, Rx, Ry, Rz})
+    std::vector<real> gG_xd, gG_xrx, gG_xry, gG_xrz;
+    std::vector<real> gG_yd, gG_yrx, gG_yry, gG_yrz;
+    std::vector<real> gG_zd, gG_zrx, gG_zry, gG_zrz;
+    // Gradient scratch (3 spatial components x {D, Rx, Ry, Rz})
+    std::vector<real> du_xd, du_xrx, du_xry, du_xrz;
+    std::vector<real> du_yd, du_yrx, du_yry, du_yrz;
+    std::vector<real> du_zd, du_zrx, du_zry, du_zrz;
 
-    scalar_real error;
+    std::vector<real> error_d, error_rx, error_ry, error_rz;
 
     real max_error;
 

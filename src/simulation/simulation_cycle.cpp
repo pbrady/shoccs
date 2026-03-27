@@ -32,11 +32,10 @@ real3 simulation_cycle::run()
     // Registry-based field allocation (9.5a)
     sim_registry reg;
     auto sz = sys.size();
-    auto& ss = sz.scalar_size;
-    int d_sz  = get<0>(get<0>(ss));
-    int rx_sz = get<0>(get<1>(ss));
-    int ry_sz = get<1>(get<1>(ss));
-    int rz_sz = get<2>(get<1>(ss));
+    int d_sz  = sz.d_size;
+    int rx_sz = sz.rx_size;
+    int ry_sz = sz.ry_size;
+    int rz_sz = sz.rz_size;
 
     field_ref u0_ref{0}, u1_ref{1}, rk_ref{2}, srhs_ref{3};
     for (int s = 0; s < sz.nscalars; ++s) {

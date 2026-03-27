@@ -23,6 +23,11 @@ if (BUILD_TESTING)
   add_test(NAME t-heat COMMAND t-heat)
   set_tests_properties(t-heat PROPERTIES LABELS "systems")
 
+  add_executable(t-scalar_wave scalar_wave.t.cpp)
+  target_link_libraries(t-scalar_wave Catch2::Catch2 shoccs-system Kokkos::kokkos)
+  add_test(NAME t-scalar_wave COMMAND t-scalar_wave)
+  set_tests_properties(t-scalar_wave PROPERTIES LABELS "systems")
+
   add_executable(t-hyperbolic_eigenvalues hyperbolic_eigenvalues.t.cpp)
   target_link_libraries(t-hyperbolic_eigenvalues Catch2::Catch2 shoccs-system Kokkos::kokkos)
   add_test(NAME t-hyperbolic_eigenvalues COMMAND t-hyperbolic_eigenvalues)

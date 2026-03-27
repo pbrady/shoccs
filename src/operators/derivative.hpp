@@ -48,12 +48,12 @@ public:
 
     // operator for when neumann conditions are not needed
     template <typename Op = eq_t>
-        requires(!Scalar<Op>)
+        requires std::invocable<Op, real&, real>
     void operator()(scalar_view, scalar_span, Op op = {}) const;
 
-    // operaotr for when neumann conditions may be applied
+    // operator for when neumann conditions may be applied
     template <typename Op = eq_t>
-        requires(!Scalar<Op>)
+        requires std::invocable<Op, real&, real>
     void operator()(scalar_view field_values,
                     scalar_view derivative_values,
                     scalar_span,
