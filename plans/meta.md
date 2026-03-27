@@ -31,6 +31,12 @@
 | 13 | `13-kokkos-parallel.md` | Phases 8, 10 | Parallelize matrix-vector products (block, circulant) |
 | 14 | `14-kokkos-gpu.md` | Phases 8–13 | GPU execution: device memory, host mirrors, KOKKOS_LAMBDA |
 
+### Tooling: Stencil Derivation (Phase 20)
+
+| Phase | Plan File | Depends On | Goal |
+|-------|-----------|------------|------|
+| 20 | `20-stencil-derivation-pipeline.md` | None (standalone) | SymPy pipeline for deriving stencil coefficients and generating C++ |
+
 ### Design Documents
 
 | Document | Purpose |
@@ -294,6 +300,15 @@ Tests that don't allocate Views (e.g., handle arithmetic tests) continue using `
 **Options:**
 - (a) Per-call check in `block::operator()` before `parallel_for`
 - **(b) Construction-time check in `builder::to_block()`** ← CHOSEN
+
+### D-R18: Stencil Derivation Tooling
+**Decision:** **(a) Build a SymPy-based derivation pipeline in `scripts/stencil_gen/`.**
+The existing Mathematica notebooks are too slow for iterating on new stencil schemes. A Python/SymPy pipeline gives version-controlled, reproducible derivations integrated into the repo. The pipeline derives coefficients symbolically and generates C++ code matching the existing `src/stencils/` patterns via `sympy.cse()`.
+**Options:**
+- **(a) SymPy pipeline in the repo** ← CHOSEN
+- (b) Continue with Mathematica notebooks
+- (c) Use a different CAS (Maple, SageMath)
+**Considerations:** SymPy 1.14 is already available in the container. The `QQ(psi)` fraction field provides 24,000x speedup over naive symbolic substitution for TEMO cut-cell derivations. `uv` is available for dependency management.
 
 ---
 
