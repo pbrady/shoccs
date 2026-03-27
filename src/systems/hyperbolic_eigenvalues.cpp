@@ -4,7 +4,6 @@
 
 #include <spdlog/sinks/basic_file_sink.h>
 
-#include "operators/discrete_operator.hpp"
 #include "operators/eigenvalue_visitor.hpp"
 
 #include <algorithm>

@@ -9,7 +9,6 @@ namespace ccs
 {
 class laplacian
 {
-    std::shared_ptr<spdlog::logger> logger;
     derivative dx;
     derivative dy;
     derivative dz;

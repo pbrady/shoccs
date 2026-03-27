@@ -30,7 +30,6 @@ class cartesian : public index_extents
     real3 min_;
     real3 max_;
     real3 h_;
-    // int3 n_;
     int dims_;
     std::vector<real> x_;
     std::vector<real> y_;

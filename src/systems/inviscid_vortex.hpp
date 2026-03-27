@@ -2,7 +2,6 @@
 
 #include "fields/field_registry.hpp"
 #include "io/field_io.hpp"
-#include "operators/divergence.hpp"
 #include "temporal/step_controller.hpp"
 #include "types.hpp"
 
@@ -12,9 +11,6 @@ namespace ccs::systems
 // the system of pdes to solve is in this class
 class inviscid_vortex
 {
-    // only require one operator
-    divergence div;
-
 public:
     inviscid_vortex() = default;
 

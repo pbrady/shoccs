@@ -26,10 +26,6 @@ constexpr bool same_plane(const int3& x, const int3& y)
     return x[J] == y[J] && x[K] == y[K];
 }
 
-// constexpr auto offset = [](int3 n) {
-//     return [n](int3 ijk) { return ijk[0] * n[1] * n[2] + ijk[1] * n[2] + ijk[2]; };
-// };
-
 template <auto I>
 void init_line(std::vector<line>& v, int3 extents, std::span<const mesh_object_info> r)
 {
@@ -38,8 +34,6 @@ void init_line(std::vector<line>& v, int3 extents, std::span<const mesh_object_i
 
     constexpr auto S = index::dir<I>::slow;
     constexpr auto F = index::dir<I>::fast;
-    // auto off = offset(extents);
-
     integer ns = extents[S];
     integer nf = extents[F];
 
@@ -65,13 +59,11 @@ void init_line(std::vector<line>& v, int3 extents, std::span<const mesh_object_i
                 if (first->ray_outside) {
                     // set the `right` point and add both to line
                     v.emplace_back(
-                        // off(left_boundary->mesh_coordinate),
                         index::stride<I>(extents),
                         *left_boundary,
                         boundary{.mesh_coordinate = first->solid_coord,
                                  .object = object_boundary{
                                      first - std::ranges::begin(r), first->shape_id, first->psi}});
-                    // invalidate the boundary point to indicate it was consumed
                     left_boundary.reset();
                 } else {
                     // set the left_boundary and allow the next loop to process
@@ -86,7 +78,6 @@ void init_line(std::vector<line>& v, int3 extents, std::span<const mesh_object_i
             // consume the left boundary
             if (left_boundary) {
                 v.emplace_back(
-                    // off(left_boundary->mesh_coordinate),
                     index::stride<I>(extents),
                     *left_boundary,
                     boundary{.mesh_coordinate = right, .object = std::nullopt});
@@ -226,7 +217,6 @@ std::optional<mesh> mesh::from_lua(const sol::table& tbl, const logs& logger)
     const auto& shapes = *shapes_opt;
 
     return mesh{n, domain, shapes, logger};
-    // return std::nullopt;
 }
 
 } // namespace ccs

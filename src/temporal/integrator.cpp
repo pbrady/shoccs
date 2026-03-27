@@ -17,7 +17,7 @@ void integrator::operator()(system& sys, sim_registry& reg,
             if constexpr (std::is_same_v<T, integrators::rk4>) {
                 integ(sys, reg, u0, output, scratch1, scratch2, ctrl, dt);
             } else if constexpr (std::is_same_v<T, integrators::euler>) {
-                integ(sys, reg, u0, output, scratch1, ctrl, dt);
+                integ(sys, reg, u0, output, scratch2, ctrl, dt);
             }
             // integrators::empty: no-op
         },

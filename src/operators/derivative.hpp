@@ -28,10 +28,13 @@ class derivative
     matrix::csr Bfx, Brx;
     matrix::csr Bfy, Bry;
     matrix::csr Bfz, Brz;
-    std::vector<real> interior_c;
-
     // Pre-built graph for submit_graph().
     std::optional<Kokkos::Experimental::Graph<execution_space>> graph_;
+
+    // Submit all kernels (R-space + D-space) without fencing.
+    template <typename Op = eq_t>
+        requires std::invocable<Op, real&, real>
+    void apply_kernels(scalar_view u, scalar_span du, Op op = {}) const;
 
 public:
     derivative() = default;

@@ -36,7 +36,6 @@ std::function<void(scalar_span)> laplacian::operator()(scalar_view u) const
 {
     return [this, u](scalar_span du) {
         du = 0;
-        // accumulate results into du * WRONG * The block matrix does not accumulate
         if (ex[0] > 1) dx(u, du, plus_eq);
         if (ex[1] > 1) dy(u, du, plus_eq);
         if (ex[2] > 1) dz(u, du, plus_eq);

@@ -1,22 +1,22 @@
 #include "scalar_wave.hpp"
+#include "detail/scalar_system_utils.hpp"
 #include "fields/expr.hpp"
 #include "fields/selection_desc.hpp"
 #include "real3_operators.hpp"
 #include <algorithm>
 #include <cmath>
-#include <limits>
 #include <numbers>
 
 #include <sol/sol.hpp>
 
-#include "operators/discrete_operator.hpp"
-
 #include <fmt/ranges.h>
-#include <iterator>
 #include <ranges>
 
 namespace ccs::systems
 {
+
+using detail::eval_at_locations;
+
 namespace
 {
 
@@ -35,50 +35,6 @@ constexpr auto solution_at(const real3& center, real radius, real time)
     return [=](const real3& location) {
         return std::sin(twoPI * (length(location - center) - radius - time));
     };
-}
-
-// Evaluate func(loc) at every mesh location, storing results in out.
-// Uses Kokkos::parallel_for for D and R buffers.
-void eval_at_locations(const mesh& m, auto&& func, scalar_span out)
-{
-    const auto* xv = m.x().data();
-    const auto* yv = m.y().data();
-    const auto* zv = m.z().data();
-    int nx = (int)m.x().size(), ny = (int)m.y().size(), nz = (int)m.z().size();
-
-    // D-buffer: flat parallel_for over cartesian product of x, y, z
-    auto* d = out.D.data();
-    Kokkos::parallel_for(
-        Kokkos::RangePolicy<execution_space>(0, nx * ny * nz),
-        [=, &func](int idx) {
-            int i = idx / (ny * nz);
-            int j = (idx / nz) % ny;
-            int k = idx % nz;
-            d[idx] = func(real3{xv[i], yv[j], zv[k]});
-        });
-
-    // Rx buffer
-    const auto* rx_data = m.Rx().data();
-    auto* rx_out = out.Rx.data();
-    Kokkos::parallel_for(
-        Kokkos::RangePolicy<execution_space>(0, (int)m.Rx().size()),
-        [=, &func](int i) { rx_out[i] = func(rx_data[i].position); });
-
-    // Ry buffer
-    const auto* ry_data = m.Ry().data();
-    auto* ry_out = out.Ry.data();
-    Kokkos::parallel_for(
-        Kokkos::RangePolicy<execution_space>(0, (int)m.Ry().size()),
-        [=, &func](int i) { ry_out[i] = func(ry_data[i].position); });
-
-    // Rz buffer
-    const auto* rz_data = m.Rz().data();
-    auto* rz_out = out.Rz.data();
-    Kokkos::parallel_for(
-        Kokkos::RangePolicy<execution_space>(0, (int)m.Rz().size()),
-        [=, &func](int i) { rz_out[i] = func(rz_data[i].position); });
-
-    Kokkos::fence();
 }
 
 } // namespace
@@ -135,8 +91,6 @@ scalar_wave::scalar_wave(mesh&& m_,
         fill_selected(y_r, gd, 0.0);
         fill_selected(z_r, gd, 0.0);
     }
-
-    spdlog::debug("-grad_G {}\n", gG_xrx[0]);
 
     logger.set_pattern("%v");
     logger(spdlog::level::info,
@@ -416,105 +370,8 @@ system_stats scalar_wave::stats(const sim_registry& reg, field_ref /*u0*/,
     scalar_span sol{sol_d, sol_rx, sol_ry, sol_rz};
     eval_at_locations(m, solution_at(center, radius, c), sol);
 
-    // Compute min/max and per-component error over fluid D indices
-    const auto fd = m.fluid_desc(); // copy for lambda capture
-    const real* u_D = u.D.data();
-    const real* sol_D = sol.D.data();
-
-    // MinMax reduction for u_min/u_max
-    Kokkos::MinMaxScalar<real> minmax_result;
-    Kokkos::parallel_reduce(
-        Kokkos::RangePolicy<execution_space>(0, fd.count()),
-        KOKKOS_LAMBDA(int k, Kokkos::MinMaxScalar<real>& update) {
-            int i = fd.element(k);
-            if (u_D[i] < update.min_val) update.min_val = u_D[i];
-            if (u_D[i] > update.max_val) update.max_val = u_D[i];
-        },
-        Kokkos::MinMax<real>(minmax_result));
-
-    real u_min = minmax_result.min_val;
-    real u_max = minmax_result.max_val;
-
-    // MaxLoc reduction for err_d/err_d_idx
-    Kokkos::ValLocScalar<real, int> maxloc_result;
-    Kokkos::parallel_reduce(
-        Kokkos::RangePolicy<execution_space>(0, fd.count()),
-        KOKKOS_LAMBDA(int k, Kokkos::ValLocScalar<real, int>& update) {
-            int i = fd.element(k);
-            real e = Kokkos::abs(u_D[i] - sol_D[i]);
-            if (e > update.val) {
-                update.val = e;
-                update.loc = i;
-            }
-        },
-        Kokkos::MaxLoc<real, int>(maxloc_result));
-
-    real err_d = fd.count() > 0 ? maxloc_result.val : 0.0;
-    real err_d_idx = fd.count() > 0 ? (real)maxloc_result.loc : 0.0;
-    Kokkos::fence();
-
-    // Per-component stats for Rx/Ry/Rz over non-dirichlet object indices
-    std::span<const real> u_Rs[] = {u.Rx, u.Ry, u.Rz};
-    std::span<const real> sol_Rs[] = {sol.Rx, sol.Ry, sol.Rz};
-    real comp_errs[3] = {0.0, 0.0, 0.0};
-    real comp_idxs[3] = {0.0, 0.0, 0.0};
-
-    for (int dir = 0; dir < 3; ++dir) {
-        auto nd = m.non_dirichlet_object_desc(dir, object_bcs);
-        if (nd.count() == 0) continue;
-
-        const real* u_R_ptr = u_Rs[dir].data();
-        const real* sol_R_ptr = sol_Rs[dir].data();
-
-        // MinMax reduction for this R component
-        Kokkos::MinMaxScalar<real> r_minmax;
-        Kokkos::parallel_reduce(
-            Kokkos::RangePolicy<execution_space>(0, nd.count()),
-            KOKKOS_LAMBDA(int k, Kokkos::MinMaxScalar<real>& update) {
-                int i = nd.element(k);
-                if (u_R_ptr[i] < update.min_val) update.min_val = u_R_ptr[i];
-                if (u_R_ptr[i] > update.max_val) update.max_val = u_R_ptr[i];
-            },
-            Kokkos::MinMax<real>(r_minmax));
-
-        u_min = std::min(u_min, r_minmax.min_val);
-        u_max = std::max(u_max, r_minmax.max_val);
-
-        // MaxLoc reduction for error
-        Kokkos::ValLocScalar<real, int> r_maxloc;
-        Kokkos::parallel_reduce(
-            Kokkos::RangePolicy<execution_space>(0, nd.count()),
-            KOKKOS_LAMBDA(int k, Kokkos::ValLocScalar<real, int>& update) {
-                int i = nd.element(k);
-                real e = Kokkos::abs(u_R_ptr[i] - sol_R_ptr[i]);
-                if (e > update.val) {
-                    update.val = e;
-                    update.loc = i;
-                }
-            },
-            Kokkos::MaxLoc<real, int>(r_maxloc));
-
-        comp_errs[dir] = r_maxloc.val;
-        comp_idxs[dir] = (real)r_maxloc.loc;
-    }
-    Kokkos::fence();
-
-    real err_rx = comp_errs[0], idx_rx = comp_idxs[0];
-    real err_ry = comp_errs[1], idx_ry = comp_idxs[1];
-    real err_rz = comp_errs[2], idx_rz = comp_idxs[2];
-
-    real err = std::max({err_d, err_rx, err_ry, err_rz});
-    return system_stats{.stats = {err,
-                                  u_min,
-                                  u_max,
-                                  err_d,
-                                  err_d_idx,
-                                  err_rx,
-                                  idx_rx,
-                                  err_ry,
-                                  idx_ry,
-                                  err_rz,
-                                  idx_rz}};
+    return detail::compute_scalar_stats(m, object_bcs, u,
+        scalar_view{sol_d, sol_rx, sol_ry, sol_rz});
 }
 
 void scalar_wave::initialize(sim_registry& reg, field_ref ref, const step_controller& c)
@@ -530,37 +387,7 @@ void scalar_wave::initialize(sim_registry& reg, field_ref ref, const step_contro
     scalar_span sol{sol_d, sol_rx, sol_ry, sol_rz};
     eval_at_locations(m, solution_at(center, radius, c), sol);
 
-    // Fill D with zeros via parallel_for
-    real* u_D = u.D.data();
-    int u_D_size = (int)u.D.size();
-    Kokkos::parallel_for(
-        Kokkos::RangePolicy<execution_space>(0, u_D_size),
-        KOKKOS_LAMBDA(int i) { u_D[i] = 0.0; });
-
-    // Copy sol at fluid indices
-    const auto fd = m.fluid_desc(); // copy for lambda capture
-    assign_selected(u_D, fd, handle_expr{sol.D.data()});
-
-    // Copy sol's R components to u's R components via parallel_for
-    real* u_Rx = u.Rx.data();
-    const real* sol_Rx_ptr = sol.Rx.data();
-    int rx_size = (int)u.Rx.size();
-    real* u_Ry = u.Ry.data();
-    const real* sol_Ry_ptr = sol.Ry.data();
-    int ry_size = (int)u.Ry.size();
-    real* u_Rz = u.Rz.data();
-    const real* sol_Rz_ptr = sol.Rz.data();
-    int rz_size = (int)u.Rz.size();
-    Kokkos::parallel_for(
-        Kokkos::RangePolicy<execution_space>(0, rx_size),
-        KOKKOS_LAMBDA(int i) { u_Rx[i] = sol_Rx_ptr[i]; });
-    Kokkos::parallel_for(
-        Kokkos::RangePolicy<execution_space>(0, ry_size),
-        KOKKOS_LAMBDA(int i) { u_Ry[i] = sol_Ry_ptr[i]; });
-    Kokkos::parallel_for(
-        Kokkos::RangePolicy<execution_space>(0, rz_size),
-        KOKKOS_LAMBDA(int i) { u_Rz[i] = sol_Rz_ptr[i]; });
-    Kokkos::fence();
+    detail::initialize_scalar_field(m, u, sol);
 }
 
 bool scalar_wave::write(field_io& io, const sim_registry& reg, field_ref ref,
@@ -577,58 +404,10 @@ bool scalar_wave::write(field_io& io, const sim_registry& reg, field_ref ref,
     scalar_span sol{sol_d, sol_rx, sol_ry, sol_rz};
     eval_at_locations(m, solution_at(center, radius, (real)c), sol);
 
-    // Zero all error buffers
-    std::ranges::fill(error_d, 0.0);
-    std::ranges::fill(error_rx, 0.0);
-    std::ranges::fill(error_ry, 0.0);
-    std::ranges::fill(error_rz, 0.0);
-
-    // Compute |u - sol| at fluid D indices
-    const auto fd = m.fluid_desc(); // copy for lambda capture
-    const real* u_D = u.D.data();
-    const real* sol_D = sol.D.data();
-    real* err_d_ptr = error_d.data();
-    Kokkos::parallel_for(
-        Kokkos::RangePolicy<execution_space>(0, fd.count()),
-        KOKKOS_LAMBDA(int k) {
-            int i = fd.element(k);
-            err_d_ptr[i] = Kokkos::abs(u_D[i] - sol_D[i]);
-        });
-
-    // Compute |u - sol| at non-dirichlet R indices
-    std::span<const real> u_R[] = {u.Rx, u.Ry, u.Rz};
-    std::span<const real> sol_R[] = {sol.Rx, sol.Ry, sol.Rz};
-    real* err_R_ptrs[] = {error_rx.data(), error_ry.data(), error_rz.data()};
-    for (int dir = 0; dir < 3; ++dir) {
-        auto nd = m.non_dirichlet_object_desc(dir, object_bcs);
-        if (nd.count() == 0) continue;
-        const real* u_R_ptr = u_R[dir].data();
-        const real* sol_R_ptr = sol_R[dir].data();
-        real* err_R_ptr = err_R_ptrs[dir];
-        Kokkos::parallel_for(
-            Kokkos::RangePolicy<execution_space>(0, nd.count()),
-            KOKKOS_LAMBDA(int k) {
-                int i = nd.element(k);
-                err_R_ptr[i] = Kokkos::abs(u_R_ptr[i] - sol_R_ptr[i]);
-            });
-    }
-    Kokkos::fence();
-
-    // Zero Dirichlet grid faces on D buffer
-    for_each_grid_bc_desc<bcs::Dirichlet>(grid_bcs, m.extents(), [&](auto desc) {
-        fill_selected(error_d.data(), desc, 0.0);
-    });
-
-    // Zero Dirichlet object entries on Rx/Ry/Rz buffers
-    for (int dir = 0; dir < 3; ++dir) {
-        auto gd = m.dirichlet_object_desc(dir, object_bcs);
-        fill_selected(err_R_ptrs[dir], gd, 0.0);
-    }
-
-    scalar_view err_view{error_d, error_rx, error_ry, error_rz};
-    std::vector<scalar_view> io_scalars{u, err_view};
-
-    return io.write(io_names, io_scalars, c, dt, m.R());
+    scalar_span error{error_d, error_rx, error_ry, error_rz};
+    return detail::write_scalar_error(m, object_bcs, grid_bcs, u,
+        scalar_view{sol_d, sol_rx, sol_ry, sol_rz}, error,
+        io, io_names, c, dt);
 }
 
 } // namespace ccs::systems

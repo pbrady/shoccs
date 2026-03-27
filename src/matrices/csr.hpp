@@ -85,13 +85,10 @@ struct csr::builder {
 
     void add_point(integer row, integer col, real v)
     {
-        // std::cout << "adding\t" << row << '\t' << col << '\t' << v << '\n';
         p.emplace_back(row, col, v);
     }
 
     csr to_csr(integer nrows);
 };
-
-// using CSR_Builder = csr::builder_;
 
 } // namespace ccs::matrix

@@ -127,6 +127,10 @@ TEST_CASE("euler registry-based step")
     // Get timestep
     const real dt = *sys.timestep_size(reg, u0_ref, step);
 
+    // Build RHS graph: bind to (u1_ref, srhs_ref) matching the production
+    // convention in simulation_cycle. Euler deep-copies u0→u1 before submit.
+    sys.build_rhs_graph(reg, u1_ref, reg, srhs_ref);
+
     // Perform one euler step using the registry-based interface
     integrators::euler euler_integrator;
     euler_integrator(sys, reg, u0_ref, u1_ref, srhs_ref, step, dt);

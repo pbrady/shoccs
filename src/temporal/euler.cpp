@@ -13,8 +13,12 @@ void euler::operator()(system& sys, sim_registry& reg,
 {
     const real time = ctrl;
 
+    // Copy u0 into output so the pre-built RHS graph (bound to the output
+    // slot) reads the current solution, matching RK4's slot convention.
+    reg.deep_copy_slot(output.slot, u0.slot);
+
     slot_zero(reg, system_rhs_ref);
-    sys.rhs(reg, u0, reg, system_rhs_ref, time);
+    sys.submit_rhs_graph(reg, output, reg, system_rhs_ref, time);
     slot_assign_lc(reg, output, u0, dt, system_rhs_ref);
     sys.update_boundary(reg, output, time + dt);
 }

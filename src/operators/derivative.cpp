@@ -237,7 +237,6 @@ void cut_discretization(int r,
                 if (cp[dir] == obj.solid_coord[dir]) {
                     builder.add_cut_point(shape_row, v);
                 } else {
-                    // cp[dir] += cp_shift;
                     auto&& [r_stride, left_bounds, right_bounds] = m.interp_line(r, cp);
                     auto&& [interp_v, left, right] =
                         st.interp(r, cp, y, left_bounds, right_bounds, interp_c);
@@ -325,8 +324,6 @@ void domain_discretization(int dir,
     auto N_builder = matrix::csr::builder();
 
     for (auto [stride, start, end] : m.lines(dir)) {
-        // assert(offset == m.ic(start.m_coordinate));
-        // skip derivatives along line of dirichlet bcs
         if (m.dirichlet_line(start.mesh_coordinate, dir, grid_bcs)) continue;
 
         // start with assumption of square matrix and adjust based on boundary conditions
@@ -463,7 +460,7 @@ derivative::derivative(int dir,
     auto [p, rmax, tmax, ex_max] = st.query_max();
     auto h = m.h(dir);
     // set up the interior stencil
-    interior_c.resize(2 * p + 1);
+    auto interior_c = std::vector<real>(2 * p + 1);
     st.interior(h, interior_c);
 
     domain_discretization(dir, m, st, grid_bcs, obj_bcs, O, B, N, interior_c);
@@ -475,7 +472,7 @@ derivative::derivative(int dir,
 
 template <typename Op>
     requires std::invocable<Op, real&, real>
-void derivative::operator()(scalar_view u, scalar_span du, Op op) const
+void derivative::apply_kernels(scalar_view u, scalar_span du, Op op) const
 {
     // update points in R
     Bfx(u.D, du.Rx);
@@ -488,7 +485,6 @@ void derivative::operator()(scalar_view u, scalar_span du, Op op) const
 
     // update fluid domain
     O(u.D, du.D, op);
-    // This is ugly
     switch (dir) {
     case 0:
         B(u.Rx, du.D);
@@ -499,6 +495,13 @@ void derivative::operator()(scalar_view u, scalar_span du, Op op) const
     default:
         B(u.Rz, du.D);
     }
+}
+
+template <typename Op>
+    requires std::invocable<Op, real&, real>
+void derivative::operator()(scalar_view u, scalar_span du, Op op) const
+{
+    apply_kernels(u, du, op);
     Kokkos::fence("derivative::operator() complete");
 }
 
@@ -506,7 +509,7 @@ template <typename Op>
     requires std::invocable<Op, real&, real>
 void derivative::operator()(scalar_view u, scalar_view nu, scalar_span du, Op op) const
 {
-    (*this)(u, du, op);
+    apply_kernels(u, du, op);
     N(nu.D, du.D);
     Kokkos::fence("derivative::operator() with Neumann complete");
 }

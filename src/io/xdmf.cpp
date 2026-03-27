@@ -1,4 +1,3 @@
-#include <iomanip>
 #include <iostream>
 #include <pugixml.hpp>
 #include <string>

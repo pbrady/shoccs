@@ -144,14 +144,6 @@ struct E6u_1 {
 
     std::span<const real> nbs_dirichlet(real h, real, std::span<real> c, bool right) const
     {
-        // c[0] = (60 * alpha[0] - 137) / 60;
-        // c[1] = 5 - 6 * alpha[0];
-        // c[2] = 15 * alpha[0] - 5;
-        // c[3] = -(60 * alpha[0] - 10) / 3;
-        // c[4] = (60 * alpha[0] - 5) / 4;
-        // c[5] = -(30 * alpha[0] - 1) / 5;
-        // c[6] = alpha[0];
-        // c[7] = 0;
         c[0] = (5 * alpha[1] - 1) / 5;
         c[1] = -(72 * alpha[1] + 13) / 12;
         c[2] = 15 * alpha[1] + 2;

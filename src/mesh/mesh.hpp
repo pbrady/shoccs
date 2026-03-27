@@ -67,8 +67,6 @@ public:
         return ijk[0] * n[1] * n[2] + ijk[1] * n[2] + ijk[2];
     }
 
-    // constexpr auto location() const { return views::location(cart, geometry); }
-
     // Intersection of rays in x and all objects
     std::span<const mesh_object_info> Rx() const { return geometry.Rx(); }
     // Intersection of rays in y and all objects
