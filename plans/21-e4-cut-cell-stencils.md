@@ -104,14 +104,29 @@ The SymPy pipeline (Phase 20) is complete with 231 passing tests and 7 modules:
   5. Calls `boundary.solve_boundary_row(i, t, q, nu, free_symbols[i])` for each row i = 0..r_eff-1.
      - **Note:** `solve_boundary_row` builds a Taylor system with `q+1` equations (via `build_taylor_system`). For E4_1 (q=3, nu=1), `q+1 = 4 = max(q+1, nu+1)`, so this matches the existing `_build_uniform_vandermonde` equation count. For nu=2 schemes where `q+1 < nu+1`, this will produce fewer equations; see 21.5a for how to handle that case.
   6. **Conservation step (nextra > 0 only):**
-     - If nextra > 0: substitute phi symbols using column-sum conservation `sum_i B_u[i,j] = 0` for j >= p+1 (same approach as `derive_e2_uniform_boundary` lines 248–254).
+     - If nextra > 0: substitute phi symbols using column-sum conservation. For each interior column `j` in range `[p+1, t)` (= columns `[q+1, t)` in the `solve_boundary_row` output since `n_det = q+1`):
+       ```
+       For j in range(p+1, t):
+         col_sum_upper = sum(B_u[i, j] for i in range(r_eff - 1))
+         phi_idx = j - (q + 1)   # maps column j to phi symbol index
+         subs[phi[phi_idx]] = -col_sum_upper
+       B_u = B_u.subs(subs)
+       ```
+       This resolves all phi symbols in the last row, leaving only the alpha symbols from earlier rows.
+       - For **E2_1** (p=1, t=4, q=1): columns j=2,3 are conserved → 2 phi symbols resolved, matching `derive_e2_uniform_boundary` lines 248–254.
+       - For **E4_1** (nextra=0): this step is skipped entirely — no phi symbols exist.
      - If nextra == 0: no conservation step — all rows retain their free alphas.
   7. Gets interior coefficients via `interior.derive_interior(s, p, nu)` + `full_gamma_array()`
   8. Assembles the r_eff × t Matrix and packages into `UniformResult`
   - **Key insight:** boundary.py's `derive_boundary(p, nu)` uses `r = 2p-1` (SBP minimal rows) which gives r=3, t=5 for E4. The TEMO needs t=6 (wider). But `solve_boundary_row(i, t, q, nu, free)` accepts arbitrary t, so call it with the TEMO t=6. This is NOT a format conversion from `BoundaryResult` — it's a fresh derivation using the lower-level `solve_boundary_row` function.
   - **Relationship to E4u_1:** The TEMO 3×6 boundary extends the uniform 3×5 boundary (E4u_1) by one column. Row 0 and Row 1's first 5 coefficients match E4u_1 exactly (column 5 is zero). Row 2 has 2 free alphas (alpha_2, alpha_3) instead of being conservation-constrained like E4u_1's row 2.
   - File: `scripts/stencil_gen/stencil_gen/temo.py`
-  - Test: verify `derive_uniform_boundary_for_temo(E2_1)` produces the same `UniformResult` as the existing `derive_e2_uniform_boundary(nu=1)` (regression check)
+  - **Regression test:** verify `derive_uniform_boundary_for_temo(E2_1)` produces the same `UniformResult` as the existing `derive_e2_uniform_boundary(nu=1)`:
+    - Both should use alpha symbols `alpha_0, alpha_1, alpha_2, alpha_3` (in that order)
+    - Compare `B_u` matrices entry-by-entry via `cancel(new[i,j] - old[i,j]) == 0`
+    - Compare `interior` lists exactly
+    - If the new function produces differently named alphas (e.g., from `solve_boundary_row`'s internal naming), add a symbol-remapping step before constructing `UniformResult`
+    - The new function should accept an optional `alpha_symbols` parameter (like `derive_e2_uniform_boundary` does) to allow the caller to control symbol naming
 
 - [ ] **21.1b** Test the bridge for E4_1:
   - Call `derive_uniform_boundary_for_temo(E4_1)`
@@ -161,9 +176,29 @@ The SymPy pipeline (Phase 20) is complete with 231 passing tests and 7 modules:
       fixed = {2, 4, 5, 6}
       unknown = {0, 1, 3}           → 3 unknowns, 4 equations
 
-    identify_prescribed_entries (general psi, each row):
-      prescribed = 1 (cat A zeroed col) + 2 (limit interp, highest free cols)
-      solve_cols = T - 3 prescribed = 4 = n_eqs → exactly determined, no betas
+    identify_prescribed_entries (general psi, all 4 rows):
+      For ALL rows (nu=1): zeroed_col = 1 (x_0), n_eqs = max(q+1,nu+1) = 4
+
+      Row 0 (boundary, i=0):
+        prescribed[1] = psi * B_u[0, 0]           (Category A)
+        free_cols = [0, 2, 3, 4, 5, 6]  → n_free=6, n_excess = 6-4 = 2
+        extra_cols = [5, 6]  (highest 2)
+        prescribed[5] = psi*B_l_1[0,5] + (1-psi)*B_d[0,5]
+        prescribed[6] = psi*B_l_1[0,6] + (1-psi)*B_d[0,6]
+        solve_cols = [0, 2, 3, 4]  → 4 unknowns = 4 equations ✓
+
+      Rows 1, 2 (boundary, i=1,2): same structure as row 0
+        prescribed = {1, 5, 6}, solve_cols = [0, 2, 3, 4] → exactly determined
+
+      Row 3 (near-interior, i=3):
+        prescribed[1] = psi * B_l_1[3, 1]          (Category A, target from B_l_1)
+        free_cols = [0, 2, 3, 4, 5, 6]
+        extra_cols = [5, 6]
+        prescribed[5] = psi*B_l_1[3,5] + (1-psi)*B_d[3,5]  (psi-dependent)
+        prescribed[6] = psi*B_l_1[3,6] + (1-psi)*B_d[3,6]  (psi-dependent)
+        solve_cols = [0, 2, 3, 4]  → 4 unknowns = 4 equations ✓
+
+      Summary: all rows exactly determined, no betas introduced
     ```
     The overdetermined systems are expected to be consistent because the conservation values are derived from boundary rows that satisfy the Taylor accuracy conditions. If either raises `RuntimeError("Overdetermined system inconsistent...")`, the alpha distribution or conservation logic in 21.1a needs debugging.
   - File: `scripts/stencil_gen/tests/test_e4_cut_cell.py`
@@ -193,7 +228,7 @@ The SymPy pipeline (Phase 20) is complete with 231 passing tests and 7 modules:
   - The struct should have: **P=2, R=4, T=7, X=0** (corrected: R=4, not 5)
   - Member array: `std::array<real, 4> alpha` (4 free params)
   - `param_arrays = {"alpha": 4}` in `StencilGenSpec`
-  - Methods: `interior()`, `nbs_floating()` (**4×7=28 coefficients**), `nbs_dirichlet()` (**3×7=21 coefficients**)
+  - Methods: `interior()`, `nbs_floating()` (**4×7=28 coefficients**), `nbs_dirichlet()` (**3×7=21 emitted coefficients**)
   - CSE will be needed (expressions will be complex rational functions of psi and alpha)
   - The `StencilGenSpec` for E4_1:
     ```python
@@ -202,10 +237,17 @@ The SymPy pipeline (Phase 20) is complete with 231 passing tests and 7 modules:
         derivative_order=1, is_uniform=False,
         param_arrays={"alpha": 4},
         interior_coeffs=interior,  # from derive_interior(0, 2, 1)
-        floating_coeffs=list(floating_matrix),  # 28 entries row-major
-        dirichlet_coeffs=list(dirichlet_matrix),  # 21 entries row-major
+        floating_coeffs=list(floating_matrix),  # 28 entries row-major; SymPy Matrix flattens row-major
+        dirichlet_coeffs=dirichlet_flat,         # 28 entries; see construction note below
     )
     ```
+  - **IMPORTANT: `dirichlet_coeffs` format.** The codegen's `_emit_nbs_methods` slices `spec.dirichlet_coeffs[spec.T:]` to skip row 0. So `spec.dirichlet_coeffs` must have **R×T = 28 entries**, not (R-1)×T = 21. Construct as:
+    ```python
+    # CutCellResult.dirichlet is (R-1)×T = 3×7 = 21 entries (rows 1..3)
+    # Prepend T=7 zeros as placeholder for row 0 (wall row, dropped by Dirichlet BC)
+    dirichlet_flat = [Integer(0)] * 7 + list(result.dirichlet)
+    ```
+    This matches the existing E4u_1 spec pattern (`[Integer(0)] * 5 + e4u_dirichlet_coeffs`) and the polyE2_1 spec pattern (`[Integer(0)] * 4 + ...`).
   - Write generated code to `scripts/stencil_gen/output/E4_1.cpp` (not into src/stencils/ yet)
   - File: `scripts/stencil_gen/tests/test_e4_cut_cell.py`
   - Test: verify generated code has correct structure (check for P=2, R=4, T=7 constants)
@@ -220,12 +262,18 @@ The SymPy pipeline (Phase 20) is complete with 231 passing tests and 7 modules:
 ### 21.5 — Assemble the full `derive_and_generate` pipeline
 
 - [ ] **21.5a** Add a high-level `derive_cut_cell_scheme(scheme: SchemeParams, psi)` function in `temo.py`:
+  - **Signature:** `def derive_cut_cell_scheme(scheme: SchemeParams, psi: Symbol) -> CutCellResult`
   - Orchestrates the full pipeline:
-    1. `derive_uniform_boundary_for_temo(scheme)` → `UniformResult` (B_u, interior, alpha_symbols)
-    2. `construct_cut_cell_stencil(B_u, interior, p, q, nu, nextra, psi)` → `StencilResult` (floating matrix)
-    3. If nu=2: `derive_uniform_neumann(interior, p, q, nu)` + `construct_neumann_stencil(...)` → neumann matrix + eta
-    4. `assemble_cut_cell_result(floating, neumann, eta, dims, alpha_symbols)` → `CutCellResult`
+    1. `dims = compute_dimensions(scheme.p, scheme.q, scheme.s, scheme.nextra, scheme.nu)` — corrected dimensions
+    2. `uniform = derive_uniform_boundary_for_temo(scheme)` → `UniformResult` (B_u, interior, alpha_symbols)
+    3. `floating_result = construct_cut_cell_stencil(uniform.B_u, uniform.interior, scheme.p, scheme.q, scheme.nu, scheme.nextra, psi)` → `StencilResult`
+    4. If `scheme.nu == 2` (Neumann needed):
+       - `B_uN, eta_u = derive_uniform_neumann(uniform.interior, scheme.p, scheme.q, scheme.nu)`
+       - `neumann_main, eta = construct_neumann_stencil(uniform.B_u, B_uN, eta_u, uniform.interior, scheme.p, scheme.q, scheme.nu, scheme.nextra, psi)`
+       - Else: `neumann_main, eta = None, None`
+    5. `return assemble_cut_cell_result(floating_result.matrix, neumann_main, eta, dims, uniform.alpha_symbols)`
   - Returns `CutCellResult` with all coefficient matrices
+  - **For E4_1 (nu=1):** steps 4's Neumann branch is skipped. The result has `neumann=None, eta=None, dims.X=0`.
   - Works for E2_1, E2_2, E4_1 (any scheme in the Table 1 family with corrected dimensions)
   - **Dispatch strategy for step 1 (Decision):** Use `derive_uniform_boundary_for_temo` for ALL schemes (E2 and E4), not just E4+. The 21.1a regression check (21.1a step: "verify `derive_uniform_boundary_for_temo(E2_1)` produces the same `UniformResult` as `derive_e2_uniform_boundary(nu=1)`") ensures the general function handles E2's nextra>0 conservation case correctly. If the 21.1a regression check fails (e.g., alpha naming differs), fix the general function rather than keeping `derive_e2_uniform_boundary` as a fallback — the goal is ONE code path. The old `derive_e2_uniform_boundary` remains in `temo.py` but is no longer called by the pipeline; it can be deprecated in a future cleanup phase.
   - **Known limitation for nu=2 schemes:** `solve_boundary_row` uses `q+1` equations from `build_taylor_system`. For E2_2 (q=1, nu=2), this gives only 2 equations while the existing `derive_e2_uniform_boundary` uses `max(q+1, nu+1)=3`. If `derive_uniform_boundary_for_temo` uses `solve_boundary_row` directly for E2_2, it will build a different Taylor system. Fix: either (a) build the Taylor system inline with `max(q+1, nu+1)` equations instead of calling `solve_boundary_row`, or (b) modify `solve_boundary_row` to accept an optional `n_eqs` parameter. Since E4_1 (nu=1, q=3) has `q+1 = max(q+1, nu+1) = 4`, this is NOT an issue for Phase 21's primary target.
