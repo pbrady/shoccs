@@ -1084,3 +1084,15 @@ def construct_cut_cell_stencil(
     return StencilResult(
         matrix=matrix, beta_info=all_beta_info, beta_symbols=all_beta_symbols
     )
+
+
+# ---------------------------------------------------------------------------
+# 20.5e Phase 2 — Psi-dependent conservation
+# ---------------------------------------------------------------------------
+#
+# NOTE: Phase 2 implementation is in progress. See plan 20.5 items
+# 20.5e-P2a through P2d for the revised approach. Key findings:
+# - Constant betas violate psi limits; extra columns need psi-dependent values
+# - solve_uniform_limit wall=0 is incorrect for E2_1 (needs fixing in 20.5d)
+# - C++ alpha parameterization is nonlinear; mapping requires fixture tool
+# See plans/20.5-temo-cut-cell.md for details.
