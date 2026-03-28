@@ -17,6 +17,49 @@ from stencil_gen.boundary import solve_boundary_row, BoundaryRow
 
 
 # ---------------------------------------------------------------------------
+# Pipeline helper and fixtures (deferred imports for isolation)
+# ---------------------------------------------------------------------------
+
+def _run_pipeline(p, nu=1, s=0):
+    """Run derive_boundary + conservation, return full pipeline results."""
+    from stencil_gen.boundary import derive_boundary
+    from stencil_gen.conservation import build_conservation_system, solve_conservation
+    result = derive_boundary(p=p, nu=nu, s=s)
+    equations, w_syms, last_free = build_conservation_system(
+        result.r, result.t, p, result.rows, result.interior_coeffs)
+    solution_dict, updated_rows = solve_conservation(
+        equations, w_syms, last_free, result.all_free_params, result.rows)
+    return updated_rows, solution_dict, w_syms, result
+
+
+def _interior_contribution(j, r, p, interior_coeffs):
+    """Compute the sum of interior stencil contributions to column j."""
+    ic = S.Zero
+    for m in range(max(0, j - r - p), j - r + p + 1):
+        if m >= 0:
+            idx = j - (r + m) + p
+            if 0 <= idx <= 2 * p:
+                ic += interior_coeffs[idx]
+    return ic
+
+
+@pytest.fixture(scope="module")
+def e4u_pipeline():
+    """Run E4u pipeline once, reuse across all test_E4u_* functions."""
+    return _run_pipeline(p=2)
+
+
+@pytest.fixture(scope="module")
+def e6u_pipeline():
+    return _run_pipeline(p=3)
+
+
+@pytest.fixture(scope="module")
+def e8u_pipeline():
+    return _run_pipeline(p=4)
+
+
+# ---------------------------------------------------------------------------
 # 20.3a -- Taylor system tests
 # ---------------------------------------------------------------------------
 
@@ -137,3 +180,37 @@ def test_solve_row_two_free():
     assert len(result.coefficients) == 8
     assert result.coefficients[6] == a3
     assert result.coefficients[7] == a4
+
+
+# ---------------------------------------------------------------------------
+# 20.3d -- Conservation constraint solver tests
+# ---------------------------------------------------------------------------
+
+
+def test_conservation_weight_count_E4u(e4u_pipeline):
+    """Verify 3 weight symbols exist and are solved."""
+    updated_rows, solution_dict, w_syms, result = e4u_pipeline
+    assert len(w_syms) == 3
+    for w in w_syms:
+        assert w in solution_dict
+
+
+def test_conservation_placeholders_resolved_E4u(e4u_pipeline):
+    """Verify last row has no phi_* symbols remaining."""
+    updated_rows, solution_dict, w_syms, result = e4u_pipeline
+    last_row = updated_rows[2]
+    allowed = set(result.all_free_params)
+    for coeff in last_row.coefficients:
+        assert coeff.free_symbols <= allowed, (
+            f"Unexpected symbols in last row: {coeff.free_symbols - allowed}"
+        )
+
+
+def test_conservation_redundant_column_E4u(e4u_pipeline):
+    """Verify the redundant column (t-1=4) sums to zero."""
+    updated_rows, solution_dict, w_syms, result = e4u_pipeline
+    w_exprs = [solution_dict[w] for w in w_syms]
+    col_sum = sum(w * row.coefficients[4]
+                  for w, row in zip(w_exprs, updated_rows))
+    col_sum += _interior_contribution(4, result.r, 2, result.interior_coeffs)
+    assert cancel(col_sum) == 0
