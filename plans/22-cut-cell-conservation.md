@@ -27,17 +27,17 @@ The current TEMO pipeline solves each row of the cut-cell stencil B_l(ψ) indepe
 
 ### Why E2_1 works without explicit conservation enforcement
 - E2_1: R=4, T=5, p=1, nextra=1
-- Interior overlap columns: 3, 4 (2 columns)
-- Conservation equations: 2 column sums + 1 wall constraint = 3
-- Weight unknowns (w_1, w_2, w_3): 3
-- **Exactly determined** → weights alone absorb all constraints, no stencil entry constraints needed
+- Columns with nonzero IC (grid-frame): 3 (1 column; T-frame: 4)
+- Conservation equations: T−1 = 4 (all columns j=0..T−2 per `conservation.py`)
+- Unknowns: 3 weights (w_1, w_2, w_3) + 1 phi placeholder (nextra=1) = 4
+- **Exactly determined** → weights + phi absorb all constraints, no alpha constraints needed
 
 ### Why E4_1 fails
 - E4_1: R=4, T=7, p=2, nextra=0
-- Interior overlap columns: 2, 3, 4, 5, 6 (5 columns)
-- Conservation equations: 5 column sums + 1 wall constraint = 6
-- Weight unknowns (w_1, w_2, w_3): 3
-- **3 excess constraints** → must be satisfied by stencil entries
+- Columns with nonzero IC (grid-frame): 2, 3, 4, 5 (4 columns; T-frame: 3, 4, 5, 6)
+- Conservation equations: T−1 = 6 (all columns j=0..T−2 per `conservation.py`)
+- Weight unknowns (w_1, w_2, w_3): 3, nextra=0 → no phi placeholders
+- **3 excess constraints** → must be satisfied by stencil entries (alpha parameters)
 - Currently ignored → conservation violated on ALL columns
 
 ### Degrees of freedom budget
@@ -77,19 +77,19 @@ The practical approach: solve Taylor per-row first (as now) to get stencil entri
   - **Signature:** `build_cut_cell_conservation_system(B_l: Matrix, R: int, T: int, p: int, interior_coeffs: list, psi: Symbol) -> tuple[list[Expr], list[Symbol]]`
     - `B_l` is the R×T cut-cell stencil matrix (entries are rational in ψ and α symbols)
     - Returns `(equations, w_symbols)` where equations are expressions that must equal zero
-  - **Interior column identification:** A T-frame column j (0-indexed, col 0 = wall) is an "interior overlap" column if any interior stencil row (row index ≥ R in the full grid) has a non-zero coefficient at that column. Using the same logic as `conservation.py:_interior_contribution()` but adapted for the T-frame: column j in the T-frame corresponds to grid point j-1 (since col 0 = wall, col 1 = x_0). Interior row R+m covers T-frame columns `(R+m-p+1)..(R+m+p+1)`. A column j is interior-overlapping if it falls in range `[R-p+1, T-1]` (for E4_1: j = 2..6, all 5 non-wall/non-x_0 columns).
-  - **Interior contribution IC(j):** Sum of interior stencil coefficients touching T-frame column j. Interior row R+m has coefficient `interior_coeffs[j-1 - (R+m) + p]` at column j. This is the same as `_interior_contribution(j-1, R, p, interior_coeffs)` from `conservation.py` (adjusting for T-frame vs grid-frame indexing).
-  - **Conservation equations:** For each interior-overlap column j:
+  - **Interior column identification:** T-frame column j (0-indexed, col 0 = wall) corresponds to grid point j-1 (col 1 = x_0). Interior row R+m covers T-frame columns `(R+m-p+1)..(R+m+p+1)`. A column j has nonzero IC if it falls in range `[R-p+1, T-1]` (for E4_1: j = 3..6, 4 columns). Uses the same logic as `conservation.py:_interior_contribution()` adapted for T-frame indexing.
+  - **Interior contribution IC(j):** Sum of interior stencil coefficients touching T-frame column j. Interior row R+m has coefficient `interior_coeffs[j-1 - (R+m) + p]` at column j. Equivalently: `_interior_contribution(j-1, R, p, interior_coeffs)` from `conservation.py` (adjusting for T-frame vs grid-frame). IC(j) = 0 for columns outside the overlap range.
+  - **Conservation equations:** For each T-frame column j = 0..T−2 (matching `conservation.py` which iterates `range(t-1)`, giving T−1 total equations):
     `w_0 * B_l[0,j] + Σ_{i=1}^{R-1} w_i * B_l[i,j] + IC(j) = 0`
     where `w_0 = psi` (the cut-cell weight) and `w_1..w_{R-1}` are symbol unknowns.
-  - **Wall column constraint (j=0):** `w_0 * B_l[0,0] = Σ_{i=0}^{r-1} w^u_i * B^u_l[i,0]` — but for now, the wall column may only need `Σ_i w_i * B_l[i,0] = -1` (the standard column-0-sums-to-negative-one condition from `conservation.py` line 80). Use the same convention: `col_sum + 1 = 0` for j=0.
-  - **Column 1 (x_0):** For nu=1, column 1 is the zeroed Category-A column. Its column sum involves `psi * B_l[0,1]` where `B_l[0,1]` is already prescribed as `psi * target`. Include in the conservation system only if the column overlaps with interior stencils.
+  - **Wall column (j=0):** Use the standard `col_sum + 1 = 0` convention from `conservation.py` line 80 (column 0 sums to −1).
+  - **Column 1 (x_0):** For nu=1, column 1 is the zeroed Category-A column. Its column sum involves `psi * B_l[0,1]` where `B_l[0,1]` is already prescribed. The equation for j=1 is generated like any other column; it may be trivially satisfied or impose a constraint on weights.
   - File: `scripts/stencil_gen/stencil_gen/temo.py` (add after `construct_cut_cell_stencil`, around line 1282)
   - Verify: new function is importable and produces the correct number of equations
 
 - [ ] **22.2b** Test conservation system dimensions:
-  - For E2_1: call with E2_1's cut-cell stencil → expect 4 equations (cols 0-4, T-1=4 columns per `conservation.py` convention), 3 weight unknowns `w_1, w_2, w_3` (w_0=ψ is fixed)
-  - For E4_1: call with E4_1's cut-cell stencil → expect 6 equations (cols 0-6, T-1=6 columns), 3 weight unknowns `w_1, w_2, w_3` (w_0=ψ is fixed)
+  - For E2_1: call with E2_1's cut-cell stencil → expect T−1 = 4 equations (j = 0..3), 3 weight unknowns `w_1, w_2, w_3` (w_0=ψ is fixed) + 1 phi placeholder (nextra=1) = 4 unknowns → exactly determined
+  - For E4_1: call with E4_1's cut-cell stencil → expect T−1 = 6 equations (j = 0..5), 3 weight unknowns `w_1, w_2, w_3` (w_0=ψ is fixed), nextra=0 → 3 excess constraints
   - The E4_1 system has 6 equations and only 3 weight unknowns → 3 excess constraints that must be absorbed by the 4 alpha parameters, confirming the problem
   - File: `scripts/stencil_gen/tests/test_e4_cut_cell.py`
   - Test: `cd scripts/stencil_gen && uv run pytest tests/test_e4_cut_cell.py -v -k conservation_system`
