@@ -115,11 +115,11 @@ The two-phase approach described below was attempted and found to have a **funda
 6. **Key structural issue**: For E2_1, rows 1 and 2 of B_l are identical when all α=0, making the conservation matrix rank-deficient. Non-zero α values break this degeneracy.
 
 **The problem requires a different approach.** The conservation system couples weights and alpha through bilinear terms (w_i × B_l[i,j](α)). Solving must handle both simultaneously, not sequentially. Possible approaches:
-- **(A) Augmented consistency**: formulate conservation as requiring all 4×4 minors of [A(α)|b(α)] to vanish for all ψ; solve the resulting nonlinear α-system, then recover weights.
-- **(B) Direct parametric solve**: parameterize w_i as rational functions of ψ with unknown coefficients, substitute into conservation, match ψ-coefficients, solve the resulting polynomial system in (weight coefficients, α).
-- **(C) Entry-level unknowns**: instead of working with α, treat the 8 free stencil entries directly as unknowns alongside weights, giving a system that may be solvable despite higher dimensionality.
+- **(A) Augmented consistency**: formulate conservation as requiring all 4×4 minors of [A(α)|b(α)] to vanish for all ψ; solve the resulting nonlinear α-system, then recover weights. **RESULT: FAILS** (22.3a-i). No α satisfies all minor conditions.
+- **(B) Direct parametric solve**: parameterize w_i as rational functions of ψ with unknown coefficients, substitute into conservation, match ψ-coefficients, solve the resulting polynomial system in (weight coefficients, α). **RESULT: FAILS** (22.3a-ii). Mathematically equivalent to (A) — pointwise inconsistency at every tested (ψ, α) proves no weight function can satisfy conservation within the α-parameterized stencil space.
+- **(C) Entry-level unknowns**: instead of working with α, treat the 8 free stencil entries directly as unknowns alongside weights, giving a system that may be solvable despite higher dimensionality. **STATUS: Not yet investigated — this is the remaining viable approach.**
 
-**Next step**: Implement sub-items 22.3a-i through 22.3a-iii below as a prerequisite investigation to select and validate the correct approach before full implementation.
+**Next step**: Implement 22.3a-iii using approach (C).
 
 - [x] **22.3a-i** Investigate approach (A) — augmented matrix minor conditions:
   - Compute all C(6,4)=15 minor determinants of [A(ψ,α)|b(ψ,α)] for E4_1 symbolically (all 4 alpha free, not fixing alpha_3=0).
@@ -134,16 +134,24 @@ The two-phase approach described below was attempted and found to have a **funda
     - `sympy.solve()` on the full 39-equation system returns `[]` (no solution).
     - **Conclusion:** No choice of (α₀,α₁,α₂,α₃) can make the conservation system consistent for all ψ with constant weights. The bilinear coupling between weights and alpha truly requires ψ-dependent weights (approach B) or entry-level unknowns (approach C).
 
-- [ ] **22.3a-ii** Investigate approach (B) — parametric weight functions:
+- [x] **22.3a-ii** Investigate approach (B) — parametric weight functions:
   - Parameterize weights as w_i = p_i(ψ)/q(ψ) where q is the common TEMO denominator (ψ+1)(ψ+2)(ψ+3) and p_i are polynomials in ψ of degree ≤ 3 with unknown rational coefficients.
   - Substitute into all 6 conservation equations, clear denominators.
   - Collect all ψ-coefficient equations.
   - Determine if the resulting system (in weight coefficients and alpha) is solvable.
-  - File: exploratory script or test
+  - File: `scripts/stencil_gen/tests/test_e4_cut_cell.py` (`TestApproachBParametricWeights`)
+  - **RESULT: Approach (B) FAILS.** Three independent tests confirm this:
+    1. **Common denominator verified:** All B_l entries share common psi-denominator 12·(ψ+1)(ψ+2)(ψ+3) (degree 3). Rows 0–2 each have 6·(ψ+1)(ψ+2)(ψ+3); row 3 has constant denom 12.
+    2. **Pointwise inconsistency:** At every tested (ψ, α) combination (3 alpha choices × 3 psi values = 9 points), rank([A|b]) = 4 > rank(A) = 3. The system has no solution at those specific ψ values. No weight FUNCTION w(ψ) can produce a valid w(ψ₀) where no w exists.
+    3. **Parametric coefficient system inconsistent:** For α=0, the psi-coefficient system in weight polynomial coefficients c is inconsistent at every tested degree (3, 5, 7). The rank gap is always exactly 1: rank([M|b]) = rank(M) + 1. The failure is fundamental, not a degree limitation.
+    - **Mathematical proof of equivalence with approach A:** If approach B had a solution (c*, α*), then w(ψ) = p(ψ)/q(ψ) would satisfy A(ψ,α*)·w(ψ) = b(ψ,α*) for all ψ where q(ψ)≠0. This implies rank([A|b]) ≤ 3 at infinitely many ψ, forcing all 4×4 minors to vanish as polynomials — contradicting approach A's result. QED.
+    - **Conclusion:** Both approaches A and B fail because the conservation system is structurally inconsistent within the α-parameterized stencil space. The 4 alpha parameters cannot simultaneously satisfy the 3 excess conservation constraints. Approach (C) — entry-level unknowns — is needed to break out of the α parameterization and work in the full 8-dimensional free-entry space.
 
 - [ ] **22.3a-iii** Choose approach and implement `enforce_cut_cell_conservation()`:
-  - Based on findings from 22.3a-i and 22.3a-ii, implement the working approach.
-  - Must pass verification: for the conserved stencil, all T−1 conservation column sums must be zero (symbolically, for all ψ and remaining free α).
+  - Based on findings from 22.3a-i and 22.3a-ii: **Both approaches A and B have been ruled out.** The only remaining option is approach (C) — entry-level unknowns.
+  - **Approach (C) sketch:** Instead of the α parameterization (which pre-solves Taylor accuracy per row), treat the 8 free stencil entries (2 per row × 4 rows) as direct unknowns alongside the 3 weights. The Taylor accuracy constraints (4 per row = 16 total) and conservation constraints (6 total) form a system of 22 equations in 11 unknowns (8 entries + 3 weights). Since each row's Taylor equations only involve that row's 2 free entries, the system decomposes partially. The excess DOF (11 − rank ≤ 11) leave room for optimization parameters.
+  - **Key implementation challenge:** The current TEMO pipeline solves Taylor per-row using the α parameterization. Approach C requires either (a) a fundamentally different solve strategy that couples rows, or (b) a post-hoc re-parameterization that maps from (entries, weights) back to the pipeline's α symbols. Option (b) may be simpler if the conservation constraints can be expressed as entry-level conditions that are then back-substituted into the per-row Taylor solutions.
+  - Must pass verification: for the conserved stencil, all T−1 conservation column sums must be zero (symbolically, for all ψ and remaining free parameters).
   - File: `scripts/stencil_gen/stencil_gen/temo.py`
 
 - [ ] **22.3b** Integrate into `construct_cut_cell_stencil()` and propagate through pipeline:
@@ -251,7 +259,7 @@ The two-phase approach described below was attempted and found to have a **funda
 **ORIGINALLY CHOSEN: Two-phase** (Taylor first, then conservation substitution). **STATUS: FAILED** — the two-phase approach encounters a bilinear singularity where the weight denominators vanish at the constrained alpha values, making the system inconsistent after alpha substitution. See "Investigation Findings" in §22.3 for details. A new approach must be selected from the alternatives described in 22.3a-i/ii/iii.
 
 ### DD22-2: Bilinear term handling
-**ORIGINALLY CHOSEN: (a) Treat alphas as parameters, solve for w's.** **STATUS: INSUFFICIENT** — while the conservation equations are linear in w_i when α symbols are parameters, the resulting parametric weight solution has denominators that depend on α. At the α values required by conservation, these denominators vanish (the coefficient matrix A(α) loses rank). The bilinear coupling MUST be handled simultaneously. The augmented matrix minor approach (all 4×4 minors of [A|b] must vanish) gives the true consistency conditions but produces nonlinear equations in α.
+**ORIGINALLY CHOSEN: (a) Treat alphas as parameters, solve for w's.** **STATUS: DEAD END** — the conservation system A(ψ,α)·w = b(ψ,α) is structurally inconsistent within the α-parameterized stencil space. Both approach A (minor conditions) and approach B (parametric weights) confirm this independently. The α parameterization constrains the stencil to a 4-dimensional manifold that does not intersect the conservation constraint surface. **Resolution:** approach (C) must work in the full entry space, bypassing the α parameterization entirely.
 
 ### DD22-3: Alpha parameter reduction
 **TBD (narrowed):** Conservation enforcement will reduce E4_1's free alpha count from 4 to a smaller number. Based on the DOF analysis:
@@ -273,11 +281,13 @@ The two-phase approach described below was attempted and found to have a **funda
 
 The conservation solve is small but mathematically nontrivial:
 - E4_1: 6 conservation equations, bilinear in 3 weight unknowns × 4 alpha symbols
-- The augmented matrix approach produces 15 minor determinants, each polynomial in (ψ, α). After extracting ψ-coefficients: 67 nonlinear equations in α (containing cross-terms like α₁·α₃)
-- The parametric weight approach may require parameterizing w_i as rational functions of ψ with ~12 unknown coefficients
-- SymPy's `solve()` returns 0 solutions for the full bilinear system; `nsolve()` reports singular Jacobian
-- Target: TBD after selecting approach in 22.3a-i/ii/iii
+- **Approach A (minors):** 15 minor determinants → 40 polynomial equations in 4 α unknowns. System is inconsistent (no solution).
+- **Approach B (parametric weights):** 37–55 psi-coefficient equations in 12–24 weight coefficients + 4 α. System is inconsistent for all tested α (rank gap = 1). The failure is independent of weight polynomial degree.
+- **Approach C (entry-level unknowns):** TBD — expected to be a linear system in ~11 unknowns (8 free entries + 3 weights) with ~22 equations (16 Taylor + 6 conservation). Should be tractable with SymPy's linear solver.
+- Target: TBD after implementing approach C in 22.3a-iii
 
 ## Key Implementation Insight
 
-The original two-phase approach (Taylor → conservation) fails due to bilinear singularities. The correct approach must handle the coupling between weights and alpha simultaneously. The conservation system A(ψ,α)·w = b(ψ,α) requires the augmented matrix [A|b] to have rank ≤ rank(A) for ALL ψ, which gives polynomial conditions on α (from minor determinants). These conditions are nonlinear because the A matrix entries involve α linearly, making the 4×4 minors quadratic or higher in α.
+The α parameterization (free parameters from the per-row Taylor solve) is a 4-dimensional manifold in an 8-dimensional space of free stencil entries. Approaches A and B both proved that this manifold does not intersect the conservation constraint surface — no choice of α (constant or ψ-dependent) can make the system consistent. The conservation system A(ψ,α)·w = b(ψ,α) is pointwise inconsistent: rank([A|b]) = 4 > rank(A) = 3 at every tested (ψ, α).
+
+**The fix requires approach (C):** work in the full 8-dimensional entry space, coupling the Taylor accuracy and conservation constraints into a single system. This bypasses the α parameterization entirely and solves for stencil entries + weights simultaneously.

@@ -1065,3 +1065,188 @@ class TestApproachAMinorConditions:
         assert len(a3_values) > 1, (
             f"Expected contradictory alpha_3 values, got single: {a3_values}"
         )
+
+
+class TestApproachBParametricWeights:
+    """Investigation 22.3a-ii: parametric weight functions for E4_1.
+
+    Approach (B): parameterize w_i = p_i(psi)/q(psi) with polynomial
+    numerators p_i and denominator q = common stencil denominator.
+    Substitute into conservation equations, clear denominators, collect
+    psi-coefficients, and check solvability of the resulting linear-in-c
+    system.
+
+    RESULT: Approach B FAILS.  The conservation system A(psi,alpha)*w =
+    b(psi,alpha) is pointwise inconsistent — rank([A|b]) = 4 > rank(A) = 3
+    at every tested (psi, alpha).  No weight function w(psi) can produce a
+    valid w at those points.  The psi-coefficient system in the weight
+    polynomial coefficients c is also inconsistent (rank gap = 1) regardless
+    of the polynomial degree.  This follows mathematically from approach A's
+    result: since no alpha makes all 4×4 minors of [A|b] vanish identically
+    in psi, the system is pointwise inconsistent on a dense set.
+    """
+
+    @pytest.fixture
+    def e4_data(self):
+        """Build E4_1 stencil, conservation system, and derived quantities."""
+        psi = Symbol("psi")
+        ur = derive_uniform_boundary_for_temo(E4_1)
+        stencil = construct_cut_cell_stencil(
+            ur.B_u, ur.interior, p=E4_1.p, q=E4_1.q, nu=E4_1.nu,
+            nextra=E4_1.nextra, psi=psi,
+        )
+        B_l = stencil.matrix
+        R, T = B_l.rows, B_l.cols
+        eqs, w_syms = build_cut_cell_conservation_system(
+            B_l, R, T, p=E4_1.p, nu=E4_1.nu,
+            interior_coeffs=ur.interior, psi=psi,
+        )
+        A_mat, b_vec = linear_eq_to_matrix(eqs, w_syms)
+        alpha_syms = sorted(B_l.free_symbols - {psi}, key=lambda s: s.name)
+
+        # Common psi-only denominator of all B_l entries
+        from sympy import lcm as sym_lcm
+        d = S.One
+        for i in range(R):
+            for j in range(T):
+                e = B_l[i, j]
+                if e != 0:
+                    _, den = fraction(cancel(e))
+                    d = sym_lcm(d, den)
+
+        return {
+            "psi": psi, "eqs": eqs, "B_l": B_l,
+            "alpha_syms": alpha_syms, "w_syms": w_syms,
+            "R": R, "T": T,
+            "A": A_mat, "b": b_vec,
+            "common_denom": d,
+        }
+
+    def test_common_denominator_is_psi_plus_1_2_3(self, e4_data):
+        """The common psi-denominator of E4_1 stencil entries is
+        12*(psi+1)*(psi+2)*(psi+3).
+
+        Rows 0-2 each have denominator 6*(psi+1)*(psi+2)*(psi+3);
+        row 3 (the near-interior row) has constant denominator 12.
+        """
+        from sympy import Poly as SPoly, lcm as sym_lcm
+
+        psi = e4_data["psi"]
+        B_l = e4_data["B_l"]
+        R, T = e4_data["R"], e4_data["T"]
+
+        # Per-row denominators
+        row_denoms = []
+        for i in range(R):
+            rd = S.One
+            for j in range(T):
+                e = B_l[i, j]
+                if e != 0:
+                    _, den = fraction(cancel(e))
+                    rd = sym_lcm(rd, den)
+            row_denoms.append(rd)
+
+        # Rows 0-2 share the same denominator
+        expected_row_denom = 6 * (psi + 1) * (psi + 2) * (psi + 3)
+        for i in range(3):
+            assert cancel(row_denoms[i] - expected_row_denom) == 0, (
+                f"Row {i} denom mismatch: {factor(row_denoms[i])}"
+            )
+
+        # Row 3 has constant denominator
+        assert row_denoms[3].free_symbols == set(), (
+            f"Row 3 denom should be constant, got {factor(row_denoms[3])}"
+        )
+
+        # Overall common denominator
+        d = e4_data["common_denom"]
+        deg = SPoly(d, psi).degree()
+        assert deg == 3, f"Expected degree 3, got {deg}"
+
+    def test_pointwise_inconsistency(self, e4_data):
+        """At every tested (psi, alpha), rank([A|b]) > rank(A).
+
+        This directly proves approach B fails: if the 6×3 system A*w = b
+        has no solution at a specific psi_0, no weight function w(psi) can
+        produce a valid w(psi_0).
+        """
+        psi = e4_data["psi"]
+        A_mat = e4_data["A"]
+        b_vec = e4_data["b"]
+        alpha_syms = e4_data["alpha_syms"]
+
+        test_alphas = [
+            {a: Integer(0) for a in alpha_syms},
+            {alpha_syms[0]: Rational(11, 6), alpha_syms[1]: Rational(1, 3),
+             alpha_syms[2]: Rational(-1, 6), alpha_syms[3]: Integer(0)},
+            {a: Rational(i + 1, 10) for i, a in enumerate(alpha_syms)},
+        ]
+        psi_vals = [Rational(1, 4), Rational(1, 2), Rational(3, 4)]
+
+        inconsistent_count = 0
+        total = 0
+        for alpha_vals in test_alphas:
+            for psi_val in psi_vals:
+                total += 1
+                subs = {psi: psi_val, **alpha_vals}
+                A_num = A_mat.subs(subs)
+                b_num = b_vec.subs(subs)
+                aug = A_num.row_join(b_num)
+                r_A = A_num.rank()
+                r_aug = aug.rank()
+                if r_aug > r_A:
+                    inconsistent_count += 1
+
+        # ALL tested points should be inconsistent
+        assert inconsistent_count == total, (
+            f"Expected all {total} points inconsistent, got {inconsistent_count}"
+        )
+
+    def test_parametric_c_system_inconsistent(self, e4_data):
+        """For fixed alpha=0, the psi-coefficient system in weight polynomial
+        coefficients c is inconsistent at every tested degree (3, 5, 7).
+
+        The rank gap is always exactly 1: rank([M|b]) = rank(M) + 1.
+        This confirms the failure is fundamental, not a degree limitation.
+        """
+        from sympy import Poly as SPoly
+
+        psi = e4_data["psi"]
+        eqs = e4_data["eqs"]
+        w_syms = e4_data["w_syms"]
+        alpha_syms = e4_data["alpha_syms"]
+        q = e4_data["common_denom"]
+        alpha_vals = {a: Integer(0) for a in alpha_syms}
+
+        for deg in [3, 5, 7]:
+            c_all = []
+            w_subs = {}
+            for idx, w in enumerate(w_syms):
+                cs = [Symbol(f"c_{idx + 1}_{k}") for k in range(deg + 1)]
+                c_all.extend(cs)
+                p = sum(cs[k] * psi**k for k in range(deg + 1))
+                w_subs[w] = p / q
+
+            psi_eqs = []
+            for eq in eqs:
+                eq_sub = eq.subs(w_subs).subs(alpha_vals)
+                eq_c = cancel(eq_sub)
+                num, _ = fraction(eq_c)
+                poly = SPoly(expand(num), psi)
+                for coeff in poly.all_coeffs():
+                    c_val = cancel(coeff)
+                    if c_val != 0:
+                        psi_eqs.append(c_val)
+
+            M, rhs = linear_eq_to_matrix(psi_eqs, c_all)
+            aug = M.row_join(rhs)
+            r_M = M.rank()
+            r_aug = aug.rank()
+
+            assert r_aug > r_M, (
+                f"Degree {deg}: expected inconsistent, got rank(M)={r_M}, "
+                f"rank([M|b])={r_aug}"
+            )
+            assert r_aug == r_M + 1, (
+                f"Degree {deg}: rank gap should be 1, got {r_aug - r_M}"
+            )
