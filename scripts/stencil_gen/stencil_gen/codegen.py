@@ -521,3 +521,152 @@ def generate_stencil_cpp(spec: StencilGenSpec) -> str:
             _emit_factory(spec),
         ]
     )
+
+
+# ── 20.4f: Test file generator ─────────────────────────────────────────
+
+
+@dataclass
+class TestCase:
+    """A single test case for a generated .t.cpp file."""
+
+    __test__ = False  # prevent pytest collection
+
+    bc_type: str  # "Floating" or "Dirichlet"
+    h: float
+    psi: float
+    alpha_values: dict[str, list[float]]
+    expected_coeffs: list[float]
+    margin: float = 1.0e-8
+
+
+LUA_KEY_MAP = {
+    "alpha": "alpha",
+    "fa": "floating_alpha",
+    "da": "dirichlet_alpha",
+    "ia": "interpolant_alpha",
+}
+
+
+def compute_test_values(
+    coeffs: list[Expr],
+    alpha_values: dict[str, list[float]],
+    h: float,
+    psi: float,
+    right: bool = False,
+    nu: int = 1,
+) -> list[float]:
+    """Evaluate symbolic coefficients at given parameter values."""
+    subs: dict[Symbol, float] = {}
+    for name, values in alpha_values.items():
+        for i, v in enumerate(values):
+            subs[Symbol(f"{name}_{i}")] = v
+    subs[Symbol("psi")] = psi
+    subs[Symbol("h")] = h
+
+    result = [float(c.xreplace(subs)) for c in coeffs]
+
+    h_divisor = h if nu == 1 else h * h
+    result = [v / h_divisor for v in result]
+
+    if right and nu == 1:
+        result = [-v for v in reversed(result)]
+    elif right and nu == 2:
+        result = list(reversed(result))
+
+    return result
+
+
+def generate_test_cpp(
+    spec: StencilGenSpec,
+    test_cases: list[TestCase],
+) -> str:
+    """Generate a complete .t.cpp test file from a StencilGenSpec and test cases."""
+    scheme_type = spec.name.rsplit("_", 1)[0]
+    order = spec.derivative_order
+
+    # Build Lua alpha table string
+    lua_lines: list[str] = []
+    for key, count in spec.param_arrays.items():
+        lua_key = LUA_KEY_MAP.get(key, key)
+        # Use the alpha values from the first test case for the Lua config
+        if test_cases and key in test_cases[0].alpha_values:
+            vals = test_cases[0].alpha_values[key]
+        else:
+            vals = [0.0] * count
+        val_str = ", ".join(f"{v!r}" for v in vals)
+        lua_lines.append(f"                {lua_key} = {{{val_str}}}")
+    alpha_lua_table = ",\n".join(lua_lines)
+
+    lines: list[str] = []
+
+    # Includes
+    lines.append('#include "stencil.hpp"')
+    lines.append("")
+    lines.append("#include <catch2/catch_approx.hpp>")
+    lines.append("#include <catch2/catch_test_macros.hpp>")
+    lines.append("#include <catch2/matchers/catch_matchers_vector.hpp>")
+    lines.append("")
+    lines.append("#include <vector>")
+    lines.append("")
+    lines.append("#include <sol/sol.hpp>")
+    lines.append("#include <spdlog/spdlog.h>")
+    lines.append("")
+    lines.append("using Catch::Matchers::Approx;")
+    lines.append("using namespace ccs;")
+    lines.append("")
+
+    # TEST_CASE open
+    lines.append(f'TEST_CASE("{spec.name}")')
+    lines.append("{")
+    lines.append("    using T = std::vector<real>;")
+    lines.append("    sol::state lua;")
+    lines.append("    lua.open_libraries(sol::lib::base, sol::lib::math);")
+    lines.append('    lua.script(R"(')
+    lines.append("        simulation = {")
+    lines.append("            scheme = {")
+    lines.append(f"                order = {order},")
+    lines.append(f'                type = "{scheme_type}",')
+    lines.append(alpha_lua_table)
+    lines.append("            }")
+    lines.append("        }")
+    lines.append('    )");')
+    lines.append("")
+    lines.append('    auto st_opt = stencil::from_lua(lua["simulation"]);')
+    lines.append("    REQUIRE(!!st_opt);")
+    lines.append("    const auto& st = *st_opt;")
+
+    # Each test case as a scoped block
+    for tc in test_cases:
+        expected_r = spec.R if tc.bc_type == "Floating" else spec.R - 1
+        n_coeffs = expected_r * spec.T
+
+        lines.append("")
+        lines.append("    {")
+        lines.append(f"        auto [p, r, t, x] = st.query(bcs::{tc.bc_type});")
+        lines.append(f"        REQUIRE(p == {spec.P});")
+        lines.append(f"        REQUIRE(r == {expected_r});")
+        lines.append(f"        REQUIRE(t == {spec.T});")
+        lines.append(f"        REQUIRE(x == {spec.X});")
+        lines.append("")
+        lines.append(f"        T c({n_coeffs});")
+        lines.append("        T ex{};")
+        lines.append("")
+        lines.append(
+            f"        st.nbs({tc.h!r}, bcs::{tc.bc_type}, {tc.psi!r}, false, c, ex);"
+        )
+
+        # Format expected values
+        val_strs = [repr(v) for v in tc.expected_coeffs]
+        lines.append("        REQUIRE_THAT(c,")
+        lines.append(f"                     Approx(T{{{val_strs[0]},")
+        for v in val_strs[1:-1]:
+            lines.append(f"                              {v},")
+        lines.append(f"                              {val_strs[-1]}}})")
+        lines.append(f"                         .margin({tc.margin!r}));")
+        lines.append("    }")
+
+    lines.append("}")
+    lines.append("")
+
+    return "\n".join(lines)

@@ -4,11 +4,14 @@ from sympy import Integer, Rational, Symbol, symbols
 
 from stencil_gen.codegen import (
     StencilGenSpec,
+    TestCase,
     apply_cse,
+    compute_test_values,
     format_rational_h_division,
     generate_interior_method,
     generate_nbs_method,
     generate_stencil_cpp,
+    generate_test_cpp,
 )
 from stencil_gen.printer import StencilCodePrinter, build_symbol_map
 
@@ -355,3 +358,168 @@ def test_full_struct_poly():
     assert "std::array<real, 4> ia;" in code
     assert "real psi" in code  # psi parameter is named
     assert "interp_info query_interp() const { return {2, 4}; }" in code
+
+
+# ── 20.4f: Test file generator tests ──────────────────────────────────
+
+
+def test_test_gen_structure():
+    """Generated test file has correct Catch2 structure."""
+    cases = [
+        TestCase(
+            bc_type="Floating",
+            h=2.0,
+            psi=1.0,
+            alpha_values={"alpha": [-0.773, 0.162]},
+            expected_coeffs=[0.0] * 15,
+        )
+    ]
+    code = generate_test_cpp(e4u_spec, cases)
+    assert '#include "stencil.hpp"' in code
+    assert "TEST_CASE" in code
+    assert "Approx" in code
+    assert "from_lua" in code
+    assert ".margin(1e-08)" in code
+
+
+def test_test_gen_values():
+    """Generated test values match hand-computed reference."""
+    cases = [
+        TestCase(
+            bc_type="Floating",
+            h=2.0,
+            psi=1.0,
+            alpha_values={"alpha": [-0.7733323791884821, 0.1623961700641681]},
+            expected_coeffs=[
+                -1.3033328562609077,
+                3.046664758376964,
+                -3.069997137565446,
+                1.713331425043631,
+                -0.38666618959424104,
+                -0.08546858163458262,
+                -0.5747923401283361,
+                0.9871885101925043,
+                -0.4081256734616695,
+                0.08119808503208405,
+                0.0923093909615862,
+                -0.5359042305130115,
+                0.3038563457695172,
+                0.13076243615365518,
+                0.00897605762825287,
+            ],
+        )
+    ]
+    code = generate_test_cpp(e4u_spec, cases)
+    assert "-1.3033328562609077" in code
+
+
+def test_test_gen_lua_config():
+    """Generated test file has correct Lua config."""
+    cases = [
+        TestCase(
+            bc_type="Floating",
+            h=2.0,
+            psi=1.0,
+            alpha_values={"alpha": [-0.773, 0.162]},
+            expected_coeffs=[0.0] * 15,
+        )
+    ]
+    code = generate_test_cpp(e4u_spec, cases)
+    assert 'type = "E4u"' in code
+    assert "order = 1" in code
+    assert "alpha = {-0.773, 0.162}" in code
+
+
+def test_test_gen_dirichlet_sizing():
+    """Dirichlet test case has (R-1)*T coefficients."""
+    cases = [
+        TestCase(
+            bc_type="Dirichlet",
+            h=0.5,
+            psi=0.0,
+            alpha_values={"alpha": [-0.773, 0.162]},
+            expected_coeffs=[0.0] * 10,
+        )
+    ]
+    code = generate_test_cpp(e4u_spec, cases)
+    assert "st.query(bcs::Dirichlet)" in code
+    assert "REQUIRE(r == 2)" in code  # R-1 = 3-1 = 2
+    assert "T c(10)" in code  # (R-1)*T = 2*5 = 10
+
+
+def test_test_gen_multiple_cases():
+    """Multiple test cases generate multiple scoped blocks."""
+    cases = [
+        TestCase(
+            bc_type="Floating",
+            h=2.0,
+            psi=1.0,
+            alpha_values={"alpha": [-0.773, 0.162]},
+            expected_coeffs=[0.0] * 15,
+        ),
+        TestCase(
+            bc_type="Dirichlet",
+            h=0.5,
+            psi=0.0,
+            alpha_values={"alpha": [-0.773, 0.162]},
+            expected_coeffs=[0.0] * 10,
+        ),
+    ]
+    code = generate_test_cpp(e4u_spec, cases)
+    assert code.count("st.query(bcs::") == 2
+    assert code.count("REQUIRE_THAT(c,") == 2
+
+
+def test_compute_test_values_floating():
+    """compute_test_values evaluates symbolic expressions correctly."""
+    values = compute_test_values(
+        e4u_floating_coeffs,
+        alpha_values={"alpha": [-0.7733323791884821, 0.1623961700641681]},
+        h=2.0,
+        psi=1.0,
+    )
+    reference = [
+        -1.3033328562609077,
+        3.046664758376964,
+        -3.069997137565446,
+        1.713331425043631,
+        -0.38666618959424104,
+        -0.08546858163458262,
+        -0.5747923401283361,
+        0.9871885101925043,
+        -0.4081256734616695,
+        0.08119808503208405,
+        0.0923093909615862,
+        -0.5359042305130115,
+        0.3038563457695172,
+        0.13076243615365518,
+        0.00897605762825287,
+    ]
+    assert len(values) == len(reference)
+    for got, want in zip(values, reference):
+        assert abs(got - want) < 1e-8, f"got {got}, want {want}"
+
+
+def test_compute_test_values_dirichlet():
+    """compute_test_values for Dirichlet sliced coefficients."""
+    values = compute_test_values(
+        e4u_dirichlet_coeffs,
+        alpha_values={"alpha": [-0.7733323791884821, 0.1623961700641681]},
+        h=0.5,
+        psi=0.0,
+    )
+    reference = [
+        -0.3418743265383305,
+        -2.2991693605133445,
+        3.9487540407700172,
+        -1.632502693846678,
+        0.3247923401283362,
+        0.3692375638463448,
+        -2.143616922052046,
+        1.2154253830780688,
+        0.5230497446146207,
+        0.03590423051301148,
+    ]
+    assert len(values) == len(reference)
+    for got, want in zip(values, reference):
+        assert abs(got - want) < 1e-8, f"got {got}, want {want}"
