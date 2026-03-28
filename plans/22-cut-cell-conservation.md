@@ -23,7 +23,7 @@ cd scripts/stencil_gen && uv run pytest tests/test_e4_cut_cell.py -v -k conserva
 ## Problem Analysis
 
 ### The bug
-The current TEMO pipeline solves each row of the cut-cell stencil B_l(ψ) independently for Taylor accuracy, then assembles the result. It does NOT enforce the discrete conservation constraint `Σ_i w_i · B[i,j] = 0` for interior columns. This is fine for E2_1 (where the excess conservation residuals are trivially zero — the TEMO construction inherits conservation from the uniform boundary), but fails for E4_1 (where 3 excess constraints must be absorbed by stencil entries).
+The current TEMO pipeline solves each row of the cut-cell stencil B_l(ψ) independently for Taylor accuracy, then assembles the result. It does NOT enforce the discrete conservation constraint `Σ_i w_i · B[i,j] = 0` for interior columns. This affects BOTH E2_1 and E4_1: E2_1's existing tests only check columns 3,4 (where conservation holds trivially), but columns 0,1,2 have non-zero residuals with unit weights. E4_1 violates conservation on all columns with nonzero IC. Both schemes require non-trivial ψ-dependent weights and alpha constraints for full conservation (see CORRECTION in §E2_1 analysis below).
 
 ### Why E2_1 works without explicit conservation enforcement
 - E2_1: R=4, T=5, p=1, nextra=1
@@ -151,13 +151,13 @@ The two-phase approach described below was attempted and found to have a **funda
   - **`assemble_cut_cell_result` (line 1905):** Add `weight_solutions: dict | None = None` parameter. Pass through to `CutCellResult`.
   - File: `scripts/stencil_gen/stencil_gen/temo.py` (4 modification points: `StencilResult` at line 843, `construct_cut_cell_stencil` at line 1278, `assemble_cut_cell_result` at line 1905, `derive_cut_cell_scheme` at line 1995)
   - **Co-implement with 22.3c** — the `assemble_cut_cell_result` signature change (adding `weight_solutions`) requires the `CutCellResult` field from 22.3c to exist. Do both items in the same work pass.
-  - **Temporarily broken tests:** After this item, `construct_cut_cell_stencil` enforces conservation by default, which changes the E4_1 stencil. The following tests in `test_e4_cut_cell.py` will fail until fixed by 22.4b/22.4c/22.4d: `test_e4_1_alpha_count` (line 659), `test_e4_1_matches_manual_pipeline` (line 665), `test_e4_1_custom_alphas` (line 707), `TestE4CodeGeneration.e4_spec` fixture (line 323), `TestE4TestFileGeneration.e4_spec` fixture (line 461). E2_1 and E2_2 tests are unaffected (their conservation residuals are trivially zero, stencils unchanged).
+  - **Temporarily broken tests:** After this item, `construct_cut_cell_stencil` enforces conservation by default, which changes the E4_1 stencil. The following tests in `test_e4_cut_cell.py` will fail until fixed by 22.4b/22.4c/22.4d: `test_e4_1_alpha_count` (line 659), `test_e4_1_matches_manual_pipeline` (line 665), `test_e4_1_custom_alphas` (line 707), `TestE4CodeGeneration.e4_spec` fixture (line 323), `TestE4TestFileGeneration.e4_spec` fixture (line 461). **E2_1 tests will also be affected** — conservation enforcement will constrain some E2_1 alpha parameters and produce non-trivial weights (see CORRECTION in E2_1 analysis, §22.5a). E2_1 tests that assert 4 free alpha symbols or compare against the pre-conservation stencil will need updates. E2_2 tests may be unaffected (TBD — depends on 22.6a results).
 
 - [ ] **22.3c** Handle the quadrature weight output:
   - The conservation solve produces ψ-dependent quadrature weights w_0=ψ, w_1(ψ,α), ..., w_{R-1}(ψ,α)
   - **`CutCellResult` dataclass (line 1290):** Add `weight_solutions: dict | None = None` field (maps `w_i → expr(psi, alpha_remaining)`).
   - **`assemble_cut_cell_result()` (line 1905):** Accept `weight_solutions` parameter (added in 22.3b) and store in `CutCellResult.weight_solutions`.
-  - **Test:** For E2_1, verify weight_solutions gives w_0=ψ, w_1=w_2=w_3=1 (the exactly-determined case produces trivial weights). For E4_1, verify weights are rational functions of (ψ, α_remaining).
+  - **Test:** For E2_1, verify weight_solutions gives non-trivial ψ-dependent weights (NOT w_i=1 — the 22.3a investigation showed that full conservation for E2_1 requires non-trivial weights and alpha constraints; see CORRECTION in the E2_1 analysis). For E4_1, verify weights are rational functions of (ψ, α_remaining).
   - **Note on C++ weights:** The current C++ stencil struct (`struct info` in `stencil.hpp`) has no weight storage — it only stores `{p, r, t, nextra}`. The C++ solver currently hardcodes `w_0=psi, w_i=1` for the norm. If conservation produces non-trivial weights (w_i ≠ 1), the C++ side will need a `norm_weights(psi)` method. But this is a **separate Phase 23+ concern** — for now, record the weights in the Python pipeline and verify them in tests.
   - File: `scripts/stencil_gen/stencil_gen/temo.py`
 
@@ -200,15 +200,15 @@ The two-phase approach described below was attempted and found to have a **funda
 
 ### 22.5 — Regression test: E2_1 conservation still holds
 
-- [ ] **22.5a** Verify E2_1 is unchanged by the conservation enforcement:
-  - Since E2_1's excess conservation residuals are trivially zero (no alpha constraints needed), the stencil entries should be identical before and after the fix.
-  - **Existing tests that must still pass (no modifications needed):**
-    - `test_temo.py::TestE2_1Integration` — all tests including `test_conservation_symbolic` (line 1596) and `test_conservation_numeric` (line 1535). These use `construct_cut_cell_stencil` which now enforces conservation by default, but E2_1's stencil is unchanged by conservation.
-    - `test_e4_cut_cell.py::TestDeriveCutCellScheme::test_e2_1_reproduces_existing` (line 715) — compares `derive_cut_cell_scheme(E2_1, psi)` against manual pipeline. Both paths now enforce conservation; E2_1 is unchanged by conservation so the comparison holds. The manual path at line 721 calls `construct_cut_cell_stencil` (which now enforces conservation by default) and passes `ur.alpha_symbols` to `assemble_cut_cell_result`. Since E2_1's `StencilResult.alpha_symbols` equals `ur.alpha_symbols` (no alphas constrained), the manual path remains consistent.
+- [ ] **22.5a** Verify E2_1 conservation enforcement and update existing tests:
+  - **CORRECTION (from 22.3a investigation):** E2_1's conservation residuals are NOT trivially zero for columns 0, 1, 2 when using unit weights. Verified: columns 0, 1, 2 have non-zero residuals with `w_i=1`; only column 3 has a zero residual. Full conservation for E2_1 requires non-trivial ψ-dependent weights AND alpha constraints, just like E4_1. The E2_1 stencil WILL change after conservation enforcement (some alpha parameters will be constrained).
+  - **Existing tests that WILL need updates:**
+    - `test_temo.py::TestE2_1Integration::test_conservation_symbolic` (line 1596) and `test_conservation_numeric` (line 1535) — these only check columns `j in [3, 4]` where conservation holds trivially. After conservation enforcement, extend these to verify ALL T−1=4 columns (j=0..3) using the solved weights from `result.weight_solutions`.
+    - `test_e4_cut_cell.py::TestDeriveCutCellScheme::test_e2_1_reproduces_existing` (line 715) — this compares `derive_cut_cell_scheme(E2_1, psi)` against the manual pipeline. After conservation enforcement, the stencil changes (some alphas are constrained), so the manual path must also enforce conservation. Update `ur.alpha_symbols` to use `stencil.alpha_symbols` (post-conservation reduced list).
   - **New test to add:** `test_e2_1_weight_solutions` in `test_temo.py::TestE2_1Integration`:
     - Call `construct_cut_cell_stencil(ur.B_u, ur.interior, ur.p, ur.q, ur.nu, 1, psi)` and verify `result.weight_solutions` is populated.
-    - Verify weights: `w_0 = psi` (fixed, not in weight_solutions), `w_1 = 1, w_2 = 1, w_3 = 1` — all non-trivial weights are 1 (the conservation solve for E2_1 produces unit weights because the boundary already satisfies conservation).
-    - Verify `result.alpha_symbols` contains all 4 original alpha symbols (none constrained).
+    - Verify weights are non-trivial ψ-dependent rational functions (NOT w_i=1).
+    - Verify `result.alpha_symbols` has fewer than 4 alpha symbols (some constrained by conservation).
     - File: `scripts/stencil_gen/tests/test_temo.py`
   - Test commands:
     - `cd scripts/stencil_gen && uv run pytest tests/test_temo.py::TestE2_1Integration -v`
