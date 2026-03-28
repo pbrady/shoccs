@@ -121,13 +121,18 @@ The two-phase approach described below was attempted and found to have a **funda
 
 **Next step**: Implement sub-items 22.3a-i through 22.3a-iii below as a prerequisite investigation to select and validate the correct approach before full implementation.
 
-- [ ] **22.3a-i** Investigate approach (A) — augmented matrix minor conditions:
+- [x] **22.3a-i** Investigate approach (A) — augmented matrix minor conditions:
   - Compute all C(6,4)=15 minor determinants of [A(ψ,α)|b(ψ,α)] for E4_1 symbolically (all 4 alpha free, not fixing alpha_3=0).
   - Extract ψ-coefficient equations from each minor.
   - Determine if the resulting α-system has any solution (check consistency).
   - If consistent, solve for α and verify the conservation system becomes consistent with those α values.
   - **Key question to answer**: does a valid (α₀,α₁,α₂,α₃) exist such that the conservation system A(ψ,α)w=b(ψ,α) is consistent for all ψ?
-  - File: exploratory script or test
+  - File: `scripts/stencil_gen/tests/test_e4_cut_cell.py` (`TestApproachAMinorConditions`)
+  - **RESULT: Approach (A) FAILS.** All 15 minors are nonzero. Extracting ψ-coefficients yields 40 polynomial equations in 4 alpha unknowns (39 unique). The system is heavily overdetermined and inconsistent:
+    - From the 6 degree-1-in-ψ minors (rows involving 0,1,2): partial solution α₁=1/3, α₂=−4α₃−1/6.
+    - Substituting into remaining equations yields alpha_3-only equations with contradictory values: −197/768, −11/48, −7/24, etc.
+    - `sympy.solve()` on the full 39-equation system returns `[]` (no solution).
+    - **Conclusion:** No choice of (α₀,α₁,α₂,α₃) can make the conservation system consistent for all ψ with constant weights. The bilinear coupling between weights and alpha truly requires ψ-dependent weights (approach B) or entry-level unknowns (approach C).
 
 - [ ] **22.3a-ii** Investigate approach (B) — parametric weight functions:
   - Parameterize weights as w_i = p_i(ψ)/q(ψ) where q is the common TEMO denominator (ψ+1)(ψ+2)(ψ+3) and p_i are polynomials in ψ of degree ≤ 3 with unknown rational coefficients.

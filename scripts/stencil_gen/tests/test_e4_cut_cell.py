@@ -3,7 +3,11 @@
 import pathlib
 
 import pytest
-from sympy import Integer, Matrix, Rational, S, Symbol, cancel, simplify
+from itertools import combinations
+from sympy import (
+    Integer, Matrix, Rational, S, Symbol, cancel, collect, expand,
+    factor, fraction, linear_eq_to_matrix, simplify, solve,
+)
 
 from stencil_gen.codegen import (
     StencilGenSpec,
@@ -908,4 +912,156 @@ class TestBuildCutCellConservationSystem:
         alpha_syms = sorted(stencil.matrix.free_symbols - {psi}, key=lambda s: s.name)
         assert len(alpha_syms) == 4, (
             f"Expected 4 alpha symbols, got {len(alpha_syms)}: {alpha_syms}"
+        )
+
+
+class TestApproachAMinorConditions:
+    """Investigation 22.3a-i: augmented matrix minor conditions for E4_1.
+
+    Tests that approach (A) — requiring all 4x4 minors of [A|b] to vanish
+    for all psi — is infeasible for the E4_1 conservation system.
+    """
+
+    @pytest.fixture
+    def e4_conservation_system(self):
+        """Build the E4_1 conservation system and extract A, b."""
+        psi = Symbol("psi")
+        ur = derive_uniform_boundary_for_temo(E4_1)
+        stencil = construct_cut_cell_stencil(
+            ur.B_u, ur.interior, p=E4_1.p, q=E4_1.q, nu=E4_1.nu,
+            nextra=E4_1.nextra, psi=psi,
+        )
+        B_l = stencil.matrix
+        R, T = B_l.rows, B_l.cols
+        eqs, w_syms = build_cut_cell_conservation_system(
+            B_l, R, T, p=E4_1.p, nu=E4_1.nu,
+            interior_coeffs=ur.interior, psi=psi,
+        )
+        A_mat, b_vec = linear_eq_to_matrix(eqs, w_syms)
+        alpha_syms = sorted(B_l.free_symbols - {psi}, key=lambda s: s.name)
+        return {
+            "psi": psi,
+            "A": A_mat,
+            "b": b_vec,
+            "alpha_syms": alpha_syms,
+            "w_syms": w_syms,
+        }
+
+    def test_all_15_minors_are_nonzero(self, e4_conservation_system):
+        """All C(6,4)=15 4x4 minors of [A|b] are nonzero as functions of (psi, alpha)."""
+        A_mat = e4_conservation_system["A"]
+        b_vec = e4_conservation_system["b"]
+        Aug = A_mat.row_join(b_vec)
+
+        row_combos = list(combinations(range(6), 4))
+        assert len(row_combos) == 15
+
+        nonzero_count = 0
+        for rows in row_combos:
+            submat = Aug.extract(list(rows), [0, 1, 2, 3])
+            det_val = cancel(submat.det())
+            if det_val != 0:
+                nonzero_count += 1
+
+        assert nonzero_count == 15, (
+            f"Expected all 15 minors nonzero, got {nonzero_count}"
+        )
+
+    def _collect_all_alpha_eqs(self, e4_conservation_system):
+        """Helper: extract all alpha equations from psi-coefficients of all 15 minors."""
+        psi = e4_conservation_system["psi"]
+        A_mat = e4_conservation_system["A"]
+        b_vec = e4_conservation_system["b"]
+        Aug = A_mat.row_join(b_vec)
+
+        all_alpha_eqs = []
+        for rows in combinations(range(6), 4):
+            submat = Aug.extract(list(rows), [0, 1, 2, 3])
+            det_val = cancel(submat.det())
+            if det_val == 0:
+                continue
+            num, _ = fraction(det_val)
+            num_expanded = expand(num)
+            num_collected = collect(num_expanded, psi, evaluate=False)
+            for key, coeff in num_collected.items():
+                c = cancel(coeff)
+                if c != 0:
+                    all_alpha_eqs.append(c)
+        return all_alpha_eqs
+
+    def test_no_alpha_solution_exists(self, e4_conservation_system):
+        """No (alpha_0, alpha_1, alpha_2, alpha_3) makes all minors vanish for all psi.
+
+        This proves approach (A) is infeasible: the conservation system A*w=b
+        cannot be made consistent for all psi by any choice of alpha alone.
+        Any partial solution from a subset of equations fails to satisfy all
+        remaining equations simultaneously.
+        """
+        alpha_syms = e4_conservation_system["alpha_syms"]
+        all_alpha_eqs = self._collect_all_alpha_eqs(e4_conservation_system)
+
+        # The system is heavily overdetermined: many equations in 4 unknowns
+        assert len(all_alpha_eqs) >= 30
+
+        # Find a candidate solution from a small subset
+        candidate = solve(all_alpha_eqs[:10], alpha_syms, dict=True)
+
+        if candidate:
+            # Verify the candidate FAILS on remaining equations
+            unsatisfied = 0
+            for eq in all_alpha_eqs[10:]:
+                val = cancel(eq.subs(candidate[0]))
+                if val != 0:
+                    unsatisfied += 1
+            assert unsatisfied > 0, (
+                "Candidate solution unexpectedly satisfies all equations"
+            )
+        else:
+            # Even the small subset has no solution — system is definitely inconsistent
+            pass
+
+        # Definitive check: solve the full system
+        full_sol = solve(all_alpha_eqs, alpha_syms, dict=True)
+        assert full_sol == [], (
+            f"Expected no solution for full system, got {full_sol}"
+        )
+
+    def test_partial_solution_yields_contradictory_alpha3(self, e4_conservation_system):
+        """Substituting the partial solution alpha_1=1/3, alpha_2=-4*alpha_3-1/6
+        into remaining equations yields contradictory alpha_3 values.
+
+        This is the specific mechanism by which approach (A) fails: the first
+        few simplest equations constrain (alpha_1, alpha_2), but the remaining
+        overdetermined equations demand different alpha_3 values.
+        """
+        alpha_syms = e4_conservation_system["alpha_syms"]
+        a0, a1, a2, a3 = alpha_syms
+        all_alpha_eqs = self._collect_all_alpha_eqs(e4_conservation_system)
+
+        # The partial solution alpha_1=1/3, alpha_2=-4*alpha_3-1/6 comes from the
+        # low-degree (degree 1 in psi) minors involving rows 0,1,2,{3,4,5}
+        partial = {a1: Rational(1, 3), a2: -4 * a3 - Rational(1, 6)}
+        reduced_eqs = []
+        for eq in all_alpha_eqs:
+            eq_sub = cancel(eq.subs(partial))
+            if eq_sub != 0:
+                reduced_eqs.append(eq_sub)
+
+        assert len(reduced_eqs) > 0, "Partial solution satisfies all equations"
+
+        # Extract the constraints on alpha_3 alone (no alpha_0 dependence)
+        a3_only_eqs = [eq for eq in reduced_eqs if a0 not in eq.free_symbols]
+        assert len(a3_only_eqs) >= 2, (
+            f"Expected at least 2 alpha_3-only equations, got {len(a3_only_eqs)}"
+        )
+
+        # Solve each for alpha_3 — they give different values
+        a3_values = set()
+        for eq in a3_only_eqs:
+            sols = solve(eq, a3)
+            for s in sols:
+                a3_values.add(s)
+
+        assert len(a3_values) > 1, (
+            f"Expected contradictory alpha_3 values, got single: {a3_values}"
         )
