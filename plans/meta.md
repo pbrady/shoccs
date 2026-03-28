@@ -326,6 +326,20 @@ The existing Mathematica notebooks are too slow for iterating on new stencil sch
 **Decision:** The Category A zeroed-column variant for 2nd-derivative Neumann stencils is B^{d,0} (row 0: x_0 zeroed, wall gets `alpha^{uN}`; rows >= 1: wall zeroed, x_0 gets `alpha^{uN}`). This is the **opposite** of the floating/Dirichlet variant B^{d,1} (D-R22).
 **Why:** Verified against `E2_2.cpp` `nbs_neumann` at psi=0: row 0 = `[-2, 0, 2, 0]` (x_0 zeroed, wall = -2 from uniform Neumann) and row 1 = `[0, -2, 2, 0]` (wall zeroed, x_0 = -2). The math reference Step 6 ("all schemes use alpha^d_{i,0} = 0 for i >= 1") applies to the floating/Dirichlet stencils but not the Neumann stencil, because the Neumann stencil operates on the uniform Neumann base `B^{uN}_l` (which has different alpha^u values). For E2_2, the uniform Neumann is `[-2, 2, 0], eta^u = -2`.
 
+### D-R25: E4 Dimension Formula (TBD — stretch target only)
+**Decision:** TBD. The Eq. 11a/11b dimension formulas (`t = p+q+1+nextra`, `r = q+1+nextra`) do not produce correct dimensions for E4 schemes.
+**Evidence:**
+- The plan's Table 1 (from the math reference) gives q=3 for E4, yielding t=6, r=4 for both E4_1 and E4_2. But:
+  - E4u_1.cpp (uniform-only) has R=3, T=5. Working backwards: r=3, t=5. With nextra=0, this requires q=2 (not q=3). Alternatively, with nextra=1: q=1, which also satisfies r=3, t=5.
+  - E4_2.cpp (cut-cell, 2nd derivative) has R=3, T=5. Working backwards from the psi=1 limit: the uniform boundary (without wall) is 2x4 (r_eff=2, t=4). This doesn't match any combination of q and nextra with p=2 using Eq. 11.
+  - The math reference Table 1 says r+1=4, t+1=7 for E4_1, which gives r=3 — but Eq. 11b with q=3 gives r=4 (off by 1). This suggests the formula may have a different form for higher-order schemes, or q=3 refers to a different parameter convention.
+- For E2 schemes (E2_1, E2_2), the formulas are verified correct against code.
+**Impact:** E4_2 is a stretch target. The E2_1 (primary) and E2_2 (secondary) implementations are not affected. Resolution required only when implementing E4 support.
+**Options:**
+- (a) Derive the correct general formula from the Brady & Livescu papers (may require reading both 2019 and 2021 papers carefully)
+- (b) Hard-code E4 dimensions from the C++ code and math reference table, bypassing the formula
+- (c) Determine if the math reference Table 1 has a typo in q for E4
+
 ---
 
 ## Files Excluded from Migration Scope
