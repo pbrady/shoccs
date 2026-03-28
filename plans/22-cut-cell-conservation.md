@@ -118,7 +118,7 @@ The practical approach: solve Taylor per-row first (as now) to get stencil entri
   - File: `scripts/stencil_gen/stencil_gen/temo.py` (add after `build_cut_cell_conservation_system`, ~line 1300)
 
 - [ ] **22.3b** Integrate into `construct_cut_cell_stencil()` and propagate through pipeline:
-  - **`StencilResult` dataclass (line 843):** Add field `weight_solutions: dict | None = None` (maps `w_i → expr(psi, alpha)`) and `alpha_symbols: list | None = None` (the remaining free alphas after conservation). Use `dataclass(frozen=True)` → need to change to `frozen=False` or use a new return type.
+  - **`StencilResult` dataclass (line 843):** Add field `weight_solutions: dict | None = None` (maps `w_i → expr(psi, alpha)`) and `alpha_symbols: list | None = None` (the remaining free alphas after conservation). The dataclass is not frozen, so new Optional fields with defaults can be appended without breaking existing callers.
   - **`construct_cut_cell_stencil` (lines 1206-1281):** Add parameters `nu: int` and `enforce_conservation: bool = True`. After assembling `matrix = Matrix(rows)` at line 1278 and before the return at line 1279:
     - Call `enforce_cut_cell_conservation(matrix, R, T, p, nu, interior, psi, alpha_syms)`
     - Replace `matrix` with the conserved version, store weight solutions and remaining alphas in the returned `StencilResult`
