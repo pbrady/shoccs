@@ -127,7 +127,7 @@ def test_taylor_E8u_row0_shape():
 # 20.3b -- Single-row boundary solver tests
 # ---------------------------------------------------------------------------
 
-a0, a1, a2, a3, a4 = symbols("alpha_0 alpha_1 alpha_2 alpha_3 alpha_4")
+a0, a1, a2, a3, a4, a5, a6 = symbols("alpha_0 alpha_1 alpha_2 alpha_3 alpha_4 alpha_5 alpha_6")
 
 
 def test_solve_row_E4u_row0():
@@ -560,3 +560,328 @@ def test_E6u_polynomial_exactness(e6u_pipeline):
                 f"Poly exactness failed: d={d}, row={i}, "
                 f"got {stencil_result}, expected {expected}"
             )
+
+
+def test_E6u_conservation_column_sums(e6u_pipeline):
+    """Conservation verification: weighted column sums satisfy SBP."""
+    updated_rows, solution_dict, w_syms, result = e6u_pipeline
+    w_exprs = [solution_dict[w] for w in w_syms]
+    t = result.t  # 8
+    r = result.r  # 5
+    p = 3
+
+    for j in range(t):
+        col_sum = sum(
+            w * row.coefficients[j]
+            for w, row in zip(w_exprs, updated_rows)
+        )
+        col_sum += _interior_contribution(j, r, p, result.interior_coeffs)
+        if j == 0:
+            assert cancel(col_sum + 1) == 0, f"Column {j} SBP failed"
+        else:
+            assert cancel(col_sum) == 0, f"Column {j} SBP failed"
+
+
+# ---------------------------------------------------------------------------
+# 20.3g -- E8u_1 end-to-end validation tests
+# ---------------------------------------------------------------------------
+
+# Alpha values from E8u_1.t.cpp lines 25-31
+_alpha_vals_e8 = {
+    a0: -0.6484343281044554,
+    a1:  0.1546307245964576,
+    a2: -0.0024361150534464,
+    a3: -0.0767677234359209,
+    a4:  0.0395245547501803,
+    a5: -0.25779890216368,
+    a6:  0.0527307049447768,
+}
+
+
+def test_E8u_row0_symbolic(e8u_pipeline):
+    """Row 0 symbolic coefficients match E8u_1.cpp lines 83-93."""
+    updated_rows, solution_dict, w_syms, result = e8u_pipeline
+    row = updated_rows[0]
+    expected = [
+        (140 * a0 - 363) / 140,
+        7 - 8 * a0,
+        (56 * a0 - 21) / 2,
+        -(168 * a0 - 35) / 3,
+        (280 * a0 - 35) / 4,
+        -(280 * a0 - 21) / 5,
+        (168 * a0 - 7) / 6,
+        -(56 * a0 - 1) / 7,
+        a0,
+        S.Zero,
+        S.Zero,
+    ]
+    for i, (got, exp) in enumerate(zip(row.coefficients, expected)):
+        assert cancel(got - exp) == 0, f"Row 0 coeff {i}: {got} != {exp}"
+
+
+def test_E8u_row1_symbolic(e8u_pipeline):
+    """Row 1 symbolic coefficients match E8u_1.cpp lines 94-104."""
+    updated_rows, solution_dict, w_syms, result = e8u_pipeline
+    row = updated_rows[1]
+    expected = [
+        (7 * a1 - 1) / 7,
+        -(160 * a1 + 29) / 20,
+        28 * a1 + 3,
+        -(112 * a1 + 5) / 2,
+        (210 * a1 + 5) / 3,
+        -(224 * a1 + 3) / 4,
+        (140 * a1 + 1) / 5,
+        -(336 * a1 + 1) / 42,
+        a1,
+        S.Zero,
+        S.Zero,
+    ]
+    for i, (got, exp) in enumerate(zip(row.coefficients, expected)):
+        assert cancel(got - exp) == 0, f"Row 1 coeff {i}: {got} != {exp}"
+
+
+def test_E8u_row2_symbolic(e8u_pipeline):
+    """Row 2 symbolic coefficients match E8u_1.cpp lines 105-115."""
+    updated_rows, solution_dict, w_syms, result = e8u_pipeline
+    row = updated_rows[2]
+    expected = [
+        (42 * a2 + 1) / 42,
+        -(24 * a2 + 1) / 3,
+        (1680 * a2 - 47) / 60,
+        -(168 * a2 - 5) / 3,
+        (420 * a2 - 5) / 6,
+        -(168 * a2 - 1) / 3,
+        (336 * a2 - 1) / 12,
+        -(840 * a2 - 1) / 105,
+        a2,
+        S.Zero,
+        S.Zero,
+    ]
+    for i, (got, exp) in enumerate(zip(row.coefficients, expected)):
+        assert cancel(got - exp) == 0, f"Row 2 coeff {i}: {got} != {exp}"
+
+
+def test_E8u_row3_symbolic(e8u_pipeline):
+    """Row 3 symbolic coefficients match E8u_1.cpp lines 116-126."""
+    updated_rows, solution_dict, w_syms, result = e8u_pipeline
+    row = updated_rows[3]
+    expected = [
+        (105 * a3 - 1) / 105,
+        -(80 * a3 - 1) / 10,
+        (140 * a3 - 3) / 5,
+        -(224 * a3 + 1) / 4,
+        70 * a3 + 1,
+        -(560 * a3 + 3) / 10,
+        (420 * a3 + 1) / 15,
+        -(1120 * a3 + 1) / 140,
+        a3,
+        S.Zero,
+        S.Zero,
+    ]
+    for i, (got, exp) in enumerate(zip(row.coefficients, expected)):
+        assert cancel(got - exp) == 0, f"Row 3 coeff {i}: {got} != {exp}"
+
+
+def test_E8u_row4_symbolic(e8u_pipeline):
+    """Row 4 symbolic coefficients match E8u_1.cpp lines 127-137."""
+    updated_rows, solution_dict, w_syms, result = e8u_pipeline
+    row = updated_rows[4]
+    expected = [
+        (140 * a4 + 1) / 140,
+        -(120 * a4 + 1) / 15,
+        (280 * a4 + 3) / 10,
+        -56 * a4 - 1,
+        (280 * a4 + 1) / 4,
+        -(280 * a4 - 3) / 5,
+        (280 * a4 - 1) / 10,
+        -(840 * a4 - 1) / 105,
+        a4,
+        S.Zero,
+        S.Zero,
+    ]
+    for i, (got, exp) in enumerate(zip(row.coefficients, expected)):
+        assert cancel(got - exp) == 0, f"Row 4 coeff {i}: {got} != {exp}"
+
+
+def test_E8u_row5_symbolic(e8u_pipeline):
+    """Row 5 symbolic coefficients match E8u_1.cpp lines 138-148."""
+    updated_rows, solution_dict, w_syms, result = e8u_pipeline
+    row = updated_rows[5]
+    expected = [
+        (840 * a6 + 105 * a5 - 1) / 105,
+        -(756 * a6 + 96 * a5 - 1) / 12,
+        (648 * a6 + 84 * a5 - 1) / 3,
+        -(2520 * a6 + 336 * a5 - 5) / 6,
+        (1512 * a6 + 210 * a5 - 5) / 3,
+        -(22680 * a6 + 3360 * a5 - 47) / 60,
+        (504 * a6 + 84 * a5 + 1) / 3,
+        -(1512 * a6 + 336 * a5 + 1) / 42,
+        a5,
+        a6,
+        S.Zero,
+    ]
+    for i, (got, exp) in enumerate(zip(row.coefficients, expected)):
+        assert cancel(got - exp) == 0, f"Row 5 coeff {i}: {got} != {exp}"
+
+
+def test_E8u_row6_symbolic(e8u_pipeline):
+    """Row 6 (conservation-constrained) symbolic coefficients match E8u_1.cpp lines 149-185."""
+    updated_rows, solution_dict, w_syms, result = e8u_pipeline
+    row = updated_rows[6]
+    expected = [
+        -(43994496 * a6 + 5499312 * a5 + 3756354 * a4 + 7475328 * a3
+          + 2303742 * a2 + 7419216 * a1 + 1545558 * a0 - 28865) / 5022570,
+        (8248968 * a6 + 1047488 * a5 + 715496 * a4 + 1423872 * a3
+         + 438808 * a2 + 1413184 * a1 + 294392 * a0 - 5917) / 119585,
+        -(113128704 * a6 + 14664832 * a5 + 10016944 * a4 + 19934208 * a3
+          + 6143312 * a2 + 19784576 * a1 + 4121488 * a0 - 92067) / 478340,
+        (164979360 * a6 + 21997248 * a5 + 15025416 * a4 + 29901312 * a3
+         + 9214968 * a2 + 29676864 * a1 + 6182232 * a0 - 164197) / 358755,
+        -(131983488 * a6 + 18331040 * a5 + 12521180 * a4 + 24917760 * a3
+          + 7679140 * a2 + 24730720 * a1 + 5151860 * a0 - 190693) / 239170,
+        (49493808 * a6 + 7332416 * a5 + 5008472 * a4 + 9967104 * a3
+         + 3071656 * a2 + 9892288 * a1 + 2060744 * a0 - 163203) / 119585,
+        -(87988992 * a6 + 14664832 * a5 + 10016944 * a4 + 19934208 * a3
+          + 6143312 * a2 + 19784576 * a1 + 4121488 * a0 - 169433) / 478340,
+        (32995872 * a6 + 7332416 * a5 + 5008472 * a4 + 9967104 * a3
+         + 3071656 * a2 + 9892288 * a1 + 2060744 * a0 + 551009) / 837095,
+        -(130936 * a5 + 89437 * a4 + 177984 * a3
+          + 54851 * a2 + 176648 * a1 + 36799 * a0 + 20016) / 119585,
+        -(130936 * a6 - 4176) / 119585,
+        -Rational(432, 119585),
+    ]
+    for i, (got, exp) in enumerate(zip(row.coefficients, expected)):
+        assert cancel(got - exp) == 0, f"Row 6 coeff {i}: {got} != {exp}"
+
+
+def test_E8u_numerical_floating(e8u_pipeline):
+    """Numerical evaluation (floating, h=2) matches E8u_1.t.cpp."""
+    updated_rows, solution_dict, w_syms, result = e8u_pipeline
+    h = 2
+    expected_float = [
+        -1.620645735480799, 6.093737312417822, -14.328080593462376,
+        23.989494520258084, -27.07020148365594, 20.256161186924754,
+        -9.66141392679571, 2.6651658838463934, -0.3242171640522277, 0.0, 0.0,
+        0.005886790869657372, -1.3435228983858305, 3.6648301443504065,
+        -5.579660288700813, 6.24540869420935, -4.704660288700813,
+        2.2648301443504066, -0.6304276602905923, 0.0773153622982288, 0.0, 0.0,
+        0.010686704378038705, -0.15692220645288107, -0.42577227741491624,
+        0.9015445548298325, -0.5019306935372907, 0.23487788816316588,
+        -0.07577227741491627, 0.014506364975690363, -0.0012180575267232, 0.0, 0.0,
+        -0.04314576647986521, 0.3570708937436836, -1.3747481281028926,
+        2.0244962562057855, -2.1868703202572317, 1.9994962562057854,
+        -1.0414147947695593, 0.30349946517225507, -0.03838386171796045, 0.0, 0.0,
+        0.023333705946518724, -0.19143155233405454, 0.7033437665025243,
+        -1.6066875330050485, 1.5083594162563105, -0.8066875330050485,
+        0.5033437665025242, -0.15333631423881644, 0.01976227737509015, 0.0, 0.0,
+        0.07726146393536244, -0.5881549304390825, 1.9190648370777077,
+        -3.4384121111534216, 3.4318427370216202, -2.3560673073131086,
+        0.9868612517363978, 0.07013815774397571, -0.12889945108184,
+        0.0263653524723884, 0.0,
+        -0.058467796419719775, 0.4371229276793953, -1.3903775683566566,
+        2.397968815999491, -2.278631808271436, 0.7319853517776528,
+        0.07615328403773296, 0.01154775812234574, 0.085912848127809,
+        -0.01140756609377972, -0.0018062466028348036,
+    ]
+    computed = []
+    for row in updated_rows:
+        for coeff in row.coefficients:
+            val = float(coeff.xreplace(_alpha_vals_e8)) / h
+            computed.append(val)
+    assert len(computed) == len(expected_float)
+    for i, (got, exp) in enumerate(zip(computed, expected_float)):
+        assert abs(got - exp) < 1e-10, f"Floating coeff {i}: {got} != {exp}"
+
+
+def test_E8u_numerical_dirichlet(e8u_pipeline):
+    """Numerical evaluation (Dirichlet, h=0.5) matches E8u_1.t.cpp."""
+    updated_rows, solution_dict, w_syms, result = e8u_pipeline
+    h = 0.5
+    # Dirichlet drops row 0 => rows 1-6
+    expected_dirichlet = [
+        0.02354716347862949, -5.374091593543322, 14.659320577401626,
+        -22.318641154803252, 24.9816347768374, -18.818641154803252,
+        9.059320577401627, -2.521710641162369, 0.3092614491929152, 0.0, 0.0,
+        0.04274681751215482, -0.6276888258115243, -1.703089109659665,
+        3.60617821931933, -2.007722774149163, 0.9395115526526635,
+        -0.30308910965966507, 0.05802545990276145, -0.0048722301068928, 0.0, 0.0,
+        -0.17258306591946085, 1.4282835749747345, -5.49899251241157,
+        8.097985024823142, -8.747481281028927, 7.997985024823142,
+        -4.165659179078237, 1.2139978606890203, -0.1535354468718418, 0.0, 0.0,
+        0.0933348237860749, -0.7657262093362182, 2.813375066010097,
+        -6.426750132020194, 6.033437665025242, -3.226750132020194,
+        2.013375066010097, -0.6133452569552658, 0.0790491095003606, 0.0, 0.0,
+        0.30904585574144977, -2.35261972175633, 7.676259348310831,
+        -13.753648444613686, 13.727370948086481, -9.424269229252435,
+        3.9474450069455913, 0.28055263097590283, -0.51559780432736,
+        0.1054614098895536, 0.0,
+        -0.2338711856788791, 1.7484917107175812, -5.561510273426626,
+        9.591875263997965, -9.114527233085743, 2.927941407110611,
+        0.30461313615093183, 0.04619103248938296, 0.343651392511236,
+        -0.04563026437511888, -0.0072249864113392145,
+    ]
+    computed = []
+    for row in updated_rows[1:]:  # skip row 0
+        for coeff in row.coefficients:
+            val = float(coeff.xreplace(_alpha_vals_e8)) / h
+            computed.append(val)
+    assert len(computed) == len(expected_dirichlet)
+    for i, (got, exp) in enumerate(zip(computed, expected_dirichlet)):
+        assert abs(got - exp) < 1e-10, f"Dirichlet coeff {i}: {got} != {exp}"
+
+
+def test_E8u_conservation_column_sums(e8u_pipeline):
+    """Conservation verification: weighted column sums satisfy SBP."""
+    updated_rows, solution_dict, w_syms, result = e8u_pipeline
+    w_exprs = [solution_dict[w] for w in w_syms]
+    t = result.t  # 11
+    r = result.r  # 7
+    p = 4
+
+    for j in range(t):
+        col_sum = sum(
+            w * row.coefficients[j]
+            for w, row in zip(w_exprs, updated_rows)
+        )
+        col_sum += _interior_contribution(j, r, p, result.interior_coeffs)
+        if j == 0:
+            assert cancel(col_sum + 1) == 0, f"Column {j} SBP failed"
+        else:
+            assert cancel(col_sum) == 0, f"Column {j} SBP failed"
+
+
+def test_E8u_polynomial_exactness(e8u_pipeline):
+    """Polynomial exactness up to degree q=7."""
+    updated_rows, solution_dict, w_syms, result = e8u_pipeline
+    t = result.t  # 11
+
+    for d in range(8):  # degrees 0, 1, ..., 7
+        # Grid values f(j) = j^d for j = 0..t-1
+        grid_vals = [Rational(j) ** d for j in range(t)]
+        for row in updated_rows:
+            i = row.row_index
+            # Apply stencil: sum_j coeff_j * f(j)
+            stencil_result = sum(
+                c * fj for c, fj in zip(row.coefficients, grid_vals)
+            )
+            # Expected: first derivative of x^d at x=i
+            if d == 0:
+                expected = 0
+            elif d == 1:
+                expected = 1
+            else:
+                expected = d * Rational(i) ** (d - 1)
+            assert cancel(stencil_result - expected) == 0, (
+                f"Poly exactness failed: d={d}, row={i}, "
+                f"got {stencil_result}, expected {expected}"
+            )
+
+
+def test_E8u_performance():
+    """E8u derivation completes within 2 seconds."""
+    import time
+    from stencil_gen.boundary import derive_boundary
+    start = time.perf_counter()
+    derive_boundary(p=4, nu=1, s=0)
+    elapsed = time.perf_counter() - start
+    assert elapsed < 2.0, f"E8u derivation took {elapsed:.2f}s (budget: 2.0s)"
