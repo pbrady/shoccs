@@ -1116,3 +1116,664 @@ def construct_cut_cell_stencil(
     return StencilResult(
         matrix=matrix, beta_info=all_beta_info, beta_symbols=all_beta_symbols
     )
+
+
+# ---------------------------------------------------------------------------
+# 20.5f — Neumann eta coefficients and output assembly
+# ---------------------------------------------------------------------------
+
+
+@dataclass
+class CutCellResult:
+    """Assembled cut-cell stencil output with all BC variants.
+
+    Attributes
+    ----------
+    floating : Matrix
+        R x T floating (no BC) stencil.
+    dirichlet : Matrix
+        (R-1) x T Dirichlet stencil (rows 1..R-1 of floating).
+    neumann : Matrix or None
+        R x T Neumann stencil (only for nu=2, X > 0).
+    eta : list or None
+        Length-R Neumann eta coefficients (only for nu=2, X > 0).
+    dims : Dimensions
+        (r, t, R, T, X) dimensions.
+    alpha_symbols : list[Symbol]
+        Free alpha symbols (from B_u).
+    """
+
+    floating: Matrix
+    dirichlet: Matrix
+    neumann: "Matrix | None"
+    eta: "list | None"
+    dims: Dimensions
+    alpha_symbols: list
+
+
+def _neumann_zeroed_col_for_row(i: int, nu: int) -> int:
+    """Return the column index zeroed by the Neumann variant B^{d,0} for row *i*.
+
+    For nu=2 (Neumann): row 0 zeros x_0 (col 1), rows >= 1 zero wall (col 0).
+    This is the OPPOSITE of the floating variant B^{d,1}.
+    """
+    if nu == 2:
+        return 1 if i == 0 else 0
+    else:
+        raise ValueError(f"Neumann only supported for nu=2, got nu={nu}")
+
+
+def derive_uniform_neumann(
+    interior: list,
+    p: int,
+    q: int,
+    nu: int,
+) -> tuple[Matrix, list]:
+    """Derive the uniform Neumann stencil B^{uN}_l.
+
+    Augments the Taylor system with a virtual derivative column for
+    ``h * f'(x_wall)``, then solves with conservation on the uniform grid.
+
+    Parameters
+    ----------
+    interior : list
+        Interior stencil coefficients (length 2*p+1).
+    p : int
+        Interior half-width.
+    q : int
+        Boundary accuracy order.
+    nu : int
+        Derivative order (must be 2).
+
+    Returns
+    -------
+    (B_uN, eta_u)
+        B_uN: r_eff x t matrix (uniform Neumann stencil).
+        eta_u: length-r_eff list of eta values.
+    """
+    if nu != 2:
+        raise ValueError(f"Neumann only for nu=2, got {nu}")
+
+    # For E2_2: r_eff=1, t=3
+    # The uniform Neumann row is derived from an augmented Taylor system:
+    # Row 0 on uniform grid [x_0, x_1, x_2] with virtual eta column.
+    t = 2 * p + q
+    r_eff = q  # For nu=2: r_eff = r - 1 where r = q + 1
+    n_eqs = max(q + 1, nu + 1)
+
+    B_uN = Matrix.zeros(r_eff, t)
+    eta_u = []
+
+    for i in range(r_eff):
+        # Standard uniform Vandermonde for t columns
+        deltas = [Rational(j - i) for j in range(t)]
+
+        # Augmented system: T_cols + 1 eta column
+        # V[k, j] = delta_j^k / k! for j = 0..t-1
+        # V[k, t] = delta_0^{k-1} / (k-1)! for k >= 1, 0 for k=0
+        # (derivative column for the wall at x_0 on uniform grid, delta_wall = -i)
+        delta_wall = Rational(-i)
+
+        V_aug = Matrix(n_eqs, t + 1, lambda k, j: (
+            deltas[j] ** k / factorial(k) if j < t
+            else (delta_wall ** (k - 1) / factorial(k - 1) if k >= 1 else Rational(0))
+        ))
+        rhs = Matrix(
+            n_eqs, 1, lambda k, _: Rational(1) if k == nu else Rational(0)
+        )
+
+        # Conservation: for uniform Neumann, the last column (j=t-1) should be 0
+        # because the interior stencil doesn't reach that far.
+        # Apply: c[t-1] = 0 (conservation at rightmost column for single-row case)
+        # Move last stencil column to RHS (it's 0, so no change to rhs)
+        # Actually for single row, conservation is: sum over rows = 0 for interior cols
+        # With r_eff=1, there's only one row plus the interior stencil.
+        # For the uniform case, prescribe c[t-1] = 0 based on the worked example.
+
+        # For E2_2 (r_eff=1, t=3): n_eqs=3, unknowns = t+1 = 4 (3 stencil + 1 eta)
+        # Conservation: c[t-1] = 0
+        prescribed_cols = {t - 1: Rational(0)}
+
+        # Move prescribed to RHS
+        rhs_adj = rhs.copy()
+        for col_j, val in prescribed_cols.items():
+            for k in range(n_eqs):
+                rhs_adj[k, 0] -= V_aug[k, col_j] * val
+
+        # Free columns: all except prescribed stencil cols (keep eta = col t)
+        free_cols = [j for j in range(t + 1) if j not in prescribed_cols]
+        V_free = Matrix(n_eqs, len(free_cols), lambda k, fj: V_aug[k, free_cols[fj]])
+
+        sol = V_free.solve(rhs_adj)
+
+        for fj, col_j in enumerate(free_cols):
+            if col_j < t:
+                B_uN[i, col_j] = sol[fj]
+            else:
+                eta_u.append(sol[fj])
+        for col_j, val in prescribed_cols.items():
+            if col_j < t:
+                B_uN[i, col_j] = val
+
+    return B_uN, eta_u
+
+
+def build_neumann_vandermonde(
+    i: int, T: int, q: int, nu: int, psi
+) -> tuple[Matrix, Matrix]:
+    """Build the augmented Neumann Vandermonde system for cut-cell row *i*.
+
+    Extends ``build_temo_vandermonde`` with one extra column for
+    ``eta_i * h * f'(x_wall)``.
+
+    Parameters
+    ----------
+    i : int
+        Row centre index.
+    T : int
+        Number of stencil columns (including wall).
+    q : int
+        Boundary accuracy order.
+    nu : int
+        Derivative order.
+    psi : Symbol or Expr
+        Fractional wall position.
+
+    Returns
+    -------
+    (V_aug, rhs) where V_aug is n_eqs x (T+1), rhs is n_eqs x 1.
+    The last column of V_aug is the virtual derivative column.
+    """
+    n_eqs = max(q + 1, nu + 1)
+    deltas = build_cut_cell_deltas(i, T, psi)
+    delta_wall = deltas[0]  # -(psi + i)
+
+    V_aug = Matrix(n_eqs, T + 1, lambda k, j: (
+        deltas[j] ** k / factorial(k) if j < T
+        else (delta_wall ** (k - 1) / factorial(k - 1) if k >= 1 else Rational(0))
+    ))
+    rhs = Matrix(n_eqs, 1, lambda k, _: Rational(1) if k == nu else Rational(0))
+    return V_aug, rhs
+
+
+def solve_neumann_uniform_limit(
+    B_uN: Matrix,
+    eta_u: list,
+    interior: list,
+    p: int,
+    q: int,
+    nu: int,
+    nextra: int,
+) -> Matrix:
+    """Solve for B_l_N(1) — the Neumann cut-cell stencil at psi=1.
+
+    Returns an R x (T+1) matrix where the last column holds the eta values.
+
+    Parameters
+    ----------
+    B_uN : Matrix
+        r_eff x t uniform Neumann boundary stencil.
+    eta_u : list
+        Length-r_eff uniform Neumann eta values.
+    interior : list
+        Interior stencil coefficients (length 2*p+1).
+    p : int
+        Interior half-width.
+    q : int
+        Boundary accuracy order.
+    nu : int
+        Derivative order.
+    nextra : int
+        Extra rows/columns.
+
+    Returns
+    -------
+    Matrix
+        R x (T+1) matrix. Columns 0..T-1 are stencil coefficients,
+        column T is the eta value for each row.
+    """
+    r = B_uN.rows  # r_eff
+    t = B_uN.cols
+    R = r + 1
+    T = t + 1
+    n_eqs = max(q + 1, nu + 1)
+
+    # Result: R x (T+1) — last column is eta
+    B_l_N_1 = Matrix.zeros(R, T + 1)
+
+    # Step 1: Boundary rows (i = 0..r-1)
+    # Solve the augmented Taylor system at psi=1 with eta prescribed from
+    # the uniform Neumann and conservation on the rightmost stencil column.
+    for i in range(r):
+        deltas_i = [Rational(-(1 + i))] + [Rational(j - i) for j in range(t)]
+        delta_wall_i = deltas_i[0]
+
+        V_aug = Matrix(
+            n_eqs, T + 1,
+            lambda k, j, _di=deltas_i, _dw=delta_wall_i: (
+                Rational(_di[j] ** k, factorial(k)) if j < T
+                else (Rational(_dw ** (k - 1), factorial(k - 1)) if k >= 1
+                      else Rational(0))
+            ),
+        )
+        rhs_i = Matrix(
+            n_eqs, 1, lambda k, _: Rational(1) if k == nu else Rational(0)
+        )
+
+        # Prescribe eta = eta_u[i] and c[T-1] = 0 (conservation at rightmost col)
+        fixed_i: dict[int, Rational] = {T: eta_u[i], T - 1: Rational(0)}
+
+        rhs_adj = rhs_i.copy()
+        for k in range(n_eqs):
+            for col_j, val in fixed_i.items():
+                rhs_adj[k, 0] -= V_aug[k, col_j] * val
+
+        free_cols = [j for j in range(T + 1) if j not in fixed_i]
+        V_free = Matrix(
+            n_eqs, len(free_cols),
+            lambda k, fj, _fc=free_cols: V_aug[k, _fc[fj]],
+        )
+        sol = V_free.solve(rhs_adj)
+        for fj, col_j in enumerate(free_cols):
+            B_l_N_1[i, col_j] = sol[fj]
+        for col_j, val in fixed_i.items():
+            B_l_N_1[i, col_j] = val
+
+    # Step 2-4: Near-interior row (row r)
+    deltas_r = [Rational(-(1 + r))] + [Rational(j - r) for j in range(t)]
+    delta_wall_r = deltas_r[0]
+
+    V_aug_r = Matrix(
+        n_eqs, T + 1,
+        lambda k, j, _dr=deltas_r, _dw=delta_wall_r: (
+            Rational(_dr[j] ** k, factorial(k)) if j < T
+            else (Rational(_dw ** (k - 1), factorial(k - 1)) if k >= 1 else Rational(0))
+        ),
+    )
+    rhs_r = Matrix(
+        n_eqs, 1, lambda k, _: Rational(1) if k == nu else Rational(0)
+    )
+
+    # Step 3: Conservation at psi=1 for interior stencil columns.
+    fixed_cols: set[int] = set()
+    for j in range(2, T):
+        if not (j <= R - p or j >= p + 2):
+            continue
+        val = -sum(B_l_N_1[i, j] for i in range(r))
+        B_l_N_1[r, j] = val
+        fixed_cols.add(j)
+
+    # Unknowns: wall (0), x_0 (1), unfixed stencil cols, eta (T)
+    unknown_cols = [j for j in range(T + 1) if j not in fixed_cols]
+
+    # Step 4: Solve augmented Taylor for near-interior row unknowns.
+    rhs_reduced = rhs_r.copy()
+    for k in range(n_eqs):
+        for j in fixed_cols:
+            rhs_reduced[k, 0] -= V_aug_r[k, j] * B_l_N_1[r, j]
+
+    V_reduced = Matrix(
+        n_eqs, len(unknown_cols),
+        lambda k, uj, _uc=unknown_cols: V_aug_r[k, _uc[uj]],
+    )
+
+    n_unk = len(unknown_cols)
+
+    # If still underdetermined, apply additional constraints:
+    # 1. Conservation on rightmost stencil column (c[T-1])
+    # 2. eta = 0 for near-interior row (no wall-derivative coupling needed
+    #    at the uniform limit — the near-interior stencil is the interior stencil)
+    while n_unk > n_eqs:
+        if T - 1 not in fixed_cols:
+            val = -sum(B_l_N_1[i, T - 1] for i in range(r))
+            B_l_N_1[r, T - 1] = val
+            fixed_cols.add(T - 1)
+        elif T not in fixed_cols:
+            # Prescribe eta = 0 for the near-interior row at psi=1
+            B_l_N_1[r, T] = Rational(0)
+            fixed_cols.add(T)
+        else:
+            raise ValueError(
+                f"Underdetermined Neumann uniform-limit row r: "
+                f"{n_unk} unknowns, {n_eqs} equations"
+            )
+
+        unknown_cols = [j for j in range(T + 1) if j not in fixed_cols]
+        rhs_reduced = rhs_r.copy()
+        for k in range(n_eqs):
+            for j in fixed_cols:
+                rhs_reduced[k, 0] -= V_aug_r[k, j] * B_l_N_1[r, j]
+        V_reduced = Matrix(
+            n_eqs, len(unknown_cols),
+            lambda k, uj, _uc=unknown_cols: V_aug_r[k, _uc[uj]],
+        )
+        n_unk = len(unknown_cols)
+
+    if n_unk <= n_eqs:
+        V_sq = V_reduced[:n_unk, :]
+        rhs_sq = rhs_reduced[:n_unk, :]
+        sol = V_sq.solve(rhs_sq)
+
+        for k in range(n_unk, n_eqs):
+            res = sum(V_reduced[k, uj] * sol[uj] for uj in range(n_unk))
+            res -= rhs_reduced[k, 0]
+            if cancel(res) != 0:
+                raise RuntimeError(
+                    f"Inconsistent Neumann uniform-limit at equation {k}"
+                )
+
+    for uj, j in enumerate(unknown_cols):
+        B_l_N_1[r, j] = sol[uj]
+
+    return B_l_N_1
+
+
+def identify_neumann_prescribed_entries(
+    i: int,
+    r: int,
+    t: int,
+    nextra: int,
+    nu: int,
+    B_uN: Matrix,
+    B_l_N_1: Matrix,
+    B_d_N: Matrix,
+    psi,
+    n_eqs: int,
+) -> dict:
+    """Identify prescribed entries for Neumann variant B^{d,0}.
+
+    Uses the opposite zeroed column convention from the floating variant:
+    row 0 zeros x_0, rows >= 1 zero wall.
+
+    Parameters
+    ----------
+    i : int
+        Row index.
+    r : int
+        Number of uniform boundary rows (r_eff).
+    t : int
+        Uniform stencil width.
+    nextra : int
+        Extra rows/columns.
+    nu : int
+        Derivative order (must be 2).
+    B_uN : Matrix
+        r_eff x t uniform Neumann boundary matrix.
+    B_l_N_1 : Matrix
+        R x (T+1) Neumann uniform limit matrix.
+    B_d_N : Matrix
+        R x (T+1) Neumann degenerate stencil.
+    psi : Symbol
+        The psi symbol.
+    n_eqs : int
+        Number of Taylor equations per row.
+
+    Returns
+    -------
+    dict[int, Expr]
+        ``{col_index: expr(psi)}`` for all prescribed columns in the
+        augmented (T+1)-column frame.
+    """
+    T_aug = B_l_N_1.cols  # T + 1
+    T = T_aug - 1
+    prescribed: dict = {}
+    zeroed = _neumann_zeroed_col_for_row(i, nu)
+
+    # Category A: zeroed column.
+    # For Neumann, always use B_l_N_1 for the target because the Neumann
+    # uniform limit involves solving the augmented Taylor system — the values
+    # differ from a simple B_uN embedding.
+    target = B_l_N_1[i, zeroed]
+    prescribed[zeroed] = psi * target
+
+    # Prescribe eta (col T) via limit interpolation for ALL rows.
+    # For boundary rows, limits are typically identical (eta is constant).
+    # For near-interior rows, limits differ, giving a psi-dependent eta.
+    prescribed[T] = psi * B_l_N_1[i, T] + (1 - psi) * B_d_N[i, T]
+
+    # Limit interpolation for extra stencil columns (nextra > 0)
+    free_cols = sorted(j for j in range(T_aug) if j not in prescribed)
+    n_free = len(free_cols)
+    n_excess = n_free - n_eqs
+    if n_excess > 0:
+        stencil_free = [j for j in free_cols if j < T]
+        n_stencil_excess = min(n_excess, len(stencil_free))
+        if n_stencil_excess > 0:
+            extra_cols = stencil_free[-n_stencil_excess:]
+            for j in extra_cols:
+                prescribed[j] = psi * B_l_N_1[i, j] + (1 - psi) * B_d_N[i, j]
+
+    return prescribed
+
+
+def _build_neumann_degenerate(
+    B_uN: Matrix,
+    eta_u: list,
+    interior: list,
+    p: int,
+    q: int,
+    nu: int,
+) -> Matrix:
+    """Build the Neumann degenerate stencil (psi=0) in augmented frame.
+
+    Returns an R x (T+1) matrix where the last column is eta.
+    Uses Neumann variant B^{d,0}: row 0 zeros x_0, rows >= 1 zero wall.
+
+    Parameters
+    ----------
+    B_uN : Matrix
+        r_eff x t uniform Neumann boundary stencil.
+    eta_u : list
+        Length-r_eff uniform Neumann eta values.
+    interior : list
+        Interior stencil coefficients.
+    p : int
+        Interior half-width.
+    q : int
+        Boundary accuracy order.
+    nu : int
+        Derivative order (must be 2).
+
+    Returns
+    -------
+    Matrix
+        R x (T+1) degenerate Neumann stencil.
+    """
+    r = B_uN.rows
+    t = B_uN.cols
+    R = r + 1
+    T = t + 1
+    n_eqs = max(q + 1, nu + 1)
+
+    B_d_N = Matrix.zeros(R, T + 1)
+
+    # Rows 0..r-1: DP1 + Neumann variant B^{d,0}
+    for i in range(r):
+        # Cols 1..T-1 from B_uN (shifted)
+        for j in range(1, t):
+            B_d_N[i, j + 1] = B_uN[i, j]
+
+        zeroed = _neumann_zeroed_col_for_row(i, nu)
+        if zeroed == 1:
+            # x_0 zeroed (row 0): wall gets B_uN[i,0], x_0 = 0
+            B_d_N[i, 0] = B_uN[i, 0]
+            B_d_N[i, 1] = Rational(0)
+        elif zeroed == 0:
+            # wall zeroed (rows >= 1): wall = 0, x_0 gets B_uN[i,0]
+            B_d_N[i, 0] = Rational(0)
+            B_d_N[i, 1] = B_uN[i, 0]
+
+        # eta column
+        B_d_N[i, T] = eta_u[i]
+
+    # Row r (near-interior): solve augmented Taylor at psi=0
+    # Deltas at psi=0: wall coincides with x_0, so delta = [-r, -r, 1-r, ..., t-1-r]
+    deltas_r = [Rational(-r), Rational(-r)] + [Rational(j - r) for j in range(1, t)]
+    delta_wall_r = Rational(-r)
+
+    V_aug_r = Matrix(
+        n_eqs, T + 1,
+        lambda k, j, _dr=deltas_r, _dw=delta_wall_r: (
+            Rational(_dr[j] ** k, factorial(k)) if j < T
+            else (Rational(_dw ** (k - 1), factorial(k - 1)) if k >= 1 else Rational(0))
+        ),
+    )
+    rhs_r = Matrix(
+        n_eqs, 1, lambda k, _: Rational(1) if k == nu else Rational(0)
+    )
+
+    # Neumann variant for near-interior row (i >= 1): wall zeroed
+    B_d_N[r, 0] = Rational(0)
+
+    # Conservation at psi=0 (w_0=0): for interior stencil cols j >= 2
+    # sum_{i=1}^{R-1} B_d_N[i,j] = 0 (row 0 drops out since w_0=0)
+    fixed_cols: set[int] = set()
+    fixed_cols.add(0)  # wall zeroed
+
+    if r >= 2:
+        for j in range(2, T):
+            val = -sum(B_d_N[ii, j] for ii in range(1, r))
+            B_d_N[r, j] = val
+            fixed_cols.add(j)
+
+    # Conservation at rightmost column: c[T-1] = 0
+    if T - 1 not in fixed_cols:
+        B_d_N[r, T - 1] = Rational(0)
+        fixed_cols.add(T - 1)
+
+    # Solve for remaining unknowns in near-interior row
+    unknown_cols = [j for j in range(T + 1) if j not in fixed_cols]
+
+    rhs_reduced = rhs_r.copy()
+    for k in range(n_eqs):
+        for j in fixed_cols:
+            rhs_reduced[k, 0] -= V_aug_r[k, j] * B_d_N[r, j]
+
+    V_reduced = Matrix(
+        n_eqs, len(unknown_cols),
+        lambda k, uj, _uc=unknown_cols: V_aug_r[k, _uc[uj]],
+    )
+
+    sol = V_reduced.solve(rhs_reduced)
+    for uj, j in enumerate(unknown_cols):
+        B_d_N[r, j] = sol[uj]
+
+    return B_d_N
+
+
+def construct_neumann_stencil(
+    B_u: Matrix,
+    B_uN: Matrix,
+    eta_u: list,
+    interior: list,
+    p: int,
+    q: int,
+    nu: int,
+    nextra: int,
+    psi: Symbol,
+) -> tuple[Matrix, list]:
+    """Construct the psi-parameterized Neumann cut-cell stencil.
+
+    Parameters
+    ----------
+    B_u : Matrix
+        r_eff x t uniform boundary coefficient matrix (floating).
+    B_uN : Matrix
+        r_eff x t uniform Neumann boundary stencil.
+    eta_u : list
+        Length-r_eff uniform Neumann eta values.
+    interior : list
+        Interior stencil coefficients.
+    p : int
+        Interior half-width.
+    q : int
+        Boundary accuracy order.
+    nu : int
+        Derivative order (must be 2).
+    nextra : int
+        Extra rows/columns.
+    psi : Symbol
+        The psi symbol.
+
+    Returns
+    -------
+    (neumann_main, eta)
+        neumann_main: R x T SymPy Matrix of stencil coefficients.
+        eta: length-R list of eta expressions (rational in psi).
+    """
+    r = B_uN.rows
+    R = r + 1
+    T = B_uN.cols + 1
+    n_eqs = max(q + 1, nu + 1)
+
+    K, _ = make_psi_field(psi)
+
+    # Collect alpha symbols
+    alpha_syms = sorted(B_u.free_symbols, key=lambda s: s.name)
+
+    # Compute limits
+    B_l_N_1 = solve_neumann_uniform_limit(
+        B_uN, eta_u, interior, p, q, nu, nextra
+    )
+    B_d_N = _build_neumann_degenerate(B_uN, eta_u, interior, p, q, nu)
+
+    rows: list[list] = []
+
+    for i in range(R):
+        V_aug, rhs_vec = build_neumann_vandermonde(i, T, q, nu, psi)
+
+        prescribed = identify_neumann_prescribed_entries(
+            i, r, B_uN.cols, nextra, nu, B_uN, B_l_N_1, B_d_N, psi, n_eqs
+        )
+
+        # Use solve_temo_row on the augmented system (T+1 columns)
+        result = solve_temo_row(
+            i, V_aug, rhs_vec, prescribed, psi, K, alpha_syms, beta_prefix="nbeta"
+        )
+        rows.append(result.coeffs)
+
+    # Split into main stencil (R x T) and eta (R x 1)
+    neumann_main = Matrix(R, T, lambda i, j: rows[i][j])
+    eta = [rows[i][T] for i in range(R)]
+
+    return neumann_main, eta
+
+
+def assemble_cut_cell_result(
+    floating: Matrix,
+    neumann_main: "Matrix | None",
+    eta: "list | None",
+    dims: Dimensions,
+    alpha_symbols: list,
+) -> CutCellResult:
+    """Assemble the full cut-cell stencil result with all BC variants.
+
+    Parameters
+    ----------
+    floating : Matrix
+        R x T floating stencil from ``construct_cut_cell_stencil``.
+    neumann_main : Matrix or None
+        R x T Neumann stencil (only for nu=2).
+    eta : list or None
+        Length-R eta values (only for nu=2).
+    dims : Dimensions
+        Scheme dimensions.
+    alpha_symbols : list[Symbol]
+        Free alpha symbols.
+
+    Returns
+    -------
+    CutCellResult
+    """
+    R = dims.R
+    # Dirichlet = rows 1..R-1 of floating
+    dirichlet = floating[1:, :]
+
+    return CutCellResult(
+        floating=floating,
+        dirichlet=dirichlet,
+        neumann=neumann_main,
+        eta=eta,
+        dims=dims,
+        alpha_symbols=alpha_symbols,
+    )

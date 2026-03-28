@@ -6,22 +6,29 @@ import pytest
 from sympy import Matrix, Rational, Symbol, cancel, simplify
 
 from stencil_gen.temo import (
+    CutCellResult,
     Dimensions,
     RowSolveResult,
     SchemeParams,
     StencilResult,
     UniformResult,
+    assemble_cut_cell_result,
     build_cut_cell_deltas,
     build_degenerate_stencil,
+    build_neumann_vandermonde,
     build_temo_vandermonde,
     compute_dimensions,
     construct_cut_cell_stencil,
+    construct_neumann_stencil,
     decompose_alpha_terms,
     derive_e2_uniform_boundary,
+    derive_uniform_neumann,
     from_field_elem,
+    identify_neumann_prescribed_entries,
     identify_prescribed_entries,
     make_psi_field,
     solve_in_field,
+    solve_neumann_uniform_limit,
     solve_temo_row,
     solve_uniform_limit,
     to_field_elem,
@@ -1044,3 +1051,280 @@ class TestConstructCutCellStencil:
             # k=2: sum * delta^2/2 = 1
             s2 = sum(row[j] * deltas[j] ** 2 / 2 for j in range(4))
             assert simplify(s2 - 1) == 0, f"Row {i} k=2 failed"
+
+
+# ---------------------------------------------------------------------------
+# 20.5f — Neumann eta coefficients and output assembly
+# ---------------------------------------------------------------------------
+
+
+class TestNeumannUniform:
+    """Tests for derive_uniform_neumann."""
+
+    def test_e2_2_uniform_neumann(self):
+        """E2_2 uniform Neumann: c = [-2, 2, 0], eta = -2."""
+        B_uN, eta_u = derive_uniform_neumann(
+            interior=[Rational(1), Rational(-2), Rational(1)],
+            p=1, q=1, nu=2,
+        )
+        assert B_uN.shape == (1, 3), f"Shape {B_uN.shape}, expected (1, 3)"
+        assert B_uN[0, 0] == Rational(-2), f"B_uN[0,0] = {B_uN[0,0]}"
+        assert B_uN[0, 1] == Rational(2), f"B_uN[0,1] = {B_uN[0,1]}"
+        assert B_uN[0, 2] == Rational(0), f"B_uN[0,2] = {B_uN[0,2]}"
+        assert len(eta_u) == 1
+        assert eta_u[0] == Rational(-2), f"eta_u[0] = {eta_u[0]}"
+
+
+class TestNeumannVandermonde:
+    """Tests for build_neumann_vandermonde."""
+
+    def test_e2_2_row0_virtual_column(self):
+        """E2_2 Neumann virtual column at row 0: V_eta = [0, 1, -psi]."""
+        psi = Symbol("psi")
+        V_aug, rhs = build_neumann_vandermonde(0, 4, q=1, nu=2, psi=psi)
+        assert V_aug.shape == (3, 5)  # 3 eqs x (4+1) cols
+        # Virtual column (col 4)
+        assert V_aug[0, 4] == 0
+        assert V_aug[1, 4] == 1  # delta_wall^0 / 0! = 1
+        assert simplify(V_aug[2, 4] - (-psi)) == 0  # delta_wall^1 / 1! = -psi
+
+    def test_e2_2_row1_virtual_column(self):
+        """E2_2 Neumann virtual column at row 1: V_eta = [0, 1, -(psi+1)]."""
+        psi = Symbol("psi")
+        V_aug, rhs = build_neumann_vandermonde(1, 4, q=1, nu=2, psi=psi)
+        assert V_aug.shape == (3, 5)
+        assert V_aug[0, 4] == 0
+        assert V_aug[1, 4] == 1
+        assert simplify(V_aug[2, 4] - (-(psi + 1))) == 0
+
+
+class TestNeumannUniformLimit:
+    """Tests for solve_neumann_uniform_limit."""
+
+    def test_e2_2_neumann_psi1(self):
+        """E2_2 Neumann at psi=1: [[-2, 2, 0, 0], [1, -2, 1, 0]], eta = [-2, 0]."""
+        B_uN, eta_u = derive_uniform_neumann(
+            interior=[Rational(1), Rational(-2), Rational(1)],
+            p=1, q=1, nu=2,
+        )
+        B_l_N_1 = solve_neumann_uniform_limit(
+            B_uN, eta_u,
+            interior=[Rational(1), Rational(-2), Rational(1)],
+            p=1, q=1, nu=2, nextra=0,
+        )
+        # Shape: R=2 x (T+1)=5
+        assert B_l_N_1.shape == (2, 5)
+        # Row 0: stencil = [-2, 2, 0, 0], eta = -2
+        assert B_l_N_1[0, 0] == Rational(-2), f"[0,0] = {B_l_N_1[0,0]}"
+        assert B_l_N_1[0, 1] == Rational(2), f"[0,1] = {B_l_N_1[0,1]}"
+        assert B_l_N_1[0, 2] == Rational(0), f"[0,2] = {B_l_N_1[0,2]}"
+        assert B_l_N_1[0, 3] == Rational(0), f"[0,3] = {B_l_N_1[0,3]}"
+        assert B_l_N_1[0, 4] == Rational(-2), f"eta[0] = {B_l_N_1[0,4]}"
+        # Row 1: stencil = [1, -2, 1, 0], eta = 0
+        assert B_l_N_1[1, 0] == Rational(1), f"[1,0] = {B_l_N_1[1,0]}"
+        assert B_l_N_1[1, 1] == Rational(-2), f"[1,1] = {B_l_N_1[1,1]}"
+        assert B_l_N_1[1, 2] == Rational(1), f"[1,2] = {B_l_N_1[1,2]}"
+        assert B_l_N_1[1, 3] == Rational(0), f"[1,3] = {B_l_N_1[1,3]}"
+        assert B_l_N_1[1, 4] == Rational(0), f"eta[1] = {B_l_N_1[1,4]}"
+
+
+class TestNeumannStencil:
+    """Tests for construct_neumann_stencil — E2_2 Neumann."""
+
+    @pytest.fixture
+    def e2_2_neumann(self):
+        """Derive the E2_2 Neumann stencil."""
+        psi = Symbol("psi")
+        ur = derive_e2_uniform_boundary(nu=2)
+        B_uN, eta_u = derive_uniform_neumann(
+            interior=ur.interior, p=ur.p, q=ur.q, nu=ur.nu,
+        )
+        neumann_main, eta = construct_neumann_stencil(
+            ur.B_u, B_uN, eta_u, ur.interior,
+            ur.p, ur.q, ur.nu, 0, psi,
+        )
+        return neumann_main, eta, psi
+
+    def test_e2_2_neumann_eta(self, e2_2_neumann):
+        """E2_2 Neumann eta: eta_0 = -2 (constant), eta_1 = 2*(psi-1)."""
+        neumann_main, eta, psi = e2_2_neumann
+        assert simplify(eta[0] - (-2)) == 0, f"eta[0] = {eta[0]}"
+        assert simplify(eta[1] - 2 * (psi - 1)) == 0, f"eta[1] = {eta[1]}"
+
+    def test_e2_2_neumann_psi1(self, e2_2_neumann):
+        """At psi=1: [[-2, 2, 0, 0], [1, -2, 1, 0]], eta = [-2, 0]."""
+        neumann_main, eta, psi = e2_2_neumann
+        B_1 = neumann_main.subs(psi, 1)
+        expected = Matrix([[-2, 2, 0, 0], [1, -2, 1, 0]])
+        for i in range(2):
+            for j in range(4):
+                assert simplify(B_1[i, j] - expected[i, j]) == 0, (
+                    f"psi=1 mismatch at [{i},{j}]: {B_1[i,j]} vs {expected[i,j]}"
+                )
+        eta_1 = [cancel(e.subs(psi, 1)) for e in eta]
+        assert eta_1[0] == -2
+        assert eta_1[1] == 0
+
+    def test_e2_2_neumann_psi0_left(self, e2_2_neumann):
+        """At psi=0, h=0.5, left: c=[-8,0,8,0,0,-8,8,0], x=[-4,-4]."""
+        neumann_main, eta, psi = e2_2_neumann
+        h = Rational(1, 2)
+        B_0 = neumann_main.subs(psi, 0)
+        eta_0 = [cancel(e.subs(psi, 0)) for e in eta]
+        # Pre-h-scaling values (h=1): flatten row-major
+        c_h1 = [cancel(B_0[i, j]) for i in range(2) for j in range(4)]
+        x_h1 = eta_0
+        # Apply h-scaling: c /= h^2, x /= h
+        c_scaled = [float(c / h**2) for c in c_h1]
+        x_scaled = [float(x / h) for x in x_h1]
+        c_expected = [-8., 0., 8., 0., 0., -8., 8., 0.]
+        x_expected = [-4., -4.]
+        for k in range(8):
+            assert abs(c_scaled[k] - c_expected[k]) < 1e-12, (
+                f"c[{k}] = {c_scaled[k]}, expected {c_expected[k]}"
+            )
+        for k in range(2):
+            assert abs(x_scaled[k] - x_expected[k]) < 1e-12, (
+                f"x[{k}] = {x_scaled[k]}, expected {x_expected[k]}"
+            )
+
+    def test_e2_2_neumann_psi08_right(self, e2_2_neumann):
+        """At psi=0.8, h=0.5, right boundary: matches C++ test data."""
+        neumann_main, eta, psi_sym = e2_2_neumann
+        h = 0.5
+        psi_val = 0.8
+
+        # Evaluate h=1 left-boundary coefficients
+        B_eval = neumann_main.subs(psi_sym, Rational(4, 5))
+        c_h1 = [float(cancel(B_eval[i, j])) for i in range(2) for j in range(4)]
+        eta_eval = [float(cancel(e.subs(psi_sym, Rational(4, 5)))) for e in eta]
+
+        # Apply h-scaling
+        c_scaled = [c / (h * h) for c in c_h1]
+        x_scaled = [e / h for e in eta_eval]
+
+        # Apply right-boundary transform: reverse c, reverse x then negate x
+        c_right = list(reversed(c_scaled))
+        x_right = list(reversed([-v for v in x_scaled]))
+
+        c_expected = [
+            -0.384,
+            4.928,
+            -7.744,
+            3.2,
+            -0.45714285714285713,
+            2.311111111111111,
+            6.4,
+            -8.253968253968255,
+        ]
+        x_expected = [0.8, 4.]
+
+        for k in range(8):
+            assert abs(c_right[k] - c_expected[k]) < 1e-12, (
+                f"c[{k}] = {c_right[k]}, expected {c_expected[k]}"
+            )
+        for k in range(2):
+            assert abs(x_right[k] - x_expected[k]) < 1e-12, (
+                f"x[{k}] = {x_right[k]}, expected {x_expected[k]}"
+            )
+
+    def test_e2_2_neumann_coeffs_match_cpp(self, e2_2_neumann):
+        """E2_2 Neumann symbolic coefficients match E2_2.cpp nbs_neumann."""
+        neumann_main, eta, psi = e2_2_neumann
+        # Row 0: c[0..3] from C++
+        # c[0] = -(4 + 8*psi) / (2 + 3*psi + psi^2)
+        c0_expected = -(4 + 8*psi) / (2 + 3*psi + psi**2)
+        assert simplify(neumann_main[0, 0] - c0_expected) == 0, (
+            f"c[0]: {cancel(neumann_main[0,0])} vs {c0_expected}"
+        )
+        # c[1] = 2*psi
+        assert simplify(neumann_main[0, 1] - 2*psi) == 0
+        # c[2] = (2 + 2*psi - 4*psi^2) / (1 + psi)
+        c2_expected = (2 + 2*psi - 4*psi**2) / (1 + psi)
+        assert simplify(neumann_main[0, 2] - c2_expected) == 0
+        # c[3] = 2*psi*(psi-1) / (2+psi)
+        c3_expected = 2*psi*(psi - 1) / (2 + psi)
+        assert simplify(neumann_main[0, 3] - c3_expected) == 0
+
+        # Row 1: c[4..7] from C++
+        # c[4] = psi
+        assert simplify(neumann_main[1, 0] - psi) == 0
+        # c[5] = (-4 - psi^3 + psi^2) / 2
+        c5_expected = (-4 - psi**3 + psi**2) / 2
+        assert simplify(neumann_main[1, 1] - c5_expected) == 0
+        # c[6] = 2 + psi^3 - 2*psi^2
+        c6_expected = 2 + psi**3 - 2*psi**2
+        assert simplify(neumann_main[1, 2] - c6_expected) == 0
+        # c[7] = -psi*(2 - 3*psi + psi^2) / 2
+        c7_expected = -psi*(2 - 3*psi + psi**2) / 2
+        assert simplify(neumann_main[1, 3] - c7_expected) == 0
+
+    def test_e2_2_neumann_taylor_accuracy(self, e2_2_neumann):
+        """Each Neumann row satisfies augmented Taylor accuracy for all psi."""
+        neumann_main, eta, psi = e2_2_neumann
+        T = 4
+        for i in range(2):
+            deltas = build_cut_cell_deltas(i, T, psi)
+            row = [neumann_main[i, j] for j in range(T)]
+            delta_wall = deltas[0]  # -(psi + i)
+            # k=0: sum = 0
+            assert simplify(sum(row)) == 0, f"Row {i} k=0 failed"
+            # k=1: sum * delta + eta * 1 = 0
+            s1 = sum(row[j] * deltas[j] for j in range(T)) + eta[i] * 1
+            assert simplify(s1) == 0, f"Row {i} k=1 failed: {cancel(s1)}"
+            # k=2: sum * delta^2/2 + eta * delta_wall = 1
+            s2 = sum(row[j] * deltas[j]**2 / 2 for j in range(T)) + eta[i] * delta_wall
+            assert simplify(s2 - 1) == 0, f"Row {i} k=2 failed: {cancel(s2)}"
+
+
+class TestNeumannE1HasNoNeumann:
+    """E2_1 has X=0, no Neumann support."""
+
+    def test_e2_1_no_neumann(self):
+        dims = E2_1.dims()
+        assert dims.X == 0
+
+
+class TestAssembleCutCellResult:
+    """Tests for assemble_cut_cell_result."""
+
+    def test_e2_2_dirichlet_is_floating_rows_1_to_R(self):
+        """E2_2 Dirichlet = rows 1..R-1 of Floating, T=4 entries per row."""
+        psi = Symbol("psi")
+        ur = derive_e2_uniform_boundary(nu=2)
+        floating_result = construct_cut_cell_stencil(
+            ur.B_u, ur.interior, ur.p, ur.q, ur.nu, 0, psi
+        )
+        dims = E2_2.dims()
+        result = assemble_cut_cell_result(
+            floating_result.matrix, None, None, dims, [],
+        )
+        assert result.dirichlet.shape == (1, 4)
+        for j in range(4):
+            assert simplify(
+                result.dirichlet[0, j] - floating_result.matrix[1, j]
+            ) == 0
+
+    def test_e2_2_full_assembly(self):
+        """E2_2: full assembly with floating, dirichlet, and neumann."""
+        psi = Symbol("psi")
+        ur = derive_e2_uniform_boundary(nu=2)
+        floating_result = construct_cut_cell_stencil(
+            ur.B_u, ur.interior, ur.p, ur.q, ur.nu, 0, psi
+        )
+        B_uN, eta_u = derive_uniform_neumann(
+            interior=ur.interior, p=ur.p, q=ur.q, nu=ur.nu,
+        )
+        neumann_main, eta = construct_neumann_stencil(
+            ur.B_u, B_uN, eta_u, ur.interior,
+            ur.p, ur.q, ur.nu, 0, psi,
+        )
+        dims = E2_2.dims()
+        result = assemble_cut_cell_result(
+            floating_result.matrix, neumann_main, eta, dims, [],
+        )
+        assert result.floating.shape == (2, 4)
+        assert result.dirichlet.shape == (1, 4)
+        assert result.neumann.shape == (2, 4)
+        assert len(result.eta) == 2
+        assert result.dims == dims
