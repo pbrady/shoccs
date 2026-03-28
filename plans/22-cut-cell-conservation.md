@@ -167,6 +167,22 @@ The two-phase approach described below was attempted and found to have a **funda
     - **(H) Column-selective conservation:** Enforce conservation only on a subset of columns (e.g., those with nonzero IC) and accept that other columns have small residuals.
   - File: investigatory work done in ad-hoc Python scripts (no test file committed — the investigation used interactive exploration rather than formal test classes)
 
+- [ ] **22.3a-iv** *(Review follow-up)* Commit reproducible test evidence for approach (C):
+  - Approaches A and B have formal test classes (`TestApproachAMinorConditions`, `TestApproachBParametricWeights`) in `test_e4_cut_cell.py` that allow independent verification of their infeasibility claims. Approach C has no committed test artifact — the 7 sub-results documented in 22.3a-iii were obtained via ad-hoc scripts.
+  - Add `TestApproachCEntryLevelUnknowns` to `test_e4_cut_cell.py` reproducing at minimum: (1) the rank gap = 1 for constant weights + 8 betas (result #1), (2) the pointwise rank check at specific (ψ, beta) values (result #4), and (3) the nonlinear solve returning 0 solutions (result #7). These three cover the key structural claim from different angles.
+  - File: `scripts/stencil_gen/tests/test_e4_cut_cell.py`
+
+- [ ] **22.3a-v** *(Review follow-up)* Investigate approach (D) — increased stencil dimensions:
+  - All three approaches (A, B, C) failed for E4_1 at R=4, T=7. The plan identifies directions D–H but has no concrete investigation item. This item gates all downstream work (22.3b–22.7a are BLOCKED until a viable approach is found).
+  - Start with approach (D): increase T to 8 or 9 while keeping R=4. For each candidate T value:
+    - Compute the new DOF budget: rows × (T − prescribed − Taylor_constraints) free entries vs. T−1 conservation equations and R−1 weight unknowns.
+    - Build the conservation system symbolically (reuse `build_cut_cell_conservation_system` from 22.2a) and check the rank gap. If rank gap = 0, the dimension change resolves the infeasibility.
+    - If T increase alone doesn't work, also try R=5 with the original T=7 (approach E).
+  - Record findings and select the viable approach before unblocking 22.3b.
+  - File: `scripts/stencil_gen/tests/test_e4_cut_cell.py`
+
+> **NOTE (review of 173c879):** Items 22.3b through 22.7a below are **BLOCKED** — they assume conservation is solvable at the current E4_1 dimensions (R=4, T=7), which 22.3a-i/ii/iii proved infeasible. These items remain as-is for when a viable approach (from 22.3a-v) is identified; they will need revision to match the chosen approach's stencil dimensions and DOF structure.
+
 - [ ] **22.3b** Integrate into `construct_cut_cell_stencil()` and propagate through pipeline:
   - **`StencilResult` dataclass (line 843):** Add field `weight_solutions: dict | None = None` (maps `w_i → expr(psi, alpha)`) and `alpha_symbols: list | None = None` (the remaining free alphas after conservation). The dataclass is not frozen, so new Optional fields with defaults can be appended without breaking existing callers.
   - **`construct_cut_cell_stencil` (lines 1206-1281):** Add parameter `enforce_conservation: bool = True` (note: `nu` is already a parameter). After assembling `matrix = Matrix(rows)` at line 1278 and before the return at line 1279:
