@@ -30,7 +30,7 @@ The current TEMO pipeline solves each row of the cut-cell stencil B_l(ψ) indepe
 - Interior contribution IC uses `r = R = 4` (first interior grid point after the R-row boundary block). All IC values within the conservation range (j=0..T−2=3) are zero — no interior row (starting at grid point 4) reaches these T-frame columns with p=1.
 - Conservation equations: T−1 = 4 (all columns j=0..T−2 per `conservation.py`)
 - Weight unknowns: 3 (w_1, w_2, w_3). The phi placeholders from `nextra=1` are resolved during `derive_uniform_boundary_for_temo` (line 388–395), NOT during cut-cell conservation. By the time the conservation system is built, B_l has no phi symbols — only (ψ, alpha_0..alpha_3).
-- System is **overdetermined by 1** (4 equations, 3 weight unknowns, excess = q = 1). However, the TEMO construction inherits conservation from the uniform boundary, so the 1 excess residual is identically zero for any alpha values. No alpha constraints are needed — all 4 alphas remain free and the stencil is unchanged.
+- System is **overdetermined by 1** (4 equations, 3 weight unknowns, excess = q = 1). **CORRECTION**: Investigation in 22.3a showed that the excess residual is NOT identically zero. E2_1's conservation system (all T-1=4 column equations) is inconsistent with w_i=1 for columns 0,1,2. The existing passing tests only check columns 3,4 where IC=0 and column sums are trivially zero. Full conservation for E2_1 also requires alpha constraints and non-trivial ψ-dependent weights. Additionally, rows 1 and 2 of B_l are identical when α=0, making the system rank-deficient at that point.
 
 ### Why E4_1 fails
 - E4_1: R=4, T=7, p=2, nextra=0
@@ -103,24 +103,43 @@ The practical approach: solve Taylor per-row first (as now) to get stencil entri
 
 ### 22.3 — Integrate conservation into the TEMO solve
 
-- [ ] **22.3a** Implement `enforce_cut_cell_conservation()` in `temo.py`:
-  - **Signature:** `enforce_cut_cell_conservation(B_l: Matrix, R: int, T: int, p: int, nu: int, interior_coeffs: list, psi: Symbol, alpha_symbols: list[Symbol]) -> tuple[Matrix, dict[Symbol, Expr], list[Symbol]]`
-    - Returns `(B_l_conserved, weight_solutions, remaining_alphas)`
-  - **Chosen approach:** Two-phase solve — treat alpha as parameters, solve for weights first, then derive alpha constraints from overdetermined residuals (DD22-1 and DD22-2 resolved).
-  - **Step 1 — Build conservation equations:** Call `build_cut_cell_conservation_system()` from 22.2a to get `(equations, w_symbols)`.
-  - **Step 2 — Extract linear system in weights:** The equations have the form `Σ w_i · f_i(ψ, α) + g(ψ, α) = 0` where f_i and g are rational in (ψ, α). This is LINEAR in the w_i unknowns (α symbols are treated as parameters, NOT unknowns). Use `linear_eq_to_matrix(equations, w_symbols)` to extract coefficient matrix `A` (n_eq × n_w) and RHS vector `b` (n_eq × 1). For E4_1: A is 6×3, b is 6×1, with entries that are rational functions of (ψ, α₀..α₃). No bilinear term issue arises because α symbols are parameters, not unknowns in this solve.
-  - **Step 3 — Solve for weights (overdetermined case):** When n_eq > n_w (E4_1: 6 > 3), select n_w pivot rows to form a square system. Try `A_pivot = A[:n_w, :]` first; if singular (det == 0), use `A.rref()` to identify n_w linearly independent rows. Solve: `w_sol = A_pivot.solve(b_pivot)` → 3×1 Matrix giving w₁, w₂, w₃ as rational functions of (ψ, α). Apply `cancel()` to each entry.
-  - **Step 4 — Derive alpha constraints:** Substitute `w_sol` into the remaining n_eq − n_w equations: for each remaining row k, compute `residual_k = cancel((A[k,:] * w_sol)[0] - b[k])`. Each residual must be identically zero → polynomial identity in ψ. For E4_1: 3 residual equations. These residuals are rational in (ψ, α); clear denominators if needed by multiplying by `denom = fraction(residual_k)[1]`.
-  - **Step 5 — Solve alpha constraints:** The 3 residual equations (after clearing denominators) are polynomial in (ψ, α). Since they must hold for ALL ψ, extract ψ-coefficient equations: for each residual, compute `Poly(numer, psi).all_coeffs()` → list of α-polynomial equations that must all equal zero. Collect all such equations. **Important: these equations may be nonlinear in α** (degree ≤ R in α for an R×R pivot system), because `w_sol` from Step 3 involves `adj(A_pivot)/det(A_pivot)` where `A_pivot` entries are linear in α, making the numerator after clearing denominators polynomial of degree > 1 in α. Use the following strategy:
-    - **Fast path (linear):** Try `linear_eq_to_matrix(all_alpha_eqs, alpha_symbols)`. If this succeeds without raising (all equations are degree ≤ 1 in α), solve the linear system. For E4_1: expect a 3×4 system with 1 free alpha.
-    - **General path (nonlinear):** If `linear_eq_to_matrix` raises `NonlinearError`, use `sympy.solve(all_alpha_eqs, constrained_alphas)` where `constrained_alphas` is a subset of `alpha_symbols` (try `alpha_symbols[:-1]` first, keeping the last alpha free). SymPy's `solve()` handles polynomial systems and returns parametric solutions. Verify that solutions are ψ-independent: `sol.free_symbols & {psi} == set()`. If the solve returns empty, try different free-parameter choices.
-    - For E4_1 with 4 alphas and 3 constraints: expect 1 remaining free alpha. The solve produces `{alpha_k: expr(alpha_remaining)}` for the constrained alphas.
-  - **Step 6 — Substitute back:** Replace the constrained alphas in B_l using `.xreplace(alpha_solutions)`, then `cancel()` each entry. Also substitute into `w_sol`. Return `(B_l_conserved, weight_solutions, [alpha_remaining])`.
-  - **Note:** The conservation system is ALWAYS overdetermined (n_eq > n_w) because excess = q for nu=1, q+1 for nu=2, and q ≥ 1. There is no "exactly determined" case.
-  - **Edge case (zero residuals, E2_1):** When all excess residuals from Step 4 are identically zero (i.e., `cancel(residual_k) == 0` for every k), no alpha constraints are needed. Return B_l unchanged with all original alphas free. E2_1 falls into this case: 4 equations, 3 weight unknowns, 1 excess residual that is zero because the TEMO construction inherits conservation from the uniform boundary's phi resolution. This is handled naturally by Steps 4-6 (Step 5 receives zero equations, producing no alpha constraints).
-  - **Edge case (no alpha parameters, overdetermined):** When n_eq > n_w AND `len(alpha_symbols) == 0` (e.g., E2_2 with nu=2: 3 equations, 1 weight unknown, 0 alphas), Step 4 produces excess residuals that cannot be absorbed by any parameters. These residuals must be identically zero — the Taylor solve already implicitly satisfies the conservation constraints. For each residual: compute `cancel(residual_k)` and assert it equals zero, raising `ValueError(f"Conservation residual {k} is {residual_k}, expected 0 — Taylor solve does not implicitly satisfy conservation for this scheme")` if nonzero. No stencil modification is needed. Return `(B_l, weight_solutions, [])` with empty remaining_alphas. This case is exercised by E2_2 (see 22.6a).
-  - **Performance note:** The system is small (≤6 equations). For the weight solve (Step 3), SymPy's `linear_eq_to_matrix` + `Matrix.solve` handle rational function coefficients. For the alpha constraint solve (Step 5), `linear_eq_to_matrix` is used if equations are linear in α; otherwise `sympy.solve()` handles the polynomial system. No need for `solve_in_field` or QQ(ψ) domain arithmetic. Target: < 5 seconds for E4_1 (may take longer if `solve()` is needed for nonlinear α equations — increase to 15 seconds if so).
-  - File: `scripts/stencil_gen/stencil_gen/temo.py` (add after `build_cut_cell_conservation_system`, ~line 1300)
+#### Investigation Findings (from 22.3a attempt)
+
+The two-phase approach described below was attempted and found to have a **fundamental mathematical flaw**: the conservation system is bilinear in (weights × alpha), and the two-phase solve (weights first, alpha constraints from residuals) encounters a singularity at the constrained alpha values. Specifically:
+
+1. **Step 3 weight solve** produces w_i as rational functions of (ψ, α) with denominators that depend on α.
+2. **Steps 4-5** correctly derive α constraints by setting excess residual numerators to zero (for E4_1: α₀=11/6, α₁=1/3, α₂=−4α₃−1/6).
+3. **Step 6 fails**: at the constrained α values, the weight denominators are identically zero (0/0). Re-solving the constrained system gives rank([A|b]) > rank(A) — the system is **inconsistent**.
+4. **Root cause**: The 4×4 minor determinants of the augmented matrix [A|b] (the true consistency conditions) give **nonlinear** equations in α (containing α₁·α₃ cross-terms). These 67 psi-coefficient equations from 15 minors have no common solution satisfying all of them — the solution from `solve` satisfies only 46/67 equations.
+5. **E2_1 also affected**: Even E2_1's conservation system (T−1=4 equations, 3 weight unknowns) is inconsistent with w_i=1 for columns 0,1,2. The existing passing tests only check columns 3,4 (where IC=0 and the column sums are trivially zero). Full conservation requires non-trivial ψ-dependent weights AND alpha constraints simultaneously.
+6. **Key structural issue**: For E2_1, rows 1 and 2 of B_l are identical when all α=0, making the conservation matrix rank-deficient. Non-zero α values break this degeneracy.
+
+**The problem requires a different approach.** The conservation system couples weights and alpha through bilinear terms (w_i × B_l[i,j](α)). Solving must handle both simultaneously, not sequentially. Possible approaches:
+- **(A) Augmented consistency**: formulate conservation as requiring all 4×4 minors of [A(α)|b(α)] to vanish for all ψ; solve the resulting nonlinear α-system, then recover weights.
+- **(B) Direct parametric solve**: parameterize w_i as rational functions of ψ with unknown coefficients, substitute into conservation, match ψ-coefficients, solve the resulting polynomial system in (weight coefficients, α).
+- **(C) Entry-level unknowns**: instead of working with α, treat the 8 free stencil entries directly as unknowns alongside weights, giving a system that may be solvable despite higher dimensionality.
+
+**Next step**: Implement sub-items 22.3a-i through 22.3a-iii below as a prerequisite investigation to select and validate the correct approach before full implementation.
+
+- [ ] **22.3a-i** Investigate approach (A) — augmented matrix minor conditions:
+  - Compute all C(6,4)=15 minor determinants of [A(ψ,α)|b(ψ,α)] for E4_1 symbolically (all 4 alpha free, not fixing alpha_3=0).
+  - Extract ψ-coefficient equations from each minor.
+  - Determine if the resulting α-system has any solution (check consistency).
+  - If consistent, solve for α and verify the conservation system becomes consistent with those α values.
+  - **Key question to answer**: does a valid (α₀,α₁,α₂,α₃) exist such that the conservation system A(ψ,α)w=b(ψ,α) is consistent for all ψ?
+  - File: exploratory script or test
+
+- [ ] **22.3a-ii** Investigate approach (B) — parametric weight functions:
+  - Parameterize weights as w_i = p_i(ψ)/q(ψ) where q is the common TEMO denominator (ψ+1)(ψ+2)(ψ+3) and p_i are polynomials in ψ of degree ≤ 3 with unknown rational coefficients.
+  - Substitute into all 6 conservation equations, clear denominators.
+  - Collect all ψ-coefficient equations.
+  - Determine if the resulting system (in weight coefficients and alpha) is solvable.
+  - File: exploratory script or test
+
+- [ ] **22.3a-iii** Choose approach and implement `enforce_cut_cell_conservation()`:
+  - Based on findings from 22.3a-i and 22.3a-ii, implement the working approach.
+  - Must pass verification: for the conserved stencil, all T−1 conservation column sums must be zero (symbolically, for all ψ and remaining free α).
+  - File: `scripts/stencil_gen/stencil_gen/temo.py`
 
 - [ ] **22.3b** Integrate into `construct_cut_cell_stencil()` and propagate through pipeline:
   - **`StencilResult` dataclass (line 843):** Add field `weight_solutions: dict | None = None` (maps `w_i → expr(psi, alpha)`) and `alpha_symbols: list | None = None` (the remaining free alphas after conservation). The dataclass is not frozen, so new Optional fields with defaults can be appended without breaking existing callers.
@@ -224,10 +243,10 @@ The practical approach: solve Taylor per-row first (as now) to get stencil entri
 ## Design Decisions (to be recorded in plans/meta.md if cross-cutting)
 
 ### DD22-1: Conservation enforcement approach
-**CHOSEN: Two-phase** (Taylor first, then conservation substitution). The per-row Taylor solve (existing pipeline) produces B_l entries as functions of (ψ, α). Conservation equations are then formed from B_l and solved for weights + alpha constraints. This avoids building a single large coupled system and reuses the existing TEMO row-solve infrastructure.
+**ORIGINALLY CHOSEN: Two-phase** (Taylor first, then conservation substitution). **STATUS: FAILED** — the two-phase approach encounters a bilinear singularity where the weight denominators vanish at the constrained alpha values, making the system inconsistent after alpha substitution. See "Investigation Findings" in §22.3 for details. A new approach must be selected from the alternatives described in 22.3a-i/ii/iii.
 
 ### DD22-2: Bilinear term handling
-**CHOSEN: (a) Treat alphas as parameters, solve for w's.** The conservation equations are linear in the weight unknowns w₁..w_{R-1} when alpha symbols are treated as parameters (not unknowns). The bilinear terms `w_i * alpha_j` are only problematic if we try to solve for BOTH w and alpha simultaneously. With the two-phase approach (solve w first, then derive alpha constraints from residuals), the system is always linear. No theta-linearization needed.
+**ORIGINALLY CHOSEN: (a) Treat alphas as parameters, solve for w's.** **STATUS: INSUFFICIENT** — while the conservation equations are linear in w_i when α symbols are parameters, the resulting parametric weight solution has denominators that depend on α. At the α values required by conservation, these denominators vanish (the coefficient matrix A(α) loses rank). The bilinear coupling MUST be handled simultaneously. The augmented matrix minor approach (all 4×4 minors of [A|b] must vanish) gives the true consistency conditions but produces nonlinear equations in α.
 
 ### DD22-3: Alpha parameter reduction
 **TBD (narrowed):** Conservation enforcement will reduce E4_1's free alpha count from 4 to a smaller number. Based on the DOF analysis:
@@ -247,19 +266,13 @@ The practical approach: solve Taylor per-row first (as now) to get stencil entri
 
 ## Performance Considerations
 
-The conservation solve is small and tractable:
-- E4_1: 6 conservation equations, 3 weight unknowns → one 3×3 solve (Step 3) + 3 residual equations (Step 4) + alpha constraint solve (Step 5)
-- Weight solve (Step 3) uses SymPy's `linear_eq_to_matrix` + `Matrix.solve` with rational function entries in (ψ, α)
-- Alpha constraint solve (Step 5) may produce polynomial (not linear) equations in α — degree ≤ R=4 in α symbols after clearing denominators (from `adj(A_pivot)` and `det(A_pivot)` terms). If linear, use `linear_eq_to_matrix`; if nonlinear, use `sympy.solve()`.
-- No need for QQ(ψ) fraction field arithmetic — standard symbolic solve suffices
-- Target: full E4_1 derivation with conservation < 10 seconds if alpha equations are linear, < 30 seconds if `sympy.solve()` is needed for nonlinear polynomial system
+The conservation solve is small but mathematically nontrivial:
+- E4_1: 6 conservation equations, bilinear in 3 weight unknowns × 4 alpha symbols
+- The augmented matrix approach produces 15 minor determinants, each polynomial in (ψ, α). After extracting ψ-coefficients: 67 nonlinear equations in α (containing cross-terms like α₁·α₃)
+- The parametric weight approach may require parameterizing w_i as rational functions of ψ with ~12 unknown coefficients
+- SymPy's `solve()` returns 0 solutions for the full bilinear system; `nsolve()` reports singular Jacobian
+- Target: TBD after selecting approach in 22.3a-i/ii/iii
 
 ## Key Implementation Insight
 
-The cleanest approach is probably:
-1. **Keep the per-row Taylor solve** — each row's entries are functions of (ψ, row_free_params, α^u)
-2. **Substitute into conservation equations** — conservation becomes a system in (weights, row_free_params)
-3. **Solve the coupled conservation + weight system** — determine which row_free_params are constrained
-4. **Substitute back** — replace constrained free params, leaving only α^u as optimization targets
-
-This is a two-phase approach (Taylor first, then conservation) rather than solving one giant monolithic system. The Taylor phase produces the "shape" of each row; conservation then constrains the remaining degrees of freedom across rows.
+The original two-phase approach (Taylor → conservation) fails due to bilinear singularities. The correct approach must handle the coupling between weights and alpha simultaneously. The conservation system A(ψ,α)·w = b(ψ,α) requires the augmented matrix [A|b] to have rank ≤ rank(A) for ALL ψ, which gives polynomial conditions on α (from minor determinants). These conditions are nonlinear because the A matrix entries involve α linearly, making the 4×4 minors quadratic or higher in α.
