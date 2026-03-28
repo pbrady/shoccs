@@ -310,6 +310,13 @@ The existing Mathematica notebooks are too slow for iterating on new stencil sch
 - (c) Use a different CAS (Maple, SageMath)
 **Considerations:** SymPy 1.14 is already available in the container. The `QQ(psi)` fraction field provides 24,000x speedup over naive symbolic substitution for TEMO cut-cell derivations. `uv` is available for dependency management.
 
+### D-R22: TEMO Cut-Cell Column Convention and Variant Mapping
+**Decision:** The C++ code and plan 20.5 use column ordering `[wall, x_0, x_1, ..., x_{t-1}]` (wall = column 0). The math reference uses `[f_0, f_delta, f_1, ...]` (wall = column 1). All formulas in plan 20.5 use the C++ convention.
+**Variant mapping:**
+- 1st derivative (nu=1): math reference B^{d,2} — wall gets weight for ALL rows, x_0 zeroed for ALL rows.
+- 2nd derivative (nu=2): math reference B^{d,1} — row 0: wall zeroed, x_0 gets weight; rows >= 1: wall gets weight, x_0 zeroed.
+**Why:** The C++ stencil code (`E2_1.cpp`, `E2_2.cpp`) stores coefficients in `[wall, x_0, ...]` order. Matching this convention avoids column-swapping bugs. The variant mapping was verified numerically against `E2_2.cpp` at `psi=0`: row 0 = `[0, 1, -2, 1]` (wall zeroed) and row 1 = `[1, 0, -2, 1]` (x_0 zeroed), confirming B^{d,1}.
+
 ---
 
 ## Files Excluded from Migration Scope
