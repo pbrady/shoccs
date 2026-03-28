@@ -7,7 +7,10 @@ from sympy import Integer, Matrix, Rational, S, Symbol, cancel, simplify
 
 from stencil_gen.codegen import (
     StencilGenSpec,
+    TestCase,
+    compute_test_values,
     generate_stencil_cpp,
+    generate_test_cpp,
 )
 from stencil_gen.temo import (
     E4_1,
@@ -442,5 +445,188 @@ class TestE4CodeGeneration:
         output_dir.mkdir(exist_ok=True)
         output_path = output_dir / "E4_1.cpp"
         output_path.write_text(e4_code)
+        assert output_path.exists()
+        assert output_path.stat().st_size > 0
+
+
+class TestE4TestFileGeneration:
+    """Tests for E4_1 C++ test file generation (21.4c)."""
+
+    ALPHA_VALUES = {"alpha": [0.1, -0.05, 0.02, 0.01]}
+
+    @pytest.fixture(scope="class")
+    def e4_spec(self):
+        """Build the full StencilGenSpec from the TEMO pipeline."""
+        psi = Symbol("psi")
+        ur = derive_uniform_boundary_for_temo(E4_1)
+        result = construct_cut_cell_stencil(
+            ur.B_u, ur.interior, p=2, q=3, nu=1, nextra=0, psi=psi,
+        )
+        dims = compute_dimensions(E4_1.p, E4_1.q, E4_1.s, E4_1.nextra, E4_1.nu)
+        cc = assemble_cut_cell_result(
+            result.matrix, None, None, dims, ur.alpha_symbols,
+        )
+
+        floating_flat = list(cc.floating)
+        dirichlet_flat = [Integer(0)] * 7 + list(cc.dirichlet)
+
+        return StencilGenSpec(
+            name="E4_1",
+            P=2,
+            R=4,
+            T=7,
+            X=0,
+            derivative_order=1,
+            is_uniform=False,
+            param_arrays={"alpha": 4},
+            interior_coeffs=ur.interior,
+            floating_coeffs=floating_flat,
+            dirichlet_coeffs=dirichlet_flat,
+        )
+
+    def test_compute_floating_values(self, e4_spec):
+        """compute_test_values produces 28 floating coefficients at psi=1.0."""
+        values = compute_test_values(
+            e4_spec.floating_coeffs,
+            alpha_values=self.ALPHA_VALUES,
+            h=1.0,
+            psi=1.0,
+        )
+        assert len(values) == 28  # R*T = 4*7
+
+    def test_compute_dirichlet_values(self, e4_spec):
+        """compute_test_values produces 21 Dirichlet coefficients at psi=0.7."""
+        dirichlet_emitted = e4_spec.dirichlet_coeffs[e4_spec.T:]
+        values = compute_test_values(
+            dirichlet_emitted,
+            alpha_values=self.ALPHA_VALUES,
+            h=0.5,
+            psi=0.7,
+        )
+        assert len(values) == 21  # (R-1)*T = 3*7
+
+    def test_floating_uniform_limit_row3_interior(self, e4_spec):
+        """At psi=1.0, floating row 3 is the interior stencil [0,0,1/12,-2/3,0,2/3,-1/12]/h."""
+        values = compute_test_values(
+            e4_spec.floating_coeffs,
+            alpha_values=self.ALPHA_VALUES,
+            h=2.0,
+            psi=1.0,
+        )
+        # Row 3 = indices 21..27
+        row3 = values[21:28]
+        expected = [0, 0, 1 / 24, -1 / 3, 0, 1 / 3, -1 / 24]
+        for i, (got, want) in enumerate(zip(row3, expected)):
+            assert abs(got - want) < 1e-12, (
+                f"Row 3 col {i}: got {got}, want {want}"
+            )
+
+    def test_generate_test_file_structure(self, e4_spec):
+        """Generated test file has correct Catch2 structure for E4_1."""
+        floating_vals = compute_test_values(
+            e4_spec.floating_coeffs,
+            alpha_values=self.ALPHA_VALUES,
+            h=1.0,
+            psi=1.0,
+        )
+        cases = [
+            TestCase(
+                bc_type="Floating",
+                h=1.0,
+                psi=1.0,
+                alpha_values=self.ALPHA_VALUES,
+                expected_coeffs=floating_vals,
+            ),
+        ]
+        code = generate_test_cpp(e4_spec, cases)
+        assert 'TEST_CASE("E4_1")' in code
+        assert 'type = "E4"' in code
+        assert "order = 1" in code
+        assert "alpha = {0.1, -0.05, 0.02, 0.01}" in code
+        assert "REQUIRE(p == 2)" in code
+        assert "REQUIRE(r == 4)" in code
+        assert "REQUIRE(t == 7)" in code
+
+    def test_generate_test_file_multiple_cases(self, e4_spec):
+        """Generated test file has Floating and Dirichlet test blocks."""
+        dirichlet_emitted = e4_spec.dirichlet_coeffs[e4_spec.T:]
+        cases = [
+            TestCase(
+                bc_type="Floating",
+                h=2.0,
+                psi=1.0,
+                alpha_values=self.ALPHA_VALUES,
+                expected_coeffs=compute_test_values(
+                    e4_spec.floating_coeffs,
+                    alpha_values=self.ALPHA_VALUES, h=2.0, psi=1.0,
+                ),
+            ),
+            TestCase(
+                bc_type="Floating",
+                h=1.0,
+                psi=0.3,
+                alpha_values=self.ALPHA_VALUES,
+                expected_coeffs=compute_test_values(
+                    e4_spec.floating_coeffs,
+                    alpha_values=self.ALPHA_VALUES, h=1.0, psi=0.3,
+                ),
+            ),
+            TestCase(
+                bc_type="Dirichlet",
+                h=0.5,
+                psi=0.7,
+                alpha_values=self.ALPHA_VALUES,
+                expected_coeffs=compute_test_values(
+                    dirichlet_emitted,
+                    alpha_values=self.ALPHA_VALUES, h=0.5, psi=0.7,
+                ),
+            ),
+        ]
+        code = generate_test_cpp(e4_spec, cases)
+        assert code.count("REQUIRE_THAT(c,") == 3
+        assert "bcs::Floating" in code
+        assert "bcs::Dirichlet" in code
+
+    def test_write_test_output(self, e4_spec):
+        """Generate and write E4_1.t.cpp to output directory."""
+        dirichlet_emitted = e4_spec.dirichlet_coeffs[e4_spec.T:]
+        cases = [
+            TestCase(
+                bc_type="Floating",
+                h=2.0,
+                psi=1.0,
+                alpha_values=self.ALPHA_VALUES,
+                expected_coeffs=compute_test_values(
+                    e4_spec.floating_coeffs,
+                    alpha_values=self.ALPHA_VALUES, h=2.0, psi=1.0,
+                ),
+            ),
+            TestCase(
+                bc_type="Floating",
+                h=1.0,
+                psi=0.3,
+                alpha_values=self.ALPHA_VALUES,
+                expected_coeffs=compute_test_values(
+                    e4_spec.floating_coeffs,
+                    alpha_values=self.ALPHA_VALUES, h=1.0, psi=0.3,
+                ),
+            ),
+            TestCase(
+                bc_type="Dirichlet",
+                h=0.5,
+                psi=0.7,
+                alpha_values=self.ALPHA_VALUES,
+                expected_coeffs=compute_test_values(
+                    dirichlet_emitted,
+                    alpha_values=self.ALPHA_VALUES, h=0.5, psi=0.7,
+                ),
+            ),
+        ]
+        code = generate_test_cpp(e4_spec, cases)
+
+        output_dir = pathlib.Path(__file__).parent.parent / "output"
+        output_dir.mkdir(exist_ok=True)
+        output_path = output_dir / "E4_1.t.cpp"
+        output_path.write_text(code)
         assert output_path.exists()
         assert output_path.stat().st_size > 0

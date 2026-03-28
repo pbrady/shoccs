@@ -220,11 +220,12 @@ The SymPy pipeline (Phase 20) is complete with 231 passing tests and 7 modules:
   - File: `scripts/stencil_gen/tests/test_e4_cut_cell.py`
   - Test: verify generated code has correct structure (check for P=2, R=4, T=7 constants)
 
-- [ ] **21.4c** Generate the E4_1 test file:
-  - Use `codegen.generate_test_cpp()` to produce test data
-  - Pick specific alpha values (e.g., alpha = [0.1, -0.05, 0.02, 0.01]) and psi values (0.3, 0.7, 1.0) for test cases
-  - Use `codegen.compute_test_values()` to evaluate expected coefficients numerically
-  - Write to `scripts/stencil_gen/output/E4_1.t.cpp`
+- [x] **21.4c** Generate the E4_1 test file:
+  - Used `codegen.generate_test_cpp()` to produce test data
+  - Alpha values: [0.1, -0.05, 0.02, 0.01]; psi values: 1.0 (Floating), 0.3 (Floating), 0.7 (Dirichlet)
+  - Used `codegen.compute_test_values()` to evaluate expected coefficients numerically
+  - Written to `scripts/stencil_gen/output/E4_1.t.cpp`
+  - Tests: 6 new tests in `TestE4TestFileGeneration` class covering value computation, test file structure, multiple test cases, and file output
   - File: `scripts/stencil_gen/tests/test_e4_cut_cell.py`
 
 ### 21.5 — Assemble the full `derive_and_generate` pipeline
