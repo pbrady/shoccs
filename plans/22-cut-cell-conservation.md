@@ -27,26 +27,26 @@ The current TEMO pipeline solves each row of the cut-cell stencil B_l(ψ) indepe
 
 ### Why E2_1 works without explicit conservation enforcement
 - E2_1: R=4, T=5, p=1, nextra=1
-- Columns with nonzero IC (grid-frame): 2, 3 (2 columns; T-frame: 3, 4)
+- Interior contribution IC uses `r = R = 4` (first interior grid point after the R-row boundary block). All IC values within the conservation range (j=0..T−2=3) are zero — no interior row (starting at grid point 4) reaches these T-frame columns with p=1.
 - Conservation equations: T−1 = 4 (all columns j=0..T−2 per `conservation.py`)
 - Unknowns: 3 weights (w_1, w_2, w_3) + 1 phi placeholder (nextra=1) = 4
 - **Exactly determined** → weights + phi absorb all constraints, no alpha constraints needed
 
 ### Why E4_1 fails
 - E4_1: R=4, T=7, p=2, nextra=0
-- Columns with nonzero IC (grid-frame): 1, 2, 3, 4 (4 columns; T-frame: 2, 3, 4, 5)
+- Interior contribution IC uses `r = R = 4`. Nonzero IC at T-frame columns 3, 4, 5 (grid-frame 2, 3, 4) — 3 columns. Computed values: IC(3)=1/12, IC(4)=−7/12, IC(5)=−7/12. Columns 0, 1, 2 have IC=0 (interior rows at grid point ≥4 don't reach these columns with p=2).
 - Conservation equations: T−1 = 6 (all columns j=0..T−2 per `conservation.py`)
 - Weight unknowns (w_1, w_2, w_3): 3, nextra=0 → no phi placeholders
 - **3 excess constraints** → must be satisfied by stencil entries (alpha parameters)
-- Currently ignored → conservation violated on ALL columns
+- Currently ignored → conservation violated on ALL columns with nonzero IC
 
 ### Degrees of freedom budget
 Each row has 7 columns, 1 prescribed (Category A zeroed column), 4 Taylor equations → **2 free entries per row**, 8 total across 4 rows.
 
-After conservation:
+After conservation (6 equations, 3 weight unknowns + entries from 4 alpha symbols):
 - 3 weight unknowns absorb 3 of 6 conservation equations
-- 3 excess equations constrain 3 of the 8 free entries
-- 5 remaining free entries → these are the optimization parameters (map to 4 α^u plus the wall constraint absorbs 1)
+- 3 excess equations constrain 3 of the alpha parameters
+- Expected: 4 − 3 = **1 remaining free alpha** for optimization (but actual count depends on rank; see DD22-3)
 
 ### The fix: coupled Taylor + conservation solve
 Instead of solving each row independently, solve a single coupled system:
@@ -65,8 +65,9 @@ The practical approach: solve Taylor per-row first (as now) to get stencil entri
 
 - [ ] **22.1a** Add `test_e4_1_conservation_fails` to `test_e4_cut_cell.py`:
   - Construct the E4_1 cut-cell stencil using the current pipeline
-  - Check `Σ_i w_i · B[i,j] = 0` for j = 2..6 (interior columns) with w_0=ψ, w_i=1
-  - This test should FAIL (proving the bug exists)
+  - For each T-frame column j in 0..T−2 (j=0..5), compute the full conservation sum: `w_0 * B[0,j] + w_1 * B[1,j] + w_2 * B[2,j] + w_3 * B[3,j] + IC(j)` where w_0=ψ, w_i=1 for i≥1, and `IC(j) = _interior_contribution(j-1, R=4, p=2, interior)`. For j=0: add +1 (wall target = −1). Assert each column sum simplifies to 0.
+  - Import `_interior_contribution` from `stencil_gen.conservation`
+  - This test should FAIL for at least columns j=3,4,5 (where IC is nonzero and the boundary block doesn't compensate)
   - Mark with `@pytest.mark.xfail(reason="conservation not yet enforced for E4_1")`
   - File: `scripts/stencil_gen/tests/test_e4_cut_cell.py`
   - Test: `cd scripts/stencil_gen && uv run pytest tests/test_e4_cut_cell.py -v -k conservation`
@@ -74,22 +75,28 @@ The practical approach: solve Taylor per-row first (as now) to get stencil entri
 ### 22.2 — Build the coupled conservation system
 
 - [ ] **22.2a** Implement `build_cut_cell_conservation_system()` in `temo.py`:
-  - **Signature:** `build_cut_cell_conservation_system(B_l: Matrix, R: int, T: int, p: int, interior_coeffs: list, psi: Symbol) -> tuple[list[Expr], list[Symbol]]`
+  - **Signature:** `build_cut_cell_conservation_system(B_l: Matrix, R: int, T: int, p: int, nu: int, interior_coeffs: list, psi: Symbol) -> tuple[list[Expr], list[Symbol]]`
     - `B_l` is the R×T cut-cell stencil matrix (entries are rational in ψ and α symbols)
+    - `nu` is the derivative order (1 or 2) — determines wall column target (DD22-4)
     - Returns `(equations, w_symbols)` where equations are expressions that must equal zero
-  - **Interior column identification:** T-frame column j (0-indexed, col 0 = wall) corresponds to grid point j-1 (col 1 = x_0). Interior row at T-frame position R+m (grid point R-1+m, m >= 0) covers T-frame columns `(R+m-p)..(R+m+p)`. A column j has nonzero IC if `j >= R-p` and `j` is within reach of at least one interior row. For E4_1 (R=4, p=2): j = 2..6 in T-frame may have nonzero IC; computed values are IC(2)=1/12, IC(3)=-7/12, IC(4)=-7/12, IC(5)=1/12, IC(6)=0.
-  - **Interior contribution IC(j):** Sum of interior stencil coefficients touching T-frame column j. Interior row at T-frame R+m (grid point R-1+m) has coefficient `interior_coeffs[(j-1) - (R-1+m) + p]` at column j. **Equivalently:** `_interior_contribution(j-1, r, p, interior_coeffs)` from `conservation.py` where `r = R-1` (the number of uniform boundary rows = first interior grid point). **Note:** The TEMO boundary block has R rows covering grid points 0..R-2; interior rows start at grid point R-1 = r. This is the SAME r used by `conservation.py` in the uniform case. IC(j) = 0 for T-frame columns 0 and 1 (wall and x_0 are too far left for any interior row to reach with E4_1 parameters).
-  - **Conservation equations:** For each T-frame column j = 0..T−2 (matching `conservation.py` which iterates `range(t-1)`, giving T−1 total equations):
-    `w_0 * B_l[0,j] + Σ_{i=1}^{R-1} w_i * B_l[i,j] + IC(j) = 0`
-    where `w_0 = psi` (the cut-cell weight) and `w_1..w_{R-1}` are symbol unknowns.
-  - **Wall column (j=0):** Use the standard `col_sum + 1 = 0` convention from `conservation.py` line 80 (column 0 sums to −1).
-  - **Column 1 (x_0):** For nu=1, column 1 is the zeroed Category-A column. Its column sum involves `psi * B_l[0,1]` where `B_l[0,1]` is already prescribed. The equation for j=1 is generated like any other column; it may be trivially satisfied or impose a constraint on weights.
+  - **Interior column identification:** T-frame column j (0-indexed, col 0 = wall) corresponds to grid point j−1. The boundary block has R rows covering grid points 0..R−1. Interior rows (using the unmodified interior stencil with unit weight) start at grid point R. Interior row at grid point R+m (m ≥ 0) covers grid-frame columns (R+m−p)..(R+m+p), i.e., T-frame columns (R+m−p+1)..(R+m+p+1). For E4_1 (R=4, p=2): nonzero IC at T-frame columns 3, 4, 5; IC(3)=1/12, IC(4)=−7/12, IC(5)=−7/12. T-frame columns 0, 1, 2 have IC=0.
+  - **Interior contribution IC(j):** Import `_interior_contribution` from `conservation.py`. Compute `IC(j) = _interior_contribution(j-1, R, p, interior_coeffs)` where `j-1` converts T-frame to grid-frame, and `R` is the first interior grid point. **Critical:** use `r = R` (NOT `r = R-1`). The boundary block's R rows cover grid points 0..R−1; the near-interior row (R−1) IS part of the boundary block, so it must NOT be counted again in IC. This differs from the uniform case where the boundary has r_eff rows and interior starts at grid point r_eff. In the cut-cell case, R = r_eff + 1, so interior starts at R = r_eff + 1.
+  - **Conservation equations:** For each T-frame column j = 0..T−2 (T−1 total equations):
+    `w_0 * B_l[0,j] + Σ_{i=1}^{R-1} w_i * B_l[i,j] + IC(j) = target(j)`
+    where `w_0 = psi` (fixed), `w_1..w_{R-1}` are symbol unknowns.
+    Target: `target(0) = -1` for nu=1 (SBP boundary term), `target(j) = 0` for j ≥ 1.
+    For nu=2: `target(j) = 0` for ALL j (constant annihilation: HD₂·1=0). See DD22-4.
+    Equation form: `col_sum - target(j) = 0`, i.e., for j=0 with nu=1: `col_sum + 1 = 0`.
+  - **Wall column (j=0) for nu=1:** `col_sum + 1 = 0` (column 0 sums to −1, matching `conservation.py` line 80).
+  - **Wall column (j=0) for nu=2:** `col_sum = 0` (all columns sum to 0, per DD22-4).
+  - **Column 1 (x_0):** For nu=1, column 1 is the zeroed Category-A column. Its equation is generated like any other column; it may be trivially satisfied or impose a constraint on weights.
+  - **Imports needed:** `from stencil_gen.conservation import _interior_contribution` (reuse existing function, do NOT reimplement).
   - File: `scripts/stencil_gen/stencil_gen/temo.py` (add after `construct_cut_cell_stencil`, around line 1282)
-  - Verify: new function is importable and produces the correct number of equations
+  - Verify: new function is importable and produces the correct number of equations (T−1 = 4 for E2_1, 6 for E4_1)
 
-- [ ] **22.2b** Test conservation system dimensions:
-  - For E2_1: call with E2_1's cut-cell stencil → expect T−1 = 4 equations (j = 0..3), 3 weight unknowns `w_1, w_2, w_3` (w_0=ψ is fixed) + 1 phi placeholder (nextra=1) = 4 unknowns → exactly determined
-  - For E4_1: call with E4_1's cut-cell stencil → expect T−1 = 6 equations (j = 0..5), 3 weight unknowns `w_1, w_2, w_3` (w_0=ψ is fixed), nextra=0 → 3 excess constraints
+- [ ] **22.2b** Test conservation system dimensions and IC values:
+  - For E2_1: call with E2_1's cut-cell stencil → expect T−1 = 4 equations (j = 0..3), 3 weight unknowns `w_1, w_2, w_3` (w_0=ψ is fixed) + 1 phi placeholder (nextra=1) = 4 unknowns → exactly determined. All IC values should be 0 (no interior row at grid point ≥4 reaches T-frame columns 0..3 with p=1).
+  - For E4_1: call with E4_1's cut-cell stencil → expect T−1 = 6 equations (j = 0..5), 3 weight unknowns `w_1, w_2, w_3` (w_0=ψ is fixed), nextra=0 → 3 excess constraints. Verify IC values: IC(0)=IC(1)=IC(2)=0, IC(3)=1/12, IC(4)=−7/12, IC(5)=−7/12.
   - The E4_1 system has 6 equations and only 3 weight unknowns → 3 excess constraints that must be absorbed by the 4 alpha parameters, confirming the problem
   - File: `scripts/stencil_gen/tests/test_e4_cut_cell.py`
   - Test: `cd scripts/stencil_gen && uv run pytest tests/test_e4_cut_cell.py -v -k conservation_system`
@@ -97,7 +104,7 @@ The practical approach: solve Taylor per-row first (as now) to get stencil entri
 ### 22.3 — Integrate conservation into the TEMO solve
 
 - [ ] **22.3a** Implement `enforce_cut_cell_conservation()` in `temo.py`:
-  - **Signature:** `enforce_cut_cell_conservation(B_l: Matrix, R: int, T: int, p: int, interior_coeffs: list, psi: Symbol, alpha_symbols: list[Symbol]) -> tuple[Matrix, dict[Symbol, Expr], list[Symbol]]`
+  - **Signature:** `enforce_cut_cell_conservation(B_l: Matrix, R: int, T: int, p: int, nu: int, interior_coeffs: list, psi: Symbol, alpha_symbols: list[Symbol]) -> tuple[Matrix, dict[Symbol, Expr], list[Symbol]]`
     - Returns `(B_l_conserved, weight_solutions, remaining_alphas)`
   - **Chosen approach:** Two-phase solve — treat alpha as parameters, solve for weights first, then derive alpha constraints from overdetermined residuals (DD22-1 and DD22-2 resolved).
   - **Step 1 — Build conservation equations:** Call `build_cut_cell_conservation_system()` from 22.2a to get `(equations, w_symbols)`.
@@ -110,20 +117,21 @@ The practical approach: solve Taylor per-row first (as now) to get stencil entri
   - **Performance note:** The system is small (≤6 equations). SymPy's `linear_eq_to_matrix` + `Matrix.solve` handle rational function coefficients. No need for `solve_in_field` or QQ(ψ) domain arithmetic. Target: < 5 seconds for E4_1.
   - File: `scripts/stencil_gen/stencil_gen/temo.py` (add after `build_cut_cell_conservation_system`, ~line 1300)
 
-- [ ] **22.3b** Integrate into `construct_cut_cell_stencil()`:
-  - After assembling `matrix = Matrix(rows)` at line 1278, call `enforce_cut_cell_conservation()` if the scheme needs it
-  - Add parameter `enforce_conservation: bool = True` to `construct_cut_cell_stencil()`
-  - When `enforce_conservation=True` and the conservation system is overdetermined (more equations than weight unknowns), apply the enforcement
-  - Update the returned `StencilResult` to reflect the reduced alpha count
-  - Update `StencilResult` dataclass to include `weight_solutions: dict[Symbol, Expr] | None` (maps `w_i → expr(psi, alpha)`)
-  - File: `scripts/stencil_gen/stencil_gen/temo.py` (modify `construct_cut_cell_stencil` at lines 1206-1281)
+- [ ] **22.3b** Integrate into `construct_cut_cell_stencil()` and propagate through pipeline:
+  - **`StencilResult` dataclass (line 843):** Add field `weight_solutions: dict | None = None` (maps `w_i → expr(psi, alpha)`) and `alpha_symbols: list | None = None` (the remaining free alphas after conservation). Use `dataclass(frozen=True)` → need to change to `frozen=False` or use a new return type.
+  - **`construct_cut_cell_stencil` (lines 1206-1281):** Add parameters `nu: int` and `enforce_conservation: bool = True`. After assembling `matrix = Matrix(rows)` at line 1278 and before the return at line 1279:
+    - Call `enforce_cut_cell_conservation(matrix, R, T, p, nu, interior, psi, alpha_syms)`
+    - Replace `matrix` with the conserved version, store weight solutions and remaining alphas in the returned `StencilResult`
+    - When `enforce_conservation=False` or the system is exactly determined (n_eq == n_w), skip enforcement and return as before
+  - **`derive_cut_cell_scheme` (line 1950):** Pass `scheme.nu` to `construct_cut_cell_stencil`. Propagate `floating_result.weight_solutions` and `floating_result.alpha_symbols` to `assemble_cut_cell_result`. Currently calls `assemble_cut_cell_result(floating_result.matrix, ..., dims, uniform.alpha_symbols)` at line 1995 — change `uniform.alpha_symbols` to `floating_result.alpha_symbols or uniform.alpha_symbols` to use the conservation-reduced alpha list when available.
+  - **`assemble_cut_cell_result` (line 1905):** Add `weight_solutions: dict | None = None` parameter. Pass through to `CutCellResult`.
+  - File: `scripts/stencil_gen/stencil_gen/temo.py` (4 modification points: `StencilResult` at line 843, `construct_cut_cell_stencil` at line 1206, `assemble_cut_cell_result` at line 1905, `derive_cut_cell_scheme` at line 1950)
 
 - [ ] **22.3c** Handle the quadrature weight output:
   - The conservation solve produces ψ-dependent quadrature weights w_0=ψ, w_1(ψ,α), ..., w_{R-1}(ψ,α)
-  - Store weights in `StencilResult.weight_solutions` (new field from 22.3b)
-  - Add `weights: list | None` field to `CutCellResult` dataclass (line 1290)
-  - In `assemble_cut_cell_result()` (line 1905), pass through weight solutions
-  - For E2_1: verify weights match the known result (w_0=ψ, w_1=w_2=w_3=1 when the E2_1 conservation system is exactly determined)
+  - **`CutCellResult` dataclass (line 1290):** Add `weight_solutions: dict | None = None` field (maps `w_i → expr(psi, alpha_remaining)`).
+  - **`assemble_cut_cell_result()` (line 1905):** Accept `weight_solutions` parameter (added in 22.3b) and store in `CutCellResult.weight_solutions`.
+  - **Test:** For E2_1, verify weight_solutions gives w_0=ψ, w_1=w_2=w_3=1 (the exactly-determined case produces trivial weights). For E4_1, verify weights are rational functions of (ψ, α_remaining).
   - **Note on C++ weights:** The current C++ stencil struct (`struct info` in `stencil.hpp`) has no weight storage — it only stores `{p, r, t, nextra}`. The C++ solver currently hardcodes `w_0=psi, w_i=1` for the norm. If conservation produces non-trivial weights (w_i ≠ 1), the C++ side will need a `norm_weights(psi)` method. But this is a **separate Phase 23+ concern** — for now, record the weights in the Python pipeline and verify them in tests.
   - File: `scripts/stencil_gen/stencil_gen/temo.py`
 
@@ -165,8 +173,8 @@ The practical approach: solve Taylor per-row first (as now) to get stencil entri
 - [ ] **22.6a** Add conservation verification for E2_2 (2nd derivative):
   - **Dimensions:** E2_2 has p=1, q=1, nextra=0, nu=2. Computed: r=2, t=3, r_eff=1, R=2, T=4.
   - **Conservation system:** T−1 = 3 equations (j=0..2 in T-frame). Weight unknowns: w₁ only (w₀=ψ fixed, R−1=1 unknown). System is overdetermined: 3 equations, 1 weight unknown → 2 excess constraints on alphas.
-  - **IC values:** Using `_interior_contribution(j-1, r_eff, p, interior)` where r_eff=1 (first interior grid point for nu=2). Precompute IC for j=0..2.
-  - **Wall column convention for nu=2:** For the 2nd derivative, the SBP conservation condition may use a different wall column target than the 1st derivative's `col_sum = -1`. Verify against the math reference (Section 4.4) and the uniform conservation in `conservation.py`. If conservation.py's `col_sum + 1 = 0` convention applies to nu=2 as well, use it; otherwise derive the correct target from the SBP property `H D₂ + D₂ᵀ H = ...`.
+  - **IC values:** Using `_interior_contribution(j-1, R, p, interior)` where R=2 (first interior grid point after the R-row boundary block). For E2_2 (R=2, p=1, interior=[1, -2, 1]): IC(0) = _ic(-1, 2, 1, ...) = 0; IC(1) = _ic(0, 2, 1, ...) = 0 (m_hi = 0-2+1 = -1, empty); IC(2) = _ic(1, 2, 1, ...) = interior[1-2+1] = interior[0] = 1. So IC(0)=0, IC(1)=0, IC(2)=1.
+  - **Wall column convention for nu=2:** Per DD22-4, for the 2nd derivative ALL column targets are 0 (including column 0). This differs from nu=1 where column 0 targets −1. The `build_cut_cell_conservation_system` function (22.2a) already parameterizes this by `nu`. Verify that the E2_2 conservation equations use `target(j) = 0` for all j.
   - **Test structure:** Build the E2_2 cut-cell conservation system using `build_cut_cell_conservation_system()` from 22.2a. Verify equation count (3) and that the system is solvable. If the system yields alpha constraints, verify they are consistent with the existing E2_2 stencil (which was derived without explicit conservation).
   - **Polynomial exactness cross-check:** Verify that the conservation-enforced E2_2 stencil still satisfies `f(x)=x² → f''=2` (matching the existing `test_conservation_polynomial_exactness` test at line 1772 of `test_temo.py`).
   - File: `scripts/stencil_gen/tests/test_temo.py`
@@ -198,6 +206,13 @@ The practical approach: solve Taylor per-row first (as now) to get stencil entri
 - 4 alpha symbols − 3 constraints → **expected: 1 free alpha**
 - But: the 3 residual equations from Step 4 of 22.3a may not all be independent (some may be redundant), so the actual free count could be 1–4. Must be determined empirically during 22.3a and recorded in 22.4b.
 - This affects the C++ constructor signature (`std::span<const real>` size), the `param_arrays={"alpha": N}` in codegen, and the `alpha_symbols` list in `CutCellResult`.
+
+### DD22-4: Wall column conservation target by derivative order
+**RESOLVED:** The SBP conservation target for column 0 (the wall/boundary column) depends on derivative order:
+- **nu=1 (1st derivative):** Target = −1. From the SBP property Q + Qᵀ = B where B = diag(−1, 0, …, 0, 1). The norm-weighted column 0 sum must equal −1. Conservation equation: `col_sum + 1 = 0`.
+- **nu=2 (2nd derivative):** Target = 0. From constant annihilation: HD₂·𝟏 = 0, meaning ALL norm-weighted column sums equal zero, including column 0. Conservation equation: `col_sum = 0`.
+- The existing `conservation.py` only handles nu=1 cases (E2u_1, E4u_1) and hardcodes `col_sum + 1 = 0` for j=0. The new `build_cut_cell_conservation_system` (22.2a) parameterizes by `nu`.
+- **Note:** `conservation.py`'s `build_conservation_system` should eventually be updated to accept `nu` as well, but that is out of scope for Phase 22 (uniform conservation is only used for nu=1 currently).
 
 ---
 

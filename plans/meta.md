@@ -350,6 +350,14 @@ The existing Mathematica notebooks are too slow for iterating on new stencil sch
 - (c) Determine if Table 1 has a typo → no typo, formula was wrong
 - **(d) Fix r formula to `r = p + 1 + nextra`** ← CHOSEN
 
+### DD22-4: Conservation Wall Column Target by Derivative Order
+**Decision:** **(a) Column 0 target depends on `nu`: −1 for 1st derivative, 0 for 2nd derivative.**
+For the 1st derivative (nu=1), the SBP property `Q + Qᵀ = B` where `B = diag(-1, 0, ..., 0, 1)` requires the norm-weighted column 0 sum to equal −1. For the 2nd derivative (nu=2), constant annihilation `HD₂·𝟏 = 0` requires ALL column sums to equal 0. The `build_cut_cell_conservation_system` function (Phase 22, item 22.2a) parameterizes the target by `nu`. The existing `conservation.py` module (`build_conservation_system`) hardcodes the nu=1 convention and is currently only used for nu=1 cases; updating it for nu=2 is out of scope for Phase 22.
+**Options:**
+- **(a) Target varies by nu: −1 for nu=1, 0 for nu=2** ← CHOSEN
+- (b) Use −1 for all nu (incorrect for nu=2)
+- (c) Parameterize by full boundary matrix B
+
 ---
 
 ## Files Excluded from Migration Scope
