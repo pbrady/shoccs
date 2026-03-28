@@ -74,14 +74,38 @@ The SymPy pipeline (Phase 20) is complete with 231 passing tests and 7 modules:
   1. Computes TEMO dimensions using the **corrected** `compute_dimensions` (21.0a): r = p+1+nextra, t = p+q+1+nextra
   2. For nu=1: r_eff = r; for nu=2: r_eff = r - 1
   3. Computes `n_free_per_row = t - (q + 1)` (= 2 for E4_1)
-  4. Creates alpha symbols — the distribution is **scheme-dependent**:
-     - **E4_1 (p>1, nextra=0):** Rows 0..(r_eff-2) get 1 active alpha + (n_free-1) zeros (matching Table 1 zero constraints: alpha^u_{05}=0, alpha^u_{15}=0). Row r_eff-1 gets min(n_free, 2) active alphas. Total: (r_eff-1)*1 + min(n_free,2) = 4.
-     - **E2_1 (p=q=1, nextra=1):** Rows 0..(r_eff-2) get n_free active alphas each (no zeros — matching existing `derive_e2_uniform_boundary`). Row r_eff-1 is conservation-constrained (see step 6). Total: (r_eff-1)*n_free = 4.
-     - **General rule:** The number of active alphas per early row depends on whether Table 1 prescribes zero constraints for the scheme. When unsure, default to 1 active alpha per early row (conservative).
-  5. Calls `boundary.solve_boundary_row(i, t, q, nu, free_symbols)` for each row i = 0..r_eff-1
-  6. **No conservation-constrained last row** for E4_1 (nextra=0, r_eff=3 rows all have free params). For E2_1 (nextra=1), follows the existing `derive_e2_uniform_boundary` approach with conservation on the last row.
-     - Specifically: if nextra > 0, there IS an extra row (row r_eff-1) that needs conservation. Use simple column sums `sum_i B_u[i,j] = 0` for j >= p+1 to determine the last row's phi symbols.
-     - If nextra = 0, no conservation step — all rows retain their free alphas.
+  4. Creates alpha symbols using this concrete algorithm:
+     ```
+     Alpha Distribution Algorithm (depends on nextra):
+     n_free = t - (q + 1)
+     alpha_idx = 0
+
+     Case nextra == 0 (no conservation row — E4_1, E4_2):
+       For i = 0..(r_eff - 2):   # early rows
+         active = 1
+         free[i] = [alpha_{alpha_idx}] + [S.Zero] * (n_free - 1)
+         alpha_idx += 1
+       For i = r_eff - 1:        # last row
+         active = min(n_free, 2)
+         free[i] = [alpha_{alpha_idx}..alpha_{alpha_idx+active-1}]
+                   + [S.Zero] * (n_free - active)
+         alpha_idx += active
+
+     Case nextra > 0 (conservation-constrained last row — E2_1):
+       For i = 0..(r_eff - 2):   # early rows
+         free[i] = [alpha_{alpha_idx}..alpha_{alpha_idx+n_free-1}]
+         alpha_idx += n_free
+       For i = r_eff - 1:        # last row — placeholder for conservation
+         free[i] = [phi_0..phi_{n_free-1}]   (temporary symbols)
+     ```
+     Concrete results:
+     - **E4_1** (nextra=0, n_free=2, r_eff=3): `[[alpha_0, 0], [alpha_1, 0], [alpha_2, alpha_3]]` → 4 alphas
+     - **E2_1** (nextra=1, n_free=2, r_eff=3): `[[alpha_0, alpha_1], [alpha_2, alpha_3], [phi_0, phi_1]]` → 4 alphas + 2 phi (resolved by conservation)
+  5. Calls `boundary.solve_boundary_row(i, t, q, nu, free_symbols[i])` for each row i = 0..r_eff-1.
+     - **Note:** `solve_boundary_row` builds a Taylor system with `q+1` equations (via `build_taylor_system`). For E4_1 (q=3, nu=1), `q+1 = 4 = max(q+1, nu+1)`, so this matches the existing `_build_uniform_vandermonde` equation count. For nu=2 schemes where `q+1 < nu+1`, this will produce fewer equations; see 21.5a for how to handle that case.
+  6. **Conservation step (nextra > 0 only):**
+     - If nextra > 0: substitute phi symbols using column-sum conservation `sum_i B_u[i,j] = 0` for j >= p+1 (same approach as `derive_e2_uniform_boundary` lines 248–254).
+     - If nextra == 0: no conservation step — all rows retain their free alphas.
   7. Gets interior coefficients via `interior.derive_interior(s, p, nu)` + `full_gamma_array()`
   8. Assembles the r_eff × t Matrix and packages into `UniformResult`
   - **Key insight:** boundary.py's `derive_boundary(p, nu)` uses `r = 2p-1` (SBP minimal rows) which gives r=3, t=5 for E4. The TEMO needs t=6 (wider). But `solve_boundary_row(i, t, q, nu, free)` accepts arbitrary t, so call it with the TEMO t=6. This is NOT a format conversion from `BoundaryResult` — it's a fresh derivation using the lower-level `solve_boundary_row` function.
@@ -117,11 +141,31 @@ The SymPy pipeline (Phase 20) is complete with 231 passing tests and 7 modules:
   - Call `construct_cut_cell_stencil(B_u, interior, p=2, q=3, nu=1, nextra=0, psi)`
   - **Corrected dimensions:** output is a **4×7** matrix (R=4 rows, T=7 columns), not 5×7
   - Verify: output matrix has shape (4, 7), entries are rational functions in psi and alpha_{0..3}
-  - Verify: at psi=1, rows 0–2 reduce to B_u embedded in T-frame (wall=0, cols 1–6 = B_u), and row 3 (near-interior) is the interior stencil (with wall=0)
+  - Verify: at psi=1, rows 0–2 reduce to B_u embedded in T-frame (wall=0, cols 1–6 = B_u), and row 3 (near-interior) is the interior stencil [0, 0, 1/12, -2/3, 0, 2/3, -1/12] (centered at x_3; cols 0,1 zero because wall and x_0 are outside the stencil reach)
   - Verify: at psi=0, satisfies degenerate constraints (DP1: B_d[i, j+1] = B_u[i, j] for j≥1; DP2: B_u[i,0] assigned to wall, x_0 zeroed for nu=1)
   - Verify: Taylor accuracy holds for each row at a sample psi (e.g., psi=1/2): evaluate the stencil and check it reproduces f'(x_i) for polynomials of degree ≤ q=3
   - Verify: no beta symbols in the result (nextra=0 should prescribe all excess columns via limit interpolation, eliminating betas)
-  - **Potential issue:** `construct_cut_cell_stencil` internally calls `build_degenerate_stencil` and `solve_uniform_limit`, which use the `B_u.rows` to determine R = r_eff + 1. With corrected r_eff=3, this gives R=4. Verify these functions work correctly for the 3×6 B_u (they were only tested with 3×4 for E2_1 and 1×3 for E2_2).
+  - **Overdetermined near-interior row analysis** — both `build_degenerate_stencil` and `solve_uniform_limit` produce overdetermined systems for row 3 (3 unknowns, 4 equations). The code handles this by solving the first 3 equations and verifying the 4th for consistency. Concrete column categorization:
+    ```
+    build_degenerate_stencil (psi=0 limit, row 3):
+      deltas = [-3, -3, -2, -1, 0, 1, 2]
+      zeroed_col = {1}              (x_0 zeroed, nu=1)
+      conservation cols = {4, 5, 6} (j in range(p+2=4, T=7))
+      known = {1, 4, 5, 6}
+      unknown = {0, 2, 3}           → 3 unknowns, 4 equations
+
+    solve_uniform_limit (psi=1 limit, row 3):
+      deltas = [-4, -3, -2, -1, 0, 1, 2]
+      conservation cols: j in [2,7) where j<=R-p=2 or j>=p+2=4
+        j=2 ✓(≤2), j=3 ✗, j=4 ✓(≥4), j=5 ✓, j=6 ✓
+      fixed = {2, 4, 5, 6}
+      unknown = {0, 1, 3}           → 3 unknowns, 4 equations
+
+    identify_prescribed_entries (general psi, each row):
+      prescribed = 1 (cat A zeroed col) + 2 (limit interp, highest free cols)
+      solve_cols = T - 3 prescribed = 4 = n_eqs → exactly determined, no betas
+    ```
+    The overdetermined systems are expected to be consistent because the conservation values are derived from boundary rows that satisfy the Taylor accuracy conditions. If either raises `RuntimeError("Overdetermined system inconsistent...")`, the alpha distribution or conservation logic in 21.1a needs debugging.
   - File: `scripts/stencil_gen/tests/test_e4_cut_cell.py`
   - Test: `cd scripts/stencil_gen && uv run pytest tests/test_e4_cut_cell.py -v -k "temo"`
 
@@ -173,8 +217,10 @@ The SymPy pipeline (Phase 20) is complete with 231 passing tests and 7 modules:
     4. `assemble_cut_cell_result(floating, neumann, eta, dims, alpha_symbols)` → `CutCellResult`
   - Returns `CutCellResult` with all coefficient matrices
   - Works for E2_1, E2_2, E4_1 (any scheme in the Table 1 family with corrected dimensions)
-  - For E2_1/E2_2: should produce identical results to the current inline pipeline
-  - For E4_1: produces the new 4×7 cut-cell stencil
+  - **Dispatch strategy for step 1:** For E4_1 (the target of Phase 21), the new `derive_uniform_boundary_for_temo` is used. For E2 backward compatibility, there are two options:
+    - **(preferred)** Use `derive_uniform_boundary_for_temo` for all schemes. This requires that the function correctly handles the E2 nextra>0 conservation case (verified by 21.5b regression test).
+    - **(fallback)** If the general function doesn't reproduce E2 results exactly (e.g., due to different alpha naming), keep using `derive_e2_uniform_boundary` for E2 schemes and switch to the general function only for E4+.
+  - **Known limitation for nu=2 schemes:** `solve_boundary_row` uses `q+1` equations from `build_taylor_system`. For E2_2 (q=1, nu=2), this gives only 2 equations while the existing `derive_e2_uniform_boundary` uses `max(q+1, nu+1)=3`. If `derive_uniform_boundary_for_temo` uses `solve_boundary_row` directly for E2_2, it will build a different Taylor system. Fix: either (a) build the Taylor system inline with `max(q+1, nu+1)` equations instead of calling `solve_boundary_row`, or (b) modify `solve_boundary_row` to accept an optional `n_eqs` parameter. Since E4_1 (nu=1, q=3) has `q+1 = max(q+1, nu+1) = 4`, this is NOT an issue for Phase 21's primary target.
   - File: `scripts/stencil_gen/stencil_gen/temo.py`
 
 - [ ] **21.5b** Validate that the generalized pipeline still reproduces E2_1 and E2_2:
@@ -200,11 +246,10 @@ The SymPy pipeline (Phase 20) is complete with 231 passing tests and 7 modules:
 
 1. **Expression swell:** E4_1 has 28 floating coefficients (4×7, vs E2_1's 20=4×5), each a rational function of psi and 4 alphas. CSE output could be 2000+ lines. This is expected and handled by the codegen module.
 
-2. **TEMO pipeline correctness for wider stencils:** The TEMO functions (`build_degenerate_stencil`, `solve_uniform_limit`, `construct_cut_cell_stencil`) were developed and tested only for E2 schemes (3×4 and 1×3 B_u matrices). With E4_1's 3×6 B_u, the column counts, conservation column ranges, and Vandermonde systems are all larger. Particular attention needed for:
-   - `solve_uniform_limit`: conservation column selection logic (lines 826–832) uses conditions `j <= R-p` and `j >= p+2`. For E4_1 (p=2, R=4, T=7): conserved cols = {2, 4, 5, 6}, leaving unknown cols = {0, 1, 3} (3 unknowns). With n_eqs=4 this is **overdetermined** (3 unknowns, 4 equations). The code handles this via consistency check (lines 853–858), but if conservation constraints are inconsistent with Taylor accuracy for the wider E4 stencil, it will raise `RuntimeError`.
-   - `build_degenerate_stencil`: same situation — conservation fixes cols {4, 5, 6}, known={1, 4, 5, 6}, unknown={0, 2, 3} (3 unknowns, 4 equations). Consistency check at lines 398–404.
-   - `identify_prescribed_entries`: verified — each row has T=7 cols, 1 zeroed (cat A), leaving 6 free. n_eqs=4, so 2 excess cols prescribed by limit interpolation. Final: 4 solve cols, 4 equations → exactly determined, no betas. (Excess = p+nextra = 2+0 = 2 per row, same as E2_1's p+nextra = 1+1 = 2.)
+2. **TEMO pipeline correctness for wider stencils:** The TEMO functions (`build_degenerate_stencil`, `solve_uniform_limit`, `construct_cut_cell_stencil`) were developed and tested only for E2 schemes (3×4 and 1×3 B_u matrices). With E4_1's 3×6 B_u, the column counts, conservation column ranges, and Vandermonde systems are all larger. Both `build_degenerate_stencil` and `solve_uniform_limit` produce **overdetermined** near-interior row systems for E4_1 (3 unknowns, 4 equations). The detailed column analysis is in item 21.3a. The `solve_temo_row` path (general psi) is exactly determined (4 solve cols = 4 equations). If the overdetermined systems are inconsistent, the code raises `RuntimeError` — the fix would be in the conservation column selection logic or the alpha distribution from 21.1a.
 
 3. **Performance:** The `solve_in_field` calls use 4×4 Vandermonde systems (vs 2×2 for E2), and there are 4 rows to solve. Each solve involves DomainMatrix LU factorization in QQ(psi). Total derivation time should stay under 10 seconds.
 
 4. **Dimension formula (D-R25):** The corrected formula `r = p+1+nextra` has been verified for E2 and E4 schemes against Table 1 and existing C++ code. However, it has NOT been verified for E6 or E8 TEMO schemes (which don't exist yet). If these are attempted later, the formula should be re-verified.
+
+5. **`solve_boundary_row` equation count for nu=2:** `boundary.solve_boundary_row` uses `q+1` equations (via `build_taylor_system`), while `temo._build_uniform_vandermonde` uses `max(q+1, nu+1)`. For E4_1 (nu=1, q=3) these are equal (both 4). For E2_2 (nu=2, q=1) they differ: 2 vs 3. The new `derive_uniform_boundary_for_temo` must account for this when handling nu=2 schemes (see 21.5a). This is NOT a risk for Phase 21's primary target (E4_1) but affects E2 backward compatibility in 21.5b.
