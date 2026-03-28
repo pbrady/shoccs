@@ -7,7 +7,20 @@ psi-parameterized cut-cell boundary stencils from uniform boundary stencils.
 from dataclasses import dataclass
 from typing import NamedTuple
 
-from sympy import Integer, Matrix, Poly, Rational, S, Symbol, cancel, factorial
+from sympy import (
+    Expr,
+    Integer,
+    Matrix,
+    Poly,
+    Rational,
+    S,
+    Symbol,
+    cancel,
+    factorial,
+    symbols as _symbols,
+)
+
+from stencil_gen.conservation import _interior_contribution
 from sympy.polys.matrices import DomainMatrix
 
 
@@ -1279,6 +1292,71 @@ def construct_cut_cell_stencil(
     return StencilResult(
         matrix=matrix, beta_info=all_beta_info, beta_symbols=all_beta_symbols
     )
+
+
+def build_cut_cell_conservation_system(
+    B_l: Matrix,
+    R: int,
+    T: int,
+    p: int,
+    nu: int,
+    interior_coeffs: list,
+    psi: Symbol,
+) -> tuple[list[Expr], list[Symbol]]:
+    """Build conservation (SBP) constraint equations for a cut-cell stencil.
+
+    Parameters
+    ----------
+    B_l : Matrix
+        R x T cut-cell stencil matrix (entries are rational in psi and alpha).
+    R : int
+        Number of boundary rows (including the wall row).
+    T : int
+        Cut-cell stencil width (including the wall column).
+    p : int
+        Interior half-bandwidth.
+    nu : int
+        Derivative order (1 or 2). Determines the wall column target.
+    interior_coeffs : list
+        The ``2*p + 1`` interior stencil coefficients.
+    psi : Symbol
+        The psi parameter (used as w_0, the wall row weight).
+
+    Returns
+    -------
+    (equations, w_symbols)
+        equations : list of Expr that must equal zero
+        w_symbols : list of Symbol ``[w_1, ..., w_{R-1}]`` (weight unknowns;
+            w_0 = psi is fixed)
+    """
+    # Weight unknowns: w_1 .. w_{R-1} (w_0 = psi is fixed, not an unknown)
+    w_syms = list(_symbols(f"w_1:{R}"))
+
+    equations: list[Expr] = []
+    for j in range(T - 1):  # T-frame columns j = 0 .. T-2
+        # Weighted column sum from boundary rows
+        # Row 0 has weight w_0 = psi (fixed)
+        col_sum: Expr = psi * B_l[0, j]
+        # Rows 1..R-1 have symbolic weights w_1..w_{R-1}
+        for i in range(1, R):
+            col_sum += w_syms[i - 1] * B_l[i, j]
+
+        # Interior contribution: T-frame column j -> grid-frame column j-1
+        # Interior starts at grid point R (boundary rows cover 0..R-1)
+        ic = _interior_contribution(j - 1, R, p, interior_coeffs)
+        col_sum += ic
+
+        # Conservation target depends on derivative order
+        if j == 0 and nu == 1:
+            # SBP property for 1st derivative: column 0 sums to -1
+            target = S.NegativeOne
+        else:
+            # All other columns sum to 0; for nu=2, ALL columns sum to 0
+            target = S.Zero
+
+        equations.append(col_sum - target)
+
+    return equations, w_syms
 
 
 # ---------------------------------------------------------------------------

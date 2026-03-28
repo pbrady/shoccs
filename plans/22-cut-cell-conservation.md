@@ -74,7 +74,7 @@ The practical approach: solve Taylor per-row first (as now) to get stencil entri
 
 ### 22.2 — Build the coupled conservation system
 
-- [ ] **22.2a** Implement `build_cut_cell_conservation_system()` in `temo.py`:
+- [x] **22.2a** Implement `build_cut_cell_conservation_system()` in `temo.py`:
   - **Signature:** `build_cut_cell_conservation_system(B_l: Matrix, R: int, T: int, p: int, nu: int, interior_coeffs: list, psi: Symbol) -> tuple[list[Expr], list[Symbol]]`
     - `B_l` is the R×T cut-cell stencil matrix (entries are rational in ψ and α symbols)
     - `nu` is the derivative order (1 or 2) — determines wall column target (DD22-4)
@@ -94,7 +94,7 @@ The practical approach: solve Taylor per-row first (as now) to get stencil entri
   - File: `scripts/stencil_gen/stencil_gen/temo.py` (add after `construct_cut_cell_stencil`, around line 1282)
   - Verify: new function is importable and produces the correct number of equations (T−1 = 4 for E2_1, 6 for E4_1)
 
-- [ ] **22.2b** Test conservation system dimensions and IC values:
+- [x] **22.2b** Test conservation system dimensions and IC values:
   - For E2_1: call with E2_1's cut-cell stencil → expect T−1 = 4 equations (j = 0..3), 3 weight unknowns `w_1, w_2, w_3` (w_0=ψ is fixed). System is overdetermined by 1 (excess = q = 1). All IC values should be 0 (no interior row at grid point ≥4 reaches T-frame columns 0..3 with p=1). Note: E2_1 has 4 alpha parameters but the 1 excess residual should be identically zero — verify this in 22.3a tests.
   - For E4_1: call with E4_1's cut-cell stencil → expect T−1 = 6 equations (j = 0..5), 3 weight unknowns `w_1, w_2, w_3` (w_0=ψ is fixed), nextra=0 → 3 excess constraints. Verify IC values: IC(0)=IC(1)=IC(2)=0, IC(3)=1/12, IC(4)=−7/12, IC(5)=−7/12.
   - The E4_1 system has 6 equations and only 3 weight unknowns → 3 excess constraints that must be absorbed by the 4 alpha parameters, confirming the problem

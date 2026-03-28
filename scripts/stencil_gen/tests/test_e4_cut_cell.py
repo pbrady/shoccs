@@ -20,6 +20,7 @@ from stencil_gen.temo import (
     SchemeParams,
     UniformResult,
     assemble_cut_cell_result,
+    build_cut_cell_conservation_system,
     build_cut_cell_deltas,
     build_degenerate_stencil,
     compute_dimensions,
@@ -827,4 +828,84 @@ def test_e4_1_conservation_fails():
         residual = cancel(col_sum - target)
         assert residual == 0, (
             f"Conservation violated at T-frame column j={j}: residual={residual}"
+        )
+
+
+class TestBuildCutCellConservationSystem:
+    """Tests for build_cut_cell_conservation_system dimensions and IC values (22.2b)."""
+
+    def test_e2_1_conservation_system_dimensions(self):
+        """E2_1: T-1=4 equations, 3 weight unknowns, all IC values zero."""
+        psi = Symbol("psi")
+        ur = derive_uniform_boundary_for_temo(E2_1)
+        stencil = construct_cut_cell_stencil(
+            ur.B_u, ur.interior, p=E2_1.p, q=E2_1.q, nu=E2_1.nu,
+            nextra=E2_1.nextra, psi=psi,
+        )
+        R, T = stencil.matrix.rows, stencil.matrix.cols
+        assert R == 4
+        assert T == 5
+
+        eqs, ws = build_cut_cell_conservation_system(
+            stencil.matrix, R, T, p=E2_1.p, nu=E2_1.nu,
+            interior_coeffs=ur.interior, psi=psi,
+        )
+        assert len(eqs) == T - 1  # 4 equations
+        assert len(ws) == R - 1   # 3 weight unknowns (w_1, w_2, w_3)
+
+        # All IC values should be 0 for E2_1 (no interior row reaches T-frame cols 0..3)
+        for j in range(T - 1):
+            ic = _interior_contribution(j - 1, R, E2_1.p, ur.interior)
+            assert ic == 0, f"E2_1 IC({j}) should be 0, got {ic}"
+
+    def test_e4_1_conservation_system_dimensions(self):
+        """E4_1: T-1=6 equations, 3 weight unknowns, nonzero IC at j=3,4,5."""
+        psi = Symbol("psi")
+        ur = derive_uniform_boundary_for_temo(E4_1)
+        stencil = construct_cut_cell_stencil(
+            ur.B_u, ur.interior, p=E4_1.p, q=E4_1.q, nu=E4_1.nu,
+            nextra=E4_1.nextra, psi=psi,
+        )
+        R, T = stencil.matrix.rows, stencil.matrix.cols
+        assert R == 4
+        assert T == 7
+
+        eqs, ws = build_cut_cell_conservation_system(
+            stencil.matrix, R, T, p=E4_1.p, nu=E4_1.nu,
+            interior_coeffs=ur.interior, psi=psi,
+        )
+        assert len(eqs) == T - 1  # 6 equations
+        assert len(ws) == R - 1   # 3 weight unknowns (w_1, w_2, w_3)
+
+        # Verify IC values for E4_1
+        expected_ic = {
+            0: Rational(0), 1: Rational(0), 2: Rational(0),
+            3: Rational(1, 12), 4: Rational(-7, 12), 5: Rational(-7, 12),
+        }
+        for j in range(T - 1):
+            ic = _interior_contribution(j - 1, R, E4_1.p, ur.interior)
+            assert ic == expected_ic[j], (
+                f"E4_1 IC({j}): expected {expected_ic[j]}, got {ic}"
+            )
+
+    def test_e4_1_overdetermined_system(self):
+        """E4_1 has 6 equations and 3 weight unknowns -> 3 excess constraints."""
+        psi = Symbol("psi")
+        ur = derive_uniform_boundary_for_temo(E4_1)
+        stencil = construct_cut_cell_stencil(
+            ur.B_u, ur.interior, p=E4_1.p, q=E4_1.q, nu=E4_1.nu,
+            nextra=E4_1.nextra, psi=psi,
+        )
+        R, T = stencil.matrix.rows, stencil.matrix.cols
+        eqs, ws = build_cut_cell_conservation_system(
+            stencil.matrix, R, T, p=E4_1.p, nu=E4_1.nu,
+            interior_coeffs=ur.interior, psi=psi,
+        )
+        excess = len(eqs) - len(ws)
+        assert excess == 3, f"Expected 3 excess constraints, got {excess}"
+
+        # Verify the stencil has 4 alpha symbols that must absorb these constraints
+        alpha_syms = sorted(stencil.matrix.free_symbols - {psi}, key=lambda s: s.name)
+        assert len(alpha_syms) == 4, (
+            f"Expected 4 alpha symbols, got {len(alpha_syms)}: {alpha_syms}"
         )
