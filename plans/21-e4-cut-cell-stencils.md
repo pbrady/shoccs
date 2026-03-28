@@ -78,7 +78,7 @@ The SymPy pipeline (Phase 20) is complete with 231 passing tests and 7 modules:
 
 ### 21.1 — Bridge boundary.py → temo.py UniformResult
 
-- [ ] **21.1a** Add a general `derive_uniform_boundary_for_temo(scheme: SchemeParams, alpha_symbols=None)` function in `temo.py` that:
+- [x] **21.1a** Add a general `derive_uniform_boundary_for_temo(scheme: SchemeParams, alpha_symbols=None)` function in `temo.py` that:
   1. Computes TEMO dimensions using the **corrected** `compute_dimensions` (21.0a): r = p+1+nextra, t = p+q+1+nextra
   2. For nu=1: r_eff = r; for nu=2: r_eff = r - 1
   3. Computes `n_free_per_row = t - (q + 1)` (= 2 for E4_1)

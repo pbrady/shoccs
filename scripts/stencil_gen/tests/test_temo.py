@@ -22,6 +22,7 @@ from stencil_gen.temo import (
     construct_neumann_stencil,
     decompose_alpha_terms,
     derive_e2_uniform_boundary,
+    derive_uniform_boundary_for_temo,
     derive_uniform_neumann,
     from_field_elem,
     identify_neumann_prescribed_entries,
@@ -210,6 +211,59 @@ class TestUniformBoundary:
         """Unsupported nu raises ValueError."""
         with pytest.raises(ValueError, match="nu=3"):
             derive_e2_uniform_boundary(nu=3)
+
+
+class TestDeriveUniformBoundaryForTemo:
+    """Tests for derive_uniform_boundary_for_temo (21.1a)."""
+
+    def test_e2_1_regression_matches_old(self):
+        """derive_uniform_boundary_for_temo(E2_1) matches derive_e2_uniform_boundary."""
+        old = derive_e2_uniform_boundary(nu=1)
+        new = derive_uniform_boundary_for_temo(E2_1)
+
+        assert new.B_u.shape == old.B_u.shape
+        for i in range(old.B_u.rows):
+            for j in range(old.B_u.cols):
+                diff = cancel(new.B_u[i, j] - old.B_u[i, j])
+                assert diff == 0, f"Mismatch at ({i},{j}): new={new.B_u[i,j]}, old={old.B_u[i,j]}"
+
+        assert new.interior == old.interior
+        assert len(new.alpha_symbols) == len(old.alpha_symbols)
+        assert new.p == old.p
+        assert new.q == old.q
+        assert new.nu == old.nu
+
+    def test_e2_1_custom_alpha_symbols(self):
+        """derive_uniform_boundary_for_temo accepts user-supplied alpha symbols."""
+        syms = [Symbol(f"a{k}") for k in range(4)]
+        result = derive_uniform_boundary_for_temo(E2_1, alpha_symbols=syms)
+        assert result.alpha_symbols == syms
+        free = result.B_u.free_symbols
+        assert free <= set(syms)
+
+    def test_e2_1_conservation(self):
+        """E2_1: column sums are zero for interior columns."""
+        result = derive_uniform_boundary_for_temo(E2_1)
+        B_u = result.B_u
+        for j in [2, 3]:
+            col_sum = sum(B_u[i, j] for i in range(B_u.rows))
+            assert simplify(col_sum) == 0, f"Conservation failed for column {j}"
+
+    def test_e2_1_taylor_accuracy(self):
+        """Each row satisfies Taylor matching for q+1=2 equations."""
+        result = derive_uniform_boundary_for_temo(E2_1)
+        B_u = result.B_u
+        t = B_u.cols
+        for i in range(B_u.rows):
+            row = B_u.row(i)
+            assert simplify(sum(row)) == 0
+            moment1 = sum(row[j] * (j - i) for j in range(t))
+            assert simplify(moment1) == 1
+
+    def test_wrong_alpha_count_raises(self):
+        """Wrong number of alpha symbols raises ValueError."""
+        with pytest.raises(ValueError, match="alpha symbols"):
+            derive_uniform_boundary_for_temo(E2_1, alpha_symbols=[Symbol("a")])
 
 
 class TestDegenerateStencil:

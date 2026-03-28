@@ -7,7 +7,7 @@ psi-parameterized cut-cell boundary stencils from uniform boundary stencils.
 from dataclasses import dataclass
 from typing import NamedTuple
 
-from sympy import Matrix, Poly, Rational, Symbol, cancel, factorial
+from sympy import Integer, Matrix, Poly, Rational, S, Symbol, cancel, factorial
 from sympy.polys.matrices import DomainMatrix
 
 
@@ -271,6 +271,117 @@ def derive_e2_uniform_boundary(
         )
 
     raise ValueError(f"Unsupported derivative order nu={nu}")
+
+
+# ---------------------------------------------------------------------------
+# 21.1a — General uniform boundary for TEMO
+# ---------------------------------------------------------------------------
+
+
+def derive_uniform_boundary_for_temo(
+    scheme: SchemeParams,
+    alpha_symbols: list[Symbol] | None = None,
+) -> UniformResult:
+    """Derive the uniform boundary stencil for any scheme using boundary.py.
+
+    This is the general replacement for ``derive_e2_uniform_boundary``.
+    It uses ``boundary.solve_boundary_row`` with TEMO-specific dimensions
+    and the alpha distribution convention from the plan.
+
+    Parameters
+    ----------
+    scheme : SchemeParams
+        Scheme parameters (p, q, s, nextra, nu).
+    alpha_symbols : list of Symbol, optional
+        Free alpha symbols to use.  If None, creates alpha_0..alpha_{n-1}.
+
+    Returns
+    -------
+    UniformResult
+    """
+    from stencil_gen.boundary import solve_boundary_row
+    from stencil_gen.interior import derive_interior, full_gamma_array
+
+    p, q, s, nextra, nu = scheme.p, scheme.q, scheme.s, scheme.nextra, scheme.nu
+    dims = compute_dimensions(p, q, s, nextra, nu)
+    t = dims.t
+    r_eff = dims.r if nu == 1 else dims.r - 1
+    n_free_per_row = t - (q + 1)
+
+    # --- Count total alpha symbols ---
+    if nextra == 0:
+        # Early rows: 1 active each; last row: min(n_free, 2) active
+        n_alpha = (r_eff - 1) * 1 + min(n_free_per_row, 2)
+    else:
+        # Early rows: n_free each; last row: phi placeholders (resolved by conservation)
+        n_alpha = (r_eff - 1) * n_free_per_row
+
+    if alpha_symbols is None:
+        alpha_symbols = [Symbol(f"alpha_{k}") for k in range(n_alpha)]
+    if len(alpha_symbols) != n_alpha:
+        raise ValueError(
+            f"Scheme requires exactly {n_alpha} alpha symbols, got {len(alpha_symbols)}"
+        )
+
+    # --- Build free symbol lists per row ---
+    free_per_row: list[list] = []
+    alpha_idx = 0
+
+    if nextra == 0:
+        # No conservation row
+        for i in range(r_eff - 1):
+            # Early rows: 1 active alpha, rest zero
+            free = [alpha_symbols[alpha_idx]] + [S.Zero] * (n_free_per_row - 1)
+            alpha_idx += 1
+            free_per_row.append(free)
+        # Last row: min(n_free, 2) active
+        active = min(n_free_per_row, 2)
+        last_free = [alpha_symbols[alpha_idx + k] for k in range(active)]
+        last_free += [S.Zero] * (n_free_per_row - active)
+        alpha_idx += active
+        free_per_row.append(last_free)
+    else:
+        # Conservation-constrained last row
+        for i in range(r_eff - 1):
+            # Early rows: all n_free active
+            free = [alpha_symbols[alpha_idx + k] for k in range(n_free_per_row)]
+            alpha_idx += n_free_per_row
+            free_per_row.append(free)
+        # Last row: phi placeholders (will be resolved by conservation)
+        from sympy import symbols as sym_symbols
+
+        phi_syms = list(sym_symbols(f"phi_0:{n_free_per_row}"))
+        free_per_row.append(phi_syms)
+
+    # --- Solve each row's Taylor system ---
+    rows: list[list] = []
+    for i in range(r_eff):
+        result = solve_boundary_row(i, t, q, nu, free_per_row[i])
+        rows.append(result.coefficients)
+
+    B_u = Matrix(rows)
+
+    # --- Conservation step (nextra > 0 only) ---
+    if nextra > 0:
+        subs: dict = {}
+        for j in range(p + 1, t):
+            col_sum_upper = sum(B_u[row_i, j] for row_i in range(r_eff - 1))
+            phi_idx = j - (q + 1)
+            subs[phi_syms[phi_idx]] = -col_sum_upper
+        B_u = B_u.subs(subs)
+
+    # --- Interior coefficients ---
+    interior_result = derive_interior(s, p, nu)
+    interior = full_gamma_array(interior_result)
+
+    return UniformResult(
+        B_u=B_u,
+        interior=interior,
+        alpha_symbols=list(alpha_symbols),
+        p=p,
+        q=q,
+        nu=nu,
+    )
 
 
 # ---------------------------------------------------------------------------
