@@ -73,36 +73,55 @@ The practical approach: solve Taylor per-row first (as now) to get stencil entri
 
 ### 22.2 — Build the coupled conservation system
 
-- [ ] **22.2a** Implement `build_cut_cell_conservation_system(stencil_matrix, interior_coeffs, p, R, T, psi)` in `temo.py`:
-  - Identify interior columns: j where the interior stencil (half-width p) overlaps with the boundary block. For R rows and p half-width, these are columns j = R-p through T-1 in the cut-cell frame.
-  - For each interior column j, write the constraint: `psi * B[0,j] + Σ_{i=1}^{R-1} w_i * B[i,j] + IC(j) = 0` where IC(j) is the contribution from the interior rows' stencil overlap at column j.
-  - Compute IC(j) using the interior stencil coefficients: IC(j) = Σ_{k} γ_{j-R-k} for the appropriate interior rows that touch column j.
-  - The wall-column constraint: `w_0 * B[0,0] = Σ_i w^u_i * B^u[i,0]` (Eq. from Section 3.3)
-  - Return: list of constraint equations in (w_1, ..., w_{R-1}) and the stencil free parameters
-  - File: `scripts/stencil_gen/stencil_gen/temo.py`
+- [ ] **22.2a** Implement `build_cut_cell_conservation_system()` in `temo.py`:
+  - **Signature:** `build_cut_cell_conservation_system(B_l: Matrix, R: int, T: int, p: int, interior_coeffs: list, psi: Symbol) -> tuple[list[Expr], list[Symbol]]`
+    - `B_l` is the R×T cut-cell stencil matrix (entries are rational in ψ and α symbols)
+    - Returns `(equations, w_symbols)` where equations are expressions that must equal zero
+  - **Interior column identification:** A T-frame column j (0-indexed, col 0 = wall) is an "interior overlap" column if any interior stencil row (row index ≥ R in the full grid) has a non-zero coefficient at that column. Using the same logic as `conservation.py:_interior_contribution()` but adapted for the T-frame: column j in the T-frame corresponds to grid point j-1 (since col 0 = wall, col 1 = x_0). Interior row R+m covers T-frame columns `(R+m-p+1)..(R+m+p+1)`. A column j is interior-overlapping if it falls in range `[R-p+1, T-1]` (for E4_1: j = 2..6, all 5 non-wall/non-x_0 columns).
+  - **Interior contribution IC(j):** Sum of interior stencil coefficients touching T-frame column j. Interior row R+m has coefficient `interior_coeffs[j-1 - (R+m) + p]` at column j. This is the same as `_interior_contribution(j-1, R, p, interior_coeffs)` from `conservation.py` (adjusting for T-frame vs grid-frame indexing).
+  - **Conservation equations:** For each interior-overlap column j:
+    `w_0 * B_l[0,j] + Σ_{i=1}^{R-1} w_i * B_l[i,j] + IC(j) = 0`
+    where `w_0 = psi` (the cut-cell weight) and `w_1..w_{R-1}` are symbol unknowns.
+  - **Wall column constraint (j=0):** `w_0 * B_l[0,0] = Σ_{i=0}^{r-1} w^u_i * B^u_l[i,0]` — but for now, the wall column may only need `Σ_i w_i * B_l[i,0] = -1` (the standard column-0-sums-to-negative-one condition from `conservation.py` line 80). Use the same convention: `col_sum + 1 = 0` for j=0.
+  - **Column 1 (x_0):** For nu=1, column 1 is the zeroed Category-A column. Its column sum involves `psi * B_l[0,1]` where `B_l[0,1]` is already prescribed as `psi * target`. Include in the conservation system only if the column overlaps with interior stencils.
+  - File: `scripts/stencil_gen/stencil_gen/temo.py` (add after `construct_cut_cell_stencil`, around line 1282)
+  - Verify: new function is importable and produces the correct number of equations
 
 - [ ] **22.2b** Test conservation system dimensions:
-  - For E2_1: 3 equations, 3 weight unknowns → exactly determined
-  - For E4_1: 6 equations, 3 weight unknowns + stencil free params → overdetermined in weights
+  - For E2_1: call with E2_1's cut-cell stencil → expect 4 equations (cols 0-4, T-1=4 columns per `conservation.py` convention), 3 weight unknowns `w_1, w_2, w_3` (w_0=ψ is fixed)
+  - For E4_1: call with E4_1's cut-cell stencil → expect 6 equations (cols 0-6, T-1=6 columns), 3 weight unknowns `w_1, w_2, w_3` (w_0=ψ is fixed)
+  - The E4_1 system has 6 equations and only 3 weight unknowns → 3 excess constraints that must be absorbed by the 4 alpha parameters, confirming the problem
   - File: `scripts/stencil_gen/tests/test_e4_cut_cell.py`
+  - Test: `cd scripts/stencil_gen && uv run pytest tests/test_e4_cut_cell.py -v -k conservation_system`
 
 ### 22.3 — Integrate conservation into the TEMO solve
 
-- [ ] **22.3a** Modify `construct_cut_cell_stencil` to accept conservation enforcement:
-  - After the per-row Taylor solve (which gives entries as functions of free parameters), substitute into the conservation equations
-  - The conservation equations become polynomial identities in (ψ, α^u, free_params)
-  - Solve for as many free parameters as needed to satisfy conservation
-  - Keep the remaining free parameters as the optimization α^u values
-  - All arithmetic must use the QQ(ψ) fraction field for performance
-  - The solve is: given conservation equations that are linear in (w_1..w_{R-1}, free_1..free_k), find the weights and determine which free_i are constrained
-  - Key: the system is linear in the unknowns (weights and free params), so `linsolve` or `Matrix.solve` in QQ(ψ) works
+- [ ] **22.3a** Implement `enforce_cut_cell_conservation()` in `temo.py`:
+  - **Signature:** `enforce_cut_cell_conservation(B_l: Matrix, R: int, T: int, p: int, interior_coeffs: list, psi: Symbol, alpha_symbols: list[Symbol]) -> tuple[Matrix, dict[Symbol, Expr], list[Symbol]]`
+    - Returns `(B_l_conserved, weight_solutions, remaining_alphas)`
+  - **Step 1 — Build conservation equations:** Call `build_cut_cell_conservation_system()` from 22.2a to get `(equations, w_symbols)`.
+  - **Step 2 — Identify unknowns:** The equations are linear in `w_1..w_{R-1}` (weight unknowns) and the alpha symbols from B_u. Collect all unknowns. For E4_1: unknowns are `[w_1, w_2, w_3, alpha_0, alpha_1, alpha_2, alpha_3]` = 7 unknowns, 6 equations → 1 free parameter. But wait — alpha symbols appear in B_l entries which appear multiplied by w_i, creating bilinear terms `w_i * alpha_j`. This is the same issue `conservation.py:solve_conservation()` handles via the theta-linearization trick (lines 132-148). We may need to handle this similarly, or note that for nextra=0 cases (E4_1) where there are no phi placeholders, the bilinear terms are `w_i * alpha_j` products.
+  - **Step 2a — Linearization strategy:** The conservation equations contain terms like `w_i * B_l[i,j]` where `B_l[i,j]` is linear in alpha symbols. This produces bilinear terms `w_i * alpha_k`. Approach: treat alpha symbols as **parameters** (not unknowns), solve the linear system in `w_1..w_{R-1}` only. If the system is overdetermined in the w's (E4_1 has 6 equations for 3 w's), use `linear_eq_to_matrix` + solve, which will yield constraints on the alpha symbols. Alternatively: substitute `theta_{i,k} = w_i * alpha_k` to linearize (following the theta trick in `conservation.py`).
+  - **Step 2b — Practical approach for E4_1 (nextra=0):** Since the conservation equations are linear in `(w_1, w_2, w_3)` with coefficients that are rational in `(psi, alpha_0, ..., alpha_3)`, and we have 6 equations in 3 unknowns: pick 3 of the 6 equations to solve for `w_1, w_2, w_3` in terms of `(psi, alpha)`, then substitute into the remaining 3 equations. The remaining 3 equations become constraints on the alpha parameters that must hold as polynomial identities in psi. Solve these 3 equations for 3 of the 4 alphas, leaving 1 alpha free. This reduces E4_1 from 4 to 1 free alpha parameter. Alternatively, if the math in the problem analysis is correct (5 remaining free → 4 alpha^u), we need to re-examine which entries are truly free vs constrained.
+  - **Key insight:** The conservation constraints reduce the alpha parameter count. After conservation, some alphas become functions of psi and the remaining free alphas. Substitute these back into B_l to get the conservation-enforced stencil.
+  - **QQ(psi) arithmetic:** Since alpha symbols appear in the conservation equations, we cannot use `solve_in_field` (which operates purely in QQ(psi)). Instead, use SymPy's `linear_eq_to_matrix` + `linsolve` with the polynomial domain `ZZ(psi)` or just symbolic solve. Performance should still be acceptable since the system is small (≤6 equations).
   - File: `scripts/stencil_gen/stencil_gen/temo.py`
 
-- [ ] **22.3b** Handle the quadrature weight output:
+- [ ] **22.3b** Integrate into `construct_cut_cell_stencil()`:
+  - After assembling `matrix = Matrix(rows)` at line 1278, call `enforce_cut_cell_conservation()` if the scheme needs it
+  - Add parameter `enforce_conservation: bool = True` to `construct_cut_cell_stencil()`
+  - When `enforce_conservation=True` and the conservation system is overdetermined (more equations than weight unknowns), apply the enforcement
+  - Update the returned `StencilResult` to reflect the reduced alpha count
+  - Update `StencilResult` dataclass to include `weight_solutions: dict[Symbol, Expr] | None` (maps `w_i → expr(psi, alpha)`)
+  - File: `scripts/stencil_gen/stencil_gen/temo.py` (modify `construct_cut_cell_stencil` at lines 1206-1281)
+
+- [ ] **22.3c** Handle the quadrature weight output:
   - The conservation solve produces ψ-dependent quadrature weights w_0=ψ, w_1(ψ,α), ..., w_{R-1}(ψ,α)
-  - These weights are needed for the C++ stencil (they appear in `info.w` or similar)
-  - Store weights in the `StencilResult` or `CutCellResult`
-  - For E2_1: verify weights match the existing `w_0, w_1, w_2, w_3` values from E2_1.cpp
+  - Store weights in `StencilResult.weight_solutions` (new field from 22.3b)
+  - Add `weights: list | None` field to `CutCellResult` dataclass (line 1290)
+  - In `assemble_cut_cell_result()` (line 1905), pass through weight solutions
+  - For E2_1: verify weights match the known result (w_0=ψ, w_1=w_2=w_3=1 when the E2_1 conservation system is exactly determined)
+  - **Note on C++ weights:** The current C++ stencil struct (`struct info` in `stencil.hpp`) has no weight storage — it only stores `{p, r, t, nextra}`. The C++ solver currently hardcodes `w_0=psi, w_i=1` for the norm. If conservation produces non-trivial weights (w_i ≠ 1), the C++ side will need a `norm_weights(psi)` method. But this is a **separate Phase 23+ concern** — for now, record the weights in the Python pipeline and verify them in tests.
   - File: `scripts/stencil_gen/stencil_gen/temo.py`
 
 ### 22.4 — Validate conservation for E4_1
@@ -113,16 +132,21 @@ The practical approach: solve Taylor per-row first (as now) to get stencil entri
   - Verify symbolically (for all ψ and α) and numerically (at specific values)
   - File: `scripts/stencil_gen/tests/test_e4_cut_cell.py`
 
-- [ ] **22.4b** Verify E4_1 free parameter count:
-  - After conservation, E4_1 should have exactly 4 free α parameters (matching Table 1)
-  - These are the parameters that get passed as `std::span<const real>` in the C++ constructor
+- [ ] **22.4b** Verify E4_1 free parameter count after conservation:
+  - Count the alpha symbols remaining in B_l after conservation enforcement
+  - Based on the degrees-of-freedom analysis: expect either 4 alphas with 3 constrained (→ 1 free) OR the problem analysis's "4 α^u" count if the wall constraint doesn't consume an alpha. The actual count must be determined during 22.3a implementation.
+  - Document the actual free parameter count in this plan item once determined
   - File: `scripts/stencil_gen/tests/test_e4_cut_cell.py`
+  - Test: `cd scripts/stencil_gen && uv run pytest tests/test_e4_cut_cell.py -v -k free_param`
 
 - [ ] **22.4c** Re-generate E4_1 C++ code with conservation-enforced stencil:
   - The generated code will produce different (larger) expressions than Phase 21's output
+  - Update `StencilGenSpec` construction in `test_e4_cut_cell.py::TestE4CodeGeneration` to use the conservation-enforced pipeline (likely just changing to `derive_cut_cell_scheme`)
   - Run the codegen pipeline and write new E4_1.cpp
   - Verify it still compiles and passes structural checks
+  - Update `param_arrays={"alpha": N}` where N is the actual free parameter count from 22.4b
   - File: `scripts/stencil_gen/tests/test_e4_cut_cell.py`
+  - Depends on: 22.4b (need to know the free parameter count)
 
 ### 22.5 — Regression test: E2_1 conservation still holds
 
@@ -142,11 +166,34 @@ The practical approach: solve Taylor per-row first (as now) to get stencil entri
 
 ### 22.7 — Update codegen for quadrature weights
 
-- [ ] **22.7a** Add quadrature weight output to generated C++ if needed:
-  - The C++ stencil struct may need a method to provide quadrature weights for the SBP norm
-  - Check existing stencils (E2_1.cpp) for how weights are stored/accessed
-  - If weights are needed: add `w` array or method to the codegen struct template
-  - File: `scripts/stencil_gen/stencil_gen/codegen.py`
+- [ ] **22.7a** Determine if C++ weight output is needed in this phase:
+  - The current C++ stencils (E2_1.cpp) have **no** weight storage — the `struct info` in `stencil.hpp` only stores `{p, r, t, nextra}` and there is no `w` array, weight method, or quadrature concept anywhere in `src/stencils/`
+  - The C++ solver implicitly assumes `w_0=psi, w_i=1` for the SBP norm
+  - If E4_1 conservation produces weights where `w_i = 1` for all i≥1 (which is possible if the conservation system only constrains alpha parameters, not weights), then NO C++ changes are needed
+  - If weights are non-trivial (w_i ≠ 1), defer the C++ weight infrastructure to a separate phase. The Python pipeline records the weights (22.3c) and tests verify them, but C++ codegen for weights is out of scope for Phase 22.
+  - **Decision needed:** After 22.3a implementation, check whether E4_1 weights are trivial. Record the decision in this item.
+  - File: `scripts/stencil_gen/stencil_gen/codegen.py` (only if non-trivial weights found)
+
+---
+
+## Design Decisions (to be recorded in plans/meta.md if cross-cutting)
+
+### DD22-1: Conservation enforcement approach
+**TBD:** Two-phase (Taylor first, then conservation substitution) vs. monolithic coupled system. The plan currently assumes two-phase based on the "Key Implementation Insight" section. To be confirmed during 22.3a implementation.
+
+### DD22-2: Bilinear term handling
+**TBD:** For E4_1 (nextra=0), the conservation equations contain bilinear terms `w_i * alpha_j`. Options:
+- (a) Treat alphas as parameters, solve for w's → overdetermined, yields alpha constraints
+- (b) Theta-linearization trick from `conservation.py`
+- (c) Full symbolic solve with `linsolve` treating all as unknowns
+To be decided during 22.3a based on which approach yields clean symbolic solutions.
+
+### DD22-3: Alpha parameter reduction
+**TBD:** Conservation enforcement will reduce E4_1's free alpha count from 4 to some smaller number. The exact count depends on how many conservation equations constrain alpha vs. weight parameters. This affects:
+- The C++ constructor signature (`std::span<const real>` size)
+- The `param_arrays={"alpha": N}` in codegen
+- The `alpha_symbols` list in `UniformResult`
+To be determined during 22.3a and recorded in 22.4b.
 
 ---
 
