@@ -149,7 +149,7 @@ The SymPy pipeline (Phase 20) is complete with 231 passing tests and 7 modules:
 
 ### 21.2 — Handle E4 zero-constrained entries
 
-- [ ] **21.2a** Verify zero constraints are handled by the alpha distribution in 21.1a:
+- [x] **21.2a** Verify zero constraints are handled by the alpha distribution in 21.1a:
   - The zero constraints (alpha^u_{05}=0, alpha^u_{15}=0) are automatically handled by the alpha distribution convention in `derive_uniform_boundary_for_temo`: rows 0 and 1 use `free_symbols = [alpha_k, S.Zero]`, placing zero in the last free column (position 5).
   - This item is a **verification-only** step, not an implementation step (the work is done in 21.1a).
   - Test: assert `B_u[0, 5] == 0` and `B_u[1, 5] == 0` as part of 21.1b tests.
