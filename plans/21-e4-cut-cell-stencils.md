@@ -251,11 +251,12 @@ The SymPy pipeline (Phase 20) is complete with 231 passing tests and 7 modules:
     - Add `E4_1.cpp` to the `shoccs-stencils` source list (after `E4u_1.cpp`, line ~5)
     - Add `add_unit_test(E4_1 "stencils" shoccs-stencils)` (after E4u_1 test, line ~17)
   - **stencil.cpp** (`src/stencils/stencil.cpp`, line ~48, in the `order == 1` branch):
-    Add after the `E4u` case:
+    Add a new `else if` branch after the `E4u` case (between lines 50 and 51):
     ```cpp
     } else if (type == "E4") {
         logger(spdlog::level::info, "E4 cut-cell first scheme chosen");
         return make_E4_1(alpha);
+    } else if (type == "E6u") {
     ```
   - Build and run: `cmake --build build --target t-E4_1 && ctest --test-dir build -R t-E4_1`
   - Also verify no regressions: `ctest --test-dir build -L stencils`

@@ -31,11 +31,12 @@
 | 13 | `13-kokkos-parallel.md` | Phases 8, 10 | Parallelize matrix-vector products (block, circulant) |
 | 14 | `14-kokkos-gpu.md` | Phases 8–13 | GPU execution: device memory, host mirrors, KOKKOS_LAMBDA |
 
-### Tooling: Stencil Derivation (Phase 20)
+### Tooling: Stencil Derivation (Phases 20–21)
 
 | Phase | Plan File | Depends On | Goal |
 |-------|-----------|------------|------|
 | 20 | `20-stencil-derivation-pipeline.md` | None (standalone) | SymPy pipeline for deriving stencil coefficients and generating C++ |
+| 21 | `21-e4-cut-cell-stencils.md` | Phase 20 | E4_1 cut-cell stencil generation via generalized TEMO pipeline |
 
 ### Design Documents
 
