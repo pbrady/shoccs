@@ -7,7 +7,11 @@ from stencil_gen.temo import (
     E4_1,
     SchemeParams,
     UniformResult,
+    build_cut_cell_deltas,
+    build_degenerate_stencil,
+    construct_cut_cell_stencil,
     derive_uniform_boundary_for_temo,
+    solve_uniform_limit,
 )
 
 
@@ -162,3 +166,137 @@ class TestE4UniformBoundary:
         """Wrong number of alpha symbols raises ValueError."""
         with pytest.raises(ValueError, match="alpha symbols"):
             derive_uniform_boundary_for_temo(E4_1, alpha_symbols=[Symbol("a")])
+
+
+class TestE4TEMOConstruction:
+    """Tests for E4_1 full TEMO pipeline (21.3a)."""
+
+    @pytest.fixture(scope="class")
+    def e4_temo(self):
+        """Run the full E4_1 TEMO pipeline once for the test class."""
+        psi = Symbol("psi")
+        ur = derive_uniform_boundary_for_temo(E4_1)
+        result = construct_cut_cell_stencil(
+            ur.B_u, ur.interior, p=2, q=3, nu=1, nextra=0, psi=psi,
+        )
+        return ur, result, psi
+
+    def test_shape(self, e4_temo):
+        """E4_1 cut-cell stencil has shape (4, 7) — R=4, T=7."""
+        _, result, _ = e4_temo
+        assert result.matrix.shape == (4, 7)
+
+    def test_no_betas(self, e4_temo):
+        """E4_1 (nextra=0) produces no beta parameters."""
+        _, result, _ = e4_temo
+        assert len(result.beta_info) == 0
+        assert len(result.beta_symbols) == 0
+
+    def test_entries_in_psi_alpha(self, e4_temo):
+        """All entries are rational in psi and alpha_{0..3} only."""
+        _, result, _ = e4_temo
+        all_syms = result.matrix.free_symbols
+        expected_names = {"psi"} | {f"alpha_{k}" for k in range(4)}
+        actual_names = {s.name for s in all_syms}
+        assert actual_names <= expected_names, (
+            f"Unexpected symbols: {actual_names - expected_names}"
+        )
+
+    def test_uniform_limit(self, e4_temo):
+        """At psi=1, rows 0-2 reduce to B_u in T-frame, row 3 is interior."""
+        ur, result, psi = e4_temo
+        B_l_1 = solve_uniform_limit(ur.B_u, ur.interior, ur.p, ur.q, ur.nu, 0)
+        m1 = result.matrix.subs(psi, 1)
+        R, T = m1.shape
+        for i in range(R):
+            for j in range(T):
+                assert simplify(m1[i, j] - B_l_1[i, j]) == 0, (
+                    f"Uniform limit mismatch at [{i},{j}]: "
+                    f"{cancel(m1[i, j])} != {cancel(B_l_1[i, j])}"
+                )
+
+    def test_uniform_limit_rows_0_2_embed_Bu(self, e4_temo):
+        """At psi=1, rows 0-2: wall col=0, then cols 1-6 = B_u rows 0-2."""
+        ur, result, psi = e4_temo
+        m1 = result.matrix.subs(psi, 1)
+        B_u = ur.B_u
+        for i in range(3):
+            # Column 0 is the wall column
+            # Columns 1..6 should match B_u[i, 0..5]
+            for j in range(6):
+                assert simplify(m1[i, j + 1] - B_u[i, j]) == 0, (
+                    f"B_u embed mismatch at row {i}, col {j}: "
+                    f"{cancel(m1[i, j + 1])} != {cancel(B_u[i, j])}"
+                )
+
+    def test_uniform_limit_row3_interior(self, e4_temo):
+        """At psi=1, row 3 is the interior stencil [0, 0, 1/12, -2/3, 0, 2/3, -1/12]."""
+        ur, result, psi = e4_temo
+        m1 = result.matrix.subs(psi, 1)
+        expected_row3 = [
+            S.Zero, S.Zero,
+            Rational(1, 12), Rational(-2, 3), S.Zero,
+            Rational(2, 3), Rational(-1, 12),
+        ]
+        for j in range(7):
+            assert simplify(m1[3, j] - expected_row3[j]) == 0, (
+                f"Row 3 interior mismatch at col {j}: "
+                f"{cancel(m1[3, j])} != {expected_row3[j]}"
+            )
+
+    def test_degenerate_limit(self, e4_temo):
+        """At psi=0, matches the degenerate stencil B_d."""
+        ur, result, psi = e4_temo
+        m0 = result.matrix.subs(psi, 0)
+        B_d = build_degenerate_stencil(ur.B_u, ur.interior, p=2, q=3, nu=1)
+        R, T = m0.shape
+        for i in range(R):
+            for j in range(T):
+                assert simplify(m0[i, j] - B_d[i, j]) == 0, (
+                    f"Degenerate mismatch at [{i},{j}]: "
+                    f"{cancel(m0[i, j])} != {cancel(B_d[i, j])}"
+                )
+
+    def test_taylor_accuracy_symbolic(self, e4_temo):
+        """Each row satisfies Taylor accuracy (q+1=4 equations) for symbolic psi.
+
+        For first derivative (nu=1), row i should exactly differentiate
+        monomials x^m for m = 0, 1, ..., q=3:
+            sum_j c_j * delta_j^m = delta_{m,1} * m!  (= delta_{m,1})
+        """
+        _, result, psi = e4_temo
+        m = result.matrix
+        R, T = m.shape
+        for i in range(R):
+            deltas = build_cut_cell_deltas(i, T, psi)
+            row = [m[i, j] for j in range(T)]
+            for k in range(4):  # q+1 = 4
+                moment = sum(row[j] * deltas[j] ** k for j in range(T))
+                if k == 1:
+                    expected = 1
+                else:
+                    expected = 0
+                assert simplify(moment - expected) == 0, (
+                    f"Row {i}, moment k={k}: got {simplify(moment)}, "
+                    f"expected {expected}"
+                )
+
+    def test_taylor_accuracy_at_half(self, e4_temo):
+        """Taylor accuracy holds at psi=1/2 (numerical check)."""
+        _, result, psi = e4_temo
+        m = result.matrix.subs(psi, Rational(1, 2))
+        R, T = m.shape
+        psi_val = Rational(1, 2)
+        for i in range(R):
+            deltas = build_cut_cell_deltas(i, T, psi_val)
+            row = [m[i, j] for j in range(T)]
+            for k in range(4):
+                moment = sum(row[j] * deltas[j] ** k for j in range(T))
+                if k == 1:
+                    expected = 1
+                else:
+                    expected = 0
+                assert simplify(moment - expected) == 0, (
+                    f"Row {i}, moment k={k} at psi=1/2: "
+                    f"got {simplify(moment)}, expected {expected}"
+                )

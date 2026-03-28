@@ -159,7 +159,7 @@ The SymPy pipeline (Phase 20) is complete with 231 passing tests and 7 modules:
 
 ### 21.3 — E4_1 TEMO construction
 
-- [ ] **21.3a** Run the full TEMO pipeline for E4_1:
+- [x] **21.3a** Run the full TEMO pipeline for E4_1:
   - Get `B_u` (3×6) and `interior` from `derive_uniform_boundary_for_temo(E4_1)`
   - Call `construct_cut_cell_stencil(B_u, interior, p=2, q=3, nu=1, nextra=0, psi)`
   - **Corrected dimensions:** output is a **4×7** matrix (R=4 rows, T=7 columns), not 5×7
@@ -168,56 +168,16 @@ The SymPy pipeline (Phase 20) is complete with 231 passing tests and 7 modules:
   - Verify: at psi=0, satisfies degenerate constraints (DP1: B_d[i, j+1] = B_u[i, j] for j≥1; DP2: B_u[i,0] assigned to wall, x_0 zeroed for nu=1)
   - Verify: Taylor accuracy holds for each row at a sample psi (e.g., psi=1/2): evaluate the stencil and check it reproduces f'(x_i) for polynomials of degree ≤ q=3
   - Verify: no beta symbols in the result (nextra=0 should prescribe all excess columns via limit interpolation, eliminating betas)
-  - **Overdetermined near-interior row analysis** — both `build_degenerate_stencil` and `solve_uniform_limit` produce overdetermined systems for row 3 (3 unknowns, 4 equations). The code handles this by solving the first 3 equations and verifying the 4th for consistency. Concrete column categorization:
-    ```
-    build_degenerate_stencil (psi=0 limit, row 3):
-      deltas = [-3, -3, -2, -1, 0, 1, 2]
-      zeroed_col = {1}              (x_0 zeroed, nu=1)
-      conservation cols = {4, 5, 6} (j in range(p+2=4, T=7))
-      known = {1, 4, 5, 6}
-      unknown = {0, 2, 3}           → 3 unknowns, 4 equations
-
-    solve_uniform_limit (psi=1 limit, row 3):
-      deltas = [-4, -3, -2, -1, 0, 1, 2]
-      conservation cols: j in [2,7) where j<=R-p=2 or j>=p+2=4
-        j=2 ✓(≤2), j=3 ✗, j=4 ✓(≥4), j=5 ✓, j=6 ✓
-      fixed = {2, 4, 5, 6}
-      unknown = {0, 1, 3}           → 3 unknowns, 4 equations
-
-    identify_prescribed_entries (general psi, all 4 rows):
-      For ALL rows (nu=1): zeroed_col = 1 (x_0), n_eqs = max(q+1,nu+1) = 4
-
-      Row 0 (boundary, i=0):
-        prescribed[1] = psi * B_u[0, 0]           (Category A)
-        free_cols = [0, 2, 3, 4, 5, 6]  → n_free=6, n_excess = 6-4 = 2
-        extra_cols = [5, 6]  (highest 2)
-        prescribed[5] = psi*B_l_1[0,5] + (1-psi)*B_d[0,5]
-        prescribed[6] = psi*B_l_1[0,6] + (1-psi)*B_d[0,6]
-        solve_cols = [0, 2, 3, 4]  → 4 unknowns = 4 equations ✓
-
-      Rows 1, 2 (boundary, i=1,2): same structure as row 0
-        prescribed = {1, 5, 6}, solve_cols = [0, 2, 3, 4] → exactly determined
-
-      Row 3 (near-interior, i=3):
-        prescribed[1] = psi * B_l_1[3, 1]          (Category A, target from B_l_1)
-        free_cols = [0, 2, 3, 4, 5, 6]
-        extra_cols = [5, 6]
-        prescribed[5] = psi*B_l_1[3,5] + (1-psi)*B_d[3,5]  (psi-dependent)
-        prescribed[6] = psi*B_l_1[3,6] + (1-psi)*B_d[3,6]  (psi-dependent)
-        solve_cols = [0, 2, 3, 4]  → 4 unknowns = 4 equations ✓
-
-      Summary: all rows exactly determined, no betas introduced
-    ```
-    The overdetermined systems are expected to be consistent because the conservation values are derived from boundary rows that satisfy the Taylor accuracy conditions. If either raises `RuntimeError("Overdetermined system inconsistent...")`, the alpha distribution or conservation logic in 21.1a needs debugging.
+  - **Fix applied:** `build_degenerate_stencil` and `solve_uniform_limit` originally used conservation-based column-sum constraints for the near-interior row. For E4_1 (nextra=0), the uniform boundary B_u does NOT have conservation built in (column sums depend on free alpha parameters), so the conservation approach produced inconsistent overdetermined systems. **Fix:** When the interior stencil fits entirely within the T-frame boundary block without overlapping the zeroed column (condition: `r > p` and `r + p + 1 <= t`), the near-interior row is simply the interior stencil embedded at the correct T-frame positions. For E4_1 (r=3, p=2, t=6): `3 > 2` and `3+2+1=6 <= 6`, so direct embedding applies. The existing conservation approach is preserved for schemes where the interior stencil extends beyond the boundary block (e.g., E2_1 where r=3, p=1, t=4: `3+1+1=5 > 4`). All 120 existing E2 tests pass unchanged.
+  - Tests: 9 new tests in `TestE4TEMOConstruction` class covering shape, no betas, symbol content, uniform limit, degenerate limit, and Taylor accuracy (symbolic + psi=1/2)
   - File: `scripts/stencil_gen/tests/test_e4_cut_cell.py`
   - Test: `cd scripts/stencil_gen && uv run pytest tests/test_e4_cut_cell.py -v -k "temo"`
 
-- [ ] **21.3b** Performance check:
+- [x] **21.3b** Performance check:
   - The full E4_1 derivation (uniform boundary + TEMO + conservation) should complete in < 10 seconds
+  - **Result:** 0.10 seconds — well under the 10-second threshold
   - E4_1 has 28 floating coefficients (4×7), each a rational function of psi and 4 alphas — larger than E2_1 (4×5=20 coefficients with 4 alphas)
-  - If slow (>10s), profile and apply QQ(psi) field optimizations from 20.5e
-  - If the `solve_in_field` calls are the bottleneck, the E4 system has n_eqs=4 per row (vs E2's n_eqs=2), so the Vandermonde solves are 4× larger
-  - Test: add a timing assertion or measure with `time.time()`
+  - No optimization needed
 
 ### 21.4 — E4_1 C++ code generation
 
@@ -324,9 +284,9 @@ The SymPy pipeline (Phase 20) is complete with 231 passing tests and 7 modules:
 
 1. **Expression swell:** E4_1 has 28 floating coefficients (4×7, vs E2_1's 20=4×5), each a rational function of psi and 4 alphas. CSE output could be 2000+ lines. This is expected and handled by the codegen module.
 
-2. **TEMO pipeline correctness for wider stencils:** The TEMO functions (`build_degenerate_stencil`, `solve_uniform_limit`, `construct_cut_cell_stencil`) were developed and tested only for E2 schemes (3×4 and 1×3 B_u matrices). With E4_1's 3×6 B_u, the column counts, conservation column ranges, and Vandermonde systems are all larger. Both `build_degenerate_stencil` and `solve_uniform_limit` produce **overdetermined** near-interior row systems for E4_1 (3 unknowns, 4 equations). The detailed column analysis is in item 21.3a. The `solve_temo_row` path (general psi) is exactly determined (4 solve cols = 4 equations). If the overdetermined systems are inconsistent, the code raises `RuntimeError` — the fix would be in the conservation column selection logic or the alpha distribution from 21.1a.
+2. **TEMO pipeline correctness for wider stencils:** ~~RESOLVED in 21.3a.~~ The conservation-based near-interior row logic was incorrect for E4_1 (nextra=0) because B_u lacks column-sum conservation. Fixed by adding direct interior stencil embedding when `r > p` and `r + p + 1 <= t`. The E2 conservation path is preserved for cases where the interior stencil extends beyond the boundary block.
 
-3. **Performance:** The `solve_in_field` calls use 4×4 Vandermonde systems (vs 2×2 for E2), and there are 4 rows to solve. Each solve involves DomainMatrix LU factorization in QQ(psi). Total derivation time should stay under 10 seconds.
+3. **Performance:** ~~RESOLVED in 21.3b.~~ E4_1 full TEMO pipeline completes in 0.10s.
 
 4. **Dimension formula (D-R25):** The corrected formula `r = p+1+nextra` has been verified for E2 and E4 schemes against Table 1 and existing C++ code. However, it has NOT been verified for E6 or E8 TEMO schemes (which don't exist yet). If these are attempted later, the formula should be re-verified.
 

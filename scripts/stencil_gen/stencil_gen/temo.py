@@ -449,7 +449,7 @@ def build_degenerate_stencil(
         else:
             raise ValueError(f"Unsupported derivative order nu={nu}")
 
-    # --- Row r (near-interior): 3-step algorithm ---
+    # --- Row r (near-interior) ---
 
     # Step 1: zero variant column
     # nu=1: x_0 (col 1) zeroed for all rows including near-interior
@@ -457,67 +457,80 @@ def build_degenerate_stencil(
     zeroed_col = 1
     B_d[r, zeroed_col] = Rational(0)
 
-    # Step 2: conservation at psi=0 (fixes interior columns when r >= 2)
-    # At psi=0, w_0=0 so row 0 drops out:
-    #   sum_{i=1}^{R-1} B^d[i,j] = 0 for interior columns
-    # => B^d[r,j] = -sum_{i=1}^{r-1} B^d[i,j]
-    # Interior columns in the cut-cell frame start at p+2 (uniform frame
-    # interior cols p+1,...,t-1 shifted by +1 for the wall column).
-    fixed_cols: set[int] = set()
-    if r >= 2:
-        for j in range(p + 2, T):
-            val = -sum(B_d[i, j] for i in range(1, r))
-            B_d[r, j] = val
-            fixed_cols.add(j)
+    # Check if the interior stencil fits entirely within the T-frame
+    # boundary block without overlapping the zeroed column.
+    # Interior stencil at x_r covers T-frame cols (r-p+1)..(r+p+1).
+    # Fits if: (a) r > p (zeroed col 1 = x_0 is outside stencil range)
+    #          (b) r + p + 1 <= t (rightmost stencil col within boundary block)
+    interior_start = r - p + 1
+    interior_end = r + p + 1
+    can_embed_interior = (interior_start > zeroed_col) and (interior_end <= t)
 
-    # Step 3: Taylor solve for remaining unknowns
-    # At psi=0, wall and x_0 coincide at the same position.
-    # Deltas from row r centered at x_r: [-r, -r, 1-r, 2-r, ..., t-1-r]
-    deltas = [Rational(-r)] * 2 + [Rational(j - r) for j in range(1, t)]
-
-    # Identify unknown columns (not zeroed, not fixed by conservation)
-    known_cols = {zeroed_col} | fixed_cols
-    unknown_cols = [j for j in range(T) if j not in known_cols]
-    n_unk = len(unknown_cols)
-
-    # Build RHS
-    rhs = Matrix(n_eqs, 1, lambda k, _: Rational(1) if k == nu else Rational(0))
-
-    # Move known columns to RHS
-    for k in range(n_eqs):
-        for j in known_cols:
-            rhs[k, 0] -= Rational(deltas[j] ** k, factorial(k)) * B_d[r, j]
-
-    # Build Vandermonde for unknown columns
-    V = Matrix(
-        n_eqs,
-        n_unk,
-        lambda k, uj: Rational(deltas[unknown_cols[uj]] ** k, factorial(k)),
-    )
-
-    # Solve (may be overdetermined or exactly determined)
-    if n_unk <= n_eqs:
-        # Use square subsystem if overdetermined
-        V_sq = V[:n_unk, :]
-        rhs_sq = rhs[:n_unk, :]
-        sol = V_sq.solve(rhs_sq)
-
-        # Verify remaining equations for consistency
-        for k in range(n_unk, n_eqs):
-            residual = sum(V[k, uj] * sol[uj] for uj in range(n_unk)) - rhs[k, 0]
-            if cancel(residual) != 0:
-                raise RuntimeError(
-                    f"Overdetermined system inconsistent at equation {k}: "
-                    f"residual = {residual}"
-                )
+    if can_embed_interior:
+        # Direct embedding: the near-interior row is just the interior stencil
+        # placed at the correct T-frame columns.  Wall (col 0) and x_0 (col 1)
+        # are outside the stencil range and stay at 0.
+        for k, coeff in enumerate(interior_coeffs):
+            B_d[r, interior_start + k] = coeff
     else:
-        raise ValueError(
-            f"Underdetermined near-interior row: {n_unk} unknowns, "
-            f"{n_eqs} equations. Conservation should fix more columns."
+        # Conservation approach: use column-sum constraints from boundary rows
+        # to fix interior columns, then solve Taylor system for the rest.
+        # This is valid when the uniform boundary has conservation (nextra > 0)
+        # or when the stencil doesn't fit and we need boundary-modified values.
+        fixed_cols: set[int] = set()
+        if r >= 2:
+            for j in range(p + 2, T):
+                val = -sum(B_d[i, j] for i in range(1, r))
+                B_d[r, j] = val
+                fixed_cols.add(j)
+
+        # Taylor solve for remaining unknowns.
+        # At psi=0, wall and x_0 coincide at the same position.
+        # Deltas from row r centered at x_r: [-r, -r, 1-r, 2-r, ..., t-1-r]
+        deltas = [Rational(-r)] * 2 + [Rational(j - r) for j in range(1, t)]
+
+        known_cols = {zeroed_col} | fixed_cols
+        unknown_cols = [j for j in range(T) if j not in known_cols]
+        n_unk = len(unknown_cols)
+
+        rhs = Matrix(
+            n_eqs, 1, lambda k, _: Rational(1) if k == nu else Rational(0)
+        )
+        for k in range(n_eqs):
+            for j in known_cols:
+                rhs[k, 0] -= Rational(deltas[j] ** k, factorial(k)) * B_d[r, j]
+
+        V = Matrix(
+            n_eqs,
+            n_unk,
+            lambda k, uj: Rational(
+                deltas[unknown_cols[uj]] ** k, factorial(k)
+            ),
         )
 
-    for uj, j in enumerate(unknown_cols):
-        B_d[r, j] = sol[uj]
+        if n_unk <= n_eqs:
+            V_sq = V[:n_unk, :]
+            rhs_sq = rhs[:n_unk, :]
+            sol = V_sq.solve(rhs_sq)
+
+            for k in range(n_unk, n_eqs):
+                residual = (
+                    sum(V[k, uj] * sol[uj] for uj in range(n_unk))
+                    - rhs[k, 0]
+                )
+                if cancel(residual) != 0:
+                    raise RuntimeError(
+                        f"Overdetermined system inconsistent at equation "
+                        f"{k}: residual = {residual}"
+                    )
+        else:
+            raise ValueError(
+                f"Underdetermined near-interior row: {n_unk} unknowns, "
+                f"{n_eqs} equations. Conservation should fix more columns."
+            )
+
+        for uj, j in enumerate(unknown_cols):
+            B_d[r, j] = sol[uj]
 
     return B_d
 
@@ -914,65 +927,83 @@ def solve_uniform_limit(
             B_l_1[i, 0] = Rational(0)
 
     # Step 2-4: Near-interior row (row r)
-    # Build Taylor system at psi=1: deltas = [-(1+r), -r, 1-r, ..., t-1-r]
-    deltas = [Rational(-(1 + r))] + [Rational(j - r) for j in range(t)]
-    V_full = Matrix(
-        n_eqs,
-        T,
-        lambda k, j: Rational(deltas[j] ** k, factorial(k)),
-    )
-    rhs_full = Matrix(
-        n_eqs, 1, lambda k, _: Rational(1) if k == nu else Rational(0)
-    )
+    # Check if the interior stencil fits entirely within the T-frame
+    # boundary block without overlapping the zeroed column (x_0 at col 1).
+    # At psi=1: wall at col 0 is at offset -(1+r) from x_r, x_0 at col 1
+    # is at offset -r.  Interior stencil covers offsets -p..+p.
+    # Fits if: (a) r > p (both wall and x_0 are outside stencil range)
+    #          (b) r + p + 1 <= t (rightmost stencil col within boundary block)
+    interior_start = r - p + 1
+    interior_end = r + p + 1
+    can_embed_interior = (interior_start > 1) and (interior_end <= t)
 
-    # Step 3: Conservation at psi=1 (all weights = 1).
-    # sum_{i=0}^{R-1} B_l(1)[i, j] = 0 for interior columns in the
-    # boundary block. A T-frame column j is conserved if:
-    #   (a) no interior stencil reaches it: j-1 < R-p, i.e. j <= R-p, OR
-    #   (b) uniform conservation applies: j >= p+2 (mapped from uniform j_u >= p+1)
-    # Skip wall (col 0) and x_0 (col 1) which have boundary terms.
-    fixed_cols: set[int] = set()
-    for j in range(2, T):
-        if not (j <= R - p or j >= p + 2):
-            continue
-        val = -sum(B_l_1[i, j] for i in range(r))
-        B_l_1[r, j] = val
-        fixed_cols.add(j)
-
-    # Unknowns: all non-fixed columns
-    unknown_cols = [j for j in range(T) if j not in fixed_cols]
-
-    # Step 4: Solve Taylor system for remaining unknowns.
-    rhs_reduced = rhs_full.copy()
-    for k in range(n_eqs):
-        for j in fixed_cols:
-            rhs_reduced[k, 0] -= V_full[k, j] * B_l_1[r, j]
-
-    V_reduced = Matrix(
-        n_eqs, len(unknown_cols), lambda k, uj: V_full[k, unknown_cols[uj]]
-    )
-
-    n_unk = len(unknown_cols)
-    if n_unk <= n_eqs:
-        V_sq = V_reduced[:n_unk, :]
-        rhs_sq = rhs_reduced[:n_unk, :]
-        sol = V_sq.solve(rhs_sq)
-
-        for k in range(n_unk, n_eqs):
-            res = sum(V_reduced[k, uj] * sol[uj] for uj in range(n_unk))
-            res -= rhs_reduced[k, 0]
-            if cancel(res) != 0:
-                raise RuntimeError(
-                    f"Inconsistent uniform-limit system at equation {k}"
-                )
+    if can_embed_interior:
+        # Direct embedding: near-interior row is the interior stencil
+        # at T-frame cols (r-p+1)..(r+p+1).  All other cols are 0.
+        for k, coeff in enumerate(interior):
+            B_l_1[r, interior_start + k] = coeff
     else:
-        raise ValueError(
-            f"Underdetermined uniform-limit row r: {n_unk} unknowns, "
-            f"{n_eqs} equations"
+        # Conservation + Taylor solve approach (for schemes where the
+        # interior stencil extends beyond the boundary block, e.g. E2_1).
+        deltas = [Rational(-(1 + r))] + [Rational(j - r) for j in range(t)]
+        V_full = Matrix(
+            n_eqs,
+            T,
+            lambda k, j: Rational(deltas[j] ** k, factorial(k)),
+        )
+        rhs_full = Matrix(
+            n_eqs, 1, lambda k, _: Rational(1) if k == nu else Rational(0)
         )
 
-    for uj, j in enumerate(unknown_cols):
-        B_l_1[r, j] = sol[uj]
+        # Conservation at psi=1 (all weights = 1).
+        # sum_{i=0}^{R-1} B_l(1)[i, j] = 0 for interior columns.
+        # A T-frame column j is conserved if:
+        #   (a) no interior stencil reaches it: j < R-p, OR
+        #   (b) uniform conservation applies: j >= p+2
+        fixed_cols: set[int] = set()
+        for j in range(2, T):
+            if not (j < R - p or j >= p + 2):
+                continue
+            val = -sum(B_l_1[i, j] for i in range(r))
+            B_l_1[r, j] = val
+            fixed_cols.add(j)
+
+        unknown_cols = [j for j in range(T) if j not in fixed_cols]
+
+        rhs_reduced = rhs_full.copy()
+        for k in range(n_eqs):
+            for j in fixed_cols:
+                rhs_reduced[k, 0] -= V_full[k, j] * B_l_1[r, j]
+
+        V_reduced = Matrix(
+            n_eqs,
+            len(unknown_cols),
+            lambda k, uj: V_full[k, unknown_cols[uj]],
+        )
+
+        n_unk = len(unknown_cols)
+        if n_unk <= n_eqs:
+            V_sq = V_reduced[:n_unk, :]
+            rhs_sq = rhs_reduced[:n_unk, :]
+            sol = V_sq.solve(rhs_sq)
+
+            for k in range(n_unk, n_eqs):
+                res = sum(
+                    V_reduced[k, uj] * sol[uj] for uj in range(n_unk)
+                )
+                res -= rhs_reduced[k, 0]
+                if cancel(res) != 0:
+                    raise RuntimeError(
+                        f"Inconsistent uniform-limit system at equation {k}"
+                    )
+        else:
+            raise ValueError(
+                f"Underdetermined uniform-limit row r: {n_unk} unknowns, "
+                f"{n_eqs} equations"
+            )
+
+        for uj, j in enumerate(unknown_cols):
+            B_l_1[r, j] = sol[uj]
 
     return B_l_1
 
