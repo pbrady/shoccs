@@ -1328,3 +1328,397 @@ class TestAssembleCutCellResult:
         assert result.neumann.shape == (2, 4)
         assert len(result.eta) == 2
         assert result.dims == dims
+
+
+# ---------------------------------------------------------------------------
+# Helpers for C++ data comparison (20.5g / 20.5h)
+# ---------------------------------------------------------------------------
+
+
+def to_h1_left(c_cpp, h, nu, right):
+    """Convert C++ nbs_* output to h=1 left-boundary coefficients.
+
+    Undoes h-scaling and right-boundary reversal/negation applied by C++ code.
+    """
+    c = list(c_cpp)
+    if right:
+        c = list(reversed(c))
+        if nu == 1:
+            c = [-v for v in c]
+    scale = h ** nu
+    return [v * scale for v in c]
+
+
+def to_h1_left_eta(x_cpp, h, right):
+    """Convert C++ nbs_neumann x (eta) output to h=1 left-boundary values.
+
+    Undoes h-scaling, reversal, and negation for right boundary eta.
+    """
+    x = list(x_cpp)
+    if right:
+        x = list(reversed(x))
+        x = [-v for v in x]
+    return [v * h for v in x]
+
+
+# ---------------------------------------------------------------------------
+# 20.5g — E2_1 integration tests
+# ---------------------------------------------------------------------------
+
+
+class TestE2_1Integration:
+    """Integration tests for E2_1 cut-cell stencil (20.5g)."""
+
+    @pytest.fixture
+    def e2_1(self):
+        """Derive the full E2_1 cut-cell stencil."""
+        psi = Symbol("psi")
+        ur = derive_e2_uniform_boundary(nu=1)
+        stencil = construct_cut_cell_stencil(
+            ur.B_u, ur.interior, ur.p, ur.q, ur.nu, 1, psi
+        )
+        dims = E2_1.dims()
+        assembled = assemble_cut_cell_result(
+            stencil.matrix, None, None, dims, ur.alpha_symbols,
+        )
+        return assembled, stencil, ur, psi
+
+    def test_grid_deltas_all_rows(self):
+        """build_cut_cell_deltas for i=0,1,2,3 with T=5."""
+        psi = Symbol("psi")
+        expected_col0 = [-psi, -(psi + 1), -(psi + 2), -(psi + 3)]
+        for i in range(4):
+            d = build_cut_cell_deltas(i, 5, psi)
+            assert len(d) == 5
+            assert simplify(d[0] - expected_col0[i]) == 0
+            for j in range(1, 5):
+                assert d[j] == (j - 1) - i
+
+    def test_taylor_system_row0(self):
+        """2x5 Vandermonde for row 0 matches plan worked example."""
+        psi = Symbol("psi")
+        V, rhs = build_temo_vandermonde(0, 5, q=1, nu=1, psi=psi)
+        assert V.shape == (2, 5)
+        assert rhs == Matrix([[0], [1]])
+        for j in range(5):
+            assert V[0, j] == 1
+        assert simplify(V[1, 0] + psi) == 0
+        assert V[1, 1] == 0
+        assert V[1, 2] == 1
+        assert V[1, 3] == 2
+        assert V[1, 4] == 3
+
+    def test_degenerate_variant(self):
+        """nu=1 variant: wall=B_u[i,0], x_0=0 for all rows."""
+        ur = derive_e2_uniform_boundary(nu=1)
+        B_d = build_degenerate_stencil(
+            ur.B_u, ur.interior, ur.p, ur.q, ur.nu,
+        )
+        assert B_d.shape == (4, 5)
+        for i in range(4):
+            assert B_d[i, 1] == 0, f"x_0 not zero at row {i}"
+        for i in range(3):
+            assert simplify(B_d[i, 0] - ur.B_u[i, 0]) == 0
+
+    def test_floating_taylor_numeric(self, e2_1):
+        """Taylor accuracy at numeric psi=0.3, 0.5, 0.7 with multiple alpha values."""
+        _, stencil, ur, psi = e2_1
+        m = stencil.matrix
+        alphas = [
+            {s: 0 for s in ur.alpha_symbols},
+            dict(zip(ur.alpha_symbols, [Rational(1, 2), Rational(3, 10),
+                                         Rational(1, 5), Rational(1, 10)])),
+        ]
+        for alpha_vals in alphas:
+            for psi_val in [Rational(3, 10), Rational(1, 2), Rational(7, 10)]:
+                subs = {psi: psi_val, **alpha_vals}
+                for i in range(4):
+                    deltas = build_cut_cell_deltas(i, 5, psi_val)
+                    row = [float(m[i, j].subs(subs)) for j in range(5)]
+                    # k=0: sum = 0
+                    assert abs(sum(row)) < 1e-14, (
+                        f"k=0 failed: row {i}, psi={psi_val}, alpha={list(alpha_vals.values())}"
+                    )
+                    # k=1: weighted sum = 1
+                    s1 = sum(row[j] * float(deltas[j]) for j in range(5))
+                    assert abs(s1 - 1) < 1e-14, (
+                        f"k=1 failed: row {i}, psi={psi_val}, alpha={list(alpha_vals.values())}"
+                    )
+
+    def test_polynomial_exactness(self, e2_1):
+        """f(x)=2x+1 (linear): stencil gives f'(x_i)=2 for all rows, psi, alpha."""
+        _, stencil, ur, psi = e2_1
+        m = stencil.matrix
+        alphas = [
+            {s: 0 for s in ur.alpha_symbols},
+            dict(zip(ur.alpha_symbols, [Rational(1, 2), Rational(3, 10),
+                                         Rational(1, 5), Rational(1, 10)])),
+        ]
+        for alpha_vals in alphas:
+            for psi_val in [Rational(3, 10), Rational(7, 10)]:
+                subs = {psi: psi_val, **alpha_vals}
+                # Grid: wall at -psi*h, x_j = j*h (h=1)
+                x_pts = [float(-psi_val)] + list(range(4))
+                f_vals = [2 * xi + 1 for xi in x_pts]
+                for i in range(4):
+                    row = [float(m[i, j].subs(subs)) for j in range(5)]
+                    result_val = sum(row[j] * f_vals[j] for j in range(5))
+                    assert abs(result_val - 2) < 1e-13, (
+                        f"Poly exactness failed: row {i}, psi={psi_val}, "
+                        f"alpha={list(alpha_vals.values())}"
+                    )
+
+    def test_conservation_numeric(self, e2_1):
+        """Conservation psi*B[0,j]+sum B[i,j]=0 at j=3,4 with numeric values."""
+        _, stencil, ur, psi = e2_1
+        m = stencil.matrix
+        alphas = [
+            {s: 0 for s in ur.alpha_symbols},
+            dict(zip(ur.alpha_symbols, [Rational(1, 2), Rational(3, 10),
+                                         Rational(1, 5), Rational(1, 10)])),
+        ]
+        for alpha_vals in alphas:
+            for psi_val in [Rational(3, 10), Rational(1, 2), Rational(7, 10)]:
+                subs = {psi: psi_val, **alpha_vals}
+                for j in [3, 4]:
+                    col_sum = float(psi_val) * float(m[0, j].subs(subs))
+                    for i_row in range(1, 4):
+                        col_sum += float(m[i_row, j].subs(subs))
+                    assert abs(col_sum) < 1e-13, (
+                        f"Conservation col {j}, psi={psi_val}, "
+                        f"alpha={list(alpha_vals.values())}"
+                    )
+
+    def test_dirichlet_is_rows_1_3(self, e2_1):
+        """Dirichlet (3x5) = rows 1..3 of floating (4x5)."""
+        assembled, _, _, psi = e2_1
+        assert assembled.dirichlet.shape == (3, 5)
+        for i in range(3):
+            for j in range(5):
+                assert simplify(
+                    assembled.dirichlet[i, j] - assembled.floating[i + 1, j]
+                ) == 0, f"Dirichlet[{i},{j}] != Floating[{i+1},{j}]"
+
+    def test_degeneracy_psi0(self, e2_1):
+        """At psi=0, all 20 entries match B_d from 20.5c."""
+        _, stencil, ur, psi = e2_1
+        B_d = build_degenerate_stencil(ur.B_u, ur.interior, ur.p, ur.q, ur.nu)
+        m0 = stencil.matrix.subs(psi, 0)
+        for i in range(4):
+            for j in range(5):
+                assert simplify(m0[i, j] - B_d[i, j]) == 0, (
+                    f"Degenerate mismatch at [{i},{j}]"
+                )
+
+    def test_degeneracy_psi1(self, e2_1):
+        """At psi=1: wall=0 for boundary rows; near-interior row has Taylor+conservation."""
+        _, stencil, ur, psi = e2_1
+        m1 = stencil.matrix.subs(psi, 1)
+        # Wall column = 0 for boundary rows (1st derivative)
+        for i in range(3):
+            assert simplify(m1[i, 0]) == 0, f"Wall row {i} nonzero at psi=1"
+        # Near-interior row 3 satisfies Taylor accuracy
+        deltas = [Rational(-4), Rational(-3), Rational(-2), Rational(-1), Rational(0)]
+        row3 = [m1[3, j] for j in range(5)]
+        assert simplify(sum(row3)) == 0, "Row 3 k=0 at psi=1"
+        assert simplify(sum(row3[j] * deltas[j] for j in range(5)) - 1) == 0, (
+            "Row 3 k=1 at psi=1"
+        )
+        # Conservation at psi=1 (w_0=1): sum B[i,j] = 0 for interior cols
+        for j in [3, 4]:
+            col_sum = sum(m1[i, j] for i in range(4))
+            assert simplify(col_sum) == 0, f"Conservation col {j} at psi=1"
+
+    def test_conservation_symbolic(self, e2_1):
+        """Symbolic: sum w_i*B[i,j]=0 for j=3,4 (all psi, all alpha)."""
+        _, stencil, _, psi = e2_1
+        m = stencil.matrix
+        for j in [3, 4]:
+            col_sum = psi * m[0, j] + m[1, j] + m[2, j] + m[3, j]
+            assert simplify(col_sum) == 0, f"Conservation col {j}: {cancel(col_sum)}"
+
+
+# ---------------------------------------------------------------------------
+# 20.5h — E2_2 integration tests
+# ---------------------------------------------------------------------------
+
+
+class TestE2_2Integration:
+    """Integration tests for E2_2 cut-cell stencil (20.5h)."""
+
+    @pytest.fixture
+    def e2_2(self):
+        """Derive the full E2_2 cut-cell stencil with all BC variants."""
+        psi = Symbol("psi")
+        ur = derive_e2_uniform_boundary(nu=2)
+        floating_result = construct_cut_cell_stencil(
+            ur.B_u, ur.interior, ur.p, ur.q, ur.nu, 0, psi,
+        )
+        B_uN, eta_u = derive_uniform_neumann(
+            interior=ur.interior, p=ur.p, q=ur.q, nu=ur.nu,
+        )
+        neumann_main, eta = construct_neumann_stencil(
+            ur.B_u, B_uN, eta_u, ur.interior,
+            ur.p, ur.q, ur.nu, 0, psi,
+        )
+        dims = E2_2.dims()
+        assembled = assemble_cut_cell_result(
+            floating_result.matrix, neumann_main, eta, dims, [],
+        )
+        return assembled, neumann_main, eta, psi
+
+    # -- Dirichlet tests --
+
+    def test_dirichlet_psi0_left(self, e2_2):
+        """Dirichlet h=0.5, psi=0.0, left: C++ [4., 0., -8., 4.]."""
+        assembled, _, _, psi = e2_2
+        cpp_out = [4., 0., -8., 4.]
+        expected = to_h1_left(cpp_out, 0.5, nu=2, right=False)
+        actual = [
+            float(cancel(assembled.dirichlet[0, j].subs(psi, 0)))
+            for j in range(4)
+        ]
+        for k in range(4):
+            assert abs(actual[k] - expected[k]) < 1e-12, (
+                f"Dirichlet[{k}] = {actual[k]}, expected {expected[k]}"
+            )
+
+    def test_dirichlet_psi09_right(self, e2_2):
+        """Dirichlet h=0.5, psi=0.9, right: C++ data from E2_2.t.cpp line 48."""
+        assembled, _, _, psi = e2_2
+        cpp_out = [
+            0.5241379310344828, 2.610526315789474,
+            -7.2, 4.0653357531760435,
+        ]
+        expected = to_h1_left(cpp_out, 0.5, nu=2, right=True)
+        actual = [
+            float(cancel(assembled.dirichlet[0, j].subs(psi, Rational(9, 10))))
+            for j in range(4)
+        ]
+        for k in range(4):
+            assert abs(actual[k] - expected[k]) < 1e-12, (
+                f"Dirichlet[{k}] = {actual[k]}, expected {expected[k]}"
+            )
+
+    # -- Floating tests --
+
+    def test_floating_psi0_left(self, e2_2):
+        """Floating h=0.5, psi=0.0, left: C++ [0,4,-8,4,4,0,-8,4]."""
+        assembled, _, _, psi = e2_2
+        cpp_out = [0., 4., -8., 4., 4., 0., -8., 4.]
+        expected = to_h1_left(cpp_out, 0.5, nu=2, right=False)
+        actual = [
+            float(cancel(assembled.floating[i, j].subs(psi, 0)))
+            for i in range(2) for j in range(4)
+        ]
+        for k in range(8):
+            assert abs(actual[k] - expected[k]) < 1e-12, (
+                f"Floating[{k}] = {actual[k]}, expected {expected[k]}"
+            )
+
+    def test_floating_psi05_right(self, e2_2):
+        """Floating h=0.5, psi=0.5, right: C++ data from E2_2.t.cpp line 82."""
+        assembled, _, _, psi = e2_2
+        cpp_out = [
+            2.4, -2.6666666666666665, -4., 4.266666666666667,
+            3.25, -5.5, 0.25, 2.,
+        ]
+        expected = to_h1_left(cpp_out, 0.5, nu=2, right=True)
+        actual = [
+            float(cancel(assembled.floating[i, j].subs(psi, Rational(1, 2))))
+            for i in range(2) for j in range(4)
+        ]
+        for k in range(8):
+            assert abs(actual[k] - expected[k]) < 1e-12, (
+                f"Floating[{k}] = {actual[k]}, expected {expected[k]}"
+            )
+
+    # -- Neumann tests --
+
+    def test_neumann_x_count(self, e2_2):
+        """X=2 extra Neumann coefficients produced."""
+        assembled, _, eta, _ = e2_2
+        assert assembled.dims.X == 2
+        assert len(eta) == 2
+
+    def test_neumann_psi0_left(self, e2_2):
+        """Neumann h=0.5, psi=0.0, left: c=[-8,0,8,0,0,-8,8,0], x=[-4,-4]."""
+        _, neumann_main, eta, psi = e2_2
+        c_cpp = [-8., 0., 8., 0., 0., -8., 8., 0.]
+        x_cpp = [-4., -4.]
+        c_expected = to_h1_left(c_cpp, 0.5, nu=2, right=False)
+        x_expected = to_h1_left_eta(x_cpp, 0.5, right=False)
+        c_actual = [
+            float(cancel(neumann_main[i, j].subs(psi, 0)))
+            for i in range(2) for j in range(4)
+        ]
+        x_actual = [float(cancel(e.subs(psi, 0))) for e in eta]
+        for k in range(8):
+            assert abs(c_actual[k] - c_expected[k]) < 1e-12, (
+                f"c[{k}] = {c_actual[k]}, expected {c_expected[k]}"
+            )
+        for k in range(2):
+            assert abs(x_actual[k] - x_expected[k]) < 1e-12, (
+                f"x[{k}] = {x_actual[k]}, expected {x_expected[k]}"
+            )
+
+    def test_neumann_psi08_right(self, e2_2):
+        """Neumann h=0.5, psi=0.8, right: matches C++ E2_2.t.cpp line 105."""
+        _, neumann_main, eta, psi_sym = e2_2
+        c_cpp = [
+            -0.384, 4.928, -7.744, 3.2,
+            -0.45714285714285713, 2.311111111111111,
+            6.4, -8.253968253968255,
+        ]
+        x_cpp = [0.8, 4.]
+        c_expected = to_h1_left(c_cpp, 0.5, nu=2, right=True)
+        x_expected = to_h1_left_eta(x_cpp, 0.5, right=True)
+        c_actual = [
+            float(cancel(neumann_main[i, j].subs(psi_sym, Rational(4, 5))))
+            for i in range(2) for j in range(4)
+        ]
+        x_actual = [
+            float(cancel(e.subs(psi_sym, Rational(4, 5)))) for e in eta
+        ]
+        for k in range(8):
+            assert abs(c_actual[k] - c_expected[k]) < 1e-12, (
+                f"c[{k}] = {c_actual[k]}, expected {c_expected[k]}"
+            )
+        for k in range(2):
+            assert abs(x_actual[k] - x_expected[k]) < 1e-12, (
+                f"x[{k}] = {x_actual[k]}, expected {x_expected[k]}"
+            )
+
+    # -- No free parameters --
+
+    def test_no_free_parameters(self, e2_2):
+        """All E2_2 outputs are fully determined (no alpha symbols)."""
+        assembled, neumann_main, eta, psi = e2_2
+        for name, mat in [("floating", assembled.floating),
+                          ("dirichlet", assembled.dirichlet),
+                          ("neumann", assembled.neumann)]:
+            extra = mat.free_symbols - {psi}
+            assert not extra, f"{name} has unexpected symbols: {extra}"
+        for k, e in enumerate(eta):
+            extra = e.free_symbols - {psi}
+            assert not extra, f"eta[{k}] has unexpected symbols: {extra}"
+
+    # -- Conservation / polynomial exactness --
+
+    def test_conservation_polynomial_exactness(self, e2_2):
+        """f(x)=x^2 gives f''=2 for all rows at psi=0.0, 0.5, 0.8, 1.0."""
+        assembled, _, _, psi = e2_2
+        m = assembled.floating
+        for psi_val in [Rational(0), Rational(1, 2), Rational(4, 5), Rational(1)]:
+            # Grid: wall at -psi*h, x_j = j*h (h=1)
+            x_pts = [float(-psi_val)] + list(range(3))
+            f_vals = [xi ** 2 for xi in x_pts]
+            for i in range(2):
+                row = [
+                    float(cancel(m[i, j].subs(psi, psi_val)))
+                    for j in range(4)
+                ]
+                result_val = sum(row[j] * f_vals[j] for j in range(4))
+                assert abs(result_val - 2) < 1e-12, (
+                    f"Poly exactness: row {i}, psi={psi_val}: got {result_val}"
+                )
