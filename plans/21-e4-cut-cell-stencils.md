@@ -53,7 +53,7 @@ The SymPy pipeline (Phase 20) is complete with 231 passing tests and 7 modules:
 
 ### 21.0 — Fix `compute_dimensions` for E4 (prerequisite)
 
-- [ ] **21.0a** Fix `compute_dimensions()` in `scripts/stencil_gen/stencil_gen/temo.py`:
+- [x] **21.0a** Fix `compute_dimensions()` in `scripts/stencil_gen/stencil_gen/temo.py`:
   - The function already takes `p` as its first parameter (signature: `compute_dimensions(p, q, s, nextra, nu)`)
   - Change the code on line 59: replace `r = q + 1 + nextra` with `r = p + 1 + nextra` (per D-R25)
   - The column formula `t = p + q + 1 + nextra` on line 58 is correct and unchanged
