@@ -7,15 +7,23 @@ from sympy import Matrix, Rational, Symbol, cancel, simplify
 
 from stencil_gen.temo import (
     Dimensions,
+    RowSolveResult,
     SchemeParams,
+    StencilResult,
     UniformResult,
+    build_cut_cell_deltas,
     build_degenerate_stencil,
+    build_temo_vandermonde,
     compute_dimensions,
+    construct_cut_cell_stencil,
     decompose_alpha_terms,
     derive_e2_uniform_boundary,
     from_field_elem,
+    identify_prescribed_entries,
     make_psi_field,
     solve_in_field,
+    solve_temo_row,
+    solve_uniform_limit,
     to_field_elem,
     E2_1,
     E2_2,
@@ -697,3 +705,285 @@ class TestSolveInField:
         solve_in_field(V, rhs, K, symbols=[])
         elapsed = time.monotonic() - t0
         assert elapsed < 0.1, f"Solve took {elapsed:.3f}s, expected <0.01s"
+
+
+# ---------------------------------------------------------------------------
+# 20.5d — Cut-cell stencil construction tests
+# ---------------------------------------------------------------------------
+
+
+class TestBuildCutCellDeltas:
+    """Tests for build_cut_cell_deltas."""
+
+    def test_row_0_T5(self):
+        """Row 0, T=5: [-(psi+0), 0, 1, 2, 3] = [-psi, 0, 1, 2, 3]."""
+        psi = Symbol("psi")
+        d = build_cut_cell_deltas(0, 5, psi)
+        assert len(d) == 5
+        assert simplify(d[0] + psi) == 0
+        assert d[1] == 0
+        assert d[2] == 1
+        assert d[3] == 2
+        assert d[4] == 3
+
+    def test_row_1_T5(self):
+        """Row 1, T=5: [-(psi+1), -1, 0, 1, 2]."""
+        psi = Symbol("psi")
+        d = build_cut_cell_deltas(1, 5, psi)
+        assert simplify(d[0] + psi + 1) == 0
+        assert d[1] == -1
+        assert d[2] == 0
+
+    def test_row_3_T5(self):
+        """Row 3, T=5: [-(psi+3), -3, -2, -1, 0]."""
+        psi = Symbol("psi")
+        d = build_cut_cell_deltas(3, 5, psi)
+        assert simplify(d[0] + psi + 3) == 0
+        assert d[1] == -3
+        assert d[4] == 0
+
+
+class TestBuildTemoVandermonde:
+    """Tests for build_temo_vandermonde."""
+
+    def test_e2_1_row_0_shape(self):
+        """E2_1 row 0: n_eqs=2, T=5 → V is 2x5, rhs is 2x1."""
+        psi = Symbol("psi")
+        V, rhs = build_temo_vandermonde(0, 5, q=1, nu=1, psi=psi)
+        assert V.shape == (2, 5)
+        assert rhs.shape == (2, 1)
+
+    def test_e2_1_row_0_values(self):
+        """E2_1 row 0: matches worked example from plan.
+
+        V = | 1       1    1    1    1  |     rhs = | 0 |
+            | -psi    0    1    2    3  |           | 1 |
+        """
+        psi = Symbol("psi")
+        V, rhs = build_temo_vandermonde(0, 5, q=1, nu=1, psi=psi)
+        # Row 0 (k=0): all ones
+        for j in range(5):
+            assert V[0, j] == 1 or simplify(V[0, j] - 1) == 0
+        # Row 1 (k=1): deltas
+        assert simplify(V[1, 0] + psi) == 0  # -psi
+        assert V[1, 1] == 0
+        assert V[1, 2] == 1
+        assert V[1, 3] == 2
+        assert V[1, 4] == 3
+        assert rhs[0, 0] == 0
+        assert rhs[1, 0] == 1
+
+    def test_e2_2_row_0_shape(self):
+        """E2_2 row 0: n_eqs=max(2,3)=3, T=4 → V is 3x4."""
+        psi = Symbol("psi")
+        V, rhs = build_temo_vandermonde(0, 4, q=1, nu=2, psi=psi)
+        assert V.shape == (3, 4)
+        assert rhs == Matrix([[0], [0], [1]])
+
+
+class TestSolveUniformLimit:
+    """Tests for solve_uniform_limit (B_l(1))."""
+
+    def test_e2_2_matches_expected(self):
+        """E2_2 B_l(1) = [[1, -2, 1, 0], [1, -2, 1, 0]]."""
+        ur = derive_e2_uniform_boundary(nu=2)
+        B_l_1 = solve_uniform_limit(ur.B_u, ur.interior, ur.p, ur.q, ur.nu, 0)
+        expected = Matrix([[1, -2, 1, 0], [1, -2, 1, 0]])
+        assert B_l_1 == expected
+
+    def test_e2_1_shape(self):
+        """E2_1 B_l(1) has shape (4, 5)."""
+        ur = derive_e2_uniform_boundary(nu=1)
+        B_l_1 = solve_uniform_limit(ur.B_u, ur.interior, ur.p, ur.q, ur.nu, 1)
+        assert B_l_1.shape == (4, 5)
+
+    def test_e2_1_wall_zero_boundary_rows(self):
+        """E2_1: wall (col 0) = 0 for all boundary rows (nu=1)."""
+        ur = derive_e2_uniform_boundary(nu=1)
+        B_l_1 = solve_uniform_limit(ur.B_u, ur.interior, ur.p, ur.q, ur.nu, 1)
+        for i in range(3):
+            assert B_l_1[i, 0] == 0
+
+    def test_e2_1_boundary_cols_match_Bu(self):
+        """E2_1: boundary rows cols 1..4 match B_u cols 0..3."""
+        ur = derive_e2_uniform_boundary(nu=1)
+        B_l_1 = solve_uniform_limit(ur.B_u, ur.interior, ur.p, ur.q, ur.nu, 1)
+        for i in range(3):
+            for j in range(4):
+                assert simplify(B_l_1[i, j + 1] - ur.B_u[i, j]) == 0
+
+    def test_e2_1_near_interior_taylor(self):
+        """E2_1: near-interior row (row 3) satisfies Taylor at psi=1."""
+        ur = derive_e2_uniform_boundary(nu=1)
+        B_l_1 = solve_uniform_limit(ur.B_u, ur.interior, ur.p, ur.q, ur.nu, 1)
+        deltas = [Rational(-4), Rational(-3), Rational(-2), Rational(-1), Rational(0)]
+        row = [B_l_1[3, j] for j in range(5)]
+        # k=0: sum = 0
+        assert simplify(sum(row)) == 0
+        # k=1: weighted sum = 1
+        assert simplify(sum(row[j] * deltas[j] for j in range(5)) - 1) == 0
+
+    def test_e2_1_conservation_cols(self):
+        """E2_1: conservation at psi=1 for cols 2,3,4."""
+        ur = derive_e2_uniform_boundary(nu=1)
+        B_l_1 = solve_uniform_limit(ur.B_u, ur.interior, ur.p, ur.q, ur.nu, 1)
+        for j in [2, 3, 4]:
+            col_sum = sum(B_l_1[i, j] for i in range(4))
+            assert simplify(col_sum) == 0, f"Conservation failed at col {j}"
+
+
+class TestConstructCutCellStencil:
+    """Tests for construct_cut_cell_stencil (20.5d)."""
+
+    def test_e2_2_shape_and_no_betas(self):
+        """E2_2: 2x4 matrix, no beta parameters."""
+        psi = Symbol("psi")
+        ur = derive_e2_uniform_boundary(nu=2)
+        result = construct_cut_cell_stencil(
+            ur.B_u, ur.interior, ur.p, ur.q, ur.nu, 0, psi
+        )
+        assert result.matrix.shape == (2, 4)
+        assert len(result.beta_info) == 0
+        assert len(result.beta_symbols) == 0
+
+    def test_e2_2_coefficients_match_cpp(self):
+        """E2_2 floating coefficients match E2_2.cpp exactly.
+
+        C++ (pre-h^2 scaling, left boundary):
+        c[0] = psi
+        c[1] = (2 - 2*psi - 3*psi^2 - psi^3) / 2
+        c[2] = -2 + 2*psi^2 + psi^3
+        c[3] = (2 - psi^2 - psi^3) / 2
+        c[4] = (2 + 4*psi) / (2 + 3*psi + psi^2)
+        c[5] = -2*psi
+        c[6] = (-2 + 4*psi^2) / (1 + psi)
+        c[7] = (2 - 2*psi^2) / (2 + psi)
+        """
+        psi = Symbol("psi")
+        ur = derive_e2_uniform_boundary(nu=2)
+        result = construct_cut_cell_stencil(
+            ur.B_u, ur.interior, ur.p, ur.q, ur.nu, 0, psi
+        )
+        m = result.matrix
+        expected = [
+            psi,
+            (2 - 2 * psi - 3 * psi**2 - psi**3) / 2,
+            -2 + 2 * psi**2 + psi**3,
+            (2 - psi**2 - psi**3) / 2,
+            (2 + 4 * psi) / (2 + 3 * psi + psi**2),
+            -2 * psi,
+            (-2 + 4 * psi**2) / (1 + psi),
+            (2 - 2 * psi**2) / (2 + psi),
+        ]
+        for i in range(2):
+            for j in range(4):
+                idx = i * 4 + j
+                assert simplify(m[i, j] - expected[idx]) == 0, (
+                    f"Mismatch at c[{idx}]: {cancel(m[i, j])} != {expected[idx]}"
+                )
+
+    def test_e2_2_degenerate_limit(self):
+        """E2_2 at psi=0 matches degenerate: [[0,1,-2,1],[1,0,-2,1]]."""
+        psi = Symbol("psi")
+        ur = derive_e2_uniform_boundary(nu=2)
+        result = construct_cut_cell_stencil(
+            ur.B_u, ur.interior, ur.p, ur.q, ur.nu, 0, psi
+        )
+        m0 = result.matrix.subs(psi, 0)
+        expected = Matrix([[0, 1, -2, 1], [1, 0, -2, 1]])
+        assert m0 == expected
+
+    def test_e2_2_uniform_limit(self):
+        """E2_2 at psi=1 matches uniform: [[1,-2,1,0],[1,-2,1,0]]."""
+        psi = Symbol("psi")
+        ur = derive_e2_uniform_boundary(nu=2)
+        result = construct_cut_cell_stencil(
+            ur.B_u, ur.interior, ur.p, ur.q, ur.nu, 0, psi
+        )
+        m1 = result.matrix.subs(psi, 1)
+        expected = Matrix([[1, -2, 1, 0], [1, -2, 1, 0]])
+        assert m1 == expected
+
+    def test_e2_2_floating_psi05_right_boundary(self):
+        """E2_2 floating at psi=0.5, h=0.5, right boundary matches C++.
+
+        C++ right boundary output (after /h^2):
+        [2.4, -2.6666..., -4.0, 4.2666..., 3.25, -5.5, 0.25, 2.0]
+
+        To recover left boundary h=1 values: reverse the flat array, then * h^2.
+        """
+        psi = Symbol("psi")
+        ur = derive_e2_uniform_boundary(nu=2)
+        result = construct_cut_cell_stencil(
+            ur.B_u, ur.interior, ur.p, ur.q, ur.nu, 0, psi
+        )
+        h = Rational(1, 2)
+        # Left boundary /h^2 values
+        left_div_h2 = []
+        for i in range(2):
+            for j in range(4):
+                left_div_h2.append(
+                    float(result.matrix[i, j].subs(psi, Rational(1, 2)) / h**2)
+                )
+        # C++ right boundary = reversed left boundary (nu=2, no negation)
+        cpp_right = [2.4, -2.6666666666666665, -4.0, 4.266666666666667,
+                     3.25, -5.5, 0.25, 2.0]
+        cpp_left = list(reversed(cpp_right))
+        for k in range(8):
+            assert abs(left_div_h2[k] - cpp_left[k]) < 1e-12, (
+                f"c[{k}]: {left_div_h2[k]} != {cpp_left[k]}"
+            )
+
+    def test_e2_1_shape_and_betas(self):
+        """E2_1: 4x5 matrix, 8 beta parameters (2 per row)."""
+        psi = Symbol("psi")
+        ur = derive_e2_uniform_boundary(nu=1)
+        result = construct_cut_cell_stencil(
+            ur.B_u, ur.interior, ur.p, ur.q, ur.nu, 1, psi
+        )
+        assert result.matrix.shape == (4, 5)
+        assert len(result.beta_info) == 8
+        assert len(result.beta_symbols) == 8
+        # Each row has 2 betas at cols 3 and 4
+        for row_idx in range(4):
+            row_betas = [(r, c, s) for r, c, s in result.beta_info if r == row_idx]
+            assert len(row_betas) == 2
+            assert row_betas[0][1] == 3
+            assert row_betas[1][1] == 4
+
+    def test_e2_1_entries_in_psi_alpha_beta(self):
+        """E2_1: all matrix entries are rational in psi, linear in alpha+beta."""
+        psi = Symbol("psi")
+        ur = derive_e2_uniform_boundary(nu=1)
+        result = construct_cut_cell_stencil(
+            ur.B_u, ur.interior, ur.p, ur.q, ur.nu, 1, psi
+        )
+        # Check that all free symbols are psi, alpha_0..3, beta_*
+        all_syms = result.matrix.free_symbols
+        expected_names = {"psi"} | {f"alpha_{k}" for k in range(4)} | {
+            f"beta_{i}_{k}" for i in range(4) for k in range(2)
+        }
+        actual_names = {s.name for s in all_syms}
+        assert actual_names <= expected_names, (
+            f"Unexpected symbols: {actual_names - expected_names}"
+        )
+
+    def test_e2_2_taylor_accuracy_per_row(self):
+        """E2_2: each row satisfies Taylor accuracy for all psi."""
+        psi = Symbol("psi")
+        ur = derive_e2_uniform_boundary(nu=2)
+        result = construct_cut_cell_stencil(
+            ur.B_u, ur.interior, ur.p, ur.q, ur.nu, 0, psi
+        )
+        m = result.matrix
+        for i in range(2):
+            deltas = build_cut_cell_deltas(i, 4, psi)
+            row = [m[i, j] for j in range(4)]
+            # k=0: sum = 0
+            assert simplify(sum(row)) == 0, f"Row {i} k=0 failed"
+            # k=1: sum * delta = 0
+            s1 = sum(row[j] * deltas[j] for j in range(4))
+            assert simplify(s1) == 0, f"Row {i} k=1 failed"
+            # k=2: sum * delta^2/2 = 1
+            s2 = sum(row[j] * deltas[j] ** 2 / 2 for j in range(4))
+            assert simplify(s2 - 1) == 0, f"Row {i} k=2 failed"

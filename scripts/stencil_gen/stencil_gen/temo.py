@@ -617,3 +617,470 @@ def solve_in_field(V_sympy: Matrix, rhs_sympy: Matrix, K, symbols: list[Symbol])
         result.append(expr)
 
     return result
+
+
+# ---------------------------------------------------------------------------
+# 20.5d — B_l(psi) general cut-cell stencil construction
+# ---------------------------------------------------------------------------
+
+
+def build_cut_cell_deltas(i: int, T: int, psi) -> list:
+    """Build the T normalized deltas from row centre x_i for the cut-cell grid.
+
+    Parameters
+    ----------
+    i : int
+        Row index (grid point).
+    T : int
+        Total number of columns (including wall).
+    psi : Symbol or Expr
+        Fractional wall position.
+
+    Returns
+    -------
+    list of length T
+        ``[-(psi+i), -i, 1-i, 2-i, ..., (T-2)-i]``
+    """
+    return [-(psi + i)] + [Rational(j - i) for j in range(T - 1)]
+
+
+def build_temo_vandermonde(i: int, T: int, q: int, nu: int, psi) -> tuple:
+    """Build the non-uniform Vandermonde Taylor system for cut-cell row *i*.
+
+    Parameters
+    ----------
+    i : int
+        Row centre index.
+    T : int
+        Number of columns (including wall).
+    q : int
+        Boundary accuracy order.
+    nu : int
+        Derivative order.
+    psi : Symbol or Expr
+        Fractional wall position.
+
+    Returns
+    -------
+    (V, rhs) where V is n_eqs x T, rhs is n_eqs x 1.
+    n_eqs = max(q+1, nu+1).
+    """
+    n_eqs = max(q + 1, nu + 1)
+    deltas = build_cut_cell_deltas(i, T, psi)
+    V = Matrix(
+        n_eqs,
+        T,
+        lambda k, j: deltas[j] ** k / factorial(k),
+    )
+    rhs = Matrix(n_eqs, 1, lambda k, _: Rational(1) if k == nu else Rational(0))
+    return V, rhs
+
+
+@dataclass
+class RowSolveResult:
+    """Result of solving a single TEMO row.
+
+    Attributes
+    ----------
+    coeffs : list
+        Length-T list of SymPy expressions (rational in psi, linear in
+        alpha + beta symbols).
+    beta_info : list[tuple[int, Symbol]]
+        ``(col_index, beta_symbol)`` pairs for underdetermined columns.
+        Empty for fully determined rows.
+    """
+
+    coeffs: list
+    beta_info: list
+
+
+@dataclass
+class StencilResult:
+    """Result of the full cut-cell stencil construction.
+
+    Attributes
+    ----------
+    matrix : Matrix
+        R x T SymPy Matrix of coefficients.
+    beta_info : list[tuple[int, int, Symbol]]
+        ``(row, col, symbol)`` for every beta parameter.
+    beta_symbols : list[Symbol]
+        All unique beta symbols (flat list).
+    """
+
+    matrix: Matrix
+    beta_info: list
+    beta_symbols: list
+
+
+def _zeroed_col_for_row(i: int, nu: int) -> int:
+    """Return the column index zeroed by the variant for row *i*.
+
+    For nu=1 (1st derivative): x_0 (col 1) is zeroed for ALL rows.
+    For nu=2 (2nd derivative): wall (col 0) for row 0, x_0 (col 1) for rows >= 1.
+    """
+    if nu == 1:
+        return 1
+    elif nu == 2:
+        return 0 if i == 0 else 1
+    else:
+        raise ValueError(f"Unsupported nu={nu}")
+
+
+def solve_uniform_limit(
+    B_u: Matrix,
+    interior: list,
+    p: int,
+    q: int,
+    nu: int,
+    nextra: int,
+) -> Matrix:
+    """Solve for B_l(1) — the cut-cell stencil at psi=1 (uniform limit).
+
+    Returns the R x T matrix where R = r_eff + 1, T = t + 1.
+    This is needed to provide Category A target values for the near-interior
+    row in the general psi solve.
+
+    Parameters
+    ----------
+    B_u : Matrix
+        r_eff x t uniform boundary coefficient matrix.
+    interior : list
+        Interior stencil coefficients (length 2*p+1).
+    p : int
+        Interior half-width.
+    q : int
+        Boundary accuracy order.
+    nu : int
+        Derivative order.
+    nextra : int
+        Extra rows/columns for optimization.
+
+    Returns
+    -------
+    Matrix
+        R x T matrix of coefficients at psi=1.
+    """
+    r = B_u.rows  # r_eff
+    t = B_u.cols
+    R = r + 1
+    T = t + 1
+    n_eqs = max(q + 1, nu + 1)
+
+    B_l_1 = Matrix.zeros(R, T)
+
+    # Step 1: Boundary rows (i = 0..r-1)
+    # Two cases based on which column is zeroed at psi=0:
+    # (a) x_0 zeroed (nu=1 all rows, nu=2 rows>=1):
+    #     Simple embedding: cols 1..T-1 = B_u[i, 0..t-1], wall = 0.
+    #     At psi=1 Category A gives x_0 = B_u[i,0] (already embedded).
+    # (b) wall zeroed (nu=2 row 0):
+    #     Category A prescribes wall = B_u[i,0] at psi=1. The remaining
+    #     columns must be solved from the Taylor system (not just B_u shifted).
+    for i in range(r):
+        zeroed = _zeroed_col_for_row(i, nu)
+        if zeroed == 0:
+            # Wall-zeroed variant: prescribe wall = B_u[i,0], solve for rest.
+            B_l_1[i, 0] = B_u[i, 0]
+            deltas_i = [Rational(-(1 + i))] + [Rational(j - i) for j in range(t)]
+            V_i = Matrix(
+                n_eqs, T,
+                lambda k, j: Rational(deltas_i[j] ** k, factorial(k)),
+            )
+            rhs_i = Matrix(
+                n_eqs, 1, lambda k, _: Rational(1) if k == nu else Rational(0)
+            )
+            # Move wall column to RHS
+            rhs_adj = rhs_i.copy()
+            for k in range(n_eqs):
+                rhs_adj[k, 0] -= V_i[k, 0] * B_l_1[i, 0]
+            # Solve for cols 1..T-1
+            V_rem = V_i[:, 1:]
+            sol_i = V_rem.solve(rhs_adj)
+            for j in range(t):
+                B_l_1[i, j + 1] = sol_i[j]
+        else:
+            # x_0-zeroed variant: simple embedding, wall = 0.
+            for j in range(t):
+                B_l_1[i, j + 1] = B_u[i, j]
+            B_l_1[i, 0] = Rational(0)
+
+    # Step 2-4: Near-interior row (row r)
+    # Build Taylor system at psi=1: deltas = [-(1+r), -r, 1-r, ..., t-1-r]
+    deltas = [Rational(-(1 + r))] + [Rational(j - r) for j in range(t)]
+    V_full = Matrix(
+        n_eqs,
+        T,
+        lambda k, j: Rational(deltas[j] ** k, factorial(k)),
+    )
+    rhs_full = Matrix(
+        n_eqs, 1, lambda k, _: Rational(1) if k == nu else Rational(0)
+    )
+
+    # Step 3: Conservation at psi=1 (all weights = 1).
+    # sum_{i=0}^{R-1} B_l(1)[i, j] = 0 for interior columns in the
+    # boundary block. A T-frame column j is conserved if:
+    #   (a) no interior stencil reaches it: j-1 < R-p, i.e. j <= R-p, OR
+    #   (b) uniform conservation applies: j >= p+2 (mapped from uniform j_u >= p+1)
+    # Skip wall (col 0) and x_0 (col 1) which have boundary terms.
+    fixed_cols: set[int] = set()
+    for j in range(2, T):
+        if not (j <= R - p or j >= p + 2):
+            continue
+        val = -sum(B_l_1[i, j] for i in range(r))
+        B_l_1[r, j] = val
+        fixed_cols.add(j)
+
+    # Unknowns: all non-fixed columns
+    unknown_cols = [j for j in range(T) if j not in fixed_cols]
+
+    # Step 4: Solve Taylor system for remaining unknowns.
+    rhs_reduced = rhs_full.copy()
+    for k in range(n_eqs):
+        for j in fixed_cols:
+            rhs_reduced[k, 0] -= V_full[k, j] * B_l_1[r, j]
+
+    V_reduced = Matrix(
+        n_eqs, len(unknown_cols), lambda k, uj: V_full[k, unknown_cols[uj]]
+    )
+
+    n_unk = len(unknown_cols)
+    if n_unk <= n_eqs:
+        V_sq = V_reduced[:n_unk, :]
+        rhs_sq = rhs_reduced[:n_unk, :]
+        sol = V_sq.solve(rhs_sq)
+
+        for k in range(n_unk, n_eqs):
+            res = sum(V_reduced[k, uj] * sol[uj] for uj in range(n_unk))
+            res -= rhs_reduced[k, 0]
+            if cancel(res) != 0:
+                raise RuntimeError(
+                    f"Inconsistent uniform-limit system at equation {k}"
+                )
+    else:
+        raise ValueError(
+            f"Underdetermined uniform-limit row r: {n_unk} unknowns, "
+            f"{n_eqs} equations"
+        )
+
+    for uj, j in enumerate(unknown_cols):
+        B_l_1[r, j] = sol[uj]
+
+    return B_l_1
+
+
+def identify_prescribed_entries(
+    i: int,
+    r: int,
+    t: int,
+    nextra: int,
+    nu: int,
+    B_u: Matrix,
+    B_l_1: Matrix,
+    psi,
+) -> dict:
+    """Identify Category A and B prescribed entries for row *i*.
+
+    Parameters
+    ----------
+    i : int
+        Row index (0 to R-1).
+    r : int
+        Number of uniform boundary rows (r_eff).
+    t : int
+        Uniform stencil width.
+    nextra : int
+        Extra rows/columns.
+    nu : int
+        Derivative order.
+    B_u : Matrix
+        r_eff x t uniform boundary matrix.
+    B_l_1 : Matrix
+        R x T uniform limit matrix from ``solve_uniform_limit``.
+    psi : Symbol
+        The psi symbol.
+
+    Returns
+    -------
+    dict[int, Expr]
+        ``{col_index: expr(psi)}`` for all prescribed columns.
+    """
+    prescribed: dict = {}
+    zeroed = _zeroed_col_for_row(i, nu)
+
+    # Category A: zeroed column
+    if i < r:
+        # Boundary row — target is alpha^u_{i,0}
+        target = B_u[i, 0]
+    else:
+        # Near-interior row — target from B_l(1)
+        target = B_l_1[i, zeroed]
+
+    prescribed[zeroed] = psi * target
+
+    # Category B entries (nextra > 0) are not prescribed here — underdetermined
+    # rows instead introduce beta symbols in solve_temo_row, and the excess
+    # degrees of freedom are resolved by conservation in 20.5e Phase 2.
+
+    return prescribed
+
+
+def solve_temo_row(
+    i: int,
+    V: Matrix,
+    rhs: Matrix,
+    prescribed: dict,
+    psi,
+    K,
+    symbols: list,
+    beta_prefix: str = "beta",
+) -> RowSolveResult:
+    """Solve a single TEMO row, handling underdetermined systems via betas.
+
+    Parameters
+    ----------
+    i : int
+        Row index.
+    V : Matrix
+        n_eqs x T Vandermonde matrix.
+    rhs : Matrix
+        n_eqs x 1 RHS vector.
+    prescribed : dict[int, Expr]
+        Prescribed column entries ``{col: expr(psi)}``.
+    psi : Symbol
+        The psi symbol.
+    K : FractionField
+        QQ(psi) field.
+    symbols : list[Symbol]
+        Non-psi symbols (alpha from B_u) that may appear in prescribed values.
+    beta_prefix : str
+        Prefix for new beta symbols.
+
+    Returns
+    -------
+    RowSolveResult
+    """
+    n_eqs = V.rows
+    T = V.cols
+
+    # Move prescribed columns to RHS
+    rhs_adj = rhs.copy()
+    for j, val in prescribed.items():
+        for k in range(n_eqs):
+            rhs_adj[k, 0] -= V[k, j] * val
+
+    # Identify free columns (not prescribed)
+    free_cols = sorted(j for j in range(T) if j not in prescribed)
+    n_free = len(free_cols)
+
+    beta_info: list[tuple[int, Symbol]] = []
+    all_symbols = list(symbols)
+
+    if n_free > n_eqs:
+        # Underdetermined: introduce beta symbols for excess columns
+        n_excess = n_free - n_eqs
+        # Beta columns = last n_excess free columns (highest indices)
+        beta_cols = free_cols[-n_excess:]
+        solve_cols = free_cols[:n_eqs]
+
+        for k, bc in enumerate(beta_cols):
+            beta_sym = Symbol(f"{beta_prefix}_{i}_{k}")
+            beta_info.append((bc, beta_sym))
+            all_symbols.append(beta_sym)
+            # Move beta column to RHS
+            for row_k in range(n_eqs):
+                rhs_adj[row_k, 0] -= V[row_k, bc] * beta_sym
+    elif n_free == n_eqs:
+        solve_cols = free_cols
+    else:
+        raise ValueError(
+            f"Overdetermined TEMO row {i}: {n_free} free cols, {n_eqs} equations"
+        )
+
+    # Build square Vandermonde for solve columns
+    V_sq = Matrix(n_eqs, n_eqs, lambda k, uj: V[k, solve_cols[uj]])
+
+    # Solve using solve_in_field
+    sol = solve_in_field(V_sq, rhs_adj, K, all_symbols)
+
+    # Assemble full coefficient vector
+    coeffs = [Rational(0)] * T
+    for j, val in prescribed.items():
+        coeffs[j] = val
+    for uj, j in enumerate(solve_cols):
+        coeffs[j] = sol[uj]
+    for bc, beta_sym in beta_info:
+        coeffs[bc] = beta_sym
+
+    return RowSolveResult(coeffs=coeffs, beta_info=beta_info)
+
+
+def construct_cut_cell_stencil(
+    B_u: Matrix,
+    interior: list,
+    p: int,
+    q: int,
+    nu: int,
+    nextra: int,
+    psi: Symbol,
+) -> StencilResult:
+    """Construct the psi-parameterized cut-cell stencil B_l(psi).
+
+    This is the central TEMO procedure: produces an R x T matrix of
+    rational functions of psi (and alpha/beta symbols).
+
+    Parameters
+    ----------
+    B_u : Matrix
+        r_eff x t uniform boundary coefficient matrix.
+    interior : list
+        Interior stencil coefficients.
+    p : int
+        Interior half-width.
+    q : int
+        Boundary accuracy order.
+    nu : int
+        Derivative order.
+    nextra : int
+        Extra rows/columns.
+    psi : Symbol
+        The psi symbol.
+
+    Returns
+    -------
+    StencilResult
+    """
+    r = B_u.rows
+    R = r + 1
+    T = B_u.cols + 1
+
+    K, _ = make_psi_field(psi)
+
+    # Collect alpha symbols from B_u
+    alpha_syms = sorted(B_u.free_symbols, key=lambda s: s.name)
+
+    # Step 0: Solve at psi=1 to get target values
+    B_l_1 = solve_uniform_limit(B_u, interior, p, q, nu, nextra)
+
+    # Solve each row
+    all_beta_info: list[tuple[int, int, Symbol]] = []
+    all_beta_symbols: list[Symbol] = []
+    rows: list[list] = []
+
+    for i in range(R):
+        V, rhs_vec = build_temo_vandermonde(i, T, q, nu, psi)
+        prescribed = identify_prescribed_entries(
+            i, r, B_u.cols, nextra, nu, B_u, B_l_1, psi
+        )
+        result = solve_temo_row(
+            i, V, rhs_vec, prescribed, psi, K, alpha_syms, beta_prefix="beta"
+        )
+        rows.append(result.coeffs)
+        for col, sym in result.beta_info:
+            all_beta_info.append((i, col, sym))
+            all_beta_symbols.append(sym)
+
+    matrix = Matrix(rows)
+    return StencilResult(
+        matrix=matrix, beta_info=all_beta_info, beta_symbols=all_beta_symbols
+    )
