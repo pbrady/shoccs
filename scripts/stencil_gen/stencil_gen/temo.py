@@ -277,6 +277,144 @@ def derive_e2_uniform_boundary(
 
 
 # ---------------------------------------------------------------------------
+# 20.5c — Degenerate stencil B^d_l (psi=0 limit)
+# ---------------------------------------------------------------------------
+
+
+def build_degenerate_stencil(
+    B_u: Matrix, interior_coeffs: list, p: int, q: int, nu: int
+) -> Matrix:
+    """Build the degenerate (psi=0) stencil B^d_l.
+
+    At psi=0 the wall point coincides with x_0. The degenerate stencil is an
+    (r+1) x (t+1) matrix that satisfies Design Principles 1 and 2 from
+    Brady & Livescu (2021).
+
+    Parameters
+    ----------
+    B_u : Matrix
+        r_eff x t uniform boundary coefficient matrix from
+        ``derive_e2_uniform_boundary``.
+    interior_coeffs : list
+        Interior stencil coefficients (length 2*p+1), as Rational values.
+    p : int
+        Interior half-width.
+    q : int
+        Boundary accuracy order.
+    nu : int
+        Derivative order (1 or 2).
+
+    Returns
+    -------
+    Matrix
+        (r_eff + 1) x (t + 1) degenerate stencil matrix.
+        Column layout: [wall, x_0, x_1, ..., x_{t-1}].
+    """
+    r = B_u.rows  # r_eff
+    t = B_u.cols
+    R = r + 1
+    T = t + 1
+    n_eqs = max(q + 1, nu + 1)
+
+    B_d = Matrix.zeros(R, T)
+
+    # --- Rows 0..r-1: Design Principles 1 and 2 ---
+    for i in range(r):
+        # DP1: B_u cols 1..t-1 map to B_d cols 2..T-1
+        for j in range(1, t):
+            B_d[i, j + 1] = B_u[i, j]
+
+        # DP2: split B_u[i,0] between wall (col 0) and x_0 (col 1)
+        if nu == 1:
+            # B^{d,2}: all rows — wall gets full weight, x_0 zeroed
+            B_d[i, 0] = B_u[i, 0]
+            B_d[i, 1] = Rational(0)
+        elif nu == 2:
+            if i == 0:
+                # B^{d,1} row 0: wall zeroed, x_0 gets full weight
+                B_d[i, 0] = Rational(0)
+                B_d[i, 1] = B_u[i, 0]
+            else:
+                # B^{d,1} rows >= 1: wall gets full weight, x_0 zeroed
+                B_d[i, 0] = B_u[i, 0]
+                B_d[i, 1] = Rational(0)
+        else:
+            raise ValueError(f"Unsupported derivative order nu={nu}")
+
+    # --- Row r (near-interior): 3-step algorithm ---
+
+    # Step 1: zero variant column
+    # nu=1: x_0 (col 1) zeroed for all rows including near-interior
+    # nu=2: x_0 (col 1) zeroed for rows >= 1 (near-interior is row r >= 1)
+    zeroed_col = 1
+    B_d[r, zeroed_col] = Rational(0)
+
+    # Step 2: conservation at psi=0 (fixes interior columns when r >= 2)
+    # At psi=0, w_0=0 so row 0 drops out:
+    #   sum_{i=1}^{R-1} B^d[i,j] = 0 for interior columns
+    # => B^d[r,j] = -sum_{i=1}^{r-1} B^d[i,j]
+    # Interior columns in the cut-cell frame start at p+2 (uniform frame
+    # interior cols p+1,...,t-1 shifted by +1 for the wall column).
+    fixed_cols: set[int] = set()
+    if r >= 2:
+        for j in range(p + 2, T):
+            val = -sum(B_d[i, j] for i in range(1, r))
+            B_d[r, j] = val
+            fixed_cols.add(j)
+
+    # Step 3: Taylor solve for remaining unknowns
+    # At psi=0, wall and x_0 coincide at the same position.
+    # Deltas from row r centered at x_r: [-r, -r, 1-r, 2-r, ..., t-1-r]
+    deltas = [Rational(-r)] * 2 + [Rational(j - r) for j in range(1, t)]
+
+    # Identify unknown columns (not zeroed, not fixed by conservation)
+    known_cols = {zeroed_col} | fixed_cols
+    unknown_cols = [j for j in range(T) if j not in known_cols]
+    n_unk = len(unknown_cols)
+
+    # Build RHS
+    rhs = Matrix(n_eqs, 1, lambda k, _: Rational(1) if k == nu else Rational(0))
+
+    # Move known columns to RHS
+    for k in range(n_eqs):
+        for j in known_cols:
+            rhs[k, 0] -= Rational(deltas[j] ** k, factorial(k)) * B_d[r, j]
+
+    # Build Vandermonde for unknown columns
+    V = Matrix(
+        n_eqs,
+        n_unk,
+        lambda k, uj: Rational(deltas[unknown_cols[uj]] ** k, factorial(k)),
+    )
+
+    # Solve (may be overdetermined or exactly determined)
+    if n_unk <= n_eqs:
+        # Use square subsystem if overdetermined
+        V_sq = V[:n_unk, :]
+        rhs_sq = rhs[:n_unk, :]
+        sol = V_sq.solve(rhs_sq)
+
+        # Verify remaining equations for consistency
+        for k in range(n_unk, n_eqs):
+            residual = sum(V[k, uj] * sol[uj] for uj in range(n_unk)) - rhs[k, 0]
+            if cancel(residual) != 0:
+                raise RuntimeError(
+                    f"Overdetermined system inconsistent at equation {k}: "
+                    f"residual = {residual}"
+                )
+    else:
+        raise ValueError(
+            f"Underdetermined near-interior row: {n_unk} unknowns, "
+            f"{n_eqs} equations. Conservation should fix more columns."
+        )
+
+    for uj, j in enumerate(unknown_cols):
+        B_d[r, j] = sol[uj]
+
+    return B_d
+
+
+# ---------------------------------------------------------------------------
 # 20.5e Phase 1 — QQ(psi) field utilities and linear solve
 # ---------------------------------------------------------------------------
 

@@ -9,6 +9,7 @@ from stencil_gen.temo import (
     Dimensions,
     SchemeParams,
     UniformResult,
+    build_degenerate_stencil,
     compute_dimensions,
     decompose_alpha_terms,
     derive_e2_uniform_boundary,
@@ -184,6 +185,170 @@ class TestUniformBoundary:
         """Unsupported nu raises ValueError."""
         with pytest.raises(ValueError, match="nu=3"):
             derive_e2_uniform_boundary(nu=3)
+
+
+class TestDegenerateStencil:
+    """Tests for build_degenerate_stencil (20.5c)."""
+
+    def test_e2_1_shape(self):
+        """E2_1 degenerate stencil has shape (4, 5)."""
+        result = derive_e2_uniform_boundary(nu=1)
+        B_d = build_degenerate_stencil(
+            result.B_u, result.interior, result.p, result.q, result.nu
+        )
+        assert B_d.shape == (4, 5)
+
+    def test_e2_1_x0_column_all_zero(self):
+        """E2_1 (nu=1): x_0 column (col 1) is all zeros."""
+        result = derive_e2_uniform_boundary(nu=1)
+        B_d = build_degenerate_stencil(
+            result.B_u, result.interior, result.p, result.q, result.nu
+        )
+        for i in range(4):
+            assert B_d[i, 1] == 0, f"B_d[{i}, 1] = {B_d[i, 1]}, expected 0"
+
+    def test_e2_1_boundary_rows_dp1(self):
+        """E2_1: boundary rows cols 2..4 match B_u cols 1..3."""
+        result = derive_e2_uniform_boundary(nu=1)
+        B_d = build_degenerate_stencil(
+            result.B_u, result.interior, result.p, result.q, result.nu
+        )
+        B_u = result.B_u
+        for i in range(3):
+            for j in range(1, 4):
+                assert simplify(B_d[i, j + 1] - B_u[i, j]) == 0, (
+                    f"DP1 failed: B_d[{i},{j+1}] != B_u[{i},{j}]"
+                )
+
+    def test_e2_1_boundary_rows_dp2_wall(self):
+        """E2_1 (nu=1): wall column (col 0) = B_u[i,0] for boundary rows."""
+        result = derive_e2_uniform_boundary(nu=1)
+        B_d = build_degenerate_stencil(
+            result.B_u, result.interior, result.p, result.q, result.nu
+        )
+        B_u = result.B_u
+        for i in range(3):
+            assert simplify(B_d[i, 0] - B_u[i, 0]) == 0, (
+                f"DP2 failed: B_d[{i},0] != B_u[{i},0]"
+            )
+
+    def test_e2_1_near_interior_conservation(self):
+        """E2_1: near-interior row satisfies B[3,j] = -(B[1,j]+B[2,j]) for j=3,4.
+
+        Interior columns in the cut-cell frame are j >= p+2 = 3 (corresponding
+        to uniform interior columns j >= p+1 shifted by +1 for the wall column).
+        """
+        result = derive_e2_uniform_boundary(nu=1)
+        B_d = build_degenerate_stencil(
+            result.B_u, result.interior, result.p, result.q, result.nu
+        )
+        for j in [3, 4]:
+            expected = -(B_d[1, j] + B_d[2, j])
+            assert simplify(B_d[3, j] - expected) == 0, (
+                f"Conservation failed at col {j}: B_d[3,{j}]={B_d[3,j]}, "
+                f"expected {expected}"
+            )
+
+    def test_e2_1_near_interior_taylor(self):
+        """E2_1: near-interior row (row 3) satisfies Taylor accuracy at psi=0.
+
+        Deltas from x_3: [-3, -3, -2, -1, 0]. Col 1 (x_0) is zeroed.
+        k=0: sum of row = 0
+        k=1: sum_j B_d[3,j] * delta_j = 1
+        """
+        result = derive_e2_uniform_boundary(nu=1)
+        B_d = build_degenerate_stencil(
+            result.B_u, result.interior, result.p, result.q, result.nu
+        )
+        deltas = [Rational(-3), Rational(-3), Rational(-2), Rational(-1), Rational(0)]
+        row = [B_d[3, j] for j in range(5)]
+
+        # k=0: sum = 0
+        assert simplify(sum(row)) == 0, f"k=0 failed: sum = {sum(row)}"
+        # k=1: weighted sum = 1
+        moment1 = sum(row[j] * deltas[j] for j in range(5))
+        assert simplify(moment1 - 1) == 0, f"k=1 failed: sum = {moment1}"
+
+    def test_e2_2_shape(self):
+        """E2_2 degenerate stencil has shape (2, 4)."""
+        result = derive_e2_uniform_boundary(nu=2)
+        B_d = build_degenerate_stencil(
+            result.B_u, result.interior, result.p, result.q, result.nu
+        )
+        assert B_d.shape == (2, 4)
+
+    def test_e2_2_row0_wall_zeroed(self):
+        """E2_2 (nu=2) row 0: wall (col 0) is zeroed."""
+        result = derive_e2_uniform_boundary(nu=2)
+        B_d = build_degenerate_stencil(
+            result.B_u, result.interior, result.p, result.q, result.nu
+        )
+        assert B_d[0, 0] == 0
+
+    def test_e2_2_row1_wall_is_gamma(self):
+        """E2_2 (nu=2) row 1: wall = gamma_{-1} = 1."""
+        result = derive_e2_uniform_boundary(nu=2)
+        B_d = build_degenerate_stencil(
+            result.B_u, result.interior, result.p, result.q, result.nu
+        )
+        assert B_d[1, 0] == 1
+
+    def test_e2_2_matches_cpp_psi0(self):
+        """E2_2 at psi=0 matches C++: [0, 1, -2, 1, 1, 0, -2, 1] (pre-h^2).
+
+        The flat array is row-major: row 0 = [0, 1, -2, 1], row 1 = [1, 0, -2, 1].
+        """
+        result = derive_e2_uniform_boundary(nu=2)
+        B_d = build_degenerate_stencil(
+            result.B_u, result.interior, result.p, result.q, result.nu
+        )
+        expected = Matrix([
+            [0, 1, -2, 1],
+            [1, 0, -2, 1],
+        ])
+        assert B_d == expected, f"E2_2 degenerate mismatch:\n{B_d}\nexpected:\n{expected}"
+
+    def test_e2_2_taylor_accuracy(self):
+        """E2_2: both rows satisfy max(q+1,nu+1)=3 Taylor equations at psi=0.
+
+        Row 0 centered at x_0: deltas [-0, -0, 0, 1] = [0, 0, 0, 1]
+        Wait -- at psi=0, wall is at x_0. Deltas from x_0:
+          wall: -(0+0) = 0, x_0: 0, x_1: 1, x_2: 2
+
+        Row 1 centered at x_1: deltas from x_1:
+          wall: -(0+1) = -1, x_0: -1, x_1: 0, x_2: 1
+        """
+        result = derive_e2_uniform_boundary(nu=2)
+        B_d = build_degenerate_stencil(
+            result.B_u, result.interior, result.p, result.q, result.nu
+        )
+        # Row 1 (near-interior) centered at x_1
+        deltas_1 = [Rational(-1), Rational(-1), Rational(0), Rational(1)]
+        row1 = [B_d[1, j] for j in range(4)]
+        # k=0
+        assert sum(row1) == 0
+        # k=1
+        assert sum(row1[j] * deltas_1[j] for j in range(4)) == 0
+        # k=2
+        moment2 = sum(row1[j] * deltas_1[j] ** 2 / 2 for j in range(4))
+        assert moment2 == 1
+
+    def test_e2_1_no_free_symbols_lost(self):
+        """E2_1 degenerate retains the alpha symbols from B_u."""
+        result = derive_e2_uniform_boundary(nu=1)
+        B_d = build_degenerate_stencil(
+            result.B_u, result.interior, result.p, result.q, result.nu
+        )
+        # The degenerate stencil should contain the same alpha symbols
+        assert B_d.free_symbols == set(result.alpha_symbols)
+
+    def test_e2_2_no_free_symbols(self):
+        """E2_2 degenerate has no free symbols (fully determined)."""
+        result = derive_e2_uniform_boundary(nu=2)
+        B_d = build_degenerate_stencil(
+            result.B_u, result.interior, result.p, result.q, result.nu
+        )
+        assert B_d.free_symbols == set()
 
 
 class TestPsiField:
