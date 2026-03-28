@@ -312,10 +312,19 @@ The existing Mathematica notebooks are too slow for iterating on new stencil sch
 
 ### D-R22: TEMO Cut-Cell Column Convention and Variant Mapping
 **Decision:** The C++ code and plan 20.5 use column ordering `[wall, x_0, x_1, ..., x_{t-1}]` (wall = column 0). The math reference uses `[f_0, f_delta, f_1, ...]` (wall = column 1). All formulas in plan 20.5 use the C++ convention.
-**Variant mapping:**
+**Variant mapping (floating/Dirichlet):**
 - 1st derivative (nu=1): math reference B^{d,2} — wall gets weight for ALL rows, x_0 zeroed for ALL rows.
 - 2nd derivative (nu=2): math reference B^{d,1} — row 0: wall zeroed, x_0 gets weight; rows >= 1: wall gets weight, x_0 zeroed.
+- 2nd derivative Neumann: uses different variant B^{d,0} — see D-R24.
 **Why:** The C++ stencil code (`E2_1.cpp`, `E2_2.cpp`) stores coefficients in `[wall, x_0, ...]` order. Matching this convention avoids column-swapping bugs. The variant mapping was verified numerically against `E2_2.cpp` at `psi=0`: row 0 = `[0, 1, -2, 1]` (wall zeroed) and row 1 = `[1, 0, -2, 1]` (x_0 zeroed), confirming B^{d,1}.
+
+### D-R23: Neumann Cut-Cell Derivation via Augmented Taylor System
+**Decision:** The Neumann cut-cell stencil is derived using the same TEMO procedure as the floating stencil, but with an augmented Vandermonde matrix that includes a virtual column for `h * f'(x_wall)`. The virtual column entries are `V[k, T] = delta_wall^{k-1} / (k-1)!` for k >= 1, `V[0, T] = 0`, where `delta_wall = -(psi + i)`. The `eta_i` coupling coefficient is an additional unknown solved from the Taylor system — it is not independently prescribed. The same Category A/B/C + conservation machinery handles both floating and Neumann, differing only in (a) the variant choice (D-R24) and (b) the Vandermonde width (T vs T+1 columns).
+**Why:** The augmented approach reuses the entire TEMO solve infrastructure (`build_temo_vandermonde`, `solve_temo_row`, conservation) with minimal changes. The alternative (substitution of f(x_wall) via Taylor expansion from the floating stencil) requires higher-order truncation matching and produces less clean code. Verified by reconstructing all E2_2 Neumann coefficients from the augmented system.
+
+### D-R24: Neumann Variant Selection (B^{d,0} for nu=2)
+**Decision:** The Category A zeroed-column variant for 2nd-derivative Neumann stencils is B^{d,0} (row 0: x_0 zeroed, wall gets `alpha^{uN}`; rows >= 1: wall zeroed, x_0 gets `alpha^{uN}`). This is the **opposite** of the floating/Dirichlet variant B^{d,1} (D-R22).
+**Why:** Verified against `E2_2.cpp` `nbs_neumann` at psi=0: row 0 = `[-2, 0, 2, 0]` (x_0 zeroed, wall = -2 from uniform Neumann) and row 1 = `[0, -2, 2, 0]` (wall zeroed, x_0 = -2). The math reference Step 6 ("all schemes use alpha^d_{i,0} = 0 for i >= 1") applies to the floating/Dirichlet stencils but not the Neumann stencil, because the Neumann stencil operates on the uniform Neumann base `B^{uN}_l` (which has different alpha^u values). For E2_2, the uniform Neumann is `[-2, 2, 0], eta^u = -2`.
 
 ---
 
