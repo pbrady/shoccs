@@ -178,7 +178,17 @@ The SymPy pipeline (Phase 20) is complete with 231 passing tests and 7 modules:
 
 ### 21.4 — E4_1 C++ code generation
 
-- [ ] **21.4a** Generate the E4_1 C++ stencil struct:
+- [ ] **21.4a** Fix codegen constructor/factory for non-uniform single-param-array stencils (prerequisite):
+  - **Bug:** `codegen.py`'s `_emit_struct_preamble()` (line ~292) guards the single-span constructor with `if spec.is_uniform and len(spec.param_arrays) == 1:`. For E4_1 (`is_uniform=False`, 1 param array), neither this nor the `elif len(spec.param_arrays) > 1:` branch fires, so **no constructor is emitted** (only the default). The same guard appears in `_emit_factory()` (line ~485): for 1 non-uniform param array, the `else` branch fires and generates a malformed factory with duplicate parameter names.
+  - **Fix:** In both `_emit_struct_preamble` and `_emit_factory`, change the condition from `spec.is_uniform and len(spec.param_arrays) == 1` to `len(spec.param_arrays) == 1`. This matches the pattern used in E2_1.cpp (non-uniform, single `alpha` array, single-span constructor).
+  - **Concrete changes:**
+    - `_emit_struct_preamble` line ~292: `if spec.is_uniform and len(spec.param_arrays) == 1:` → `if len(spec.param_arrays) == 1:`
+    - `_emit_factory` line ~485: `elif spec.is_uniform and len(spec.param_arrays) == 1:` → `elif len(spec.param_arrays) == 1:`
+  - File: `scripts/stencil_gen/stencil_gen/codegen.py`
+  - Test: add a test in `test_codegen.py` that creates a `StencilGenSpec(is_uniform=False, param_arrays={"alpha": 4}, ...)` and verifies the generated code contains `E4_1(std::span<const real> a)` constructor and `make_E4_1(std::span<const real> alpha)` factory
+  - Also verify existing E4u_1 uniform test still passes: `cd scripts/stencil_gen && uv run pytest tests/test_codegen.py -v`
+
+- [ ] **21.4b** Generate the E4_1 C++ stencil struct:
   - Use `codegen.generate_stencil_cpp()` to produce `E4_1.cpp`
   - The struct should have: **P=2, R=4, T=7, X=0** (corrected: R=4, not 5)
   - Member array: `std::array<real, 4> alpha` (4 free params)
@@ -200,7 +210,7 @@ The SymPy pipeline (Phase 20) is complete with 231 passing tests and 7 modules:
   - File: `scripts/stencil_gen/tests/test_e4_cut_cell.py`
   - Test: verify generated code has correct structure (check for P=2, R=4, T=7 constants)
 
-- [ ] **21.4b** Generate the E4_1 test file:
+- [ ] **21.4c** Generate the E4_1 test file:
   - Use `codegen.generate_test_cpp()` to produce test data
   - Pick specific alpha values (e.g., alpha = [0.1, -0.05, 0.02, 0.01]) and psi values (0.3, 0.7, 1.0) for test cases
   - Use `codegen.compute_test_values()` to evaluate expected coefficients numerically
@@ -217,9 +227,7 @@ The SymPy pipeline (Phase 20) is complete with 231 passing tests and 7 modules:
     4. `assemble_cut_cell_result(floating, neumann, eta, dims, alpha_symbols)` → `CutCellResult`
   - Returns `CutCellResult` with all coefficient matrices
   - Works for E2_1, E2_2, E4_1 (any scheme in the Table 1 family with corrected dimensions)
-  - **Dispatch strategy for step 1:** For E4_1 (the target of Phase 21), the new `derive_uniform_boundary_for_temo` is used. For E2 backward compatibility, there are two options:
-    - **(preferred)** Use `derive_uniform_boundary_for_temo` for all schemes. This requires that the function correctly handles the E2 nextra>0 conservation case (verified by 21.5b regression test).
-    - **(fallback)** If the general function doesn't reproduce E2 results exactly (e.g., due to different alpha naming), keep using `derive_e2_uniform_boundary` for E2 schemes and switch to the general function only for E4+.
+  - **Dispatch strategy for step 1 (Decision):** Use `derive_uniform_boundary_for_temo` for ALL schemes (E2 and E4), not just E4+. The 21.1a regression check (21.1a step: "verify `derive_uniform_boundary_for_temo(E2_1)` produces the same `UniformResult` as `derive_e2_uniform_boundary(nu=1)`") ensures the general function handles E2's nextra>0 conservation case correctly. If the 21.1a regression check fails (e.g., alpha naming differs), fix the general function rather than keeping `derive_e2_uniform_boundary` as a fallback — the goal is ONE code path. The old `derive_e2_uniform_boundary` remains in `temo.py` but is no longer called by the pipeline; it can be deprecated in a future cleanup phase.
   - **Known limitation for nu=2 schemes:** `solve_boundary_row` uses `q+1` equations from `build_taylor_system`. For E2_2 (q=1, nu=2), this gives only 2 equations while the existing `derive_e2_uniform_boundary` uses `max(q+1, nu+1)=3`. If `derive_uniform_boundary_for_temo` uses `solve_boundary_row` directly for E2_2, it will build a different Taylor system. Fix: either (a) build the Taylor system inline with `max(q+1, nu+1)` equations instead of calling `solve_boundary_row`, or (b) modify `solve_boundary_row` to accept an optional `n_eqs` parameter. Since E4_1 (nu=1, q=3) has `q+1 = max(q+1, nu+1) = 4`, this is NOT an issue for Phase 21's primary target.
   - File: `scripts/stencil_gen/stencil_gen/temo.py`
 
@@ -233,12 +241,25 @@ The SymPy pipeline (Phase 20) is complete with 231 passing tests and 7 modules:
 ### 21.6 — Register E4_1 in the solver (optional)
 
 - [ ] **21.6a** Copy generated E4_1.cpp and E4_1.t.cpp to `src/stencils/`:
-  - Add `stencil make_E4_1(std::span<const real> alpha);` declaration to `stencil.hpp` (4 alpha params, matching E2_1 pattern)
-  - Add E4_1.cpp to `src/stencils/CMakeLists.txt` source list
-  - Add test via `add_unit_test()` in `src/stencils/CMakeLists.txt`
-  - Register in the Lua stencil factory (`stencil::from_lua`) so `type = "E4"` with `order = 1` creates E4_1
+  - Copy `scripts/stencil_gen/output/E4_1.cpp` → `src/stencils/E4_1.cpp`
+  - Copy `scripts/stencil_gen/output/E4_1.t.cpp` → `src/stencils/E4_1.t.cpp`
+  - **stencil.hpp** (line ~278, after `make_E4u_1`): Add declaration:
+    ```cpp
+    stencil make_E4_1(std::span<const real>);
+    ```
+  - **CMakeLists.txt** (`src/stencils/CMakeLists.txt`):
+    - Add `E4_1.cpp` to the `shoccs-stencils` source list (after `E4u_1.cpp`, line ~5)
+    - Add `add_unit_test(E4_1 "stencils" shoccs-stencils)` (after E4u_1 test, line ~17)
+  - **stencil.cpp** (`src/stencils/stencil.cpp`, line ~48, in the `order == 1` branch):
+    Add after the `E4u` case:
+    ```cpp
+    } else if (type == "E4") {
+        logger(spdlog::level::info, "E4 cut-cell first scheme chosen");
+        return make_E4_1(alpha);
+    ```
   - Build and run: `cmake --build build --target t-E4_1 && ctest --test-dir build -R t-E4_1`
-  - Files: `src/stencils/E4_1.cpp`, `src/stencils/E4_1.t.cpp`, `src/stencils/stencil.hpp`, `src/stencils/CMakeLists.txt`
+  - Also verify no regressions: `ctest --test-dir build -L stencils`
+  - Files: `src/stencils/E4_1.cpp`, `src/stencils/E4_1.t.cpp`, `src/stencils/stencil.hpp`, `src/stencils/stencil.cpp`, `src/stencils/CMakeLists.txt`
 
 ---
 
@@ -253,3 +274,5 @@ The SymPy pipeline (Phase 20) is complete with 231 passing tests and 7 modules:
 4. **Dimension formula (D-R25):** The corrected formula `r = p+1+nextra` has been verified for E2 and E4 schemes against Table 1 and existing C++ code. However, it has NOT been verified for E6 or E8 TEMO schemes (which don't exist yet). If these are attempted later, the formula should be re-verified.
 
 5. **`solve_boundary_row` equation count for nu=2:** `boundary.solve_boundary_row` uses `q+1` equations (via `build_taylor_system`), while `temo._build_uniform_vandermonde` uses `max(q+1, nu+1)`. For E4_1 (nu=1, q=3) these are equal (both 4). For E2_2 (nu=2, q=1) they differ: 2 vs 3. The new `derive_uniform_boundary_for_temo` must account for this when handling nu=2 schemes (see 21.5a). This is NOT a risk for Phase 21's primary target (E4_1) but affects E2 backward compatibility in 21.5b.
+
+6. **Codegen single-param non-uniform bug (discovered during plan refinement):** `codegen.py`'s `_emit_struct_preamble` and `_emit_factory` guard single-param-array constructor/factory generation with `spec.is_uniform and len(spec.param_arrays) == 1`. For E4_1 (`is_uniform=False`, 1 param array), the constructor is not emitted and the factory generates duplicate parameter names. Fix in 21.4a (prerequisite). Low risk — the fix is a one-line condition change in two places and existing E4u_1 uniform tests confirm no regression.
