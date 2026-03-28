@@ -12,6 +12,7 @@ from stencil_gen.codegen import (
     generate_stencil_cpp,
     generate_test_cpp,
 )
+from stencil_gen.conservation import _interior_contribution
 from stencil_gen.temo import (
     E2_1,
     E2_2,
@@ -790,3 +791,40 @@ class TestDeriveCutCellScheme:
             assert cancel(auto.eta[i] - manual.eta[i]) == 0, (
                 f"E2_2 eta mismatch at row {i}"
             )
+
+
+@pytest.mark.xfail(reason="conservation not yet enforced for E4_1")
+def test_e4_1_conservation_fails():
+    """E4_1 cut-cell stencil violates discrete conservation (SBP property).
+
+    For each T-frame column j in 0..T-2, the conservation sum must be zero:
+        w_0 * B[0,j] + w_1 * B[1,j] + w_2 * B[2,j] + w_3 * B[3,j] + IC(j) = target(j)
+    where w_0=psi, w_i=1 for i>=1, and IC(j) is the interior contribution.
+    Target: -1 for j=0 (wall), 0 for j>=1.
+
+    This test exposes the bug: columns j=3,4,5 have nonzero IC but the boundary
+    block doesn't compensate, so conservation is violated.
+    """
+    psi = Symbol("psi")
+    ur = derive_uniform_boundary_for_temo(E4_1)
+    stencil = construct_cut_cell_stencil(
+        ur.B_u, ur.interior, p=2, q=3, nu=1, nextra=0, psi=psi,
+    )
+    m = stencil.matrix  # R=4 x T=7 matrix
+    R, T = 4, 7
+
+    for j in range(T - 1):  # j = 0..5
+        # Weighted column sum: w_0=psi for row 0, w_i=1 for rows 1..R-1
+        col_sum = psi * m[0, j] + m[1, j] + m[2, j] + m[3, j]
+
+        # Interior contribution: T-frame column j -> grid-frame column j-1
+        ic = _interior_contribution(j - 1, R, 2, ur.interior)
+        col_sum += ic
+
+        # Target: -1 for wall column (j=0), 0 for j>=1
+        target = -1 if j == 0 else 0
+
+        residual = cancel(col_sum - target)
+        assert residual == 0, (
+            f"Conservation violated at T-frame column j={j}: residual={residual}"
+        )

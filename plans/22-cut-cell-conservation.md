@@ -63,7 +63,7 @@ The practical approach: solve Taylor per-row first (as now) to get stencil entri
 
 ### 22.1 — Add conservation verification test that exposes the bug
 
-- [ ] **22.1a** Add `test_e4_1_conservation_fails` to `test_e4_cut_cell.py`:
+- [x] **22.1a** Add `test_e4_1_conservation_fails` to `test_e4_cut_cell.py`:
   - Construct the E4_1 cut-cell stencil using the current pipeline
   - For each T-frame column j in 0..T−2 (j=0..5), compute the full conservation sum: `w_0 * B[0,j] + w_1 * B[1,j] + w_2 * B[2,j] + w_3 * B[3,j] + IC(j)` where w_0=ψ, w_i=1 for i≥1, and `IC(j) = _interior_contribution(j-1, R=4, p=2, interior)`. For j=0: add +1 (wall target = −1). Assert each column sum simplifies to 0.
   - Import `_interior_contribution` from `stencil_gen.conservation`
