@@ -90,19 +90,29 @@ def cpp_to_python(stmt):
 def convert_expr(expr):
     """Convert a C++ expression to Python."""
     # Replace std::pow(x, N) with x**(N)
-    # Handle nested calls by doing multiple passes
-    while "std::pow(" in expr:
+    # Handle nested calls by doing multiple passes.
+    # Guard against infinite loop: if the regex fails to substitute, break.
+    max_iterations = 100
+    for _ in range(max_iterations):
+        if "std::pow(" not in expr:
+            break
+        prev = expr
         expr = re.sub(
             r"std::pow\(([^,()]+(?:\([^()]*\))?[^,()]*),\s*([^()]+)\)",
             r"(\1)**(\2)",
             expr,
         )
+        if expr == prev:
+            raise ValueError(
+                f"Failed to convert std::pow in expression: {expr!r}"
+            )
+    else:
+        raise ValueError(
+            f"Too many std::pow nesting levels (>{max_iterations}): {expr!r}"
+        )
 
     # Replace 'alpha[N]' with 'alpha_N' - we'll use individual variables
     expr = re.sub(r"alpha\[(\d+)\]", r"alpha[\1]", expr)
-
-    # Replace trailing '/ 2.' with '/ 2.0' for clarity (Python handles fine either way)
-    # Actually Python handles '2.' fine, so leave it.
 
     return expr
 

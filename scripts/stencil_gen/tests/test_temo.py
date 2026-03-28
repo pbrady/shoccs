@@ -934,39 +934,96 @@ class TestConstructCutCellStencil:
                 f"c[{k}]: {left_div_h2[k]} != {cpp_left[k]}"
             )
 
-    def test_e2_1_shape_and_betas(self):
-        """E2_1: 4x5 matrix, 8 beta parameters (2 per row)."""
+    def test_e2_1_shape_and_no_betas(self):
+        """E2_1: 4x5 matrix, no beta parameters (limit interpolation replaces betas)."""
         psi = Symbol("psi")
         ur = derive_e2_uniform_boundary(nu=1)
         result = construct_cut_cell_stencil(
             ur.B_u, ur.interior, ur.p, ur.q, ur.nu, 1, psi
         )
         assert result.matrix.shape == (4, 5)
-        assert len(result.beta_info) == 8
-        assert len(result.beta_symbols) == 8
-        # Each row has 2 betas at cols 3 and 4
-        for row_idx in range(4):
-            row_betas = [(r, c, s) for r, c, s in result.beta_info if r == row_idx]
-            assert len(row_betas) == 2
-            assert row_betas[0][1] == 3
-            assert row_betas[1][1] == 4
+        assert len(result.beta_info) == 0
+        assert len(result.beta_symbols) == 0
 
-    def test_e2_1_entries_in_psi_alpha_beta(self):
-        """E2_1: all matrix entries are rational in psi, linear in alpha+beta."""
+    def test_e2_1_entries_in_psi_alpha(self):
+        """E2_1: all matrix entries are rational in psi, linear in alpha only."""
         psi = Symbol("psi")
         ur = derive_e2_uniform_boundary(nu=1)
         result = construct_cut_cell_stencil(
             ur.B_u, ur.interior, ur.p, ur.q, ur.nu, 1, psi
         )
-        # Check that all free symbols are psi, alpha_0..3, beta_*
         all_syms = result.matrix.free_symbols
-        expected_names = {"psi"} | {f"alpha_{k}" for k in range(4)} | {
-            f"beta_{i}_{k}" for i in range(4) for k in range(2)
-        }
+        expected_names = {"psi"} | {f"alpha_{k}" for k in range(4)}
         actual_names = {s.name for s in all_syms}
         assert actual_names <= expected_names, (
             f"Unexpected symbols: {actual_names - expected_names}"
         )
+
+    def test_e2_1_degenerate_limit(self):
+        """E2_1 at psi=0 matches the degenerate stencil B_d."""
+        psi = Symbol("psi")
+        ur = derive_e2_uniform_boundary(nu=1)
+        result = construct_cut_cell_stencil(
+            ur.B_u, ur.interior, ur.p, ur.q, ur.nu, 1, psi
+        )
+        B_d = result.matrix.subs(psi, 0)
+        B_d_expected = build_degenerate_stencil(
+            ur.B_u, ur.interior, ur.p, ur.q, ur.nu
+        )
+        for i in range(4):
+            for j in range(5):
+                assert simplify(B_d[i, j] - B_d_expected[i, j]) == 0, (
+                    f"Degenerate mismatch at [{i},{j}]: "
+                    f"{B_d[i,j]} != {B_d_expected[i,j]}"
+                )
+
+    def test_e2_1_uniform_limit(self):
+        """E2_1 at psi=1 matches B_l(1) from solve_uniform_limit."""
+        psi = Symbol("psi")
+        ur = derive_e2_uniform_boundary(nu=1)
+        result = construct_cut_cell_stencil(
+            ur.B_u, ur.interior, ur.p, ur.q, ur.nu, 1, psi
+        )
+        B_1 = result.matrix.subs(psi, 1)
+        B_l_1 = solve_uniform_limit(ur.B_u, ur.interior, ur.p, ur.q, ur.nu, 1)
+        for i in range(4):
+            for j in range(5):
+                assert simplify(B_1[i, j] - B_l_1[i, j]) == 0, (
+                    f"Uniform limit mismatch at [{i},{j}]: "
+                    f"{B_1[i,j]} != {B_l_1[i,j]}"
+                )
+
+    def test_e2_1_taylor_accuracy_per_row(self):
+        """E2_1: each row satisfies Taylor accuracy (q+1=2 equations) for all psi."""
+        psi = Symbol("psi")
+        ur = derive_e2_uniform_boundary(nu=1)
+        result = construct_cut_cell_stencil(
+            ur.B_u, ur.interior, ur.p, ur.q, ur.nu, 1, psi
+        )
+        m = result.matrix
+        for i in range(4):
+            deltas = build_cut_cell_deltas(i, 5, psi)
+            row = [m[i, j] for j in range(5)]
+            # k=0: sum = 0
+            assert simplify(sum(row)) == 0, f"Row {i} k=0 failed"
+            # k=1: weighted sum = 1
+            s1 = sum(row[j] * deltas[j] for j in range(5))
+            assert simplify(s1 - 1) == 0, f"Row {i} k=1 failed"
+
+    def test_e2_1_conservation_extra_cols(self):
+        """E2_1: psi-dependent conservation holds for extra columns (j=3,4)."""
+        psi = Symbol("psi")
+        ur = derive_e2_uniform_boundary(nu=1)
+        result = construct_cut_cell_stencil(
+            ur.B_u, ur.interior, ur.p, ur.q, ur.nu, 1, psi
+        )
+        m = result.matrix
+        # SBP weights: w = [psi, 1, 1, 1]
+        for j in [3, 4]:
+            col_sum = psi * m[0, j] + m[1, j] + m[2, j] + m[3, j]
+            assert simplify(col_sum) == 0, (
+                f"Conservation failed at col {j}: {cancel(col_sum)}"
+            )
 
     def test_e2_2_taylor_accuracy_per_row(self):
         """E2_2: each row satisfies Taylor accuracy for all psi."""

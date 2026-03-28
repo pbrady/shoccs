@@ -877,9 +877,19 @@ def identify_prescribed_entries(
     nu: int,
     B_u: Matrix,
     B_l_1: Matrix,
+    B_d: Matrix,
     psi,
+    n_eqs: int,
 ) -> dict:
-    """Identify Category A and B prescribed entries for row *i*.
+    """Identify Category A and limit-interpolation prescribed entries for row *i*.
+
+    Category A prescribes the zeroed column as ``psi * target``.
+
+    Limit interpolation prescribes extra columns (from ``nextra > 0``) as
+    ``psi * B_l_1[i, j] + (1 - psi) * B_d[i, j]``, ensuring the stencil
+    matches both the uniform (psi=1) and degenerate (psi=0) limits.  For
+    boundary rows the two limits are identical so the prescription is constant;
+    for the near-interior row it is psi-dependent.
 
     Parameters
     ----------
@@ -897,14 +907,19 @@ def identify_prescribed_entries(
         r_eff x t uniform boundary matrix.
     B_l_1 : Matrix
         R x T uniform limit matrix from ``solve_uniform_limit``.
+    B_d : Matrix
+        R x T degenerate stencil from ``build_degenerate_stencil``.
     psi : Symbol
         The psi symbol.
+    n_eqs : int
+        Number of Taylor equations per row (``max(q+1, nu+1)``).
 
     Returns
     -------
     dict[int, Expr]
         ``{col_index: expr(psi)}`` for all prescribed columns.
     """
+    T = B_l_1.cols
     prescribed: dict = {}
     zeroed = _zeroed_col_for_row(i, nu)
 
@@ -918,9 +933,19 @@ def identify_prescribed_entries(
 
     prescribed[zeroed] = psi * target
 
-    # Category B entries (nextra > 0) are not prescribed here — underdetermined
-    # rows instead introduce beta symbols in solve_temo_row, and the excess
-    # degrees of freedom are resolved by conservation in 20.5e Phase 2.
+    # Limit interpolation for extra columns (nextra > 0).
+    # These are the columns that would otherwise be underdetermined (beta
+    # columns).  Prescribing them via psi-linear interpolation between B_l_1
+    # and B_d ensures both psi limits are satisfied and eliminates the need
+    # for beta symbols.
+    free_cols = sorted(j for j in range(T) if j not in prescribed)
+    n_free = len(free_cols)
+    n_excess = n_free - n_eqs
+    if n_excess > 0:
+        # Same convention as the old beta selection: highest free columns.
+        extra_cols = free_cols[-n_excess:]
+        for j in extra_cols:
+            prescribed[j] = psi * B_l_1[i, j] + (1 - psi) * B_d[i, j]
 
     return prescribed
 
@@ -1027,7 +1052,12 @@ def construct_cut_cell_stencil(
     """Construct the psi-parameterized cut-cell stencil B_l(psi).
 
     This is the central TEMO procedure: produces an R x T matrix of
-    rational functions of psi (and alpha/beta symbols).
+    rational functions of psi (and alpha symbols from B_u).
+
+    Extra columns (from ``nextra > 0``) are prescribed via limit
+    interpolation between B_l(1) and B_d(0), ensuring both psi limits
+    are satisfied.  This eliminates the need for beta symbols; all free
+    parameters in the result originate from B_u's alpha symbols.
 
     Parameters
     ----------
@@ -1053,14 +1083,16 @@ def construct_cut_cell_stencil(
     r = B_u.rows
     R = r + 1
     T = B_u.cols + 1
+    n_eqs = max(q + 1, nu + 1)
 
     K, _ = make_psi_field(psi)
 
     # Collect alpha symbols from B_u
     alpha_syms = sorted(B_u.free_symbols, key=lambda s: s.name)
 
-    # Step 0: Solve at psi=1 to get target values
+    # Step 0: Compute the two limits needed for prescriptions
     B_l_1 = solve_uniform_limit(B_u, interior, p, q, nu, nextra)
+    B_d = build_degenerate_stencil(B_u, interior, p, q, nu)
 
     # Solve each row
     all_beta_info: list[tuple[int, int, Symbol]] = []
@@ -1070,7 +1102,7 @@ def construct_cut_cell_stencil(
     for i in range(R):
         V, rhs_vec = build_temo_vandermonde(i, T, q, nu, psi)
         prescribed = identify_prescribed_entries(
-            i, r, B_u.cols, nextra, nu, B_u, B_l_1, psi
+            i, r, B_u.cols, nextra, nu, B_u, B_l_1, B_d, psi, n_eqs
         )
         result = solve_temo_row(
             i, V, rhs_vec, prescribed, psi, K, alpha_syms, beta_prefix="beta"
@@ -1084,15 +1116,3 @@ def construct_cut_cell_stencil(
     return StencilResult(
         matrix=matrix, beta_info=all_beta_info, beta_symbols=all_beta_symbols
     )
-
-
-# ---------------------------------------------------------------------------
-# 20.5e Phase 2 — Psi-dependent conservation
-# ---------------------------------------------------------------------------
-#
-# NOTE: Phase 2 implementation is in progress. See plan 20.5 items
-# 20.5e-P2a through P2d for the revised approach. Key findings:
-# - Constant betas violate psi limits; extra columns need psi-dependent values
-# - solve_uniform_limit wall=0 is incorrect for E2_1 (needs fixing in 20.5d)
-# - C++ alpha parameterization is nonlinear; mapping requires fixture tool
-# See plans/20.5-temo-cut-cell.md for details.
