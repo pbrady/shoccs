@@ -27,14 +27,14 @@ The current TEMO pipeline solves each row of the cut-cell stencil B_l(ψ) indepe
 
 ### Why E2_1 works without explicit conservation enforcement
 - E2_1: R=4, T=5, p=1, nextra=1
-- Columns with nonzero IC (grid-frame): 3 (1 column; T-frame: 4)
+- Columns with nonzero IC (grid-frame): 2, 3 (2 columns; T-frame: 3, 4)
 - Conservation equations: T−1 = 4 (all columns j=0..T−2 per `conservation.py`)
 - Unknowns: 3 weights (w_1, w_2, w_3) + 1 phi placeholder (nextra=1) = 4
 - **Exactly determined** → weights + phi absorb all constraints, no alpha constraints needed
 
 ### Why E4_1 fails
 - E4_1: R=4, T=7, p=2, nextra=0
-- Columns with nonzero IC (grid-frame): 2, 3, 4, 5 (4 columns; T-frame: 3, 4, 5, 6)
+- Columns with nonzero IC (grid-frame): 1, 2, 3, 4 (4 columns; T-frame: 2, 3, 4, 5)
 - Conservation equations: T−1 = 6 (all columns j=0..T−2 per `conservation.py`)
 - Weight unknowns (w_1, w_2, w_3): 3, nextra=0 → no phi placeholders
 - **3 excess constraints** → must be satisfied by stencil entries (alpha parameters)
