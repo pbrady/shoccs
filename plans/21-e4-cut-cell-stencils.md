@@ -55,9 +55,9 @@ The SymPy pipeline (Phase 20) is complete with 231 passing tests and 7 modules:
 
 - [ ] **21.0a** Fix `compute_dimensions()` in `scripts/stencil_gen/stencil_gen/temo.py`:
   - The function already takes `p` as its first parameter (signature: `compute_dimensions(p, q, s, nextra, nu)`)
-  - Single-line change on line 29: replace `r = q + 1 + nextra` with `r = p + 1 + nextra` (per D-R25)
-  - The column formula `t = p + q + 1 + nextra` on line 28 is correct and unchanged
-  - Update the docstring to say "r = p + 1 + nextra" instead of "r = q + 1 + nextra"
+  - Change the code on line 59: replace `r = q + 1 + nextra` with `r = p + 1 + nextra` (per D-R25)
+  - The column formula `t = p + q + 1 + nextra` on line 58 is correct and unchanged
+  - Update the docstring formula on line 29 to say "r = p + 1 + nextra" instead of "r = q + 1 + nextra"
   - Remove the "Note: verified for E2 schemes only" caveat (now verified for E4 too)
   - File: `scripts/stencil_gen/stencil_gen/temo.py` (lines 24–72)
   - Test: `cd scripts/stencil_gen && uv run pytest tests/test_temo.py -v -k "Dimensions"`
@@ -74,10 +74,10 @@ The SymPy pipeline (Phase 20) is complete with 231 passing tests and 7 modules:
   1. Computes TEMO dimensions using the **corrected** `compute_dimensions` (21.0a): r = p+1+nextra, t = p+q+1+nextra
   2. For nu=1: r_eff = r; for nu=2: r_eff = r - 1
   3. Computes `n_free_per_row = t - (q + 1)` (= 2 for E4_1)
-  4. Creates alpha symbols following the boundary.py convention:
-     - Rows 0..(r_eff-2): 1 active alpha + (n_free-1) zeros
-     - Row r_eff-1 (penultimate/last non-conservation row): min(n_free, 2) active alphas + rest zeros
-     - Total: (r_eff - 1) * 1 + min(n_free, 2) alphas (= 4 for E4_1, same for E2_1)
+  4. Creates alpha symbols — the distribution is **scheme-dependent**:
+     - **E4_1 (p>1, nextra=0):** Rows 0..(r_eff-2) get 1 active alpha + (n_free-1) zeros (matching Table 1 zero constraints: alpha^u_{05}=0, alpha^u_{15}=0). Row r_eff-1 gets min(n_free, 2) active alphas. Total: (r_eff-1)*1 + min(n_free,2) = 4.
+     - **E2_1 (p=q=1, nextra=1):** Rows 0..(r_eff-2) get n_free active alphas each (no zeros — matching existing `derive_e2_uniform_boundary`). Row r_eff-1 is conservation-constrained (see step 6). Total: (r_eff-1)*n_free = 4.
+     - **General rule:** The number of active alphas per early row depends on whether Table 1 prescribes zero constraints for the scheme. When unsure, default to 1 active alpha per early row (conservative).
   5. Calls `boundary.solve_boundary_row(i, t, q, nu, free_symbols)` for each row i = 0..r_eff-1
   6. **No conservation-constrained last row** for E4_1 (nextra=0, r_eff=3 rows all have free params). For E2_1 (nextra=1), follows the existing `derive_e2_uniform_boundary` approach with conservation on the last row.
      - Specifically: if nextra > 0, there IS an extra row (row r_eff-1) that needs conservation. Use simple column sums `sum_i B_u[i,j] = 0` for j >= p+1 to determine the last row's phi symbols.
@@ -201,8 +201,8 @@ The SymPy pipeline (Phase 20) is complete with 231 passing tests and 7 modules:
 1. **Expression swell:** E4_1 has 28 floating coefficients (4×7, vs E2_1's 20=4×5), each a rational function of psi and 4 alphas. CSE output could be 2000+ lines. This is expected and handled by the codegen module.
 
 2. **TEMO pipeline correctness for wider stencils:** The TEMO functions (`build_degenerate_stencil`, `solve_uniform_limit`, `construct_cut_cell_stencil`) were developed and tested only for E2 schemes (3×4 and 1×3 B_u matrices). With E4_1's 3×6 B_u, the column counts, conservation column ranges, and Vandermonde systems are all larger. Particular attention needed for:
-   - `solve_uniform_limit`: conservation column selection logic (lines 826–832) uses conditions `j <= R-p` and `j >= p+2` — verify these produce the right conserved columns for p=2, R=4.
-   - `build_degenerate_stencil`: the near-interior row solve (step 3) has unknown/known column partitioning that depends on r and p — verify for r=3, p=2.
+   - `solve_uniform_limit`: conservation column selection logic (lines 826–832) uses conditions `j <= R-p` and `j >= p+2`. For E4_1 (p=2, R=4, T=7): conserved cols = {2, 4, 5, 6}, leaving unknown cols = {0, 1, 3} (3 unknowns). With n_eqs=4 this is **overdetermined** (3 unknowns, 4 equations). The code handles this via consistency check (lines 853–858), but if conservation constraints are inconsistent with Taylor accuracy for the wider E4 stencil, it will raise `RuntimeError`.
+   - `build_degenerate_stencil`: same situation — conservation fixes cols {4, 5, 6}, known={1, 4, 5, 6}, unknown={0, 2, 3} (3 unknowns, 4 equations). Consistency check at lines 398–404.
    - `identify_prescribed_entries`: verified — each row has T=7 cols, 1 zeroed (cat A), leaving 6 free. n_eqs=4, so 2 excess cols prescribed by limit interpolation. Final: 4 solve cols, 4 equations → exactly determined, no betas. (Excess = p+nextra = 2+0 = 2 per row, same as E2_1's p+nextra = 1+1 = 2.)
 
 3. **Performance:** The `solve_in_field` calls use 4×4 Vandermonde systems (vs 2×2 for E2), and there are 4 rows to solve. Each solve involves DomainMatrix LU factorization in QQ(psi). Total derivation time should stay under 10 seconds.
