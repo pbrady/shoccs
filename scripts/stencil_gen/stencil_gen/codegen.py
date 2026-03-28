@@ -5,6 +5,8 @@ Generates .cpp and .t.cpp files matching the patterns in src/stencils/.
 
 from sympy import Expr, Rational, Symbol, cse, numbered_symbols
 
+from stencil_gen.printer import StencilCodePrinter
+
 
 def apply_cse(
     coeffs: list[Expr],
@@ -123,5 +125,99 @@ def generate_interior_method(
         else:
             lines.append(f"{indent}for (auto&& v : c) v /= (h * h);")
         lines.append(f"{indent}return c;")
+
+    return "\n".join(lines)
+
+
+def generate_nbs_method(
+    method_name: str,
+    coeffs: list[Expr],
+    r: int,
+    t: int,
+    printer: StencilCodePrinter,
+    psi_dependent: bool,
+    nu: int = 1,
+) -> str:
+    """Generate a complete nbs_floating or nbs_dirichlet method.
+
+    Returns the complete method including signature and braces, indented with
+    4 spaces (one level inside the struct). Body lines use 8 spaces.
+
+    Args:
+        method_name: "nbs_floating" or "nbs_dirichlet".
+        coeffs: r*t (floating) or (r-1)*t (Dirichlet) symbolic expressions.
+        r: Number of boundary rows.
+        t: Boundary stencil width.
+        printer: Configured StencilCodePrinter instance.
+        psi_dependent: True for cut-cell stencils (psi is named, CSE applied).
+        nu: Derivative order (1 or 2).
+    """
+    indent4 = "    "
+    indent8 = "        "
+
+    # Step 1: Determine subspan size
+    if method_name == "nbs_floating":
+        span_expr = "R * T"
+    else:
+        span_expr = "(R - 1) * T"
+
+    # Step 2: Optionally apply CSE
+    if psi_dependent:
+        replacements, reduced = apply_cse(coeffs)
+    else:
+        replacements = []
+        reduced = coeffs
+
+    # Step 3: Emit method signature
+    lines: list[str] = []
+    if psi_dependent:
+        # Cut-cell: two-line signature, named psi parameter
+        lines.append(f"{indent4}std::span<const real>")
+        lines.append(f"{indent4}{method_name}(real h, real psi, std::span<real> c, bool right) const")
+    else:
+        # Uniform: single-line signature, unnamed psi parameter
+        lines.append(f"{indent4}std::span<const real> {method_name}(real h, real, std::span<real> c, bool right) const")
+    lines.append(f"{indent4}{{")
+
+    # For cut-cell, emit subspan inside the method body
+    if psi_dependent:
+        lines.append(f"{indent8}c = c.subspan(0, {span_expr});")
+
+    # Step 4: Emit CSE temporaries (if any)
+    if replacements:
+        lines.append("")
+        for sym, expr in replacements:
+            lines.append(f"{indent8}real {sym.name} = {printer.doprint(expr)};")
+
+    # Blank line between temporaries and coefficients
+    if replacements:
+        lines.append("")
+
+    # Step 5: Emit coefficient assignments
+    for i, expr in enumerate(reduced):
+        lines.append(f"{indent8}c[{i}] = {printer.doprint(expr)};")
+
+    # Step 6: Emit h-division loop
+    lines.append("")
+    if nu == 1:
+        lines.append(f"{indent8}for (auto&& v : c) v /= h;")
+    else:
+        lines.append(f"{indent8}for (auto&& v : c) v /= (h * h);")
+
+    # Step 7: Emit right-boundary logic
+    if nu == 1:
+        lines.append(f"{indent8}if (right) {{")
+        lines.append(f"{indent8}    for (auto&& v : c) v *= -1;")
+        lines.append(f"{indent8}    std::ranges::reverse(c);")
+        lines.append(f"{indent8}}}")
+    else:
+        lines.append(f"{indent8}if (right) {{")
+        lines.append(f"{indent8}    std::ranges::reverse(c);")
+        lines.append(f"{indent8}}}")
+
+    # Step 8: Return statement
+    lines.append("")
+    lines.append(f"{indent8}return c;")
+    lines.append(f"{indent4}}}")
 
     return "\n".join(lines)
