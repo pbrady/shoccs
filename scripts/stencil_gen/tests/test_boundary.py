@@ -214,3 +214,165 @@ def test_conservation_redundant_column_E4u(e4u_pipeline):
                   for w, row in zip(w_exprs, updated_rows))
     col_sum += _interior_contribution(4, result.r, 2, result.interior_coeffs)
     assert cancel(col_sum) == 0
+
+
+# ---------------------------------------------------------------------------
+# 20.3e -- E4u_1 end-to-end validation tests
+# ---------------------------------------------------------------------------
+
+# Alpha symbols for E4u
+_a0, _a1 = symbols("alpha_0 alpha_1")
+
+# Alpha values from E4u_1.t.cpp
+_alpha_vals_e4 = {
+    _a0: -0.7733323791884821,
+    _a1:  0.1623961700641681,
+}
+
+
+def test_E4u_taylor_shape_and_entries(e4u_pipeline):
+    """Taylor system shape and specific entries for E4u row 0."""
+    V, rhs = build_taylor_system(0, 5, 3, 1)
+    assert V.shape == (4, 5)
+    assert V[0, 0] == 1
+    assert V[1, 1] == 1
+    assert V[2, 3] == Rational(9, 2)
+    assert V[3, 4] == Rational(32, 3)
+
+
+def test_E4u_row0_symbolic(e4u_pipeline):
+    """Row 0 symbolic coefficients match E4u_1.cpp lines 80-84."""
+    updated_rows, solution_dict, w_syms, result = e4u_pipeline
+    row = updated_rows[0]
+    expected = [
+        (6 * _a0 - 11) / 6,
+        3 - 4 * _a0,
+        (12 * _a0 - 3) / 2,
+        -(12 * _a0 - 1) / 3,
+        _a0,
+    ]
+    for i, (got, exp) in enumerate(zip(row.coefficients, expected)):
+        assert cancel(got - exp) == 0, f"Row 0 coeff {i}: {got} != {exp}"
+
+
+def test_E4u_row1_symbolic(e4u_pipeline):
+    """Row 1 symbolic coefficients match E4u_1.cpp lines 85-89."""
+    updated_rows, solution_dict, w_syms, result = e4u_pipeline
+    row = updated_rows[1]
+    expected = [
+        (3 * _a1 - 1) / 3,
+        -(8 * _a1 + 1) / 2,
+        6 * _a1 + 1,
+        -(24 * _a1 + 1) / 6,
+        _a1,
+    ]
+    for i, (got, exp) in enumerate(zip(row.coefficients, expected)):
+        assert cancel(got - exp) == 0, f"Row 1 coeff {i}: {got} != {exp}"
+
+
+def test_E4u_row2_symbolic(e4u_pipeline):
+    """Row 2 (conservation-constrained) symbolic coefficients match E4u_1.cpp lines 90-94."""
+    updated_rows, solution_dict, w_syms, result = e4u_pipeline
+    row = updated_rows[2]
+    expected = [
+        -(168 * _a1 + 54 * _a0 - 11) / 138,
+        (112 * _a1 + 36 * _a0 - 15) / 23,
+        -(336 * _a1 + 108 * _a0 + 1) / 46,
+        (336 * _a1 + 108 * _a0 + 47) / 69,
+        -(28 * _a1 + 9 * _a0 + 2) / 23,
+    ]
+    for i, (got, exp) in enumerate(zip(row.coefficients, expected)):
+        assert cancel(got - exp) == 0, f"Row 2 coeff {i}: {got} != {exp}"
+
+
+def test_E4u_numerical_floating(e4u_pipeline):
+    """Numerical evaluation (floating, h=2) matches E4u_1.t.cpp."""
+    updated_rows, solution_dict, w_syms, result = e4u_pipeline
+    h = 2
+    expected_float = [
+        -1.3033328562609077, 3.046664758376964, -3.069997137565446,
+        1.713331425043631, -0.38666618959424104,
+        -0.08546858163458262, -0.5747923401283361, 0.9871885101925043,
+        -0.4081256734616695, 0.08119808503208405,
+        0.0923093909615862, -0.5359042305130115, 0.3038563457695172,
+        0.13076243615365518, 0.00897605762825287,
+    ]
+    computed = []
+    for row in updated_rows:
+        for coeff in row.coefficients:
+            val = float(coeff.xreplace(_alpha_vals_e4)) / h
+            computed.append(val)
+    assert len(computed) == len(expected_float)
+    for i, (got, exp) in enumerate(zip(computed, expected_float)):
+        assert abs(got - exp) < 1e-12, f"Floating coeff {i}: {got} != {exp}"
+
+
+def test_E4u_numerical_dirichlet(e4u_pipeline):
+    """Numerical evaluation (Dirichlet, h=0.5) matches E4u_1.t.cpp."""
+    updated_rows, solution_dict, w_syms, result = e4u_pipeline
+    h = 0.5
+    # Dirichlet drops row 0, uses rows 1 and 2
+    expected_dirichlet = [
+        -0.3418743265383305, -2.2991693605133445, 3.9487540407700172,
+        -1.632502693846678, 0.3247923401283362,
+        0.3692375638463448, -2.143616922052046, 1.2154253830780688,
+        0.5230497446146207, 0.03590423051301148,
+    ]
+    computed = []
+    for row in updated_rows[1:]:  # skip row 0
+        for coeff in row.coefficients:
+            val = float(coeff.xreplace(_alpha_vals_e4)) / h
+            computed.append(val)
+    assert len(computed) == len(expected_dirichlet)
+    for i, (got, exp) in enumerate(zip(computed, expected_dirichlet)):
+        assert abs(got - exp) < 1e-12, f"Dirichlet coeff {i}: {got} != {exp}"
+
+
+def test_E4u_conservation_column_sums(e4u_pipeline):
+    """Conservation verification: weighted column sums satisfy SBP."""
+    updated_rows, solution_dict, w_syms, result = e4u_pipeline
+    w_exprs = [solution_dict[w] for w in w_syms]
+    t = result.t  # 5
+    r = result.r  # 3
+    p = 2
+
+    for j in range(t):
+        col_sum = sum(
+            w * row.coefficients[j]
+            for w, row in zip(w_exprs, updated_rows)
+        )
+        col_sum += _interior_contribution(j, r, p, result.interior_coeffs)
+        if j == 0:
+            # Column 0 sums to -1
+            assert cancel(col_sum + 1) == 0, f"Column {j} SBP failed"
+        else:
+            # All other columns sum to 0
+            assert cancel(col_sum) == 0, f"Column {j} SBP failed"
+
+
+def test_E4u_polynomial_exactness(e4u_pipeline):
+    """Polynomial exactness up to degree q=3."""
+    updated_rows, solution_dict, w_syms, result = e4u_pipeline
+    t = result.t  # 5
+
+    for d in range(4):  # degrees 0, 1, 2, 3
+        # Grid values f(j) = j^d for j = 0..t-1
+        grid_vals = [Rational(j) ** d for j in range(t)]
+        for row in updated_rows:
+            i = row.row_index
+            # Apply stencil: sum_j coeff_j * f(j)
+            stencil_result = sum(
+                c * fj for c, fj in zip(row.coefficients, grid_vals)
+            )
+            # Expected: d-th derivative of x^d at x=i
+            if d == 0:
+                expected = 0
+            elif d == 1:
+                expected = 1
+            else:
+                # d-th derivative of x^d w.r.t. first derivative = d * i^(d-1)
+                expected = d * Rational(i) ** (d - 1)
+            assert cancel(stencil_result - expected) == 0, (
+                f"Poly exactness failed: d={d}, row={i}, "
+                f"got {stencil_result}, expected {expected}"
+            )
