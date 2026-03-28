@@ -111,21 +111,24 @@ The practical approach: solve Taylor per-row first (as now) to get stencil entri
   - **Step 2 — Extract linear system in weights:** The equations have the form `Σ w_i · f_i(ψ, α) + g(ψ, α) = 0` where f_i and g are rational in (ψ, α). This is LINEAR in the w_i unknowns (α symbols are treated as parameters, NOT unknowns). Use `linear_eq_to_matrix(equations, w_symbols)` to extract coefficient matrix `A` (n_eq × n_w) and RHS vector `b` (n_eq × 1). For E4_1: A is 6×3, b is 6×1, with entries that are rational functions of (ψ, α₀..α₃). No bilinear term issue arises because α symbols are parameters, not unknowns in this solve.
   - **Step 3 — Solve for weights (overdetermined case):** When n_eq > n_w (E4_1: 6 > 3), select n_w pivot rows to form a square system. Try `A_pivot = A[:n_w, :]` first; if singular (det == 0), use `A.rref()` to identify n_w linearly independent rows. Solve: `w_sol = A_pivot.solve(b_pivot)` → 3×1 Matrix giving w₁, w₂, w₃ as rational functions of (ψ, α). Apply `cancel()` to each entry.
   - **Step 4 — Derive alpha constraints:** Substitute `w_sol` into the remaining n_eq − n_w equations: for each remaining row k, compute `residual_k = cancel((A[k,:] * w_sol)[0] - b[k])`. Each residual must be identically zero → polynomial identity in ψ. For E4_1: 3 residual equations. These residuals are rational in (ψ, α); clear denominators if needed by multiplying by `denom = fraction(residual_k)[1]`.
-  - **Step 5 — Solve alpha constraints:** The 3 residual equations (after clearing denominators) are polynomial in (ψ, α). Since they must hold for ALL ψ, extract ψ-coefficient equations: for each residual, compute `Poly(numer, psi).all_coeffs()` → list of α-polynomial equations that must all equal zero. Collect all such equations. If they are linear in α (expected, since B_l entries are linear in α), use `linear_eq_to_matrix(all_alpha_eqs, alpha_symbols)` to solve. For E4_1 with 4 alphas and 3 constraints: expect 1 remaining free alpha. The solve produces `{alpha_k: expr(alpha_remaining)}` for the constrained alphas.
+  - **Step 5 — Solve alpha constraints:** The 3 residual equations (after clearing denominators) are polynomial in (ψ, α). Since they must hold for ALL ψ, extract ψ-coefficient equations: for each residual, compute `Poly(numer, psi).all_coeffs()` → list of α-polynomial equations that must all equal zero. Collect all such equations. **Important: these equations may be nonlinear in α** (degree ≤ R in α for an R×R pivot system), because `w_sol` from Step 3 involves `adj(A_pivot)/det(A_pivot)` where `A_pivot` entries are linear in α, making the numerator after clearing denominators polynomial of degree > 1 in α. Use the following strategy:
+    - **Fast path (linear):** Try `linear_eq_to_matrix(all_alpha_eqs, alpha_symbols)`. If this succeeds without raising (all equations are degree ≤ 1 in α), solve the linear system. For E4_1: expect a 3×4 system with 1 free alpha.
+    - **General path (nonlinear):** If `linear_eq_to_matrix` raises `NonlinearError`, use `sympy.solve(all_alpha_eqs, constrained_alphas)` where `constrained_alphas` is a subset of `alpha_symbols` (try `alpha_symbols[:-1]` first, keeping the last alpha free). SymPy's `solve()` handles polynomial systems and returns parametric solutions. Verify that solutions are ψ-independent: `sol.free_symbols & {psi} == set()`. If the solve returns empty, try different free-parameter choices.
+    - For E4_1 with 4 alphas and 3 constraints: expect 1 remaining free alpha. The solve produces `{alpha_k: expr(alpha_remaining)}` for the constrained alphas.
   - **Step 6 — Substitute back:** Replace the constrained alphas in B_l using `.xreplace(alpha_solutions)`, then `cancel()` each entry. Also substitute into `w_sol`. Return `(B_l_conserved, weight_solutions, [alpha_remaining])`.
   - **Edge case (exactly determined):** When n_eq == n_w (e.g., E2_1 with nextra=1 where phi symbols are already resolved), skip Steps 4-6. Just solve for weights and return B_l unchanged with all alphas free. For E2_1: 4 equations in 3+1=4 unknowns (3 weights + 1 phi from 22.2a) → exactly determined.
-  - **Performance note:** The system is small (≤6 equations). SymPy's `linear_eq_to_matrix` + `Matrix.solve` handle rational function coefficients. No need for `solve_in_field` or QQ(ψ) domain arithmetic. Target: < 5 seconds for E4_1.
+  - **Performance note:** The system is small (≤6 equations). For the weight solve (Step 3), SymPy's `linear_eq_to_matrix` + `Matrix.solve` handle rational function coefficients. For the alpha constraint solve (Step 5), `linear_eq_to_matrix` is used if equations are linear in α; otherwise `sympy.solve()` handles the polynomial system. No need for `solve_in_field` or QQ(ψ) domain arithmetic. Target: < 5 seconds for E4_1 (may take longer if `solve()` is needed for nonlinear α equations — increase to 15 seconds if so).
   - File: `scripts/stencil_gen/stencil_gen/temo.py` (add after `build_cut_cell_conservation_system`, ~line 1300)
 
 - [ ] **22.3b** Integrate into `construct_cut_cell_stencil()` and propagate through pipeline:
   - **`StencilResult` dataclass (line 843):** Add field `weight_solutions: dict | None = None` (maps `w_i → expr(psi, alpha)`) and `alpha_symbols: list | None = None` (the remaining free alphas after conservation). The dataclass is not frozen, so new Optional fields with defaults can be appended without breaking existing callers.
-  - **`construct_cut_cell_stencil` (lines 1206-1281):** Add parameters `nu: int` and `enforce_conservation: bool = True`. After assembling `matrix = Matrix(rows)` at line 1278 and before the return at line 1279:
+  - **`construct_cut_cell_stencil` (lines 1206-1281):** Add parameter `enforce_conservation: bool = True` (note: `nu` is already a parameter). After assembling `matrix = Matrix(rows)` at line 1278 and before the return at line 1279:
     - Call `enforce_cut_cell_conservation(matrix, R, T, p, nu, interior, psi, alpha_syms)`
     - Replace `matrix` with the conserved version, store weight solutions and remaining alphas in the returned `StencilResult`
     - When `enforce_conservation=False` or the system is exactly determined (n_eq == n_w), skip enforcement and return as before
-  - **`derive_cut_cell_scheme` (line 1950):** Pass `scheme.nu` to `construct_cut_cell_stencil`. Propagate `floating_result.weight_solutions` and `floating_result.alpha_symbols` to `assemble_cut_cell_result`. Currently calls `assemble_cut_cell_result(floating_result.matrix, ..., dims, uniform.alpha_symbols)` at line 1995 — change `uniform.alpha_symbols` to `floating_result.alpha_symbols or uniform.alpha_symbols` to use the conservation-reduced alpha list when available.
+  - **`derive_cut_cell_scheme` (line 1950):** `scheme.nu` is already passed to `construct_cut_cell_stencil` at line 1981. Propagate `floating_result.weight_solutions` and `floating_result.alpha_symbols` to `assemble_cut_cell_result`. Currently calls `assemble_cut_cell_result(floating_result.matrix, ..., dims, uniform.alpha_symbols)` at line 1995 — change `uniform.alpha_symbols` to `floating_result.alpha_symbols or uniform.alpha_symbols` to use the conservation-reduced alpha list when available. Also pass `floating_result.weight_solutions` to `assemble_cut_cell_result`.
   - **`assemble_cut_cell_result` (line 1905):** Add `weight_solutions: dict | None = None` parameter. Pass through to `CutCellResult`.
-  - File: `scripts/stencil_gen/stencil_gen/temo.py` (4 modification points: `StencilResult` at line 843, `construct_cut_cell_stencil` at line 1206, `assemble_cut_cell_result` at line 1905, `derive_cut_cell_scheme` at line 1950)
+  - File: `scripts/stencil_gen/stencil_gen/temo.py` (4 modification points: `StencilResult` at line 843, `construct_cut_cell_stencil` at line 1278, `assemble_cut_cell_result` at line 1905, `derive_cut_cell_scheme` at line 1995)
 
 - [ ] **22.3c** Handle the quadrature weight output:
   - The conservation solve produces ψ-dependent quadrature weights w_0=ψ, w_1(ψ,α), ..., w_{R-1}(ψ,α)
@@ -137,16 +140,19 @@ The practical approach: solve Taylor per-row first (as now) to get stencil entri
 
 ### 22.4 — Validate conservation for E4_1
 
-- [ ] **22.4a** Remove the `xfail` marker from `test_e4_1_conservation_fails`:
+- [ ] **22.4a** Remove the `xfail` marker from `test_e4_1_conservation_fails` and adapt for solved weights:
   - The test should now PASS with the conservation-enforced pipeline
-  - Verify: `Σ_i w_i · B[i,j] = 0` as a polynomial identity in ψ and α for ALL interior columns
-  - Verify symbolically (for all ψ and α) and numerically (at specific values)
+  - **If weights are trivial** (w_i = 1 for all i ≥ 1 — check `CutCellResult.weight_solutions`): remove the xfail marker, update the test to use `derive_cut_cell_scheme(E4_1, psi)` instead of the manual pipeline, and the naive weights (psi, 1, 1, 1) still work.
+  - **If weights are non-trivial** (some w_i ≠ 1): remove the xfail marker AND rewrite the column-sum check to use the conservation-solved weights from `result.weight_solutions`. The conservation sum becomes: `w_0 · B[0,j] + Σ_{i≥1} w_i(ψ,α) · B[i,j] + IC(j) = target(j)` where each w_i is retrieved from `weight_solutions`. Use `cancel()` to verify each column sum equals target symbolically.
+  - **In both cases:** verify conservation symbolically (for all ψ and remaining α) by checking `cancel(col_sum - target) == 0`. Also verify numerically at 2-3 specific (ψ, α) values as a cross-check.
   - File: `scripts/stencil_gen/tests/test_e4_cut_cell.py`
 
 - [ ] **22.4b** Verify E4_1 free parameter count after conservation:
   - Count the alpha symbols remaining in B_l after conservation enforcement
   - Based on the degrees-of-freedom analysis: expect either 4 alphas with 3 constrained (→ 1 free) OR the problem analysis's "4 α^u" count if the wall constraint doesn't consume an alpha. The actual count must be determined during 22.3a implementation.
   - Document the actual free parameter count in this plan item once determined
+  - **Update existing test:** `TestDeriveCutCellScheme::test_e4_1_alpha_count` (line 659 of `test_e4_cut_cell.py`) currently asserts `len(result.alpha_symbols) == 4`. After conservation enforcement reduces the alpha count, this test will fail. Update it to assert the correct post-conservation count (1 if 3 constrained, or the actual count from 22.3a).
+  - Add a new `test_e4_1_free_param_count` test that explicitly verifies: (a) the number of free alpha symbols in `result.alpha_symbols`, (b) that `result.floating.free_symbols` contains exactly `{psi} | set(result.alpha_symbols)`, and (c) the constrained alphas no longer appear.
   - File: `scripts/stencil_gen/tests/test_e4_cut_cell.py`
   - Test: `cd scripts/stencil_gen && uv run pytest tests/test_e4_cut_cell.py -v -k free_param`
 
@@ -219,10 +225,11 @@ The practical approach: solve Taylor per-row first (as now) to get stencil entri
 ## Performance Considerations
 
 The conservation solve is small and tractable:
-- E4_1: 6 conservation equations, 3 weight unknowns → one 3×3 solve (Step 3) + 3 residual equations (Step 4) + one 3×4 alpha solve (Step 5)
-- All solves use SymPy's `linear_eq_to_matrix` + `Matrix.solve` with rational function entries in (ψ, α)
+- E4_1: 6 conservation equations, 3 weight unknowns → one 3×3 solve (Step 3) + 3 residual equations (Step 4) + alpha constraint solve (Step 5)
+- Weight solve (Step 3) uses SymPy's `linear_eq_to_matrix` + `Matrix.solve` with rational function entries in (ψ, α)
+- Alpha constraint solve (Step 5) may produce polynomial (not linear) equations in α — degree ≤ R=4 in α symbols after clearing denominators (from `adj(A_pivot)` and `det(A_pivot)` terms). If linear, use `linear_eq_to_matrix`; if nonlinear, use `sympy.solve()`.
 - No need for QQ(ψ) fraction field arithmetic — standard symbolic solve suffices
-- Target: full E4_1 derivation with conservation < 10 seconds (conservation solve itself < 5 seconds)
+- Target: full E4_1 derivation with conservation < 10 seconds if alpha equations are linear, < 30 seconds if `sympy.solve()` is needed for nonlinear polynomial system
 
 ## Key Implementation Insight
 
