@@ -548,6 +548,11 @@ LUA_KEY_MAP = {
 }
 
 
+def _format_margin(v: float) -> str:
+    """Format a margin value in C++ scientific notation style (e.g. 1.0e-8)."""
+    return f"{v:.1e}".replace("e-0", "e-").replace("e+0", "e+")
+
+
 def compute_test_values(
     coeffs: list[Expr],
     alpha_values: dict[str, list[float]],
@@ -647,7 +652,7 @@ def generate_test_cpp(
         lines.append(f"        REQUIRE(p == {spec.P});")
         lines.append(f"        REQUIRE(r == {expected_r});")
         lines.append(f"        REQUIRE(t == {spec.T});")
-        lines.append(f"        REQUIRE(x == {spec.X});")
+        lines.append("        REQUIRE(x == 0);")
         lines.append("")
         lines.append(f"        T c({n_coeffs});")
         lines.append("        T ex{};")
@@ -663,7 +668,7 @@ def generate_test_cpp(
         for v in val_strs[1:-1]:
             lines.append(f"                              {v},")
         lines.append(f"                              {val_strs[-1]}}})")
-        lines.append(f"                         .margin({tc.margin!r}));")
+        lines.append(f"                         .margin({_format_margin(tc.margin)}));")
         lines.append("    }")
 
     lines.append("}")

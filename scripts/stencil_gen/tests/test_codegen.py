@@ -379,7 +379,7 @@ def test_test_gen_structure():
     assert "TEST_CASE" in code
     assert "Approx" in code
     assert "from_lua" in code
-    assert ".margin(1e-08)" in code
+    assert ".margin(1.0e-8)" in code
 
 
 def test_test_gen_values():
