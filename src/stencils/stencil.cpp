@@ -45,6 +45,9 @@ std::optional<stencil> stencil::from_lua(const sol::table& tbl, const logs& logg
         if (type == "E2") {
             logger(spdlog::level::info, "E2 first scheme chosen");
             return make_E2_1(alpha);
+        } else if (type == "E4") {
+            logger(spdlog::level::info, "E4 cut-cell first scheme chosen");
+            return make_E4_1(alpha);
         } else if (type == "E4u") {
             logger(spdlog::level::info, "E4 uniform first scheme chosen");
             return make_E4u_1(alpha);

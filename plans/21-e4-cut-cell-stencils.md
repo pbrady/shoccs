@@ -247,7 +247,7 @@ The SymPy pipeline (Phase 20) is complete with 231 passing tests and 7 modules:
 
 ### 21.6 — Register E4_1 in the solver (optional)
 
-- [ ] **21.6a** Copy generated E4_1.cpp and E4_1.t.cpp to `src/stencils/`:
+- [x] **21.6a** Copy generated E4_1.cpp and E4_1.t.cpp to `src/stencils/`:
   - Copy `scripts/stencil_gen/output/E4_1.cpp` → `src/stencils/E4_1.cpp`
   - Copy `scripts/stencil_gen/output/E4_1.t.cpp` → `src/stencils/E4_1.t.cpp`
   - **stencil.hpp** (line ~278, after `make_E4u_1`): Add declaration:
