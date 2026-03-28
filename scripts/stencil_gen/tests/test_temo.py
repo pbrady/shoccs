@@ -95,6 +95,16 @@ class TestDimensions:
         with pytest.raises(AttributeError):
             E2_1.p = 2  # type: ignore[misc]
 
+    def test_e4_1_dimensions(self):
+        """E4_1: p=2, q=3, nextra=0, nu=1 -> r=3, t=6, R=4, T=7, X=0."""
+        dims = E4_1.dims()
+        assert dims == Dimensions(r=3, t=6, R=4, T=7, X=0)
+
+    def test_e4_2_dimensions(self):
+        """E4_2: p=2, q=3, nextra=0, nu=2 -> r=3, t=6, R=3, T=7, X=3."""
+        dims = E4_2.dims()
+        assert dims == Dimensions(r=3, t=6, R=3, T=7, X=3)
+
     def test_first_derivative_no_neumann(self):
         """1st derivative stencils have X=0 (no Neumann rows)."""
         assert E2_1.dims().X == 0

@@ -68,7 +68,7 @@ The SymPy pipeline (Phase 20) is complete with 231 passing tests and 7 modules:
     - E4_2 (p=2, q=3, nextra=0): r changes 4→3, R changes 4→3, X changes 4→3 → **(r=3, t=6, R=3, T=7, X=3)**
   - **Must update test assertions**: `test_first_derivative_no_neumann` uses `E4_1.dims().X == 0` (no change). `test_second_derivative_has_neumann` checks `dims_e4_2.X == dims_e4_2.R` — both change from 4 to 3, so the equality still holds. No test changes needed unless there are explicit E4 dimension value checks elsewhere.
 
-- [ ] **21.0b** Add explicit E4 dimension value tests (review finding — the 21.0a fix is untested for E4):
+- [x] **21.0b** Add explicit E4 dimension value tests (review finding — the 21.0a fix is untested for E4):
   - The existing E4 tests only check relational properties (`X==0`, `X==R`) that hold regardless of whether `r = q+1+nextra` or `r = p+1+nextra`. No test verifies the E4 dimension values actually changed. E2 schemes have exact `Dimensions` tuple assertions (test_temo.py lines 48, 53); E4 needs the same.
   - Add to `tests/test_temo.py::TestDimensions`:
     - `test_e4_1_dimensions`: `assert E4_1.dims() == Dimensions(r=3, t=6, R=4, T=7, X=0)`
