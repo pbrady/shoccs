@@ -77,8 +77,8 @@ The practical approach: solve Taylor per-row first (as now) to get stencil entri
   - **Signature:** `build_cut_cell_conservation_system(B_l: Matrix, R: int, T: int, p: int, interior_coeffs: list, psi: Symbol) -> tuple[list[Expr], list[Symbol]]`
     - `B_l` is the R×T cut-cell stencil matrix (entries are rational in ψ and α symbols)
     - Returns `(equations, w_symbols)` where equations are expressions that must equal zero
-  - **Interior column identification:** T-frame column j (0-indexed, col 0 = wall) corresponds to grid point j-1 (col 1 = x_0). Interior row R+m covers T-frame columns `(R+m-p+1)..(R+m+p+1)`. A column j has nonzero IC if it falls in range `[R-p+1, T-1]` (for E4_1: j = 3..6, 4 columns). Uses the same logic as `conservation.py:_interior_contribution()` adapted for T-frame indexing.
-  - **Interior contribution IC(j):** Sum of interior stencil coefficients touching T-frame column j. Interior row R+m has coefficient `interior_coeffs[j-1 - (R+m) + p]` at column j. Equivalently: `_interior_contribution(j-1, R, p, interior_coeffs)` from `conservation.py` (adjusting for T-frame vs grid-frame). IC(j) = 0 for columns outside the overlap range.
+  - **Interior column identification:** T-frame column j (0-indexed, col 0 = wall) corresponds to grid point j-1 (col 1 = x_0). Interior row at T-frame position R+m (grid point R-1+m, m >= 0) covers T-frame columns `(R+m-p)..(R+m+p)`. A column j has nonzero IC if `j >= R-p` and `j` is within reach of at least one interior row. For E4_1 (R=4, p=2): j = 2..6 in T-frame may have nonzero IC; computed values are IC(2)=1/12, IC(3)=-7/12, IC(4)=-7/12, IC(5)=1/12, IC(6)=0.
+  - **Interior contribution IC(j):** Sum of interior stencil coefficients touching T-frame column j. Interior row at T-frame R+m (grid point R-1+m) has coefficient `interior_coeffs[(j-1) - (R-1+m) + p]` at column j. **Equivalently:** `_interior_contribution(j-1, r, p, interior_coeffs)` from `conservation.py` where `r = R-1` (the number of uniform boundary rows = first interior grid point). **Note:** The TEMO boundary block has R rows covering grid points 0..R-2; interior rows start at grid point R-1 = r. This is the SAME r used by `conservation.py` in the uniform case. IC(j) = 0 for T-frame columns 0 and 1 (wall and x_0 are too far left for any interior row to reach with E4_1 parameters).
   - **Conservation equations:** For each T-frame column j = 0..T−2 (matching `conservation.py` which iterates `range(t-1)`, giving T−1 total equations):
     `w_0 * B_l[0,j] + Σ_{i=1}^{R-1} w_i * B_l[i,j] + IC(j) = 0`
     where `w_0 = psi` (the cut-cell weight) and `w_1..w_{R-1}` are symbol unknowns.
@@ -99,13 +99,16 @@ The practical approach: solve Taylor per-row first (as now) to get stencil entri
 - [ ] **22.3a** Implement `enforce_cut_cell_conservation()` in `temo.py`:
   - **Signature:** `enforce_cut_cell_conservation(B_l: Matrix, R: int, T: int, p: int, interior_coeffs: list, psi: Symbol, alpha_symbols: list[Symbol]) -> tuple[Matrix, dict[Symbol, Expr], list[Symbol]]`
     - Returns `(B_l_conserved, weight_solutions, remaining_alphas)`
+  - **Chosen approach:** Two-phase solve — treat alpha as parameters, solve for weights first, then derive alpha constraints from overdetermined residuals (DD22-1 and DD22-2 resolved).
   - **Step 1 — Build conservation equations:** Call `build_cut_cell_conservation_system()` from 22.2a to get `(equations, w_symbols)`.
-  - **Step 2 — Identify unknowns:** The equations are linear in `w_1..w_{R-1}` (weight unknowns) and the alpha symbols from B_u. Collect all unknowns. For E4_1: unknowns are `[w_1, w_2, w_3, alpha_0, alpha_1, alpha_2, alpha_3]` = 7 unknowns, 6 equations → 1 free parameter. But wait — alpha symbols appear in B_l entries which appear multiplied by w_i, creating bilinear terms `w_i * alpha_j`. This is the same issue `conservation.py:solve_conservation()` handles via the theta-linearization trick (lines 132-148). We may need to handle this similarly, or note that for nextra=0 cases (E4_1) where there are no phi placeholders, the bilinear terms are `w_i * alpha_j` products.
-  - **Step 2a — Linearization strategy:** The conservation equations contain terms like `w_i * B_l[i,j]` where `B_l[i,j]` is linear in alpha symbols. This produces bilinear terms `w_i * alpha_k`. Approach: treat alpha symbols as **parameters** (not unknowns), solve the linear system in `w_1..w_{R-1}` only. If the system is overdetermined in the w's (E4_1 has 6 equations for 3 w's), use `linear_eq_to_matrix` + solve, which will yield constraints on the alpha symbols. Alternatively: substitute `theta_{i,k} = w_i * alpha_k` to linearize (following the theta trick in `conservation.py`).
-  - **Step 2b — Practical approach for E4_1 (nextra=0):** Since the conservation equations are linear in `(w_1, w_2, w_3)` with coefficients that are rational in `(psi, alpha_0, ..., alpha_3)`, and we have 6 equations in 3 unknowns: pick 3 of the 6 equations to solve for `w_1, w_2, w_3` in terms of `(psi, alpha)`, then substitute into the remaining 3 equations. The remaining 3 equations become constraints on the alpha parameters that must hold as polynomial identities in psi. Solve these 3 equations for 3 of the 4 alphas, leaving 1 alpha free. This reduces E4_1 from 4 to 1 free alpha parameter. Alternatively, if the math in the problem analysis is correct (5 remaining free → 4 alpha^u), we need to re-examine which entries are truly free vs constrained.
-  - **Key insight:** The conservation constraints reduce the alpha parameter count. After conservation, some alphas become functions of psi and the remaining free alphas. Substitute these back into B_l to get the conservation-enforced stencil.
-  - **QQ(psi) arithmetic:** Since alpha symbols appear in the conservation equations, we cannot use `solve_in_field` (which operates purely in QQ(psi)). Instead, use SymPy's `linear_eq_to_matrix` + `linsolve` with the polynomial domain `ZZ(psi)` or just symbolic solve. Performance should still be acceptable since the system is small (≤6 equations).
-  - File: `scripts/stencil_gen/stencil_gen/temo.py`
+  - **Step 2 — Extract linear system in weights:** The equations have the form `Σ w_i · f_i(ψ, α) + g(ψ, α) = 0` where f_i and g are rational in (ψ, α). This is LINEAR in the w_i unknowns (α symbols are treated as parameters, NOT unknowns). Use `linear_eq_to_matrix(equations, w_symbols)` to extract coefficient matrix `A` (n_eq × n_w) and RHS vector `b` (n_eq × 1). For E4_1: A is 6×3, b is 6×1, with entries that are rational functions of (ψ, α₀..α₃). No bilinear term issue arises because α symbols are parameters, not unknowns in this solve.
+  - **Step 3 — Solve for weights (overdetermined case):** When n_eq > n_w (E4_1: 6 > 3), select n_w pivot rows to form a square system. Try `A_pivot = A[:n_w, :]` first; if singular (det == 0), use `A.rref()` to identify n_w linearly independent rows. Solve: `w_sol = A_pivot.solve(b_pivot)` → 3×1 Matrix giving w₁, w₂, w₃ as rational functions of (ψ, α). Apply `cancel()` to each entry.
+  - **Step 4 — Derive alpha constraints:** Substitute `w_sol` into the remaining n_eq − n_w equations: for each remaining row k, compute `residual_k = cancel((A[k,:] * w_sol)[0] - b[k])`. Each residual must be identically zero → polynomial identity in ψ. For E4_1: 3 residual equations. These residuals are rational in (ψ, α); clear denominators if needed by multiplying by `denom = fraction(residual_k)[1]`.
+  - **Step 5 — Solve alpha constraints:** The 3 residual equations (after clearing denominators) are polynomial in (ψ, α). Since they must hold for ALL ψ, extract ψ-coefficient equations: for each residual, compute `Poly(numer, psi).all_coeffs()` → list of α-polynomial equations that must all equal zero. Collect all such equations. If they are linear in α (expected, since B_l entries are linear in α), use `linear_eq_to_matrix(all_alpha_eqs, alpha_symbols)` to solve. For E4_1 with 4 alphas and 3 constraints: expect 1 remaining free alpha. The solve produces `{alpha_k: expr(alpha_remaining)}` for the constrained alphas.
+  - **Step 6 — Substitute back:** Replace the constrained alphas in B_l using `.xreplace(alpha_solutions)`, then `cancel()` each entry. Also substitute into `w_sol`. Return `(B_l_conserved, weight_solutions, [alpha_remaining])`.
+  - **Edge case (exactly determined):** When n_eq == n_w (e.g., E2_1 with nextra=1 where phi symbols are already resolved), skip Steps 4-6. Just solve for weights and return B_l unchanged with all alphas free. For E2_1: 4 equations in 3+1=4 unknowns (3 weights + 1 phi from 22.2a) → exactly determined.
+  - **Performance note:** The system is small (≤6 equations). SymPy's `linear_eq_to_matrix` + `Matrix.solve` handle rational function coefficients. No need for `solve_in_field` or QQ(ψ) domain arithmetic. Target: < 5 seconds for E4_1.
+  - File: `scripts/stencil_gen/stencil_gen/temo.py` (add after `build_cut_cell_conservation_system`, ~line 1300)
 
 - [ ] **22.3b** Integrate into `construct_cut_cell_stencil()`:
   - After assembling `matrix = Matrix(rows)` at line 1278, call `enforce_cut_cell_conservation()` if the scheme needs it
@@ -160,9 +163,14 @@ The practical approach: solve Taylor per-row first (as now) to get stencil entri
 ### 22.6 — Validate conservation for E2_2
 
 - [ ] **22.6a** Add conservation verification for E2_2 (2nd derivative):
-  - E2_2 uses different Design Principle variants (B^{d,1}/B^{d,2})
-  - Check conservation column sums with appropriate norm weights
+  - **Dimensions:** E2_2 has p=1, q=1, nextra=0, nu=2. Computed: r=2, t=3, r_eff=1, R=2, T=4.
+  - **Conservation system:** T−1 = 3 equations (j=0..2 in T-frame). Weight unknowns: w₁ only (w₀=ψ fixed, R−1=1 unknown). System is overdetermined: 3 equations, 1 weight unknown → 2 excess constraints on alphas.
+  - **IC values:** Using `_interior_contribution(j-1, r_eff, p, interior)` where r_eff=1 (first interior grid point for nu=2). Precompute IC for j=0..2.
+  - **Wall column convention for nu=2:** For the 2nd derivative, the SBP conservation condition may use a different wall column target than the 1st derivative's `col_sum = -1`. Verify against the math reference (Section 4.4) and the uniform conservation in `conservation.py`. If conservation.py's `col_sum + 1 = 0` convention applies to nu=2 as well, use it; otherwise derive the correct target from the SBP property `H D₂ + D₂ᵀ H = ...`.
+  - **Test structure:** Build the E2_2 cut-cell conservation system using `build_cut_cell_conservation_system()` from 22.2a. Verify equation count (3) and that the system is solvable. If the system yields alpha constraints, verify they are consistent with the existing E2_2 stencil (which was derived without explicit conservation).
+  - **Polynomial exactness cross-check:** Verify that the conservation-enforced E2_2 stencil still satisfies `f(x)=x² → f''=2` (matching the existing `test_conservation_polynomial_exactness` test at line 1772 of `test_temo.py`).
   - File: `scripts/stencil_gen/tests/test_temo.py`
+  - Test: `cd scripts/stencil_gen && uv run pytest tests/test_temo.py -v -k e2_2_conservation`
 
 ### 22.7 — Update codegen for quadrature weights
 
@@ -179,31 +187,27 @@ The practical approach: solve Taylor per-row first (as now) to get stencil entri
 ## Design Decisions (to be recorded in plans/meta.md if cross-cutting)
 
 ### DD22-1: Conservation enforcement approach
-**TBD:** Two-phase (Taylor first, then conservation substitution) vs. monolithic coupled system. The plan currently assumes two-phase based on the "Key Implementation Insight" section. To be confirmed during 22.3a implementation.
+**CHOSEN: Two-phase** (Taylor first, then conservation substitution). The per-row Taylor solve (existing pipeline) produces B_l entries as functions of (ψ, α). Conservation equations are then formed from B_l and solved for weights + alpha constraints. This avoids building a single large coupled system and reuses the existing TEMO row-solve infrastructure.
 
 ### DD22-2: Bilinear term handling
-**TBD:** For E4_1 (nextra=0), the conservation equations contain bilinear terms `w_i * alpha_j`. Options:
-- (a) Treat alphas as parameters, solve for w's → overdetermined, yields alpha constraints
-- (b) Theta-linearization trick from `conservation.py`
-- (c) Full symbolic solve with `linsolve` treating all as unknowns
-To be decided during 22.3a based on which approach yields clean symbolic solutions.
+**CHOSEN: (a) Treat alphas as parameters, solve for w's.** The conservation equations are linear in the weight unknowns w₁..w_{R-1} when alpha symbols are treated as parameters (not unknowns). The bilinear terms `w_i * alpha_j` are only problematic if we try to solve for BOTH w and alpha simultaneously. With the two-phase approach (solve w first, then derive alpha constraints from residuals), the system is always linear. No theta-linearization needed.
 
 ### DD22-3: Alpha parameter reduction
-**TBD:** Conservation enforcement will reduce E4_1's free alpha count from 4 to some smaller number. The exact count depends on how many conservation equations constrain alpha vs. weight parameters. This affects:
-- The C++ constructor signature (`std::span<const real>` size)
-- The `param_arrays={"alpha": N}` in codegen
-- The `alpha_symbols` list in `UniformResult`
-To be determined during 22.3a and recorded in 22.4b.
+**TBD (narrowed):** Conservation enforcement will reduce E4_1's free alpha count from 4 to a smaller number. Based on the DOF analysis:
+- 6 conservation equations in 3 weight unknowns → 3 excess equations constraining alphas
+- 4 alpha symbols − 3 constraints → **expected: 1 free alpha**
+- But: the 3 residual equations from Step 4 of 22.3a may not all be independent (some may be redundant), so the actual free count could be 1–4. Must be determined empirically during 22.3a and recorded in 22.4b.
+- This affects the C++ constructor signature (`std::span<const real>` size), the `param_arrays={"alpha": N}` in codegen, and the `alpha_symbols` list in `CutCellResult`.
 
 ---
 
 ## Performance Considerations
 
-The coupled system is larger but still tractable in QQ(ψ):
-- E4_1: ~11 unknowns, ~22 equations → after row-by-row Taylor reduction, 6 conservation equations in ~6 unknowns (3 weights + 3 constrained free params)
-- This is a linear system in QQ(ψ) with coefficients that depend on α
-- The QQ(ψ) fraction field handles the ψ-rational arithmetic efficiently
-- Target: full E4_1 derivation with conservation < 10 seconds
+The conservation solve is small and tractable:
+- E4_1: 6 conservation equations, 3 weight unknowns → one 3×3 solve (Step 3) + 3 residual equations (Step 4) + one 3×4 alpha solve (Step 5)
+- All solves use SymPy's `linear_eq_to_matrix` + `Matrix.solve` with rational function entries in (ψ, α)
+- No need for QQ(ψ) fraction field arithmetic — standard symbolic solve suffices
+- Target: full E4_1 derivation with conservation < 10 seconds (conservation solve itself < 5 seconds)
 
 ## Key Implementation Insight
 
