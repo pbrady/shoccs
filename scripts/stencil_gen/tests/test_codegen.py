@@ -3,10 +3,12 @@
 from sympy import Integer, Rational, Symbol, symbols
 
 from stencil_gen.codegen import (
+    StencilGenSpec,
     apply_cse,
     format_rational_h_division,
     generate_interior_method,
     generate_nbs_method,
+    generate_stencil_cpp,
 )
 from stencil_gen.printer import StencilCodePrinter, build_symbol_map
 
@@ -287,3 +289,69 @@ def test_nbs_floating_coeff_count():
     )
     # Should have R*T = 15 coefficient assignments
     assert body.count("c[") == 15
+
+
+# ── StencilGenSpec fixtures for 20.4e ────────────────────────────────────
+
+e4u_spec = StencilGenSpec(
+    name="E4u_1",
+    P=2,
+    R=3,
+    T=5,
+    X=0,
+    derivative_order=1,
+    is_uniform=True,
+    param_arrays={"alpha": 2},
+    interior_coeffs=[
+        Rational(1, 12), Rational(-2, 3), 0, Rational(2, 3), Rational(-1, 12),
+    ],
+    floating_coeffs=e4u_floating_coeffs,
+    dirichlet_coeffs=[Integer(0)] * 5 + e4u_dirichlet_coeffs,
+)
+
+poly_spec = StencilGenSpec(
+    name="polyE2_1",
+    P=1,
+    R=3,
+    T=4,
+    X=0,
+    derivative_order=1,
+    is_uniform=False,
+    param_arrays={"fa": 6, "da": 3, "ia": 4},
+    interior_coeffs=[Rational(-1, 2), 0, Rational(1, 2)],
+    floating_coeffs=poly_floating_coeffs,
+    dirichlet_coeffs=[Integer(0)] * 4 + [Integer(0)] * 8,
+    has_interp=True,
+    interp_P=2,
+    interp_T=4,
+)
+
+
+# ── 20.4e: Full struct generator tests ──────────────────────────────────
+
+
+def test_full_struct_e4u():
+    """Generate E4u_1 struct, verify structural elements."""
+    code = generate_stencil_cpp(e4u_spec)
+    assert '#include "stencil.hpp"' in code
+    assert "struct E4u_1 {" in code
+    assert "static constexpr int P = 2;" in code
+    assert "static constexpr int R = 3;" in code
+    assert "std::array<real, 2> alpha;" in code
+    assert "copy_zero_padded(a, alpha);" in code
+    assert "info query_max()" in code
+    assert "interior(real h," in code
+    assert "nbs_floating(real h," in code
+    assert "nbs_dirichlet(real h," in code
+    assert "make_E4u_1(std::span<const real> alpha)" in code
+    assert "} // namespace ccs::stencils" in code
+
+
+def test_full_struct_poly():
+    """Generate polyE2_1 struct, verify cut-cell elements."""
+    code = generate_stencil_cpp(poly_spec)
+    assert "std::array<real, 6> fa;" in code
+    assert "std::array<real, 3> da;" in code
+    assert "std::array<real, 4> ia;" in code
+    assert "real psi" in code  # psi parameter is named
+    assert "interp_info query_interp() const { return {2, 4}; }" in code

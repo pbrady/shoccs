@@ -3,9 +3,13 @@
 Generates .cpp and .t.cpp files matching the patterns in src/stencils/.
 """
 
+from __future__ import annotations
+
+from dataclasses import dataclass
+
 from sympy import Expr, Rational, Symbol, cse, numbered_symbols
 
-from stencil_gen.printer import StencilCodePrinter
+from stencil_gen.printer import StencilCodePrinter, build_symbol_map
 
 
 def apply_cse(
@@ -221,3 +225,299 @@ def generate_nbs_method(
     lines.append(f"{indent4}}}")
 
     return "\n".join(lines)
+
+
+# ── 20.4e: Full struct generator ─────────────────────────────────────────
+
+
+@dataclass
+class StencilGenSpec:
+    """Specification for generating a complete stencil .cpp file."""
+
+    name: str
+    P: int
+    R: int
+    T: int
+    X: int
+    derivative_order: int
+    is_uniform: bool
+    param_arrays: dict[str, int]
+    interior_coeffs: list
+    floating_coeffs: list
+    dirichlet_coeffs: list
+    has_interp: bool = False
+    interp_P: int = 0
+    interp_T: int = 0
+
+
+def _emit_header(spec: StencilGenSpec) -> str:
+    """Emit includes, optional comment, and namespace open."""
+    lines = [
+        '#include "stencil.hpp"',
+        "",
+        "#include <algorithm>",
+        "",
+        "#include <cmath>",
+        "",
+    ]
+    if spec.is_uniform:
+        family = spec.name.rsplit("_", 1)[0]
+        lines.append(f"/// {family} - uniform mesh {family} stencil")
+        lines.append("")
+    lines.append("namespace ccs::stencils")
+    lines.append("{")
+    return "\n".join(lines) + "\n"
+
+
+def _emit_struct_preamble(spec: StencilGenSpec) -> str:
+    """Emit struct open, constants, member arrays, and constructors."""
+    indent = "    "
+    lines = [
+        f"struct {spec.name} {{",
+        "",
+        f"{indent}static constexpr int P = {spec.P};",
+        f"{indent}static constexpr int R = {spec.R};",
+        f"{indent}static constexpr int T = {spec.T};",
+        f"{indent}static constexpr int X = {spec.X};",
+    ]
+
+    if spec.param_arrays:
+        lines.append("")
+        for name, count in spec.param_arrays.items():
+            lines.append(f"{indent}std::array<real, {count}> {name};")
+
+    lines.append("")
+    lines.append(f"{indent}{spec.name}() = default;")
+
+    if spec.is_uniform and len(spec.param_arrays) == 1:
+        array_name = list(spec.param_arrays.keys())[0]
+        lines.append(f"{indent}{spec.name}(std::span<const real> a)")
+        lines.append(f"{indent}{{")
+        lines.append(f"{indent}    copy_zero_padded(a, {array_name});")
+        lines.append(f"{indent}}}")
+    elif len(spec.param_arrays) > 1:
+        names = list(spec.param_arrays.keys())
+        ctor_indent = " " * (4 + len(spec.name) + 1)
+        lines.append(f"{indent}{spec.name}(std::span<const real> {names[0]}_,")
+        for n in names[1:-1]:
+            lines.append(f"{ctor_indent}std::span<const real> {n}_,")
+        lines.append(f"{ctor_indent}std::span<const real> {names[-1]}_)")
+        lines.append(f"{indent}{{")
+        for n in names:
+            lines.append(f"{indent}    copy_zero_padded({n}_, {n});")
+        lines.append(f"{indent}}}")
+
+    return "\n".join(lines) + "\n"
+
+
+def _emit_query_methods(spec: StencilGenSpec) -> str:
+    """Emit query_max, query, query_interp, and interpolation stubs."""
+    indent = "    "
+    indent8 = "        "
+    lines = [
+        "",
+        f"{indent}info query_max() const {{ return {{P, R, T, X}}; }}",
+        f"{indent}info query(bcs::type b) const",
+        f"{indent}{{",
+        f"{indent8}switch (b) {{",
+        f"{indent8}case bcs::Dirichlet:",
+        f"{indent8}    return {{P, R - 1, T, 0}};",
+        f"{indent8}case bcs::Floating:",
+        f"{indent8}    return {{P, R, T, 0}};",
+        f"{indent8}case bcs::Neumann:",
+        f"{indent8}    return {{}};",
+        f"{indent8}default:",
+        f"{indent8}    return {{}};",
+        f"{indent8}}}",
+        f"{indent}}}",
+    ]
+
+    if spec.has_interp:
+        lines.append(
+            f"{indent}interp_info query_interp() const "
+            f"{{ return {{{spec.interp_P}, {spec.interp_T}}}; }}"
+        )
+    else:
+        lines.append(f"{indent}interp_info query_interp() const {{ return {{}}; }}")
+
+    lines.extend(
+        [
+            "",
+            f"{indent}std::span<const real> interp_interior(real, std::span<real> c) const {{ return c; }}",
+            "",
+            f"{indent}std::span<const real> interp_wall(int, real, real, std::span<real> c, bool) const",
+            f"{indent}{{",
+            f"{indent8}return c;",
+            f"{indent}}}",
+        ]
+    )
+
+    return "\n".join(lines) + "\n"
+
+
+def _emit_interior_method(spec: StencilGenSpec) -> str:
+    """Emit the interior() method, wrapping generate_interior_method."""
+    indent = "    "
+    body = generate_interior_method(
+        spec.interior_coeffs, spec.derivative_order, spec.is_uniform
+    )
+    lines = [
+        "",
+        f"{indent}std::span<const real> interior(real h, std::span<real> c) const",
+        f"{indent}{{",
+        body,
+        f"{indent}}}",
+    ]
+    return "\n".join(lines) + "\n"
+
+
+def _emit_nbs_dispatcher(spec: StencilGenSpec) -> str:
+    """Emit the nbs() switch dispatcher method."""
+    indent = "    "
+    indent8 = "        "
+    # "    std::span<const real> nbs(" = 30 chars
+    cont = " " * 30
+
+    x_param = "std::span<real> x" if spec.is_uniform else "std::span<real>"
+
+    lines = [
+        "",
+        f"{indent}std::span<const real> nbs(real h,",
+        f"{cont}bcs::type b,",
+        f"{cont}real psi,",
+        f"{cont}bool right,",
+        f"{cont}std::span<real> c,",
+        f"{cont}{x_param}) const",
+        f"{indent}{{",
+        f"{indent8}switch (b) {{",
+    ]
+
+    if spec.is_uniform:
+        lines.extend(
+            [
+                f"{indent8}case bcs::Floating:",
+                f"{indent8}    return nbs_floating(h, psi, c.subspan(0, R * T), right);",
+                f"{indent8}case bcs::Dirichlet:",
+                f"{indent8}    return nbs_dirichlet(h, psi, c.subspan(0, (R - 1) * T), right);",
+            ]
+        )
+    else:
+        lines.extend(
+            [
+                f"{indent8}case bcs::Floating:",
+                f"{indent8}    return nbs_floating(h, psi, c, right);",
+                f"{indent8}case bcs::Dirichlet:",
+                f"{indent8}    return nbs_dirichlet(h, psi, c, right);",
+            ]
+        )
+
+    lines.extend(
+        [
+            f"{indent8}default:",
+            f"{indent8}    return c;",
+            f"{indent8}}}",
+            f"{indent}}}",
+        ]
+    )
+
+    return "\n".join(lines) + "\n"
+
+
+def _emit_nbs_methods(spec: StencilGenSpec, printer: StencilCodePrinter) -> str:
+    """Emit nbs_floating, nbs_dirichlet, and nbs_neumann methods."""
+    indent = "    "
+    indent8 = "        "
+    parts: list[str] = []
+
+    # nbs_floating
+    floating_method = generate_nbs_method(
+        "nbs_floating",
+        spec.floating_coeffs,
+        spec.R,
+        spec.T,
+        printer,
+        psi_dependent=not spec.is_uniform,
+        nu=spec.derivative_order,
+    )
+    parts.append("")
+    parts.append(floating_method)
+
+    # nbs_dirichlet — skip row 0
+    dirichlet_coeffs = spec.dirichlet_coeffs[spec.T :]
+    dirichlet_method = generate_nbs_method(
+        "nbs_dirichlet",
+        dirichlet_coeffs,
+        spec.R,
+        spec.T,
+        printer,
+        psi_dependent=not spec.is_uniform,
+        nu=spec.derivative_order,
+    )
+    parts.append("")
+    parts.append(dirichlet_method)
+
+    # nbs_neumann stub
+    parts.append("")
+    if spec.is_uniform and spec.X == 0:
+        parts.append(
+            f"{indent}void nbs_neumann(real, real, std::span<real>, std::span<real>, bool) const {{}}"
+        )
+    else:
+        parts.append(f"{indent}std::span<const real>")
+        parts.append(
+            f"{indent}nbs_neumann(real, real, std::span<real> c, std::span<real>, bool) const"
+        )
+        parts.append(f"{indent}{{")
+        parts.append(f"{indent8}return c;")
+        parts.append(f"{indent}}}")
+
+    return "\n".join(parts) + "\n"
+
+
+def _emit_factory(spec: StencilGenSpec) -> str:
+    """Emit struct close, factory function, and namespace close."""
+    lines = ["};", ""]
+
+    if not spec.param_arrays:
+        lines.append(
+            f"stencil make_{spec.name}() {{ return {spec.name}{{}}; }}"
+        )
+    elif spec.is_uniform and len(spec.param_arrays) == 1:
+        array_name = list(spec.param_arrays.keys())[0]
+        lines.append(
+            f"stencil make_{spec.name}(std::span<const real> {array_name})"
+            f" {{ return {spec.name}{{{array_name}}}; }}"
+        )
+    else:
+        names = list(spec.param_arrays.keys())
+        prefix = f"stencil make_{spec.name}("
+        cont = " " * len(prefix)
+        lines.append(f"{prefix}std::span<const real> {names[0]},")
+        for n in names[1:-1]:
+            lines.append(f"{cont}std::span<const real> {n},")
+        lines.append(f"{cont}std::span<const real> {names[-1]})")
+        lines.append("{")
+        args = ", ".join(names)
+        lines.append(f"    return {spec.name}{{{args}}};")
+        lines.append("}")
+
+    lines.extend(["", "} // namespace ccs::stencils", ""])
+
+    return "\n".join(lines)
+
+
+def generate_stencil_cpp(spec: StencilGenSpec) -> str:
+    """Generate a complete stencil .cpp file from a StencilGenSpec."""
+    smap = build_symbol_map(spec.param_arrays, has_psi=not spec.is_uniform)
+    printer = StencilCodePrinter(symbol_map=smap)
+    return "".join(
+        [
+            _emit_header(spec),
+            _emit_struct_preamble(spec),
+            _emit_query_methods(spec),
+            _emit_interior_method(spec),
+            _emit_nbs_dispatcher(spec),
+            _emit_nbs_methods(spec, printer),
+            _emit_factory(spec),
+        ]
+    )
