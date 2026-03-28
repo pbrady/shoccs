@@ -167,10 +167,14 @@ The two-phase approach described below was attempted and found to have a **funda
     - **(H) Column-selective conservation:** Enforce conservation only on a subset of columns (e.g., those with nonzero IC) and accept that other columns have small residuals.
   - File: investigatory work done in ad-hoc Python scripts (no test file committed — the investigation used interactive exploration rather than formal test classes)
 
-- [ ] **22.3a-iv** *(Review follow-up)* Commit reproducible test evidence for approach (C):
+- [x] **22.3a-iv** *(Review follow-up)* Commit reproducible test evidence for approach (C):
   - Approaches A and B have formal test classes (`TestApproachAMinorConditions`, `TestApproachBParametricWeights`) in `test_e4_cut_cell.py` that allow independent verification of their infeasibility claims. Approach C has no committed test artifact — the 7 sub-results documented in 22.3a-iii were obtained via ad-hoc scripts.
   - Add `TestApproachCEntryLevelUnknowns` to `test_e4_cut_cell.py` reproducing at minimum: (1) the rank gap = 1 for constant weights + 8 betas (result #1), (2) the pointwise rank check at specific (ψ, beta) values (result #4), and (3) the nonlinear solve returning 0 solutions (result #7). These three cover the key structural claim from different angles.
   - File: `scripts/stencil_gen/tests/test_e4_cut_cell.py`
+  - **DONE:** Added `TestApproachCEntryLevelUnknowns` with 3 tests:
+    - `test_rank_gap_constant_weights_8_betas`: Builds B_l with alpha=0 and Category-A-only prescriptions (8 betas), applies theta linearization (θ_{i,k} = w_i * e_{i,k}) to eliminate bilinear terms, clears psi-denominators, collects psi-coefficients → scalar linear system with rank gap = 1.
+    - `test_pointwise_rank_check`: At 3 psi values × 5 beta vectors = 15 combinations, the 6×3 conservation coefficient matrix always has rank 3 and augmented rank 4.
+    - `test_nonlinear_solve_no_solutions`: `sympy.solve` on the bilinear scalar equations returns no solutions.
 
 - [ ] **22.3a-v** *(Review follow-up)* Investigate approach (D) — increased stencil dimensions:
   - All three approaches (A, B, C) failed for E4_1 at R=4, T=7. The plan identifies directions D–H but has no concrete investigation item. This item gates all downstream work (22.3b–22.7a are BLOCKED until a viable approach is found).

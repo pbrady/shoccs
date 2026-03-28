@@ -27,11 +27,14 @@ from stencil_gen.temo import (
     build_cut_cell_conservation_system,
     build_cut_cell_deltas,
     build_degenerate_stencil,
+    build_temo_vandermonde,
     compute_dimensions,
     construct_cut_cell_stencil,
     derive_cut_cell_scheme,
     derive_e2_uniform_boundary,
     derive_uniform_boundary_for_temo,
+    make_psi_field,
+    solve_temo_row,
     solve_uniform_limit,
 )
 
@@ -1250,3 +1253,247 @@ class TestApproachBParametricWeights:
             assert r_aug == r_M + 1, (
                 f"Degree {deg}: rank gap should be 1, got {r_aug - r_M}"
             )
+
+
+class TestApproachCEntryLevelUnknowns:
+    """Approach C: entry-level unknowns (bypass alpha parameterization).
+
+    Instead of working with the 4 alpha parameters from the uniform boundary,
+    fix alpha=0 and introduce 2 beta symbols per row via solve_temo_row,
+    giving 8 free stencil entries alongside 3 weight unknowns.
+
+    All three tests confirm the same structural result: the conservation
+    constraint for E4_1 (R=4, T=7, p=2) is infeasible regardless of
+    parameterization.  The rank gap is always exactly 1.
+    """
+
+    @pytest.fixture
+    def e4_entry_level_data(self):
+        """Build E4_1 stencil with alpha=0, Category-A-only prescriptions.
+
+        Returns dict with keys: psi, B_l, beta_syms, eqs, w_syms, R, T,
+        ur (UniformResult).
+        """
+        psi = Symbol("psi")
+        ur = derive_uniform_boundary_for_temo(E4_1)
+
+        # Fix alpha=0 in B_u so that free entries become betas
+        B_u_0 = ur.B_u.subs({s: 0 for s in ur.alpha_symbols})
+
+        R = B_u_0.rows + 1  # 4
+        T = B_u_0.cols + 1  # 7
+        q, nu, p = E4_1.q, E4_1.nu, E4_1.p  # 3, 1, 2
+
+        K, _ = make_psi_field(psi)
+
+        # Need B_l_1 for the near-interior row's Category A target
+        B_l_1 = solve_uniform_limit(
+            B_u_0, ur.interior, p, q, nu, E4_1.nextra,
+        )
+
+        rows = []
+        beta_syms = []
+        for i in range(R):
+            V, rhs_vec = build_temo_vandermonde(i, T, q, nu, psi)
+            # Only Category A prescribed (col 1 for nu=1, all rows)
+            zeroed = 1
+            if i < B_u_0.rows:
+                target = B_u_0[i, 0]  # alpha^u_{i,0} with alpha=0
+            else:
+                target = B_l_1[i, zeroed]
+            prescribed = {zeroed: psi * target}
+
+            result = solve_temo_row(
+                i, V, rhs_vec, prescribed, psi, K, [], beta_prefix="e",
+            )
+            rows.append(result.coeffs)
+            for col, sym in result.beta_info:
+                beta_syms.append(sym)
+
+        B_l = Matrix(rows)
+
+        eqs, w_syms = build_cut_cell_conservation_system(
+            B_l, R, T, p=p, nu=nu,
+            interior_coeffs=ur.interior, psi=psi,
+        )
+
+        return {
+            "psi": psi,
+            "B_l": B_l,
+            "beta_syms": beta_syms,
+            "eqs": eqs,
+            "w_syms": w_syms,
+            "R": R,
+            "T": T,
+            "ur": ur,
+        }
+
+    def test_rank_gap_constant_weights_8_betas(self, e4_entry_level_data):
+        """Result #1: theta-linearized system has rank gap = 1.
+
+        The conservation equations are bilinear in (w_i, e_{i,k}).  Apply
+        theta linearization: theta_{i,k} = w_i * e_{i,k} for rows i >= 1.
+        This gives 11 unknowns: w_1..w_3, e_0_0, e_0_1, theta_1_0..theta_3_1.
+        After clearing psi-denominators and collecting psi-coefficients,
+        the scalar linear system has rank gap = 1.
+        """
+        from sympy import Poly as SPoly
+
+        d = e4_entry_level_data
+        psi = d["psi"]
+        B_l = d["B_l"]
+        w_syms = d["w_syms"]
+        beta_syms = d["beta_syms"]
+        R, T = d["R"], d["T"]
+        ur = d["ur"]
+        p, nu = E4_1.p, E4_1.nu
+
+        assert len(beta_syms) == 8, f"Expected 8 betas, got {len(beta_syms)}"
+
+        # Create theta symbols for rows 1..R-1 (2 per row = 6 total)
+        theta_list = []
+        for i in range(1, R):
+            for k in range(2):
+                theta_list.append(Symbol(f"theta_{i}_{k}"))
+
+        row0_betas = beta_syms[0:2]  # e_0_0, e_0_1
+        all_unknowns = list(w_syms) + row0_betas + theta_list  # 3+2+6 = 11
+
+        # Build linearized conservation equations by decomposing B_l entries
+        lin_eqs = []
+        for j in range(T - 1):
+            eq = S.Zero
+
+            # Row 0: w_0 = psi (fixed); B_l[0,j] is linear in e_0_0, e_0_1
+            eq += psi * B_l[0, j]
+
+            # Rows 1..R-1: decompose entry and apply theta linearization
+            for idx in range(R - 1):
+                i = idx + 1
+                entry = B_l[i, j]
+                row_betas_i = [beta_syms[2 * i], beta_syms[2 * i + 1]]
+
+                # base = entry with row's betas zeroed
+                base_ij = entry.subs({b: 0 for b in row_betas_i})
+                eq += w_syms[idx] * base_ij
+
+                # theta_{i,k} replaces w_i * e_{i,k}
+                for k, b in enumerate(row_betas_i):
+                    coeff = cancel(entry.diff(b))
+                    eq += coeff * theta_list[2 * idx + k]
+
+            # Interior contribution
+            ic = _interior_contribution(j - 1, R, p, ur.interior)
+            eq += ic
+
+            # Target: column 0 sums to -1 for nu=1
+            if j == 0 and nu == 1:
+                eq += 1  # col_sum - (-1) = col_sum + 1
+
+            lin_eqs.append(eq)
+
+        # Clear psi-denominators and collect psi-coefficients
+        scalar_eqs = []
+        for eq in lin_eqs:
+            eq_c = cancel(eq)
+            num, _ = fraction(eq_c)
+            poly = SPoly(expand(num), psi)
+            for coeff in poly.all_coeffs():
+                c_val = cancel(coeff)
+                if c_val != 0:
+                    scalar_eqs.append(c_val)
+
+        M, rhs = linear_eq_to_matrix(scalar_eqs, all_unknowns)
+        aug = M.row_join(rhs)
+        r_M = M.rank()
+        r_aug = aug.rank()
+
+        # Structural infeasibility: rank gap = 1
+        assert M.shape[1] == 11, f"Expected 11 unknowns, got {M.shape[1]}"
+        assert r_aug == r_M + 1, (
+            f"Expected rank gap 1, got {r_aug - r_M} "
+            f"(rank(M)={r_M}, rank([M|b])={r_aug})"
+        )
+
+    def test_pointwise_rank_check(self, e4_entry_level_data):
+        """Result #4: at specific (psi, beta) values, rank([H|b]) = 4 > rank(H) = 3.
+
+        For 3 psi values and 5 random beta vectors (15 combinations), the
+        6x3 conservation coefficient matrix H always has rank 3 and the
+        augmented matrix [H|b] always has rank 4.  No constant weights
+        satisfy conservation for ANY beta choice.
+        """
+        d = e4_entry_level_data
+        psi = d["psi"]
+        eqs = d["eqs"]
+        w_syms = d["w_syms"]
+        beta_syms = d["beta_syms"]
+        B_l = d["B_l"]
+        R, T = d["R"], d["T"]
+
+        psi_vals = [Rational(1, 4), Rational(1, 2), Rational(3, 4)]
+
+        # Deterministic "random" beta vectors (rational for exact arithmetic)
+        beta_vectors = [
+            [Rational(i + j, 10) for j in range(8)]
+            for i in range(5)
+        ]
+
+        for psi_val in psi_vals:
+            for bv in beta_vectors:
+                subs = {psi: psi_val}
+                subs.update(dict(zip(beta_syms, bv)))
+
+                # Build numeric 6x3 coefficient matrix H and RHS b
+                # from conservation equations: H @ w = b
+                A_num, b_num = linear_eq_to_matrix(
+                    [eq.subs(subs) for eq in eqs], w_syms,
+                )
+                aug_num = A_num.row_join(b_num)
+
+                r_A = A_num.rank()
+                r_aug = aug_num.rank()
+
+                assert r_A == 3, (
+                    f"psi={psi_val}, beta={bv}: "
+                    f"Expected rank(H) = 3, got {r_A}"
+                )
+                assert r_aug == 4, (
+                    f"psi={psi_val}, beta={bv}: "
+                    f"Expected rank([H|b]) = 4, got {r_aug}"
+                )
+
+    def test_nonlinear_solve_no_solutions(self, e4_entry_level_data):
+        """Result #7: sympy.solve on the 21 bilinear equations returns [].
+
+        With constant weights and constant betas, the conservation equations
+        (after clearing psi-denominators and collecting psi-coefficients)
+        yield 21 quadratic scalar equations in 11 unknowns (bilinear in
+        w_i * e_{j,k}).  sympy.solve finds no solution.
+        """
+        from sympy import Poly as SPoly
+
+        d = e4_entry_level_data
+        psi = d["psi"]
+        eqs = d["eqs"]
+        w_syms = d["w_syms"]
+        beta_syms = d["beta_syms"]
+
+        all_unknowns = list(w_syms) + beta_syms
+
+        # Clear denominators and collect psi-coefficients
+        scalar_eqs = []
+        for eq in eqs:
+            eq_c = cancel(eq)
+            num, _ = fraction(eq_c)
+            poly = SPoly(expand(num), psi)
+            for coeff in poly.all_coeffs():
+                c_val = cancel(coeff)
+                if c_val != 0:
+                    scalar_eqs.append(c_val)
+
+        # solve() on the full nonlinear system
+        result = solve(scalar_eqs, all_unknowns, dict=True)
+        assert result == [], (
+            f"Expected no solutions, got {len(result)} solution(s)"
+        )
