@@ -191,7 +191,7 @@ The SymPy pipeline (Phase 20) is complete with 231 passing tests and 7 modules:
   - Test: add a test in `test_codegen.py` that creates a `StencilGenSpec(is_uniform=False, param_arrays={"alpha": 4}, ...)` and verifies the generated code contains `E4_1(std::span<const real> a)` constructor and `make_E4_1(std::span<const real> alpha)` factory
   - Also verify existing E4u_1 uniform test still passes: `cd scripts/stencil_gen && uv run pytest tests/test_codegen.py -v`
 
-- [ ] **21.4b** Generate the E4_1 C++ stencil struct:
+- [x] **21.4b** Generate the E4_1 C++ stencil struct:
   - Use `codegen.generate_stencil_cpp()` to produce `E4_1.cpp`
   - The struct should have: **P=2, R=4, T=7, X=0** (corrected: R=4, not 5)
   - Member array: `std::array<real, 4> alpha` (4 free params)

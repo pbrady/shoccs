@@ -1,14 +1,22 @@
 """Tests for E4_1 cut-cell stencil derivation (21.1b onwards)."""
 
-import pytest
-from sympy import Matrix, Rational, S, Symbol, cancel, simplify
+import pathlib
 
+import pytest
+from sympy import Integer, Matrix, Rational, S, Symbol, cancel, simplify
+
+from stencil_gen.codegen import (
+    StencilGenSpec,
+    generate_stencil_cpp,
+)
 from stencil_gen.temo import (
     E4_1,
     SchemeParams,
     UniformResult,
+    assemble_cut_cell_result,
     build_cut_cell_deltas,
     build_degenerate_stencil,
+    compute_dimensions,
     construct_cut_cell_stencil,
     derive_uniform_boundary_for_temo,
     solve_uniform_limit,
@@ -300,3 +308,139 @@ class TestE4TEMOConstruction:
                     f"Row {i}, moment k={k} at psi=1/2: "
                     f"got {simplify(moment)}, expected {expected}"
                 )
+
+
+class TestE4CodeGeneration:
+    """Tests for E4_1 C++ code generation (21.4b)."""
+
+    @pytest.fixture(scope="class")
+    def e4_spec(self):
+        """Build the full StencilGenSpec from the TEMO pipeline."""
+        psi = Symbol("psi")
+        ur = derive_uniform_boundary_for_temo(E4_1)
+        result = construct_cut_cell_stencil(
+            ur.B_u, ur.interior, p=2, q=3, nu=1, nextra=0, psi=psi,
+        )
+        dims = compute_dimensions(E4_1.p, E4_1.q, E4_1.s, E4_1.nextra, E4_1.nu)
+        cc = assemble_cut_cell_result(
+            result.matrix, None, None, dims, ur.alpha_symbols,
+        )
+
+        # floating_coeffs: R*T = 4*7 = 28 entries, row-major from cc.floating
+        floating_flat = list(cc.floating)
+
+        # dirichlet_coeffs: R*T = 28 entries (prepend T=7 zeros for row 0)
+        dirichlet_flat = [Integer(0)] * 7 + list(cc.dirichlet)
+
+        spec = StencilGenSpec(
+            name="E4_1",
+            P=2,
+            R=4,
+            T=7,
+            X=0,
+            derivative_order=1,
+            is_uniform=False,
+            param_arrays={"alpha": 4},
+            interior_coeffs=ur.interior,
+            floating_coeffs=floating_flat,
+            dirichlet_coeffs=dirichlet_flat,
+        )
+        return spec
+
+    @pytest.fixture(scope="class")
+    def e4_code(self, e4_spec):
+        """Generate the E4_1 C++ code."""
+        return generate_stencil_cpp(e4_spec)
+
+    def test_struct_constants(self, e4_code):
+        """Generated code has P=2, R=4, T=7, X=0."""
+        assert "static constexpr int P = 2;" in e4_code
+        assert "static constexpr int R = 4;" in e4_code
+        assert "static constexpr int T = 7;" in e4_code
+        assert "static constexpr int X = 0;" in e4_code
+
+    def test_struct_name(self, e4_code):
+        """Generated code defines struct E4_1."""
+        assert "struct E4_1" in e4_code
+
+    def test_namespace(self, e4_code):
+        """Generated code uses ccs::stencils namespace."""
+        assert "namespace ccs::stencils" in e4_code
+
+    def test_alpha_array(self, e4_code):
+        """Generated code has std::array<real, 4> alpha member."""
+        assert "std::array<real, 4> alpha;" in e4_code
+
+    def test_constructor(self, e4_code):
+        """Generated code has span constructor."""
+        assert "E4_1(std::span<const real> a)" in e4_code
+        assert "copy_zero_padded(a, alpha);" in e4_code
+
+    def test_factory(self, e4_code):
+        """Generated code has make_E4_1 factory."""
+        assert "make_E4_1(std::span<const real> alpha)" in e4_code
+        assert "return E4_1{alpha};" in e4_code
+
+    def test_interior_method(self, e4_code):
+        """Generated code has interior() method."""
+        assert "interior(real h," in e4_code
+
+    def test_nbs_floating_method(self, e4_code):
+        """Generated code has nbs_floating method with 28 coefficient assignments."""
+        assert "nbs_floating(real h," in e4_code
+        floating_start = e4_code.index("nbs_floating(real h,")
+        dirichlet_start = e4_code.index("nbs_dirichlet(real h,")
+        floating_section = e4_code[floating_start:dirichlet_start]
+        # R*T = 4*7 = 28 coefficient assignments
+        assert floating_section.count("c[") == 28, (
+            f"Expected 28 c[] assignments in floating, got {floating_section.count('c[')}"
+        )
+
+    def test_nbs_dirichlet_method(self, e4_code):
+        """Generated code has nbs_dirichlet method with 21 coefficient assignments."""
+        assert "nbs_dirichlet(real h," in e4_code
+        dirichlet_start = e4_code.index("nbs_dirichlet(real h,")
+        neumann_start = e4_code.index("nbs_neumann")
+        dirichlet_section = e4_code[dirichlet_start:neumann_start]
+        # (R-1)*T = 3*7 = 21 coefficient assignments
+        assert dirichlet_section.count("c[") == 21, (
+            f"Expected 21 c[] assignments in dirichlet, got {dirichlet_section.count('c[')}"
+        )
+
+    def test_nbs_neumann_stub(self, e4_code):
+        """Generated code has nbs_neumann stub (X=0, non-uniform)."""
+        assert "nbs_neumann" in e4_code
+
+    def test_psi_named_parameter(self, e4_code):
+        """Cut-cell stencil uses named psi parameter in nbs methods."""
+        # In cut-cell (non-uniform), psi is a named parameter
+        floating_start = e4_code.index("nbs_floating(real h,")
+        floating_sig_end = e4_code.index("{", floating_start)
+        floating_sig = e4_code[floating_start:floating_sig_end]
+        assert "real psi" in floating_sig
+
+    def test_cse_temporaries(self, e4_code):
+        """Generated code uses CSE temporaries for complex expressions."""
+        # E4_1 has rational functions of psi and alpha — CSE should produce temporaries
+        floating_start = e4_code.index("nbs_floating(real h,")
+        dirichlet_start = e4_code.index("nbs_dirichlet(real h,")
+        floating_section = e4_code[floating_start:dirichlet_start]
+        # Check for CSE temporaries (real t... = ...)
+        assert "real t" in floating_section, (
+            "Expected CSE temporaries in floating method"
+        )
+
+    def test_query_methods(self, e4_code):
+        """Generated code has query_max and query methods."""
+        assert "query_max()" in e4_code
+        assert "query(bcs::type b)" in e4_code
+        assert "query_interp()" in e4_code
+
+    def test_write_output(self, e4_spec, e4_code):
+        """Write generated E4_1.cpp to output directory."""
+        output_dir = pathlib.Path(__file__).parent.parent / "output"
+        output_dir.mkdir(exist_ok=True)
+        output_path = output_dir / "E4_1.cpp"
+        output_path.write_text(e4_code)
+        assert output_path.exists()
+        assert output_path.stat().st_size > 0
