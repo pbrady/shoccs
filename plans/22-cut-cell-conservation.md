@@ -117,6 +117,7 @@ The practical approach: solve Taylor per-row first (as now) to get stencil entri
     - For E4_1 with 4 alphas and 3 constraints: expect 1 remaining free alpha. The solve produces `{alpha_k: expr(alpha_remaining)}` for the constrained alphas.
   - **Step 6 — Substitute back:** Replace the constrained alphas in B_l using `.xreplace(alpha_solutions)`, then `cancel()` each entry. Also substitute into `w_sol`. Return `(B_l_conserved, weight_solutions, [alpha_remaining])`.
   - **Edge case (exactly determined):** When n_eq == n_w (e.g., E2_1 with nextra=1 where phi symbols are already resolved), skip Steps 4-6. Just solve for weights and return B_l unchanged with all alphas free. For E2_1: 4 equations in 3+1=4 unknowns (3 weights + 1 phi from 22.2a) → exactly determined.
+  - **Edge case (no alpha parameters, overdetermined):** When n_eq > n_w AND `len(alpha_symbols) == 0` (e.g., E2_2 with nu=2: 3 equations, 1 weight unknown, 0 alphas), Step 4 produces excess residuals that cannot be absorbed by any parameters. These residuals must be identically zero — the Taylor solve already implicitly satisfies the conservation constraints. For each residual: compute `cancel(residual_k)` and assert it equals zero, raising `ValueError(f"Conservation residual {k} is {residual_k}, expected 0 — Taylor solve does not implicitly satisfy conservation for this scheme")` if nonzero. No stencil modification is needed. Return `(B_l, weight_solutions, [])` with empty remaining_alphas. This case is exercised by E2_2 (see 22.6a).
   - **Performance note:** The system is small (≤6 equations). For the weight solve (Step 3), SymPy's `linear_eq_to_matrix` + `Matrix.solve` handle rational function coefficients. For the alpha constraint solve (Step 5), `linear_eq_to_matrix` is used if equations are linear in α; otherwise `sympy.solve()` handles the polynomial system. No need for `solve_in_field` or QQ(ψ) domain arithmetic. Target: < 5 seconds for E4_1 (may take longer if `solve()` is needed for nonlinear α equations — increase to 15 seconds if so).
   - File: `scripts/stencil_gen/stencil_gen/temo.py` (add after `build_cut_cell_conservation_system`, ~line 1300)
 
@@ -129,6 +130,7 @@ The practical approach: solve Taylor per-row first (as now) to get stencil entri
   - **`derive_cut_cell_scheme` (line 1950):** `scheme.nu` is already passed to `construct_cut_cell_stencil` at line 1981. Propagate `floating_result.weight_solutions` and `floating_result.alpha_symbols` to `assemble_cut_cell_result`. Currently calls `assemble_cut_cell_result(floating_result.matrix, ..., dims, uniform.alpha_symbols)` at line 1995 — change `uniform.alpha_symbols` to `floating_result.alpha_symbols or uniform.alpha_symbols` to use the conservation-reduced alpha list when available. Also pass `floating_result.weight_solutions` to `assemble_cut_cell_result`.
   - **`assemble_cut_cell_result` (line 1905):** Add `weight_solutions: dict | None = None` parameter. Pass through to `CutCellResult`.
   - File: `scripts/stencil_gen/stencil_gen/temo.py` (4 modification points: `StencilResult` at line 843, `construct_cut_cell_stencil` at line 1278, `assemble_cut_cell_result` at line 1905, `derive_cut_cell_scheme` at line 1995)
+  - **Co-implement with 22.3c** — the `assemble_cut_cell_result` signature change (adding `weight_solutions`) requires the `CutCellResult` field from 22.3c to exist. Do both items in the same work pass.
 
 - [ ] **22.3c** Handle the quadrature weight output:
   - The conservation solve produces ψ-dependent quadrature weights w_0=ψ, w_1(ψ,α), ..., w_{R-1}(ψ,α)
@@ -158,12 +160,15 @@ The practical approach: solve Taylor per-row first (as now) to get stencil entri
 
 - [ ] **22.4c** Re-generate E4_1 C++ code with conservation-enforced stencil:
   - The generated code will produce different (larger) expressions than Phase 21's output
-  - Update `StencilGenSpec` construction in `test_e4_cut_cell.py::TestE4CodeGeneration` to use the conservation-enforced pipeline (likely just changing to `derive_cut_cell_scheme`)
-  - Run the codegen pipeline and write new E4_1.cpp
-  - Verify it still compiles and passes structural checks
-  - Update `param_arrays={"alpha": N}` where N is the actual free parameter count from 22.4b
+  - **Update two fixtures:** Both `TestE4CodeGeneration.e4_spec` (line 323) and `TestE4TestFileGeneration.e4_spec` (line 461) currently call `construct_cut_cell_stencil` + `assemble_cut_cell_result` manually with `ur.alpha_symbols`. Replace both with `result = derive_cut_cell_scheme(E4_1, psi)`, which includes conservation enforcement. Extract `floating_flat = list(result.floating)`, `dirichlet_flat = [Integer(0)] * result.dims.T + list(result.dirichlet)`, and use `result.alpha_symbols` for the `StencilGenSpec`.
+  - **Update `param_arrays`:** Change `param_arrays={"alpha": 4}` to `param_arrays={"alpha": N}` where N = `len(result.alpha_symbols)` (the post-conservation free alpha count from 22.4b).
+  - **Update assertions that depend on alpha count:**
+    - `test_alpha_array` (line 377): currently asserts `std::array<real, 4> alpha;` — update `4` to N.
+    - `TestE4TestFileGeneration.ALPHA_VALUES` (line 459): currently `{"alpha": [0.1, -0.05, 0.02, 0.01]}` (4 values) — reduce to N values.
+  - **Regenerate output:** The `test_write_output` test (line 446) writes to `scripts/stencil_gen/output/E4_1.cpp`. The new file will have different coefficient expressions with fewer alpha parameters.
+  - Verify: `cd scripts/stencil_gen && uv run pytest tests/test_e4_cut_cell.py -v -k "TestE4CodeGeneration or TestE4TestFileGeneration"`
   - File: `scripts/stencil_gen/tests/test_e4_cut_cell.py`
-  - Depends on: 22.4b (need to know the free parameter count)
+  - Depends on: 22.3b (conservation enforcement in pipeline), 22.4b (need to know the free parameter count)
 
 ### 22.5 — Regression test: E2_1 conservation still holds
 
@@ -178,12 +183,14 @@ The practical approach: solve Taylor per-row first (as now) to get stencil entri
 
 - [ ] **22.6a** Add conservation verification for E2_2 (2nd derivative):
   - **Dimensions:** E2_2 has p=1, q=1, nextra=0, nu=2. Computed: r=2, t=3, r_eff=1, R=2, T=4.
-  - **Conservation system:** T−1 = 3 equations (j=0..2 in T-frame). Weight unknowns: w₁ only (w₀=ψ fixed, R−1=1 unknown). System is overdetermined: 3 equations, 1 weight unknown → 2 excess constraints on alphas.
+  - **Conservation system:** T−1 = 3 equations (j=0..2 in T-frame). Weight unknowns: w₁ only (w₀=ψ fixed, R−1=1 unknown). System is overdetermined: 3 equations, 1 weight unknown → 2 excess constraints on alphas. But E2_2 has **0 alpha symbols** — the existing E2_2 stencil is fully determined by the Taylor solve. The 2 excess constraints must be implicitly satisfied.
   - **IC values:** Using `_interior_contribution(j-1, R, p, interior)` where R=2 (first interior grid point after the R-row boundary block). For E2_2 (R=2, p=1, interior=[1, -2, 1]): IC(0) = _ic(-1, 2, 1, ...) = 0; IC(1) = _ic(0, 2, 1, ...) = 0 (m_hi = 0-2+1 = -1, empty); IC(2) = _ic(1, 2, 1, ...) = interior[1-2+1] = interior[0] = 1. So IC(0)=0, IC(1)=0, IC(2)=1.
   - **Wall column convention for nu=2:** Per DD22-4, for the 2nd derivative ALL column targets are 0 (including column 0). This differs from nu=1 where column 0 targets −1. The `build_cut_cell_conservation_system` function (22.2a) already parameterizes this by `nu`. Verify that the E2_2 conservation equations use `target(j) = 0` for all j.
-  - **Test structure:** Build the E2_2 cut-cell conservation system using `build_cut_cell_conservation_system()` from 22.2a. Verify equation count (3) and that the system is solvable. If the system yields alpha constraints, verify they are consistent with the existing E2_2 stencil (which was derived without explicit conservation).
+  - **Expected behavior with `enforce_cut_cell_conservation`:** E2_2 exercises the "no-alpha overdetermined" edge case from 22.3a. The weight solve (Step 3) determines w₁ as a rational function of ψ. The 2 excess residuals (Step 4) must be identically zero, confirming that the Taylor solve implicitly satisfies conservation for E2_2. The stencil matrix should be UNCHANGED from the pre-conservation version. Test this by comparing entry-by-entry: `derive_cut_cell_scheme(E2_2, psi)` vs. the manual pipeline (identical to existing `test_e2_2_reproduces_existing` at line 745 of `test_e4_cut_cell.py`). Verify `result.weight_solutions` maps w₁ to its solved value (a function of ψ only, no alphas).
+  - **Test structure:** Build the E2_2 cut-cell conservation system using `build_cut_cell_conservation_system()` from 22.2a. Verify equation count (3) and that the system is solvable. Verify that the 2 excess residuals are zero. Verify that the conservation-enforced stencil is identical to the non-enforced version.
   - **Polynomial exactness cross-check:** Verify that the conservation-enforced E2_2 stencil still satisfies `f(x)=x² → f''=2` (matching the existing `test_conservation_polynomial_exactness` test at line 1772 of `test_temo.py`).
   - File: `scripts/stencil_gen/tests/test_temo.py`
+  - Depends on: 22.2a, 22.3a-22.3b (uses `enforce_cut_cell_conservation` via `derive_cut_cell_scheme`)
   - Test: `cd scripts/stencil_gen && uv run pytest tests/test_temo.py -v -k e2_2_conservation`
 
 ### 22.7 — Update codegen for quadrature weights
