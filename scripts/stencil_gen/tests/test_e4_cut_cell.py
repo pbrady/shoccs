@@ -13,6 +13,8 @@ from stencil_gen.codegen import (
     generate_test_cpp,
 )
 from stencil_gen.temo import (
+    E2_1,
+    E2_2,
     E4_1,
     SchemeParams,
     UniformResult,
@@ -21,6 +23,8 @@ from stencil_gen.temo import (
     build_degenerate_stencil,
     compute_dimensions,
     construct_cut_cell_stencil,
+    derive_cut_cell_scheme,
+    derive_e2_uniform_boundary,
     derive_uniform_boundary_for_temo,
     solve_uniform_limit,
 )
@@ -630,3 +634,159 @@ class TestE4TestFileGeneration:
         output_path.write_text(code)
         assert output_path.exists()
         assert output_path.stat().st_size > 0
+
+
+class TestDeriveCutCellScheme:
+    """Tests for derive_cut_cell_scheme high-level pipeline (21.5a)."""
+
+    def test_e4_1_shape(self):
+        """E4_1 via derive_cut_cell_scheme has R=4, T=7 floating matrix."""
+        psi = Symbol("psi")
+        result = derive_cut_cell_scheme(E4_1, psi)
+        assert result.floating.shape == (4, 7)
+        assert result.dirichlet.shape == (3, 7)
+        assert result.dims.R == 4
+        assert result.dims.T == 7
+        assert result.dims.X == 0
+
+    def test_e4_1_no_neumann(self):
+        """E4_1 (nu=1) has no Neumann stencil."""
+        psi = Symbol("psi")
+        result = derive_cut_cell_scheme(E4_1, psi)
+        assert result.neumann is None
+        assert result.eta is None
+
+    def test_e4_1_alpha_count(self):
+        """E4_1 has 4 free alpha symbols."""
+        psi = Symbol("psi")
+        result = derive_cut_cell_scheme(E4_1, psi)
+        assert len(result.alpha_symbols) == 4
+
+    def test_e4_1_matches_manual_pipeline(self):
+        """derive_cut_cell_scheme(E4_1) matches the manual step-by-step pipeline."""
+        psi = Symbol("psi")
+
+        # Manual pipeline (as done in earlier tests)
+        ur = derive_uniform_boundary_for_temo(E4_1)
+        stencil = construct_cut_cell_stencil(
+            ur.B_u, ur.interior, p=2, q=3, nu=1, nextra=0, psi=psi,
+        )
+        dims = compute_dimensions(E4_1.p, E4_1.q, E4_1.s, E4_1.nextra, E4_1.nu)
+        manual = assemble_cut_cell_result(
+            stencil.matrix, None, None, dims, ur.alpha_symbols,
+        )
+
+        # High-level pipeline
+        auto = derive_cut_cell_scheme(E4_1, psi)
+
+        # Compare floating matrices entry by entry
+        R, T = auto.floating.shape
+        for i in range(R):
+            for j in range(T):
+                assert cancel(auto.floating[i, j] - manual.floating[i, j]) == 0, (
+                    f"Floating mismatch at [{i},{j}]"
+                )
+
+    def test_e4_1_taylor_accuracy(self):
+        """E4_1 result satisfies Taylor accuracy at psi=1/2."""
+        psi = Symbol("psi")
+        result = derive_cut_cell_scheme(E4_1, psi)
+        m = result.floating.subs(psi, Rational(1, 2))
+        R, T = m.shape
+        psi_val = Rational(1, 2)
+        for i in range(R):
+            deltas = build_cut_cell_deltas(i, T, psi_val)
+            row = [m[i, j] for j in range(T)]
+            for k in range(4):  # q+1 = 4
+                moment = sum(row[j] * deltas[j] ** k for j in range(T))
+                expected = 1 if k == 1 else 0
+                assert simplify(moment - expected) == 0, (
+                    f"Row {i}, moment k={k}: got {simplify(moment)}"
+                )
+
+    def test_e4_1_custom_alphas(self):
+        """derive_cut_cell_scheme accepts custom alpha symbols."""
+        psi = Symbol("psi")
+        syms = [Symbol(f"a{k}") for k in range(4)]
+        result = derive_cut_cell_scheme(E4_1, psi, alpha_symbols=syms)
+        assert result.alpha_symbols == syms
+        assert result.floating.free_symbols <= {psi} | set(syms)
+
+    def test_e2_1_reproduces_existing(self):
+        """derive_cut_cell_scheme(E2_1) matches manual E2_1 pipeline."""
+        psi = Symbol("psi")
+
+        # Manual E2_1 pipeline using old derive_e2_uniform_boundary
+        ur = derive_e2_uniform_boundary(nu=1)
+        stencil = construct_cut_cell_stencil(
+            ur.B_u, ur.interior, p=1, q=1, nu=1, nextra=1, psi=psi,
+        )
+        dims = compute_dimensions(1, 1, 0, 1, 1)
+        manual = assemble_cut_cell_result(
+            stencil.matrix, None, None, dims, ur.alpha_symbols,
+        )
+
+        # High-level pipeline
+        auto = derive_cut_cell_scheme(E2_1, psi)
+
+        # Shapes must match
+        assert auto.floating.shape == manual.floating.shape
+        assert auto.dirichlet.shape == manual.dirichlet.shape
+        assert auto.dims == manual.dims
+
+        # Floating matrices must match entry by entry
+        R, T = auto.floating.shape
+        for i in range(R):
+            for j in range(T):
+                assert cancel(auto.floating[i, j] - manual.floating[i, j]) == 0, (
+                    f"E2_1 floating mismatch at [{i},{j}]"
+                )
+
+    def test_e2_2_reproduces_existing(self):
+        """derive_cut_cell_scheme(E2_2) matches manual E2_2 pipeline."""
+        psi = Symbol("psi")
+
+        # Manual E2_2 pipeline
+        ur = derive_e2_uniform_boundary(nu=2)
+        stencil = construct_cut_cell_stencil(
+            ur.B_u, ur.interior, p=1, q=1, nu=2, nextra=0, psi=psi,
+        )
+        from stencil_gen.temo import derive_uniform_neumann, construct_neumann_stencil
+        B_uN, eta_u = derive_uniform_neumann(ur.interior, 1, 1, 2)
+        neumann_main, eta = construct_neumann_stencil(
+            ur.B_u, B_uN, eta_u, ur.interior, 1, 1, 2, 0, psi,
+        )
+        dims = compute_dimensions(1, 1, 0, 0, 2)
+        manual = assemble_cut_cell_result(
+            stencil.matrix, neumann_main, eta, dims, ur.alpha_symbols,
+        )
+
+        # High-level pipeline
+        auto = derive_cut_cell_scheme(E2_2, psi)
+
+        # Shapes
+        assert auto.floating.shape == manual.floating.shape
+        assert auto.dims == manual.dims
+        assert auto.neumann is not None
+        assert auto.eta is not None
+
+        # Floating
+        R, T = auto.floating.shape
+        for i in range(R):
+            for j in range(T):
+                assert cancel(auto.floating[i, j] - manual.floating[i, j]) == 0, (
+                    f"E2_2 floating mismatch at [{i},{j}]"
+                )
+
+        # Neumann
+        for i in range(R):
+            for j in range(T):
+                assert cancel(auto.neumann[i, j] - manual.neumann[i, j]) == 0, (
+                    f"E2_2 neumann mismatch at [{i},{j}]"
+                )
+
+        # Eta
+        for i in range(R):
+            assert cancel(auto.eta[i] - manual.eta[i]) == 0, (
+                f"E2_2 eta mismatch at row {i}"
+            )

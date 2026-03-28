@@ -299,17 +299,20 @@ def derive_uniform_boundary_for_temo(
     -------
     UniformResult
     """
-    from stencil_gen.boundary import solve_boundary_row
     from stencil_gen.interior import derive_interior, full_gamma_array
 
     p, q, s, nextra, nu = scheme.p, scheme.q, scheme.s, scheme.nextra, scheme.nu
     dims = compute_dimensions(p, q, s, nextra, nu)
     t = dims.t
     r_eff = dims.r if nu == 1 else dims.r - 1
-    n_free_per_row = t - (q + 1)
+    n_eqs = max(q + 1, nu + 1)
+    n_free_per_row = t - n_eqs
 
     # --- Count total alpha symbols ---
-    if nextra == 0:
+    if n_free_per_row <= 0:
+        # Fully determined (e.g., E2_2: t=3, n_eqs=3)
+        n_alpha = 0
+    elif nextra == 0:
         # Early rows: 1 active each; last row: min(n_free, 2) active
         n_alpha = (r_eff - 1) * 1 + min(n_free_per_row, 2)
     else:
@@ -327,7 +330,11 @@ def derive_uniform_boundary_for_temo(
     free_per_row: list[list] = []
     alpha_idx = 0
 
-    if nextra == 0:
+    if n_free_per_row <= 0:
+        # No free parameters — all rows fully determined
+        for _i in range(r_eff):
+            free_per_row.append([])
+    elif nextra == 0:
         # No conservation row
         for i in range(r_eff - 1):
             # Early rows: 1 active alpha, rest zero
@@ -354,10 +361,27 @@ def derive_uniform_boundary_for_temo(
         free_per_row.append(phi_syms)
 
     # --- Solve each row's Taylor system ---
+    # Use _build_uniform_vandermonde with n_eqs = max(q+1, nu+1), which
+    # correctly handles nu=2 schemes where nu+1 > q+1.
     rows: list[list] = []
     for i in range(r_eff):
-        result = solve_boundary_row(i, t, q, nu, free_per_row[i])
-        rows.append(result.coefficients)
+        V, rhs = _build_uniform_vandermonde(i, t, n_eqs, nu)
+        free = free_per_row[i]
+        n_free = len(free)
+        n_det = t - n_free
+
+        V_det = V[:, :n_det]
+        V_free = V[:, n_det:]
+
+        if n_free > 0:
+            alpha_vec = Matrix(free)
+            rhs_adj = rhs - V_free * alpha_vec
+        else:
+            rhs_adj = rhs
+
+        gamma_det = V_det.solve(rhs_adj)
+        row_coeffs = [cancel(gamma_det[k]) for k in range(n_det)] + list(free)
+        rows.append(row_coeffs)
 
     B_u = Matrix(rows)
 
@@ -1915,4 +1939,59 @@ def assemble_cut_cell_result(
         eta=eta,
         dims=dims,
         alpha_symbols=alpha_symbols,
+    )
+
+
+# ---------------------------------------------------------------------------
+# 21.5a — High-level cut-cell scheme derivation
+# ---------------------------------------------------------------------------
+
+
+def derive_cut_cell_scheme(
+    scheme: SchemeParams,
+    psi: Symbol,
+    alpha_symbols: list[Symbol] | None = None,
+) -> CutCellResult:
+    """Derive a complete cut-cell stencil for the given scheme.
+
+    Orchestrates the full pipeline: uniform boundary derivation, TEMO
+    cut-cell construction, optional Neumann stencil, and assembly.
+
+    Parameters
+    ----------
+    scheme : SchemeParams
+        Scheme parameters (p, q, s, nextra, nu).
+    psi : Symbol
+        The psi symbol for the cut-cell parameter.
+    alpha_symbols : list of Symbol, optional
+        Free alpha symbols.  If None, creates alpha_0..alpha_{n-1}.
+
+    Returns
+    -------
+    CutCellResult
+        Complete cut-cell stencil with floating, Dirichlet, and
+        optionally Neumann coefficient matrices.
+    """
+    dims = compute_dimensions(scheme.p, scheme.q, scheme.s, scheme.nextra, scheme.nu)
+
+    uniform = derive_uniform_boundary_for_temo(scheme, alpha_symbols=alpha_symbols)
+
+    floating_result = construct_cut_cell_stencil(
+        uniform.B_u, uniform.interior,
+        scheme.p, scheme.q, scheme.nu, scheme.nextra, psi,
+    )
+
+    if scheme.nu == 2:
+        B_uN, eta_u = derive_uniform_neumann(
+            uniform.interior, scheme.p, scheme.q, scheme.nu,
+        )
+        neumann_main, eta = construct_neumann_stencil(
+            uniform.B_u, B_uN, eta_u, uniform.interior,
+            scheme.p, scheme.q, scheme.nu, scheme.nextra, psi,
+        )
+    else:
+        neumann_main, eta = None, None
+
+    return assemble_cut_cell_result(
+        floating_result.matrix, neumann_main, eta, dims, uniform.alpha_symbols,
     )

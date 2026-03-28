@@ -230,30 +230,20 @@ The SymPy pipeline (Phase 20) is complete with 231 passing tests and 7 modules:
 
 ### 21.5 — Assemble the full `derive_and_generate` pipeline
 
-- [ ] **21.5a** Add a high-level `derive_cut_cell_scheme(scheme: SchemeParams, psi)` function in `temo.py`:
-  - **Signature:** `def derive_cut_cell_scheme(scheme: SchemeParams, psi: Symbol) -> CutCellResult`
-  - Orchestrates the full pipeline:
-    1. `dims = compute_dimensions(scheme.p, scheme.q, scheme.s, scheme.nextra, scheme.nu)` — corrected dimensions
-    2. `uniform = derive_uniform_boundary_for_temo(scheme)` → `UniformResult` (B_u, interior, alpha_symbols)
-    3. `floating_result = construct_cut_cell_stencil(uniform.B_u, uniform.interior, scheme.p, scheme.q, scheme.nu, scheme.nextra, psi)` → `StencilResult`
-    4. If `scheme.nu == 2` (Neumann needed):
-       - `B_uN, eta_u = derive_uniform_neumann(uniform.interior, scheme.p, scheme.q, scheme.nu)`
-       - `neumann_main, eta = construct_neumann_stencil(uniform.B_u, B_uN, eta_u, uniform.interior, scheme.p, scheme.q, scheme.nu, scheme.nextra, psi)`
-       - Else: `neumann_main, eta = None, None`
-    5. `return assemble_cut_cell_result(floating_result.matrix, neumann_main, eta, dims, uniform.alpha_symbols)`
-  - Returns `CutCellResult` with all coefficient matrices
-  - **For E4_1 (nu=1):** steps 4's Neumann branch is skipped. The result has `neumann=None, eta=None, dims.X=0`.
-  - Works for E2_1, E2_2, E4_1 (any scheme in the Table 1 family with corrected dimensions)
-  - **Dispatch strategy for step 1 (Decision):** Use `derive_uniform_boundary_for_temo` for ALL schemes (E2 and E4), not just E4+. The 21.1a regression check (21.1a step: "verify `derive_uniform_boundary_for_temo(E2_1)` produces the same `UniformResult` as `derive_e2_uniform_boundary(nu=1)`") ensures the general function handles E2's nextra>0 conservation case correctly. If the 21.1a regression check fails (e.g., alpha naming differs), fix the general function rather than keeping `derive_e2_uniform_boundary` as a fallback — the goal is ONE code path. The old `derive_e2_uniform_boundary` remains in `temo.py` but is no longer called by the pipeline; it can be deprecated in a future cleanup phase.
-  - **Known limitation for nu=2 schemes:** `solve_boundary_row` uses `q+1` equations from `build_taylor_system`. For E2_2 (q=1, nu=2), this gives only 2 equations while the existing `derive_e2_uniform_boundary` uses `max(q+1, nu+1)=3`. If `derive_uniform_boundary_for_temo` uses `solve_boundary_row` directly for E2_2, it will build a different Taylor system. Fix: either (a) build the Taylor system inline with `max(q+1, nu+1)` equations instead of calling `solve_boundary_row`, or (b) modify `solve_boundary_row` to accept an optional `n_eqs` parameter. Since E4_1 (nu=1, q=3) has `q+1 = max(q+1, nu+1) = 4`, this is NOT an issue for Phase 21's primary target.
+- [x] **21.5a** Add a high-level `derive_cut_cell_scheme(scheme: SchemeParams, psi)` function in `temo.py`:
+  - **Signature:** `def derive_cut_cell_scheme(scheme: SchemeParams, psi: Symbol, alpha_symbols=None) -> CutCellResult`
+  - Orchestrates the full pipeline: compute_dimensions → derive_uniform_boundary_for_temo → construct_cut_cell_stencil → (optionally) derive_uniform_neumann + construct_neumann_stencil → assemble_cut_cell_result
+  - For nu=1 (E4_1, E2_1): Neumann branch skipped, returns `neumann=None, eta=None`
+  - For nu=2 (E2_2): Neumann branch runs, returns full Neumann stencil + eta
+  - **nu=2 fix applied:** Changed `derive_uniform_boundary_for_temo` to use `n_eqs = max(q+1, nu+1)` for the number of determined columns (option (a) from the plan). Replaced `solve_boundary_row` with inline `_build_uniform_vandermonde`-based solving. For E2_2 (q=1, nu=2): `n_eqs=3`, `n_free_per_row=0` → fully determined, matching `derive_e2_uniform_boundary(nu=2)`. For E4_1 (q=3, nu=1): `n_eqs=4 = q+1`, so behavior unchanged.
+  - Tests: 8 new tests in `TestDeriveCutCellScheme` class (E4_1: shape, no neumann, alpha count, matches manual, Taylor accuracy, custom alphas; E2_1: reproduces existing; E2_2: reproduces existing including Neumann + eta)
   - File: `scripts/stencil_gen/stencil_gen/temo.py`
 
-- [ ] **21.5b** Validate that the generalized pipeline still reproduces E2_1 and E2_2:
-  - Run `derive_cut_cell_scheme(E2_1, psi)` and compare `CutCellResult.floating` against the existing E2_1 test data (exact symbolic equality)
-  - Run `derive_cut_cell_scheme(E2_2, psi)` and compare against existing E2_2 test data
-  - No regressions in existing test suite: `cd scripts/stencil_gen && uv run pytest tests/ -v`
+- [x] **21.5b** Validate that the generalized pipeline still reproduces E2_1 and E2_2:
+  - `test_e2_1_reproduces_existing`: `derive_cut_cell_scheme(E2_1, psi).floating` matches manual pipeline via `derive_e2_uniform_boundary(nu=1)` + `construct_cut_cell_stencil` — exact symbolic equality confirmed
+  - `test_e2_2_reproduces_existing`: `derive_cut_cell_scheme(E2_2, psi)` matches manual pipeline including floating, Neumann, and eta — exact symbolic equality confirmed
+  - No regressions: all 290 tests pass (`cd scripts/stencil_gen && uv run pytest tests/ -v`)
   - File: `scripts/stencil_gen/tests/test_e4_cut_cell.py`
-  - Test: `cd scripts/stencil_gen && uv run pytest tests/ -v`
 
 ### 21.6 — Register E4_1 in the solver (optional)
 
@@ -291,6 +281,6 @@ The SymPy pipeline (Phase 20) is complete with 231 passing tests and 7 modules:
 
 4. **Dimension formula (D-R25):** The corrected formula `r = p+1+nextra` has been verified for E2 and E4 schemes against Table 1 and existing C++ code. However, it has NOT been verified for E6 or E8 TEMO schemes (which don't exist yet). If these are attempted later, the formula should be re-verified.
 
-5. **`solve_boundary_row` equation count for nu=2:** `boundary.solve_boundary_row` uses `q+1` equations (via `build_taylor_system`), while `temo._build_uniform_vandermonde` uses `max(q+1, nu+1)`. For E4_1 (nu=1, q=3) these are equal (both 4). For E2_2 (nu=2, q=1) they differ: 2 vs 3. The new `derive_uniform_boundary_for_temo` must account for this when handling nu=2 schemes (see 21.5a). This is NOT a risk for Phase 21's primary target (E4_1) but affects E2 backward compatibility in 21.5b.
+5. **`solve_boundary_row` equation count for nu=2:** ~~RESOLVED in 21.5a.~~ `derive_uniform_boundary_for_temo` now uses `n_eqs = max(q+1, nu+1)` with inline `_build_uniform_vandermonde` solving instead of `solve_boundary_row`. For E2_2 (nu=2, q=1): `n_eqs=3`, fully determined (0 free params), matching `derive_e2_uniform_boundary(nu=2)`. Verified by `test_e2_2_reproduces_existing`.
 
 6. **Codegen single-param non-uniform bug (discovered during plan refinement):** `codegen.py`'s `_emit_struct_preamble` and `_emit_factory` guard single-param-array constructor/factory generation with `spec.is_uniform and len(spec.param_arrays) == 1`. For E4_1 (`is_uniform=False`, 1 param array), the constructor is not emitted and the factory generates duplicate parameter names. Fix in 21.4a (prerequisite). Low risk — the fix is a one-line condition change in two places and existing E4u_1 uniform tests confirm no regression.
