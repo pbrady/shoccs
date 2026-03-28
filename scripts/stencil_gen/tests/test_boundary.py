@@ -376,3 +376,187 @@ def test_E4u_polynomial_exactness(e4u_pipeline):
                 f"Poly exactness failed: d={d}, row={i}, "
                 f"got {stencil_result}, expected {expected}"
             )
+
+
+# ---------------------------------------------------------------------------
+# 20.3f -- E6u_1 end-to-end validation tests
+# ---------------------------------------------------------------------------
+
+# Alpha symbols for E6u (reuse a0..a4 already defined at module level)
+_alpha_vals_e6 = {
+    a0: 0.1,
+    a1: 0.2,
+    a2: 0.3,
+    a3: 0.4,
+    a4: 0.5,
+}
+
+
+def test_E6u_row0_symbolic(e6u_pipeline):
+    """Row 0 symbolic coefficients match E6u_1.cpp lines 81-88."""
+    updated_rows, solution_dict, w_syms, result = e6u_pipeline
+    row = updated_rows[0]
+    expected = [
+        (60 * a0 - 137) / 60,
+        5 - 6 * a0,
+        15 * a0 - 5,
+        -(60 * a0 - 10) / 3,
+        (60 * a0 - 5) / 4,
+        -(30 * a0 - 1) / 5,
+        a0,
+        S.Zero,
+    ]
+    for i, (got, exp) in enumerate(zip(row.coefficients, expected)):
+        assert cancel(got - exp) == 0, f"Row 0 coeff {i}: {got} != {exp}"
+
+
+def test_E6u_row1_symbolic(e6u_pipeline):
+    """Row 1 symbolic coefficients match E6u_1.cpp lines 89-96."""
+    updated_rows, solution_dict, w_syms, result = e6u_pipeline
+    row = updated_rows[1]
+    expected = [
+        (5 * a1 - 1) / 5,
+        -(72 * a1 + 13) / 12,
+        15 * a1 + 2,
+        -20 * a1 - 1,
+        (45 * a1 + 1) / 3,
+        -(120 * a1 + 1) / 20,
+        a1,
+        S.Zero,
+    ]
+    for i, (got, exp) in enumerate(zip(row.coefficients, expected)):
+        assert cancel(got - exp) == 0, f"Row 1 coeff {i}: {got} != {exp}"
+
+
+def test_E6u_row2_symbolic(e6u_pipeline):
+    """Row 2 symbolic coefficients match E6u_1.cpp lines 97-104."""
+    updated_rows, solution_dict, w_syms, result = e6u_pipeline
+    row = updated_rows[2]
+    expected = [
+        (20 * a2 + 1) / 20,
+        -(12 * a2 + 1) / 2,
+        (45 * a2 - 1) / 3,
+        1 - 20 * a2,
+        (60 * a2 - 1) / 4,
+        -(180 * a2 - 1) / 30,
+        a2,
+        S.Zero,
+    ]
+    for i, (got, exp) in enumerate(zip(row.coefficients, expected)):
+        assert cancel(got - exp) == 0, f"Row 2 coeff {i}: {got} != {exp}"
+
+
+def test_E6u_row3_symbolic(e6u_pipeline):
+    """Row 3 symbolic coefficients match E6u_1.cpp lines 105-112."""
+    updated_rows, solution_dict, w_syms, result = e6u_pipeline
+    row = updated_rows[3]
+    expected = [
+        (180 * a4 + 30 * a3 - 1) / 30,
+        -(140 * a4 + 24 * a3 - 1) / 4,
+        84 * a4 + 15 * a3 - 1,
+        -(315 * a4 + 60 * a3 - 1) / 3,
+        (140 * a4 + 30 * a3 + 1) / 2,
+        -(420 * a4 + 120 * a3 + 1) / 20,
+        a3,
+        a4,
+    ]
+    for i, (got, exp) in enumerate(zip(row.coefficients, expected)):
+        assert cancel(got - exp) == 0, f"Row 3 coeff {i}: {got} != {exp}"
+
+
+def test_E6u_row4_symbolic(e6u_pipeline):
+    """Row 4 (conservation-constrained) symbolic coefficients match E6u_1.cpp lines 113-134."""
+    updated_rows, solution_dict, w_syms, result = e6u_pipeline
+    row = updated_rows[4]
+    expected = [
+        -(190320 * a4 + 31720 * a3 + 22080 * a2 + 38040 * a1 + 9500 * a0 - 453) / 28260,
+        (55510 * a4 + 9516 * a3 + 6624 * a2 + 11412 * a1 + 2850 * a0 - 159) / 1413,
+        -(44408 * a4 + 7930 * a3 + 5520 * a2 + 9510 * a1 + 2375 * a0 - 183) / 471,
+        (166530 * a4 + 31720 * a3 + 22080 * a2 + 38040 * a1 + 9500 * a0 - 1506) / 1413,
+        -(444080 * a4 + 95160 * a3 + 66240 * a2 + 114120 * a1 + 28500 * a0 - 1323) / 5652,
+        (55510 * a4 + 15860 * a3 + 11040 * a2 + 19020 * a1 + 4750 * a0 + 1551) / 2355,
+        -(1586 * a3 + 1104 * a2 + 1902 * a1 + 475 * a0 + 192) / 1413,
+        -(1586 * a4 - 24) / 1413,
+    ]
+    for i, (got, exp) in enumerate(zip(row.coefficients, expected)):
+        assert cancel(got - exp) == 0, f"Row 4 coeff {i}: {got} != {exp}"
+
+
+def test_E6u_numerical_floating(e6u_pipeline):
+    """Numerical evaluation (floating, h=2) matches E6u_1.t.cpp."""
+    updated_rows, solution_dict, w_syms, result = e6u_pipeline
+    h = 2
+    expected_float = [
+        -1.0916666666666666, 2.2, -1.75, 0.6666666666666666,
+        0.12500000000000006, -0.2, 0.05, 0.0,
+        5.551115123125783e-18, -1.1416666666666666, 2.5, -2.5,
+        1.6666666666666667, -0.625, 0.1, 0.0,
+        0.175, -1.15, 2.083333333333333, -2.5,
+        2.125, -0.8833333333333333, 0.15, 0.0,
+        1.6833333333333333, -9.825, 23.5, -30.083333333333332,
+        20.75, -6.475, 0.2, 0.25,
+        -2.1687367303609344, 12.723637650389243, -30.773354564755838,
+        38.79299363057325, -26.92206298655343, 9.18067940552017,
+        -0.5610403397027601, -0.27211606510969566,
+    ]
+    computed = []
+    for row in updated_rows:
+        for coeff in row.coefficients:
+            val = float(coeff.xreplace(_alpha_vals_e6)) / h
+            computed.append(val)
+    assert len(computed) == len(expected_float)
+    for i, (got, exp) in enumerate(zip(computed, expected_float)):
+        assert abs(got - exp) < 1e-10, f"Floating coeff {i}: {got} != {exp}"
+
+
+def test_E6u_numerical_dirichlet(e6u_pipeline):
+    """Numerical evaluation (Dirichlet, h=0.5) matches E6u_1.t.cpp."""
+    updated_rows, solution_dict, w_syms, result = e6u_pipeline
+    h = 0.5
+    # Dirichlet drops row 0 => rows 1-4
+    expected_dirichlet = [
+        2.2204460492503132e-17, -4.566666666666666, 10.0, -10.0,
+        6.666666666666667, -2.5, 0.4, 0.0,
+        0.7, -4.6, 8.333333333333332, -10.0,
+        8.5, -3.533333333333333, 0.6, 0.0,
+        6.733333333333333, -39.3, 94.0, -120.33333333333333,
+        83.0, -25.9, 0.8, 1.0,
+        -8.674946921443738, 50.89455060155697, -123.09341825902335,
+        155.171974522293, -107.68825194621373, 36.72271762208068,
+        -2.2441613588110405, -1.0884642604387826,
+    ]
+    computed = []
+    for row in updated_rows[1:]:  # skip row 0
+        for coeff in row.coefficients:
+            val = float(coeff.xreplace(_alpha_vals_e6)) / h
+            computed.append(val)
+    assert len(computed) == len(expected_dirichlet)
+    for i, (got, exp) in enumerate(zip(computed, expected_dirichlet)):
+        assert abs(got - exp) < 1e-10, f"Dirichlet coeff {i}: {got} != {exp}"
+
+
+def test_E6u_polynomial_exactness(e6u_pipeline):
+    """Polynomial exactness up to degree q=5."""
+    updated_rows, solution_dict, w_syms, result = e6u_pipeline
+    t = result.t  # 8
+
+    for d in range(6):  # degrees 0, 1, 2, 3, 4, 5
+        # Grid values f(j) = j^d for j = 0..t-1
+        grid_vals = [Rational(j) ** d for j in range(t)]
+        for row in updated_rows:
+            i = row.row_index
+            # Apply stencil: sum_j coeff_j * f(j)
+            stencil_result = sum(
+                c * fj for c, fj in zip(row.coefficients, grid_vals)
+            )
+            # Expected: first derivative of x^d at x=i
+            if d == 0:
+                expected = 0
+            elif d == 1:
+                expected = 1
+            else:
+                expected = d * Rational(i) ** (d - 1)
+            assert cancel(stencil_result - expected) == 0, (
+                f"Poly exactness failed: d={d}, row={i}, "
+                f"got {stencil_result}, expected {expected}"
+            )
