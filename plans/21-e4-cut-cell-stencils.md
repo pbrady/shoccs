@@ -136,7 +136,7 @@ The SymPy pipeline (Phase 20) is complete with 231 passing tests and 7 modules:
     - If the new function produces differently named alphas (e.g., from `solve_boundary_row`'s internal naming), add a symbol-remapping step before constructing `UniformResult`
     - The new function should accept an optional `alpha_symbols` parameter (like `derive_e2_uniform_boundary` does) to allow the caller to control symbol naming
 
-- [ ] **21.1b** Test the bridge for E4_1:
+- [x] **21.1b** Test the bridge for E4_1:
   - Call `derive_uniform_boundary_for_temo(E4_1)`
   - Verify: B_u shape is (3, 6) — r_eff=3 rows, t=6 columns
   - Verify: 4 free alpha symbols (matching Table 1: alpha^u_{04}, alpha^u_{14}, alpha^u_{24}, alpha^u_{25})
