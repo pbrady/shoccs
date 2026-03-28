@@ -23,14 +23,14 @@ cd scripts/stencil_gen && uv run pytest tests/test_e4_cut_cell.py -v -k conserva
 ## Problem Analysis
 
 ### The bug
-The current TEMO pipeline solves each row of the cut-cell stencil B_l(ψ) independently for Taylor accuracy, then assembles the result. It does NOT enforce the discrete conservation constraint `Σ_i w_i · B[i,j] = 0` for interior columns. This is fine for E2_1 (where the conservation system is exactly determined by weights alone), but fails for E4_1 (where 3 excess constraints must be absorbed by stencil entries).
+The current TEMO pipeline solves each row of the cut-cell stencil B_l(ψ) independently for Taylor accuracy, then assembles the result. It does NOT enforce the discrete conservation constraint `Σ_i w_i · B[i,j] = 0` for interior columns. This is fine for E2_1 (where the excess conservation residuals are trivially zero — the TEMO construction inherits conservation from the uniform boundary), but fails for E4_1 (where 3 excess constraints must be absorbed by stencil entries).
 
 ### Why E2_1 works without explicit conservation enforcement
 - E2_1: R=4, T=5, p=1, nextra=1
 - Interior contribution IC uses `r = R = 4` (first interior grid point after the R-row boundary block). All IC values within the conservation range (j=0..T−2=3) are zero — no interior row (starting at grid point 4) reaches these T-frame columns with p=1.
 - Conservation equations: T−1 = 4 (all columns j=0..T−2 per `conservation.py`)
-- Unknowns: 3 weights (w_1, w_2, w_3) + 1 phi placeholder (nextra=1) = 4
-- **Exactly determined** → weights + phi absorb all constraints, no alpha constraints needed
+- Weight unknowns: 3 (w_1, w_2, w_3). The phi placeholders from `nextra=1` are resolved during `derive_uniform_boundary_for_temo` (line 388–395), NOT during cut-cell conservation. By the time the conservation system is built, B_l has no phi symbols — only (ψ, alpha_0..alpha_3).
+- System is **overdetermined by 1** (4 equations, 3 weight unknowns, excess = q = 1). However, the TEMO construction inherits conservation from the uniform boundary, so the 1 excess residual is identically zero for any alpha values. No alpha constraints are needed — all 4 alphas remain free and the stencil is unchanged.
 
 ### Why E4_1 fails
 - E4_1: R=4, T=7, p=2, nextra=0
@@ -95,7 +95,7 @@ The practical approach: solve Taylor per-row first (as now) to get stencil entri
   - Verify: new function is importable and produces the correct number of equations (T−1 = 4 for E2_1, 6 for E4_1)
 
 - [ ] **22.2b** Test conservation system dimensions and IC values:
-  - For E2_1: call with E2_1's cut-cell stencil → expect T−1 = 4 equations (j = 0..3), 3 weight unknowns `w_1, w_2, w_3` (w_0=ψ is fixed) + 1 phi placeholder (nextra=1) = 4 unknowns → exactly determined. All IC values should be 0 (no interior row at grid point ≥4 reaches T-frame columns 0..3 with p=1).
+  - For E2_1: call with E2_1's cut-cell stencil → expect T−1 = 4 equations (j = 0..3), 3 weight unknowns `w_1, w_2, w_3` (w_0=ψ is fixed). System is overdetermined by 1 (excess = q = 1). All IC values should be 0 (no interior row at grid point ≥4 reaches T-frame columns 0..3 with p=1). Note: E2_1 has 4 alpha parameters but the 1 excess residual should be identically zero — verify this in 22.3a tests.
   - For E4_1: call with E4_1's cut-cell stencil → expect T−1 = 6 equations (j = 0..5), 3 weight unknowns `w_1, w_2, w_3` (w_0=ψ is fixed), nextra=0 → 3 excess constraints. Verify IC values: IC(0)=IC(1)=IC(2)=0, IC(3)=1/12, IC(4)=−7/12, IC(5)=−7/12.
   - The E4_1 system has 6 equations and only 3 weight unknowns → 3 excess constraints that must be absorbed by the 4 alpha parameters, confirming the problem
   - File: `scripts/stencil_gen/tests/test_e4_cut_cell.py`
@@ -116,7 +116,8 @@ The practical approach: solve Taylor per-row first (as now) to get stencil entri
     - **General path (nonlinear):** If `linear_eq_to_matrix` raises `NonlinearError`, use `sympy.solve(all_alpha_eqs, constrained_alphas)` where `constrained_alphas` is a subset of `alpha_symbols` (try `alpha_symbols[:-1]` first, keeping the last alpha free). SymPy's `solve()` handles polynomial systems and returns parametric solutions. Verify that solutions are ψ-independent: `sol.free_symbols & {psi} == set()`. If the solve returns empty, try different free-parameter choices.
     - For E4_1 with 4 alphas and 3 constraints: expect 1 remaining free alpha. The solve produces `{alpha_k: expr(alpha_remaining)}` for the constrained alphas.
   - **Step 6 — Substitute back:** Replace the constrained alphas in B_l using `.xreplace(alpha_solutions)`, then `cancel()` each entry. Also substitute into `w_sol`. Return `(B_l_conserved, weight_solutions, [alpha_remaining])`.
-  - **Edge case (exactly determined):** When n_eq == n_w (e.g., E2_1 with nextra=1 where phi symbols are already resolved), skip Steps 4-6. Just solve for weights and return B_l unchanged with all alphas free. For E2_1: 4 equations in 3+1=4 unknowns (3 weights + 1 phi from 22.2a) → exactly determined.
+  - **Note:** The conservation system is ALWAYS overdetermined (n_eq > n_w) because excess = q for nu=1, q+1 for nu=2, and q ≥ 1. There is no "exactly determined" case.
+  - **Edge case (zero residuals, E2_1):** When all excess residuals from Step 4 are identically zero (i.e., `cancel(residual_k) == 0` for every k), no alpha constraints are needed. Return B_l unchanged with all original alphas free. E2_1 falls into this case: 4 equations, 3 weight unknowns, 1 excess residual that is zero because the TEMO construction inherits conservation from the uniform boundary's phi resolution. This is handled naturally by Steps 4-6 (Step 5 receives zero equations, producing no alpha constraints).
   - **Edge case (no alpha parameters, overdetermined):** When n_eq > n_w AND `len(alpha_symbols) == 0` (e.g., E2_2 with nu=2: 3 equations, 1 weight unknown, 0 alphas), Step 4 produces excess residuals that cannot be absorbed by any parameters. These residuals must be identically zero — the Taylor solve already implicitly satisfies the conservation constraints. For each residual: compute `cancel(residual_k)` and assert it equals zero, raising `ValueError(f"Conservation residual {k} is {residual_k}, expected 0 — Taylor solve does not implicitly satisfy conservation for this scheme")` if nonzero. No stencil modification is needed. Return `(B_l, weight_solutions, [])` with empty remaining_alphas. This case is exercised by E2_2 (see 22.6a).
   - **Performance note:** The system is small (≤6 equations). For the weight solve (Step 3), SymPy's `linear_eq_to_matrix` + `Matrix.solve` handle rational function coefficients. For the alpha constraint solve (Step 5), `linear_eq_to_matrix` is used if equations are linear in α; otherwise `sympy.solve()` handles the polynomial system. No need for `solve_in_field` or QQ(ψ) domain arithmetic. Target: < 5 seconds for E4_1 (may take longer if `solve()` is needed for nonlinear α equations — increase to 15 seconds if so).
   - File: `scripts/stencil_gen/stencil_gen/temo.py` (add after `build_cut_cell_conservation_system`, ~line 1300)
@@ -126,7 +127,7 @@ The practical approach: solve Taylor per-row first (as now) to get stencil entri
   - **`construct_cut_cell_stencil` (lines 1206-1281):** Add parameter `enforce_conservation: bool = True` (note: `nu` is already a parameter). After assembling `matrix = Matrix(rows)` at line 1278 and before the return at line 1279:
     - Call `enforce_cut_cell_conservation(matrix, R, T, p, nu, interior, psi, alpha_syms)`
     - Replace `matrix` with the conserved version, store weight solutions and remaining alphas in the returned `StencilResult`
-    - When `enforce_conservation=False` or the system is exactly determined (n_eq == n_w), skip enforcement and return as before
+    - When `enforce_conservation=False`, skip enforcement and return as before
   - **`derive_cut_cell_scheme` (line 1950):** `scheme.nu` is already passed to `construct_cut_cell_stencil` at line 1981. Propagate `floating_result.weight_solutions` and `floating_result.alpha_symbols` to `assemble_cut_cell_result`. Currently calls `assemble_cut_cell_result(floating_result.matrix, ..., dims, uniform.alpha_symbols)` at line 1995 — change `uniform.alpha_symbols` to `floating_result.alpha_symbols or uniform.alpha_symbols` to use the conservation-reduced alpha list when available. Also pass `floating_result.weight_solutions` to `assemble_cut_cell_result`.
   - **`assemble_cut_cell_result` (line 1905):** Add `weight_solutions: dict | None = None` parameter. Pass through to `CutCellResult`.
   - File: `scripts/stencil_gen/stencil_gen/temo.py` (4 modification points: `StencilResult` at line 843, `construct_cut_cell_stencil` at line 1278, `assemble_cut_cell_result` at line 1905, `derive_cut_cell_scheme` at line 1995)
@@ -173,7 +174,7 @@ The practical approach: solve Taylor per-row first (as now) to get stencil entri
 ### 22.5 — Regression test: E2_1 conservation still holds
 
 - [ ] **22.5a** Verify E2_1 is unchanged by the conservation enforcement:
-  - Since E2_1's conservation is exactly determined by weights, the stencil entries should be identical before and after the fix
+  - Since E2_1's excess conservation residuals are trivially zero (no alpha constraints needed), the stencil entries should be identical before and after the fix
   - Run the pipeline for E2_1 and compare against existing test data
   - All existing E2_1 tests must still pass
   - File: `scripts/stencil_gen/tests/test_temo.py`
