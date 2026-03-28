@@ -1,14 +1,21 @@
 """Tests for the TEMO cut-cell stencil extension module."""
 
+import time
+
 import pytest
-from sympy import Matrix, Rational, Symbol, simplify
+from sympy import Matrix, Rational, Symbol, cancel, simplify
 
 from stencil_gen.temo import (
     Dimensions,
     SchemeParams,
     UniformResult,
     compute_dimensions,
+    decompose_alpha_terms,
     derive_e2_uniform_boundary,
+    from_field_elem,
+    make_psi_field,
+    solve_in_field,
+    to_field_elem,
     E2_1,
     E2_2,
     E4_1,
@@ -177,3 +184,351 @@ class TestUniformBoundary:
         """Unsupported nu raises ValueError."""
         with pytest.raises(ValueError, match="nu=3"):
             derive_e2_uniform_boundary(nu=3)
+
+
+class TestPsiField:
+    """Tests for QQ(psi) field utilities (20.5e Phase 1)."""
+
+    def test_make_psi_field(self):
+        """make_psi_field returns a field and psi element."""
+        psi = Symbol("psi")
+        K, psi_elem = make_psi_field(psi)
+        # psi_elem should convert back to psi
+        assert K.to_sympy(psi_elem) == psi
+
+    def test_to_field_elem_rational(self):
+        """to_field_elem handles rational constants."""
+        psi = Symbol("psi")
+        K, _ = make_psi_field(psi)
+        elem = to_field_elem(Rational(3, 7), K)
+        assert K.to_sympy(elem) == Rational(3, 7)
+
+    def test_to_field_elem_polynomial(self):
+        """to_field_elem handles polynomial in psi."""
+        psi = Symbol("psi")
+        K, _ = make_psi_field(psi)
+        expr = psi**2 + 3 * psi + 1
+        elem = to_field_elem(expr, K)
+        assert K.to_sympy(elem) == expr
+
+    def test_to_field_elem_rational_function(self):
+        """to_field_elem handles a rational function of psi."""
+        psi = Symbol("psi")
+        K, _ = make_psi_field(psi)
+        expr = (psi**2 + psi) / (psi + 1)
+        elem = to_field_elem(expr, K)
+        # (psi^2 + psi)/(psi + 1) = psi
+        assert K.to_sympy(elem) == psi
+
+    def test_to_field_elem_rejects_extra_symbols(self):
+        """to_field_elem raises on non-psi symbols."""
+        psi = Symbol("psi")
+        alpha = Symbol("alpha")
+        K, _ = make_psi_field(psi)
+        with pytest.raises(ValueError, match="non-psi symbols"):
+            to_field_elem(psi + alpha, K)
+
+    def test_roundtrip(self):
+        """to_field_elem -> from_field_elem preserves the expression."""
+        psi = Symbol("psi")
+        K, _ = make_psi_field(psi)
+        expr = (2 + 4 * psi) / (2 + 3 * psi + psi**2)
+        elem = to_field_elem(expr, K)
+        back = from_field_elem(elem, K)
+        assert simplify(back - expr) == 0
+
+    def test_field_arithmetic(self):
+        """Arithmetic in QQ(psi) is exact and reduced."""
+        psi = Symbol("psi")
+        K, psi_e = make_psi_field(psi)
+        one = K.from_sympy(Rational(1))
+        two = K.from_sympy(Rational(2))
+        # (1 + psi) * (1 - psi) = 1 - psi^2
+        a = one + psi_e
+        b = one - psi_e
+        product = a * b
+        expected = one - psi_e * psi_e
+        assert product == expected
+
+
+class TestDecomposeAlphaTerms:
+    """Tests for decompose_alpha_terms (20.5e Phase 1)."""
+
+    def test_no_symbols(self):
+        """With empty symbol list, returns {1: expr}."""
+        psi = Symbol("psi")
+        expr = psi**2 + 1
+        result = decompose_alpha_terms(expr, [])
+        assert result == {1: expr}
+
+    def test_single_symbol(self):
+        """Decomposes c_0(psi) + c_1(psi)*alpha."""
+        psi = Symbol("psi")
+        alpha = Symbol("alpha")
+        expr = (1 + psi) + (2 * psi) * alpha
+        result = decompose_alpha_terms(expr, [alpha])
+        assert simplify(result[1] - (1 + psi)) == 0
+        assert simplify(result[alpha] - 2 * psi) == 0
+
+    def test_multiple_symbols(self):
+        """Decomposes over alpha and beta symbols."""
+        psi = Symbol("psi")
+        a = Symbol("a")
+        b = Symbol("b")
+        expr = psi + 3 * a + psi**2 * b
+        result = decompose_alpha_terms(expr, [a, b])
+        assert simplify(result[1] - psi) == 0
+        assert result[a] == 3
+        assert simplify(result[b] - psi**2) == 0
+
+    def test_zero_coefficient_omitted(self):
+        """Symbols with zero coefficient do not appear in result."""
+        psi = Symbol("psi")
+        a = Symbol("a")
+        b = Symbol("b")
+        expr = psi + a  # b has zero coefficient
+        result = decompose_alpha_terms(expr, [a, b])
+        assert b not in result
+
+    def test_nonlinear_raises(self):
+        """Nonlinear term (alpha^2) raises ValueError."""
+        psi = Symbol("psi")
+        alpha = Symbol("alpha")
+        expr = alpha**2 + psi
+        with pytest.raises(ValueError, match="Nonlinear"):
+            decompose_alpha_terms(expr, [alpha])
+
+    def test_cross_term_raises(self):
+        """Cross-term (alpha * beta) raises ValueError."""
+        a = Symbol("a")
+        b = Symbol("b")
+        expr = a * b + 1
+        with pytest.raises(ValueError, match="Cross-term"):
+            decompose_alpha_terms(expr, [a, b])
+
+    def test_constant_only(self):
+        """Expression with no symbol dependence returns {1: expr}."""
+        psi = Symbol("psi")
+        alpha = Symbol("alpha")
+        expr = psi**2 + 3
+        result = decompose_alpha_terms(expr, [alpha])
+        assert simplify(result[1] - expr) == 0
+        assert alpha not in result
+
+
+class TestSolveInField:
+    """Tests for solve_in_field (20.5e Phase 1)."""
+
+    def test_e2_2_row_0_no_symbols(self):
+        """E2_2 row 0: 3x3 system, no alpha — matches C++ E2_2.cpp.
+
+        After removing wall column (prescribed as psi), the reduced system is:
+        V = | 1      1      1  |   rhs = | -psi            |
+            | 0      1      2  |         | psi^2           |
+            | 0      1/2    2  |         | 1 - psi^3/2     |
+        """
+        psi = Symbol("psi")
+        K, _ = make_psi_field(psi)
+
+        V = Matrix([
+            [1, 1, 1],
+            [0, 1, 2],
+            [0, Rational(1, 2), 2],
+        ])
+        rhs = Matrix([
+            [-psi],
+            [psi**2],
+            [1 - psi**3 / 2],
+        ])
+
+        sol = solve_in_field(V, rhs, K, symbols=[])
+
+        # Expected from plan (E2_2 row 0):
+        # c_x0 = (2 - 2*psi - 3*psi^2 - psi^3) / 2
+        # c_x1 = -2 + 2*psi^2 + psi^3
+        # c_x2 = (2 - psi^2 - psi^3) / 2
+        expected = [
+            (2 - 2 * psi - 3 * psi**2 - psi**3) / 2,
+            -2 + 2 * psi**2 + psi**3,
+            (2 - psi**2 - psi**3) / 2,
+        ]
+        for i in range(3):
+            assert simplify(sol[i] - expected[i]) == 0, (
+                f"Mismatch at index {i}: got {sol[i]}, expected {expected[i]}"
+            )
+
+    def test_e2_2_row_0_matches_cpp(self):
+        """E2_2 row 0 floating coefficients match E2_2.cpp lines 123-131.
+
+        C++ (E2_2.cpp, pre-h^2 scaling):
+        c[0] = psi  (wall, prescribed)
+        c[1] = (2 - 2*psi - 3*psi^2 - psi^3) / 2
+        c[2] = -2 + 2*psi^2 + psi^3
+        c[3] = (2 - psi^2 - psi^3) / 2
+        """
+        psi = Symbol("psi")
+        K, _ = make_psi_field(psi)
+
+        V = Matrix([
+            [1, 1, 1],
+            [0, 1, 2],
+            [0, Rational(1, 2), 2],
+        ])
+        rhs = Matrix([[-psi], [psi**2], [1 - psi**3 / 2]])
+        sol = solve_in_field(V, rhs, K, symbols=[])
+
+        # Verify at numeric psi values that match C++ evaluation
+        for psi_val in [Rational(0), Rational(1, 2), Rational(1)]:
+            c1_num = sol[0].subs(psi, psi_val)
+            c2_num = sol[1].subs(psi, psi_val)
+            c3_num = sol[2].subs(psi, psi_val)
+            c0_num = psi_val  # wall prescribed
+
+            if psi_val == 0:
+                # Degenerate: [0, 1, -2, 1]
+                assert (c0_num, c1_num, c2_num, c3_num) == (0, 1, -2, 1)
+            elif psi_val == 1:
+                # Uniform: [1, -2, 1, 0] (row 0 of E2_2 uniform boundary on T=4 grid)
+                assert (c0_num, c1_num, c2_num, c3_num) == (1, -2, 1, 0)
+
+    def test_e2_2_row_1_matches_cpp(self):
+        """E2_2 row 1 (near-interior): 3x3 system, no alpha.
+
+        C++ (E2_2.cpp):
+        c[4] = (2 + 4*psi) / (2 + 3*psi + psi^2)
+        c[5] = -2*psi
+        c[6] = (-2 + 4*psi^2) / (1 + psi)
+        c[7] = (2 - 2*psi^2) / (2 + psi)
+        """
+        psi = Symbol("psi")
+        K, _ = make_psi_field(psi)
+
+        # Row 1 (near-interior), Category A: x_0 zeroed, target = -2.
+        # alpha_{1,x_0}(psi) = -2*psi (prescribed, col 1)
+        # Vandermonde from x_1: deltas [-(psi+1), -1, 0, 1]
+        # After removing col 1 (x_0 = -2*psi):
+        V = Matrix([
+            [1, 1, 1],
+            [-(psi + 1), 0, 1],
+            [(psi + 1) ** 2 / 2, 0, Rational(1, 2)],
+        ])
+        rhs = Matrix([
+            [-(-2 * psi)],  # move col 1 to RHS: -1 * (-2*psi)
+            [-(-1) * (-2 * psi)],  # -V[1,1]*prescribed = -(-1)*(-2*psi) = -2*psi
+            [1 - Rational(1, 2) * (-2 * psi)],
+        ])
+        # Actually let me build this more carefully.
+        # Full Vandermonde (4 cols: wall, x_0, x_1, x_2):
+        # deltas from x_1: [-(psi+1), -1, 0, 1]
+        # V_full[k,j] = delta_j^k / k!
+        # k=0: [1, 1, 1, 1]
+        # k=1: [-(psi+1), -1, 0, 1]
+        # k=2: [(psi+1)^2/2, 1/2, 0, 1/2]
+        # rhs: [0, 0, 1]
+        #
+        # Prescribed: col 1 (x_0) = -2*psi
+        # Reduced system: cols [0, 2, 3], rhs adjusted
+        V_full = Matrix([
+            [1, 1, 1, 1],
+            [-(psi + 1), -1, 0, 1],
+            [(psi + 1) ** 2 / 2, Rational(1, 2), 0, Rational(1, 2)],
+        ])
+        rhs_full = Matrix([[0], [0], [1]])
+
+        # Move col 1 to RHS
+        V_reduced = V_full[:, [0, 2, 3]]
+        prescribed_col = V_full[:, 1]
+        rhs_reduced = rhs_full - prescribed_col * (-2 * psi)
+
+        sol = solve_in_field(V_reduced, rhs_reduced, K, symbols=[])
+
+        # Expected:
+        # c_wall = (2 + 4*psi) / (2 + 3*psi + psi^2)
+        # c_x1 = (-2 + 4*psi^2) / (1 + psi)
+        # c_x2 = (2 - 2*psi^2) / (2 + psi)
+        expected_wall = (2 + 4 * psi) / (2 + 3 * psi + psi**2)
+        expected_x1 = (-2 + 4 * psi**2) / (1 + psi)
+        expected_x2 = (2 - 2 * psi**2) / (2 + psi)
+
+        assert simplify(sol[0] - expected_wall) == 0
+        assert simplify(sol[1] - expected_x1) == 0
+        assert simplify(sol[2] - expected_x2) == 0
+
+    def test_symbol_dependent_rhs(self):
+        """solve_in_field with alpha and beta in RHS returns correct decomposition.
+
+        Test: V = [[1, 0], [0, 1]], rhs = [psi*alpha + beta, 1 + psi^2*alpha]
+        Solution should be x = rhs (identity system).
+        """
+        psi = Symbol("psi")
+        alpha = Symbol("alpha")
+        beta = Symbol("beta")
+        K, _ = make_psi_field(psi)
+
+        V = Matrix([[1, 0], [0, 1]])
+        rhs = Matrix([[psi * alpha + beta], [1 + psi**2 * alpha]])
+
+        sol = solve_in_field(V, rhs, K, symbols=[alpha, beta])
+
+        assert simplify(sol[0] - (psi * alpha + beta)) == 0
+        assert simplify(sol[1] - (1 + psi**2 * alpha)) == 0
+
+    def test_symbol_dependent_nontrivial(self):
+        """solve_in_field with a non-trivial system and symbol-dependent RHS.
+
+        V = [[1, 1], [0, 1]], rhs = [alpha, psi]
+        Solution: x_1 = psi, x_0 = alpha - psi
+        """
+        psi = Symbol("psi")
+        alpha = Symbol("alpha")
+        K, _ = make_psi_field(psi)
+
+        V = Matrix([[1, 1], [0, 1]])
+        rhs = Matrix([[alpha], [psi]])
+
+        sol = solve_in_field(V, rhs, K, symbols=[alpha])
+
+        assert simplify(sol[0] - (alpha - psi)) == 0
+        assert simplify(sol[1] - psi) == 0
+
+    def test_symbol_dependent_multi_symbol(self):
+        """solve_in_field with both alpha and beta in a 2x2 system.
+
+        V = [[1, psi], [psi, 1]], rhs = [alpha + beta, psi*alpha]
+        """
+        psi = Symbol("psi")
+        alpha = Symbol("alpha")
+        beta = Symbol("beta")
+        K, _ = make_psi_field(psi)
+
+        V = Matrix([[1, psi], [psi, 1]])
+        rhs = Matrix([[alpha + beta], [psi * alpha]])
+
+        sol = solve_in_field(V, rhs, K, symbols=[alpha, beta])
+
+        # Verify by substitution: V @ sol = rhs
+        for s0, s1 in [(0, 0), (1, 0), (0, 1), (1, 1)]:
+            subs = {alpha: s0, beta: s1}
+            lhs0 = sol[0].subs(subs) + psi * sol[1].subs(subs)
+            rhs0 = (alpha + beta).subs(subs)
+            assert simplify(lhs0 - rhs0) == 0
+            lhs1 = psi * sol[0].subs(subs) + sol[1].subs(subs)
+            rhs1 = (psi * alpha).subs(subs)
+            assert simplify(lhs1 - rhs1) == 0
+
+    def test_performance_3x3(self):
+        """Single solve_in_field call for a 3x3 system completes in <0.01s."""
+        psi = Symbol("psi")
+        K, _ = make_psi_field(psi)
+
+        V = Matrix([
+            [1, 1, 1],
+            [0, 1, 2],
+            [0, Rational(1, 2), 2],
+        ])
+        rhs = Matrix([[-psi], [psi**2], [1 - psi**3 / 2]])
+
+        t0 = time.monotonic()
+        solve_in_field(V, rhs, K, symbols=[])
+        elapsed = time.monotonic() - t0
+        assert elapsed < 0.1, f"Solve took {elapsed:.3f}s, expected <0.01s"

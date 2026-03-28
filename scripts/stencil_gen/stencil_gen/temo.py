@@ -7,7 +7,8 @@ psi-parameterized cut-cell boundary stencils from uniform boundary stencils.
 from dataclasses import dataclass
 from typing import NamedTuple
 
-from sympy import Matrix, Rational, Symbol, factorial
+from sympy import Matrix, Poly, Rational, Symbol, cancel, factorial
+from sympy.polys.matrices import DomainMatrix
 
 
 class Dimensions(NamedTuple):
@@ -273,3 +274,208 @@ def derive_e2_uniform_boundary(
         )
 
     raise ValueError(f"Unsupported derivative order nu={nu}")
+
+
+# ---------------------------------------------------------------------------
+# 20.5e Phase 1 — QQ(psi) field utilities and linear solve
+# ---------------------------------------------------------------------------
+
+
+def make_psi_field(psi: Symbol):
+    """Create the QQ(psi) fraction field and return (K, psi_elem).
+
+    Parameters
+    ----------
+    psi : Symbol
+        The SymPy symbol for psi.
+
+    Returns
+    -------
+    (K, psi_elem)
+        K is the QQ(psi) fraction field, psi_elem is psi as a field element.
+    """
+    from sympy import QQ
+
+    K = QQ.frac_field(psi)
+    psi_elem = K.from_sympy(psi)
+    return K, psi_elem
+
+
+def to_field_elem(expr, K):
+    """Convert a SymPy expression (rational in psi only) to a QQ(psi) field element.
+
+    Calls ``cancel(expr)`` once on input, then ``K.from_sympy()``.
+
+    Parameters
+    ----------
+    expr : Expr
+        SymPy expression that is rational in psi (no other symbols).
+    K : FractionField
+        The QQ(psi) field from ``make_psi_field``.
+
+    Returns
+    -------
+    Field element in K.
+
+    Raises
+    ------
+    ValueError
+        If ``expr`` contains symbols other than psi.
+    """
+    expr = cancel(expr)
+    # Check for unexpected symbols
+    psi_sym = K.symbols[0]
+    extra = expr.free_symbols - {psi_sym}
+    if extra:
+        raise ValueError(
+            f"Expression contains non-psi symbols: {extra}. "
+            f"Expected only {psi_sym}."
+        )
+    return K.from_sympy(expr)
+
+
+def from_field_elem(elem, K):
+    """Convert a QQ(psi) field element back to a SymPy expression.
+
+    Parameters
+    ----------
+    elem : field element
+        An element of the QQ(psi) field.
+    K : FractionField
+        The QQ(psi) field from ``make_psi_field``.
+
+    Returns
+    -------
+    SymPy Expr
+    """
+    return K.to_sympy(elem)
+
+
+def decompose_alpha_terms(expr, symbols: list[Symbol]) -> dict:
+    """Decompose an expression that is linear in ``symbols`` but rational in psi.
+
+    Returns ``{1: c_0, s_0: c_1, s_1: c_2, ...}`` where each ``c_k`` is a
+    SymPy expression in psi only.
+
+    Parameters
+    ----------
+    expr : Expr
+        SymPy expression, polynomial (degree <= 1) in each symbol, rational in psi.
+    symbols : list of Symbol
+        The symbols to decompose over (alpha, beta, or a mix).
+
+    Returns
+    -------
+    dict[Symbol | int, Expr]
+        Mapping from each symbol (and the integer ``1`` for the constant term)
+        to its psi-rational coefficient.
+
+    Raises
+    ------
+    ValueError
+        If any term is nonlinear in any symbol.
+    """
+    if not symbols:
+        return {1: expr}
+
+    # Use Poly to decompose into monomials over the given symbols.
+    poly = Poly(expr, *symbols, domain="ZZ(psi)")
+    result = {}
+    for monom, coeff_raw in poly.as_dict().items():
+        # monom is a tuple of exponents, e.g. (1, 0) for first symbol
+        if max(monom) > 1:
+            raise ValueError(
+                f"Nonlinear term detected: exponents {monom} for symbols {symbols}"
+            )
+        # Convert domain element back to SymPy
+        coeff = poly.domain.to_sympy(coeff_raw)
+        if sum(monom) == 0:
+            result[1] = coeff
+        elif sum(monom) == 1:
+            idx = monom.index(1)
+            result[symbols[idx]] = coeff
+        else:
+            # Cross term like alpha_0 * alpha_1
+            raise ValueError(
+                f"Cross-term detected: exponents {monom} for symbols {symbols}"
+            )
+
+    return result
+
+
+def solve_in_field(V_sympy: Matrix, rhs_sympy: Matrix, K, symbols: list[Symbol]):
+    """Solve a square linear system in QQ(psi), with optional symbol-dependent RHS.
+
+    This is the core linear solve used by ``solve_temo_row`` in 20.5d.
+
+    Parameters
+    ----------
+    V_sympy : Matrix
+        Square n x n SymPy matrix, entries rational in psi only.
+    rhs_sympy : Matrix
+        n x 1 SymPy column vector. Entries may be linear in the given symbols
+        (alpha, beta) with psi-rational coefficients.
+    K : FractionField
+        The QQ(psi) field from ``make_psi_field``.
+    symbols : list of Symbol
+        Non-psi symbols that may appear linearly in rhs_sympy.  Empty list for
+        the pure-psi case.
+
+    Returns
+    -------
+    list of Expr
+        Length-n list of SymPy expressions, each rational in psi and linear in
+        the given symbols.
+    """
+    n = V_sympy.rows
+    assert V_sympy.cols == n, "V must be square"
+    assert rhs_sympy.rows == n and rhs_sympy.cols == 1
+
+    # Build V as a DomainMatrix in K
+    V_rows = []
+    for i in range(n):
+        V_rows.append([to_field_elem(V_sympy[i, j], K) for j in range(n)])
+    V_dm = DomainMatrix(V_rows, (n, n), K)
+
+    if not symbols:
+        # Pure-psi case: convert rhs directly and solve once
+        rhs_elems = [[to_field_elem(rhs_sympy[i, 0], K)] for i in range(n)]
+        rhs_dm = DomainMatrix(rhs_elems, (n, 1), K)
+        sol_dm = V_dm.lu_solve(rhs_dm)
+        return [from_field_elem(row[0], K) for row in sol_dm.to_list()]
+
+    # Symbol-dependent case: decompose RHS into per-symbol components,
+    # solve each component separately, then reassemble.
+    # Decompose each RHS entry
+    decomposed = [decompose_alpha_terms(rhs_sympy[i, 0], symbols) for i in range(n)]
+
+    # Collect all keys (1, sym_0, sym_1, ...)
+    all_keys: set = set()
+    for d in decomposed:
+        all_keys.update(d.keys())
+
+    # For each key, build a RHS column and solve
+    solutions_per_key: dict = {}
+    for key in sorted(all_keys, key=lambda k: (0, "") if k == 1 else (1, str(k))):
+        rhs_col = []
+        for i in range(n):
+            coeff = decomposed[i].get(key, Rational(0))
+            rhs_col.append([to_field_elem(coeff, K)])
+        rhs_dm = DomainMatrix(rhs_col, (n, 1), K)
+        sol_dm = V_dm.lu_solve(rhs_dm)
+        solutions_per_key[key] = [
+            from_field_elem(row[0], K) for row in sol_dm.to_list()
+        ]
+
+    # Reassemble: solution[j] = x_{j,1} + sum_s x_{j,s} * s
+    result = []
+    for j in range(n):
+        expr = Rational(0)
+        for key, sol_vec in solutions_per_key.items():
+            if key == 1:
+                expr += sol_vec[j]
+            else:
+                expr += sol_vec[j] * key
+        result.append(expr)
+
+    return result
