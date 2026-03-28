@@ -360,6 +360,51 @@ def test_full_struct_poly():
     assert "interp_info query_interp() const { return {2, 4}; }" in code
 
 
+# ── 21.4a: Non-uniform single-param constructor/factory tests ────────
+
+
+# Minimal E4_1-like spec: non-uniform, single param array
+e4_1_minimal_spec = StencilGenSpec(
+    name="E4_1",
+    P=2,
+    R=4,
+    T=7,
+    X=0,
+    derivative_order=1,
+    is_uniform=False,
+    param_arrays={"alpha": 4},
+    interior_coeffs=[
+        Rational(1, 12), Rational(-2, 3), 0, Rational(2, 3), Rational(-1, 12),
+    ],
+    floating_coeffs=[Integer(0)] * 28,  # placeholder R*T
+    dirichlet_coeffs=[Integer(0)] * 28,  # placeholder R*T
+)
+
+
+def test_nonuniform_single_param_constructor():
+    """Non-uniform stencil with single param array gets span constructor."""
+    code = generate_stencil_cpp(e4_1_minimal_spec)
+    assert "E4_1(std::span<const real> a)" in code
+    assert "copy_zero_padded(a, alpha);" in code
+
+
+def test_nonuniform_single_param_factory():
+    """Non-uniform stencil with single param array gets correct factory."""
+    code = generate_stencil_cpp(e4_1_minimal_spec)
+    assert "make_E4_1(std::span<const real> alpha)" in code
+    assert "return E4_1{alpha};" in code
+
+
+def test_nonuniform_single_param_struct_constants():
+    """E4_1-like spec emits correct struct constants."""
+    code = generate_stencil_cpp(e4_1_minimal_spec)
+    assert "static constexpr int P = 2;" in code
+    assert "static constexpr int R = 4;" in code
+    assert "static constexpr int T = 7;" in code
+    assert "static constexpr int X = 0;" in code
+    assert "std::array<real, 4> alpha;" in code
+
+
 # ── 20.4f: Test file generator tests ──────────────────────────────────
 
 

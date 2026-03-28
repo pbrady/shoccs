@@ -181,7 +181,7 @@ The SymPy pipeline (Phase 20) is complete with 231 passing tests and 7 modules:
 
 ### 21.4 — E4_1 C++ code generation
 
-- [ ] **21.4a** Fix codegen constructor/factory for non-uniform single-param-array stencils (prerequisite):
+- [x] **21.4a** Fix codegen constructor/factory for non-uniform single-param-array stencils (prerequisite):
   - **Bug:** `codegen.py`'s `_emit_struct_preamble()` (line ~292) guards the single-span constructor with `if spec.is_uniform and len(spec.param_arrays) == 1:`. For E4_1 (`is_uniform=False`, 1 param array), neither this nor the `elif len(spec.param_arrays) > 1:` branch fires, so **no constructor is emitted** (only the default). The same guard appears in `_emit_factory()` (line ~485): for 1 non-uniform param array, the `else` branch fires and generates a malformed factory with duplicate parameter names.
   - **Fix:** In both `_emit_struct_preamble` and `_emit_factory`, change the condition from `spec.is_uniform and len(spec.param_arrays) == 1` to `len(spec.param_arrays) == 1`. This matches the pattern used in E2_1.cpp (non-uniform, single `alpha` array, single-span constructor).
   - **Concrete changes:**

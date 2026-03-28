@@ -289,7 +289,7 @@ def _emit_struct_preamble(spec: StencilGenSpec) -> str:
     lines.append("")
     lines.append(f"{indent}{spec.name}() = default;")
 
-    if spec.is_uniform and len(spec.param_arrays) == 1:
+    if len(spec.param_arrays) == 1:
         array_name = list(spec.param_arrays.keys())[0]
         lines.append(f"{indent}{spec.name}(std::span<const real> a)")
         lines.append(f"{indent}{{")
@@ -482,7 +482,7 @@ def _emit_factory(spec: StencilGenSpec) -> str:
         lines.append(
             f"stencil make_{spec.name}() {{ return {spec.name}{{}}; }}"
         )
-    elif spec.is_uniform and len(spec.param_arrays) == 1:
+    elif len(spec.param_arrays) == 1:
         array_name = list(spec.param_arrays.keys())[0]
         lines.append(
             f"stencil make_{spec.name}(std::span<const real> {array_name})"
