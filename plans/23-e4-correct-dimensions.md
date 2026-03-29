@@ -289,3 +289,46 @@ This extends the existing `solve_conservation` pattern from `conservation.py` (u
 - The Phase 22 tests (`TestApproachDIncreasedDimensions`) tested (R, T) = (4,7)..(8,11) but always used the OLD r=3 dimensions for deriving B_u. With the CORRECT r=4, B_u has different alpha structure (5 alphas instead of 4, different distribution across rows), which changes the conservation system's rank properties.
 
 **Reference implementation:** `conservation.py:solve_conservation()` (lines 88-167) handles the simpler case (no ψ, bilinear in w_i × phi_k). The cut-cell version adds ψ-coefficient extraction between steps 1 and 3 of that function.
+
+---
+
+## Critical Fix: Conservation Must Be Applied to Uniform Stencil FIRST
+
+The paper says: "the conservation constraints must also be solved on the uniform mesh to provide appropriately constrained αu."
+
+The process kept trying to enforce conservation on the CUT-CELL stencil (with w = [psi, 1, 1, 1, 1]), which is infeasible. The correct approach:
+
+1. Build uniform boundary B_u at TEMO dimensions (r=4, t=6) using `solve_boundary_row`
+2. Apply `conservation.py`'s `build_conservation_system` + `solve_conservation` to B_u
+   - This gives 5 equations, 6 unknowns (4 weights + 2 last-row free params)
+   - Underdetermined → solvable, consumes 1 last-row free param
+3. The conservation-constrained B_u has fewer free alphas
+4. THEN apply TEMO design principles to get B_l(ψ)
+5. The cut-cell conservation follows from the uniform conservation by construction
+
+This was verified manually:
+```
+build_conservation_system(r=4, t=6, p=2, rows, interior)
+→ 5 equations, 4 weight unknowns + 2 last-row free = 6 unknowns
+→ SOLVABLE (underdetermined by 1)
+```
+
+### Revised 23.3a: Apply uniform conservation at TEMO dimensions
+
+- [ ] **23.3a** Update `derive_uniform_boundary_for_temo` to apply conservation:
+  1. After solving all r=4 boundary rows with `solve_boundary_row`
+  2. Call `build_conservation_system(r=4, t=6, p=2, rows, interior)` 
+  3. Call `solve_conservation(eqs, w_syms, last_free, rows, r=4)`
+  4. This constrains the last row and determines weights
+  5. Package the conservation-constrained B_u into `UniformResult`
+  6. The resulting B_u has fewer free alphas (expected: 4, matching Table 1)
+  - File: `scripts/stencil_gen/stencil_gen/temo.py`
+  - Test: verify B_u column sums satisfy conservation
+
+### Revised 23.3b: Verify cut-cell conservation follows
+
+- [ ] **23.3b** After TEMO construction with conservation-constrained B_u:
+  - The cut-cell stencil should automatically satisfy conservation
+  - Verify: `Σ_i w_i(ψ) · B[i,j] = 0` for interior columns
+  - The weights w_i(ψ) come from the TEMO extension of the uniform weights
+  - File: `scripts/stencil_gen/tests/test_e4_cut_cell.py`
