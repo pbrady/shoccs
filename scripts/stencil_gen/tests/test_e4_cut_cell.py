@@ -680,16 +680,16 @@ class TestDeriveCutCellScheme:
         assert result.eta is None
 
     def test_e4_1_alpha_count(self):
-        """E4_1 has 5 free alpha symbols."""
+        """E4_1 has 4 free alpha symbols (conservation eliminates 1)."""
         psi = Symbol("psi")
         result = derive_cut_cell_scheme(E4_1, psi)
-        assert len(result.alpha_symbols) == 5
+        assert len(result.alpha_symbols) == 4
 
     def test_e4_1_matches_manual_pipeline(self):
-        """derive_cut_cell_scheme(E4_1) matches the manual step-by-step pipeline."""
+        """derive_cut_cell_scheme(E4_1) equals manual pipeline + conservation subs."""
         psi = Symbol("psi")
 
-        # Manual pipeline (as done in earlier tests)
+        # Manual non-conserved pipeline (5 alphas)
         ur = derive_uniform_boundary_for_temo(E4_1)
         stencil = construct_cut_cell_stencil(
             ur.B_u, ur.interior, p=2, q=3, nu=1, nextra=0, psi=psi,
@@ -699,14 +699,23 @@ class TestDeriveCutCellScheme:
             stencil.matrix, None, None, dims, ur.alpha_symbols,
         )
 
-        # High-level pipeline
+        # Conservative high-level pipeline (4 alphas)
         auto = derive_cut_cell_scheme(E4_1, psi)
+
+        # Apply conservation_subs to manual, then rename surviving alphas
+        assert auto.conservation_subs is not None
+        manual_subbed = manual.floating.xreplace(auto.conservation_subs)
+        # Rename surviving nc-alphas (alpha_0..alpha_2, alpha_4) to final (alpha_0..alpha_3)
+        nc_alphas = ur.alpha_symbols  # [alpha_0..alpha_4]
+        surviving = [a for a in nc_alphas if a not in auto.conservation_subs]
+        rename = dict(zip(surviving, auto.alpha_symbols))
+        manual_subbed = manual_subbed.xreplace(rename)
 
         # Compare floating matrices entry by entry
         R, T = auto.floating.shape
         for i in range(R):
             for j in range(T):
-                assert cancel(auto.floating[i, j] - manual.floating[i, j]) == 0, (
+                assert cancel(auto.floating[i, j] - manual_subbed[i, j]) == 0, (
                     f"Floating mismatch at [{i},{j}]"
                 )
 
@@ -728,9 +737,9 @@ class TestDeriveCutCellScheme:
                 )
 
     def test_e4_1_custom_alphas(self):
-        """derive_cut_cell_scheme accepts custom alpha symbols."""
+        """derive_cut_cell_scheme accepts custom alpha symbols (4 post-conservation)."""
         psi = Symbol("psi")
-        syms = [Symbol(f"a{k}") for k in range(5)]
+        syms = [Symbol(f"a{k}") for k in range(4)]
         result = derive_cut_cell_scheme(E4_1, psi, alpha_symbols=syms)
         assert result.alpha_symbols == syms
         assert result.floating.free_symbols <= {psi} | set(syms)

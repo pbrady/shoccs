@@ -376,20 +376,22 @@ caller's alpha symbols. Weights are rational functions of alpha_3 only.
   - Files: `scripts/stencil_gen/stencil_gen/temo.py`
   - Test: `cd scripts/stencil_gen && uv run pytest tests/test_temo.py -v` (E2 tests must still pass)
 
-- [ ] **23.3a-iii** Update all E4_1 tests for post-TEMO conservation:
-  - `derive_uniform_boundary_for_temo(E4_1)` stays at 5 alphas — `TestE4UniformBoundary` tests UNCHANGED
-  - `TestE4UniformConservation` tests UNCHANGED (still test `conserve=True` on B_u directly)
-  - `TestE4TEMOConstruction`: fixture calls `construct_cut_cell_stencil` directly (no conservation) — tests UNCHANGED
-  - `TestE4CodeGeneration`: fixture uses `derive_uniform_boundary_for_temo(E4_1)` directly → needs update if we want conservative codegen. Add new fixture that goes through `derive_cut_cell_scheme` instead. `param_arrays={"alpha": 5}` → 4, alpha array assertion, floating/dirichlet coeff counts stay the same (R=5, T=7)
-  - `TestE4TestFileGeneration`: same — update fixture path, `ALPHA_VALUES` 5→4
-  - `TestDeriveCutCellScheme`:
-    - `test_e4_1_alpha_count` 5→4, `test_e4_1_custom_alphas` range(5)→range(4)
-    - `test_e4_1_matches_manual_pipeline` (line 688): **must be updated** — currently compares `derive_cut_cell_scheme` output against non-conserved manual pipeline. After conservation, outputs differ (4 vs 5 alphas, quadratic vs linear entries). Either update to also apply conservation in the manual path, or change to verify only that the conserved result satisfies Taylor accuracy and conservation independently.
-  - `TestBuildCutCellConservationSystem`: `test_e4_1_overdetermined_system` — **alpha count stays at 5** (this test builds the stencil directly via `derive_uniform_boundary_for_temo(E4_1)` + `construct_cut_cell_stencil`, NOT through `derive_cut_cell_scheme`, so it sees the non-conserved 5-alpha stencil)
-  - `test_e4_1_conservation_constant_weights_infeasible_r5` — **alpha count stays at 5** (same reason: builds stencil directly, not through `derive_cut_cell_scheme`)
-  - `test_e4_1_conservation_fails` xfail remains (uses naive weights, not SBP weights)
+- [x] **23.3a-iii** Update all E4_1 tests for post-TEMO conservation:
+  - **Changes made (only 3 tests needed updating):**
+    - `test_e4_1_alpha_count`: 5→4
+    - `test_e4_1_custom_alphas`: `range(5)`→`range(4)`
+    - `test_e4_1_matches_manual_pipeline`: changed from direct entry comparison to: apply `conservation_subs` to manual non-conserved pipeline output, rename surviving alphas, then compare entry-by-entry. Verifies the conservative high-level pipeline equals the manual pipeline + conservation substitution.
+  - **Tests already correct (no changes needed):**
+    - `TestE4UniformBoundary` — uses `derive_uniform_boundary_for_temo(E4_1)` (non-conserved), UNCHANGED
+    - `TestE4UniformConservation` — tests `conserve=True` on B_u directly, UNCHANGED
+    - `TestE4TEMOConstruction` — fixture calls `construct_cut_cell_stencil` directly, UNCHANGED
+    - `TestE4CodeGeneration` — fixture uses non-conserved pipeline directly (not `derive_cut_cell_scheme`), already passes
+    - `TestE4TestFileGeneration` — same as above, already passes
+    - `TestBuildCutCellConservationSystem` — uses non-conserved pipeline directly, already passes
+    - `test_e4_1_conservation_constant_weights_infeasible_r5` — uses non-conserved pipeline, already passes
+    - `test_e4_1_conservation_fails` xfail — uses naive weights, still xfails correctly
+  - **Verification:** 63 passed, 1 xfailed in test_e4_cut_cell.py; 121 passed in test_temo.py
   - Files: `scripts/stencil_gen/tests/test_e4_cut_cell.py`
-  - Test: `cd scripts/stencil_gen && uv run pytest tests/test_e4_cut_cell.py -v`
 
 ### Revised 23.3b: Verify cut-cell conservation follows
 
