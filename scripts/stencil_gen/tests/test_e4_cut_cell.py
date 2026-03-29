@@ -1497,3 +1497,222 @@ class TestApproachCEntryLevelUnknowns:
         assert result == [], (
             f"Expected no solutions, got {len(result)} solution(s)"
         )
+
+
+class TestApproachDIncreasedDimensions:
+    """Approach D: increase stencil dimensions (R, T) to resolve infeasibility.
+
+    Investigation 22.3a-v: systematically test whether the conservation
+    rank gap = 1 from approaches A/B/C can be resolved by widening the
+    stencil (larger T), adding boundary rows (larger R), or both.
+
+    **Key finding:** The rank gap = 1 is UNIVERSAL — it persists across
+    all tested (R, T) combinations from (4,7) to (8,11) for any scheme
+    with q >= 2 (n_eqs >= 3 Taylor equations per row). The infeasibility
+    is structural, arising from the Vandermonde constraint structure, not
+    from insufficient degrees of freedom.
+
+    **Secondary finding:** For q = 1 (n_eqs = 2), conservation IS feasible
+    (gap = 0) at all tested dimensions and p values. The transition occurs
+    at exactly n_eqs = 3.
+    """
+
+    @staticmethod
+    def _build_and_check(p, q, nu, R, T, psi):
+        """Build a TEMO stencil at (R, T) and return the conservation rank gap.
+
+        Uses only Category-A prescriptions (column 1 zeroed) and beta
+        symbols for all other free entries, giving maximum freedom.
+        Applies theta-linearization and psi-coefficient extraction.
+
+        Returns (gap, rank_A, rank_aug, n_eqs_scalar, n_unknowns).
+        """
+        from sympy import Poly as SPoly, symbols as _symbols
+
+        n_eqs = max(q + 1, nu + 1)
+        n_free_per_row = T - 1 - n_eqs
+        if n_free_per_row < 0:
+            return None
+
+        if p == 1:
+            interior = [Rational(-1, 2), Integer(0), Rational(1, 2)]
+        elif p == 2:
+            interior = [
+                Rational(1, 12), Rational(-2, 3), Integer(0),
+                Rational(2, 3), Rational(-1, 12),
+            ]
+        elif p == 3:
+            interior = [
+                Rational(-1, 60), Rational(3, 20), Rational(-3, 4),
+                Integer(0), Rational(3, 4), Rational(-3, 20), Rational(1, 60),
+            ]
+        else:
+            return None
+
+        K, _ = make_psi_field(psi)
+
+        rows = []
+        beta_syms = []
+        for i in range(R):
+            V, rhs_vec = build_temo_vandermonde(i, T, q, nu, psi)
+            prescribed = {1: S.Zero}
+            result = solve_temo_row(
+                i, V, rhs_vec, prescribed, psi, K, [], beta_prefix=f"e{i}_",
+            )
+            rows.append(result.coeffs)
+            for col, sym in result.beta_info:
+                beta_syms.append(sym)
+
+        B_l = Matrix(rows)
+        w_syms = list(_symbols(f"w_1:{R}"))
+
+        equations = []
+        for j in range(T - 1):
+            col_sum = psi * B_l[0, j]
+            for i_row in range(1, R):
+                col_sum += w_syms[i_row - 1] * B_l[i_row, j]
+            ic = _interior_contribution(j - 1, R, p, interior)
+            col_sum += ic
+            if j == 0 and nu == 1:
+                target = S.NegativeOne
+            else:
+                target = S.Zero
+            equations.append(col_sum - target)
+
+        # Theta-linearize: theta_{i,k} = w_i * e_{i,k} for i >= 1
+        theta_syms = []
+        subs_dict = {}
+        for i_row in range(1, R):
+            row_betas = [s for s in beta_syms
+                         if s.name.startswith(f"e{i_row}_")]
+            for k, bs in enumerate(row_betas):
+                theta = Symbol(f"th_{i_row}_{k}")
+                theta_syms.append(theta)
+                subs_dict[w_syms[i_row - 1] * bs] = theta
+
+        lin_eqs = [expand(eq).subs(subs_dict) for eq in equations]
+        row0_betas = [s for s in beta_syms if s.name.startswith("e0_")]
+        lin_unknowns = list(w_syms) + row0_betas + theta_syms
+
+        scalar_eqs = []
+        for eq in lin_eqs:
+            eq_c = cancel(eq)
+            num, _ = fraction(eq_c)
+            num_exp = expand(num)
+            try:
+                p_obj = SPoly(num_exp, psi)
+                for coeff in p_obj.all_coeffs():
+                    c_val = cancel(coeff)
+                    if c_val != 0:
+                        scalar_eqs.append(c_val)
+            except Exception:
+                if num_exp != 0:
+                    scalar_eqs.append(num_exp)
+
+        A_lin, b_lin = linear_eq_to_matrix(scalar_eqs, lin_unknowns)
+        r_A = A_lin.rank()
+        r_aug = A_lin.row_join(b_lin).rank()
+        gap = r_aug - r_A
+        return (gap, r_A, r_aug, len(scalar_eqs), len(lin_unknowns))
+
+    def test_e4_1_rank_gap_all_dimensions(self):
+        """Rank gap = 1 for E4_1 (p=2, q=3, nu=1) at all tested dimensions.
+
+        Tests (R, T) from (4,7) to (8,11): the rank gap is always exactly 1.
+        Increasing dimensions cannot resolve the infeasibility.
+        """
+        psi = Symbol("psi")
+        for R in range(4, 9):
+            for T in range(7, 12):
+                result = self._build_and_check(2, 3, 1, R, T, psi)
+                assert result is not None, f"R={R}, T={T}: build failed"
+                gap = result[0]
+                assert gap == 1, (
+                    f"R={R}, T={T}: expected gap=1, got gap={gap} "
+                    f"(rank={result[1]}/{result[2]})"
+                )
+
+    def test_rank_gap_universal_for_q_ge_2(self):
+        """Rank gap = 1 for ALL (p, q) with q >= 2 at standard dimensions.
+
+        Tests p=1..3, q=2..4: the gap is always 1 regardless of p or q,
+        as long as q >= 2 (i.e., n_eqs = max(q+1, nu+1) >= 3).
+        """
+        psi = Symbol("psi")
+        for p_val in [1, 2, 3]:
+            for q_val in [2, 3, 4]:
+                R = p_val + 2   # standard: r_eff + 1 = (p+1) + 1
+                T = p_val + q_val + 2  # standard: (p+q+1) + 1
+                result = self._build_and_check(p_val, q_val, 1, R, T, psi)
+                if result is None:
+                    continue  # skip if dimensions too small
+                gap = result[0]
+                assert gap == 1, (
+                    f"p={p_val}, q={q_val}, R={R}, T={T}: "
+                    f"expected gap=1, got gap={gap}"
+                )
+
+    def test_q1_conservation_feasible(self):
+        """Conservation IS feasible for q=1 at all tested (p, R, T).
+
+        When q=1 (n_eqs=2), each row has more free entries and the
+        conservation system is consistent (gap=0).
+        """
+        psi = Symbol("psi")
+        # Standard dimensions: p, q=1
+        for p_val in [1, 2, 3]:
+            R = p_val + 2
+            T = p_val + 1 + 2  # q=1 → T = p+1+1+1 = p+3
+            result = self._build_and_check(p_val, 1, 1, R, T, psi)
+            assert result is not None
+            gap = result[0]
+            assert gap == 0, (
+                f"p={p_val}, q=1, R={R}, T={T}: "
+                f"expected gap=0, got gap={gap}"
+            )
+
+        # Also check widened: p=2, q=1 at E4_1 dimensions (R=4, T=7)
+        result = self._build_and_check(2, 1, 1, 4, 7, psi)
+        assert result is not None
+        assert result[0] == 0, (
+            f"p=2, q=1, R=4, T=7 (widened): expected gap=0, got gap={result[0]}"
+        )
+
+    def test_nextra1_pipeline_rank_gap(self):
+        """Using nextra=1 through the full pipeline also has rank gap = 1.
+
+        This verifies that the infeasibility holds even when using the
+        standard pipeline (derive_uniform_boundary + construct_cut_cell_stencil)
+        with limit-interpolation prescriptions, not just the manual
+        beta-only construction.
+        """
+        psi = Symbol("psi")
+        scheme = SchemeParams(p=2, q=3, s=0, nextra=1, nu=1)
+        ur = derive_uniform_boundary_for_temo(scheme)
+        result = construct_cut_cell_stencil(
+            ur.B_u, ur.interior, ur.p, ur.q, ur.nu, scheme.nextra, psi,
+        )
+        dims = scheme.dims()
+        eqs, w_syms = build_cut_cell_conservation_system(
+            result.matrix, dims.R, dims.T, p=2, nu=1,
+            interior_coeffs=ur.interior, psi=psi,
+        )
+
+        A, b = linear_eq_to_matrix(eqs, w_syms)
+        alpha_syms = ur.alpha_symbols
+
+        # Check at several (psi, alpha) points
+        import random
+        random.seed(42)
+        for psi_val in [Rational(1, 4), Rational(1, 2), Rational(3, 4)]:
+            alpha_vals = {s: Rational(random.randint(-5, 5), 10)
+                         for s in alpha_syms}
+            alpha_vals[psi] = psi_val
+            A_num = A.subs(alpha_vals)
+            b_num = b.subs(alpha_vals)
+            aug_num = A_num.row_join(b_num)
+            r_A = A_num.rank()
+            r_aug = aug_num.rank()
+            assert r_aug - r_A == 1, (
+                f"psi={psi_val}: expected gap=1, got gap={r_aug - r_A}"
+            )

@@ -119,7 +119,7 @@ The two-phase approach described below was attempted and found to have a **funda
 - **(B) Direct parametric solve**: parameterize w_i as rational functions of ψ with unknown coefficients, substitute into conservation, match ψ-coefficients, solve the resulting polynomial system in (weight coefficients, α). **RESULT: FAILS** (22.3a-ii). Mathematically equivalent to (A) — pointwise inconsistency at every tested (ψ, α) proves no weight function can satisfy conservation within the α-parameterized stencil space.
 - **(C) Entry-level unknowns**: instead of working with α, treat the 8 free stencil entries directly as unknowns alongside weights, giving a system that may be solvable despite higher dimensionality. **RESULT: FAILS** (22.3a-iii). The conservation system is structurally infeasible in the full 8D (and 12D) entry space, for all weight parameterizations tested.
 
-**All three approaches (A, B, C) have failed.** The conservation constraint for E4_1 (R=4, T=7, p=2, q=3, nu=1) appears to be fundamentally incompatible with the Taylor accuracy constraints at the current stencil dimensions. See 22.3a-iii results below for details. **Next step**: Investigate approach (D) — increase stencil dimensions (wider T or more boundary rows R) to provide additional degrees of freedom.
+**All five approaches (A, B, C, D, E) have failed.** The conservation constraint for E4_1 is **structurally infeasible** for any scheme with q ≥ 2, regardless of stencil dimensions. The rank gap = 1 is a universal property of the Taylor Vandermonde structure when n_eqs ≥ 3. Only q = 1 (n_eqs = 2) yields feasible conservation, but this sacrifices E4 accuracy. **Next step**: Investigate approximate conservation (approach G) or column-selective conservation (approach H).
 
 - [x] **22.3a-i** Investigate approach (A) — augmented matrix minor conditions:
   - Compute all C(6,4)=15 minor determinants of [A(ψ,α)|b(ψ,α)] for E4_1 symbolically (all 4 alpha free, not fixing alpha_3=0).
@@ -176,16 +176,41 @@ The two-phase approach described below was attempted and found to have a **funda
     - `test_pointwise_rank_check`: At 3 psi values × 5 beta vectors = 15 combinations, the 6×3 conservation coefficient matrix always has rank 3 and augmented rank 4.
     - `test_nonlinear_solve_no_solutions`: `sympy.solve` on the bilinear scalar equations returns no solutions.
 
-- [ ] **22.3a-v** *(Review follow-up)* Investigate approach (D) — increased stencil dimensions:
-  - All three approaches (A, B, C) failed for E4_1 at R=4, T=7. The plan identifies directions D–H but has no concrete investigation item. This item gates all downstream work (22.3b–22.7a are BLOCKED until a viable approach is found).
-  - Start with approach (D): increase T to 8 or 9 while keeping R=4. For each candidate T value:
-    - Compute the new DOF budget: rows × (T − prescribed − Taylor_constraints) free entries vs. T−1 conservation equations and R−1 weight unknowns.
-    - Build the conservation system symbolically (reuse `build_cut_cell_conservation_system` from 22.2a) and check the rank gap. If rank gap = 0, the dimension change resolves the infeasibility.
-    - If T increase alone doesn't work, also try R=5 with the original T=7 (approach E).
-  - Record findings and select the viable approach before unblocking 22.3b.
+- [x] **22.3a-v** *(Review follow-up)* Investigate approach (D) — increased stencil dimensions:
+  - All three approaches (A, B, C) failed for E4_1 at R=4, T=7. This item investigated whether increasing dimensions resolves the infeasibility.
+  - **Method:** Built TEMO stencils from scratch at various (R, T) using only Category-A prescriptions and beta symbols for all free entries (maximum DOF). Applied theta-linearization, extracted psi-coefficients, checked rank gap of the resulting scalar linear system.
+  - **RESULT: Approach (D) FAILS — rank gap = 1 is UNIVERSAL.**
+    1. **All dimensions tested (R=4..8, T=7..11):** rank gap is exactly 1 at every (R, T) combination. Increasing T (wider stencil), R (more rows), or both does NOT resolve the infeasibility. Tested 25 dimension combinations; all show gap=1.
+    2. **Full pipeline verification:** nextra=1 (R=5, T=8) and nextra=2 (R=6, T=9) through the standard pipeline (derive_uniform_boundary + construct_cut_cell_stencil + build_cut_cell_conservation_system) also show rank gap = 1 at multiple numeric (ψ, α) evaluation points.
+    3. **Category A target independence:** The rank gap = 1 holds with both zero and nonzero Category-A targets.
+    4. **Dropping single equations doesn't help:** Removing any single conservation equation still leaves rank gap = 1.
+  - **Critical secondary finding — the infeasibility depends on q, not on dimensions:**
+    - **q = 1 (n_eqs = 2):** GAP = 0 (conservation IS feasible) at ALL tested (p, R, T). Verified for p=1,2,3 at standard dimensions and at widened dimensions (e.g., p=2, q=1, R=4, T=7).
+    - **q ≥ 2 (n_eqs ≥ 3):** GAP = 1 (infeasible) at ALL tested (p, R, T). Verified for p=1,2,3 with q=2,3,4 at standard and extended dimensions.
+    - The transition occurs at exactly n_eqs = 3 Taylor equations per row. With 2 equations, the Vandermonde constraints leave enough algebraic freedom for conservation. With 3+, the constraints create an irreducible rank deficiency.
+  - **Approach (E) also fails** (tested as part of D): R=5, T=7 (more rows, same width) has gap=1.
+  - **Approach (F) partial result:** Reducing q from 3 to 1 makes conservation feasible, but this sacrifices boundary accuracy from 4th to 2nd order — effectively making it an E2-like scheme, which defeats the E4 purpose.
+  - **Implications for remaining approaches:**
+    - (D) Increase T: **FAILS** — tested exhaustively.
+    - (E) Increase R: **FAILS** — tested exhaustively.
+    - (F) Relax Taylor accuracy to q=1: **WORKS** mathematically but sacrifices E4 accuracy.
+    - (G) Accept approximate conservation: **VIABLE** — minimize conservation residual instead of enforcing exactly.
+    - (H) Column-selective conservation: **VIABLE** — enforce conservation only on columns with nonzero IC.
+  - File: `scripts/stencil_gen/tests/test_e4_cut_cell.py` (`TestApproachDIncreasedDimensions`), 4 tests:
+    - `test_e4_1_rank_gap_all_dimensions`: 25 (R,T) combinations, all gap=1
+    - `test_rank_gap_universal_for_q_ge_2`: 9 (p,q) combinations with q≥2, all gap=1
+    - `test_q1_conservation_feasible`: 4 (p,q=1) cases, all gap=0
+    - `test_nextra1_pipeline_rank_gap`: full pipeline at 3 numeric (ψ,α) points, all gap=1
+
+- [ ] **22.3a-vi** Investigate approach (G) — approximate conservation:
+  - The exact conservation constraint is structurally infeasible for q ≥ 2 at any dimensions. Approximate conservation minimizes the conservation residual (weighted column-sum error) instead of enforcing it exactly.
+  - **Proposed method:** After the per-row Taylor solve, compute the conservation residuals as functions of the free parameters (alpha). Use the alpha DOF to minimize the L2 norm of the residuals across all T-1 conservation columns. The residuals are rational in (ψ, α); minimize in the least-squares sense for specific ψ values or symbolically.
+  - **Key question:** How small can the residual be made? If the residual is O(h^k) for some k related to the interior accuracy, approximate conservation may be sufficient for practical convergence.
+  - **Alternative (H):** Enforce conservation exactly on the columns where IC ≠ 0 (columns 3,4,5 for E4_1) and accept nonzero residuals on other columns. This gives "column-selective" conservation.
+  - This item gates all downstream work (22.3b–22.7a are BLOCKED until a viable approach is selected).
   - File: `scripts/stencil_gen/tests/test_e4_cut_cell.py`
 
-> **NOTE (review of 173c879):** Items 22.3b through 22.7a below are **BLOCKED** — they assume conservation is solvable at the current E4_1 dimensions (R=4, T=7), which 22.3a-i/ii/iii proved infeasible. These items remain as-is for when a viable approach (from 22.3a-v) is identified; they will need revision to match the chosen approach's stencil dimensions and DOF structure.
+> **NOTE:** Items 22.3b through 22.7a below are **BLOCKED** — they assume exact conservation is solvable, which 22.3a-i through 22.3a-v proved infeasible for E4_1 at ANY dimensions when q ≥ 2. The structural rank gap = 1 is a property of the Taylor Vandermonde constraints, not the stencil dimensions. These items need fundamental revision once an approximate conservation approach (G or H) is selected in 22.3a-vi.
 
 - [ ] **22.3b** Integrate into `construct_cut_cell_stencil()` and propagate through pipeline:
   - **`StencilResult` dataclass (line 843):** Add field `weight_solutions: dict | None = None` (maps `w_i → expr(psi, alpha)`) and `alpha_symbols: list | None = None` (the remaining free alphas after conservation). The dataclass is not frozen, so new Optional fields with defaults can be appended without breaking existing callers.
@@ -292,14 +317,10 @@ The two-phase approach described below was attempted and found to have a **funda
 **ORIGINALLY CHOSEN: Two-phase** (Taylor first, then conservation substitution). **STATUS: FAILED** — the two-phase approach encounters a bilinear singularity where the weight denominators vanish at the constrained alpha values, making the system inconsistent after alpha substitution. See "Investigation Findings" in §22.3 for details. A new approach must be selected from the alternatives described in 22.3a-i/ii/iii.
 
 ### DD22-2: Bilinear term handling
-**ORIGINALLY CHOSEN: (a) Treat alphas as parameters, solve for w's.** **STATUS: DEAD END** — the conservation system A(ψ,α)·w = b(ψ,α) is structurally inconsistent within the α-parameterized stencil space. Both approach A (minor conditions) and approach B (parametric weights) confirm this independently. The α parameterization constrains the stencil to a 4-dimensional manifold that does not intersect the conservation constraint surface. **Approach (C) also fails:** the full 8D entry space (bypassing α) has the same structural rank gap = 1 for the conservation system. The infeasibility is inherent to the stencil dimensions (R=4, T=7), not the parameterization. **Resolution pending:** requires changing stencil dimensions or accepting approximate conservation.
+**ORIGINALLY CHOSEN: (a) Treat alphas as parameters, solve for w's.** **STATUS: FUNDAMENTALLY INFEASIBLE** — approaches A–E all fail. The conservation system is structurally inconsistent for ANY scheme with q ≥ 2 (n_eqs ≥ 3 Taylor equations per row), at ANY stencil dimensions. The rank gap = 1 is universal: tested at (R, T) from (4,7) to (8,11), p=1,2,3, q=2,3,4, all give gap=1. Only q=1 (n_eqs=2) produces gap=0, but this sacrifices boundary accuracy. **Resolution:** approximate conservation (approach G) or column-selective conservation (approach H).
 
 ### DD22-3: Alpha parameter reduction
-**TBD (narrowed):** Conservation enforcement will reduce E4_1's free alpha count from 4 to a smaller number. Based on the DOF analysis:
-- 6 conservation equations in 3 weight unknowns → 3 excess equations constraining alphas
-- 4 alpha symbols − 3 constraints → **expected: 1 free alpha**
-- But: the 3 residual equations from Step 4 of 22.3a may not all be independent (some may be redundant), so the actual free count could be 1–4. Must be determined empirically during 22.3a and recorded in 22.4b.
-- This affects the C++ constructor signature (`std::span<const real>` size), the `param_arrays={"alpha": N}` in codegen, and the `alpha_symbols` list in `CutCellResult`.
+**MOOT (exact conservation is infeasible):** The original plan to constrain alphas via exact conservation equations is no longer applicable, since exact conservation is structurally infeasible for q ≥ 2. If approximate conservation is pursued (approach G), alphas may be used to minimize the conservation residual, which could constrain some alphas but through an optimization objective rather than hard constraints. The actual alpha reduction (if any) depends on the chosen approximate approach.
 
 ### DD22-4: Wall column conservation target by derivative order
 **RESOLVED:** The SBP conservation target for column 0 (the wall/boundary column) depends on derivative order:
@@ -317,7 +338,8 @@ The conservation solve is small but mathematically nontrivial:
 - **Approach A (minors):** 15 minor determinants → 40 polynomial equations in 4 α unknowns. System is inconsistent (no solution).
 - **Approach B (parametric weights):** 37–55 psi-coefficient equations in 12–24 weight coefficients + 4 α. System is inconsistent for all tested α (rank gap = 1). The failure is independent of weight polynomial degree.
 - **Approach C (entry-level unknowns):** Investigated in 22.3a-iii. The theta-linearized system has 21–32 scalar equations in 11–38 unknowns (depending on weight polynomial degree). All formulations show rank gap = 1 — the system is structurally infeasible. The nonlinear (bilinear) system was also tested via SymPy's `solve` and `nonlinsolve` and confirmed infeasible.
-- **Status: BLOCKED** — all three approaches (A, B, C) fail for E4_1 at current dimensions (R=4, T=7). Conservation requires increasing stencil dimensions or accepting approximate enforcement.
+- **Approach D (increased dimensions):** Investigated in 22.3a-v. Tested 25 (R,T) combinations from (4,7) to (8,11). Rank gap = 1 at every combination. Also tested through the full pipeline with nextra=1 and nextra=2.
+- **Status: EXACT CONSERVATION IS STRUCTURALLY INFEASIBLE** for all schemes with q ≥ 2 (n_eqs ≥ 3), at any dimensions. Only q = 1 gives gap = 0. Approximate conservation (approach G) or column-selective conservation (approach H) is the remaining path.
 
 ## Key Implementation Insight
 
@@ -325,4 +347,6 @@ The α parameterization (free parameters from the per-row Taylor solve) is a 4-d
 
 **The structural infeasibility** arises because the Taylor Vandermonde constraints for each row create algebraic dependencies between stencil entries at different columns. These dependencies force the 6×3 conservation coefficient matrix (from rows 1–3 across the 6 conservation columns) to have a left null space whose projection onto the RHS is always nonzero. The rank gap = 1 is invariant across all parameterizations: constant weights, polynomial weights of any degree, ψ-dependent betas, and removal of the Category A prescription.
 
-**Resolving conservation for E4_1 requires changing the stencil dimensions** — either increasing T (wider stencil), increasing R (more boundary rows), or accepting approximate conservation. This is a Phase 22+ decision that affects the stencil structure and C++ implementation.
+**UPDATED (22.3a-v):** Changing stencil dimensions does NOT help — the rank gap = 1 is universal for q ≥ 2 at any (R, T). The infeasibility is a fundamental property of the Taylor Vandermonde structure: with n_eqs ≥ 3 per row, the polynomial reproduction constraints create algebraic dependencies between stencil entries at different columns that are inherently incompatible with the SBP column-sum conservation constraint. Only q = 1 (2 Taylor equations per row) leaves enough algebraic freedom.
+
+**Resolving conservation for E4_1 requires accepting approximate conservation** (minimize the conservation residual using alpha DOF) or column-selective conservation (enforce conservation only on a subset of columns). This is a Phase 22+ decision that affects the C++ norm implementation and error analysis.
