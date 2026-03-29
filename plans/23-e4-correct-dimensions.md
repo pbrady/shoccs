@@ -349,15 +349,17 @@ caller's alpha symbols. Weights are rational functions of alpha_3 only.
     1. Derive B_u with `conserve=False` → 5 alphas, linear entries
     2. Also derive B_u with `conserve=True` → 4 alphas, quadratic entries (for substitution mapping and weights only)
     3. Run TEMO pipeline with the **non-conserved** (linear) B_u — works fine
-    4. Extract the substitution mapping: compare conserved vs non-conserved alpha_symbols, build `{alpha_4: expr(alpha_0..alpha_3)}`
+    4. Extract the substitution mapping (see **Substitution mapping** note below)
     5. Apply the substitution to the cut-cell stencil matrices (floating, dirichlet)
-    6. Return `CutCellResult` with 4 alphas and the uniform weights
-  - **Key insight:** The substitution mapping is determined by the uniform conservation step and is applied symbolically to the already-solved cut-cell stencil. Since the cut-cell entries are rational in psi and linear in 5 alphas, after substituting alpha_4 they become rational in psi and (at most quadratic) in 4 alphas — which is fine for code generation and numerical evaluation, just not for the TEMO solver.
+    6. Rename remaining symbols to canonical `alpha_0..alpha_3`
+    7. Return `CutCellResult` with 4 alphas and the uniform weights
+  - **Substitution mapping:** The conservation step eliminates `_b3` (the FIRST last-row build symbol), not `_b4`. In non-conserved terms this means `alpha_3` is eliminated, not `alpha_4`. The actual substitution in non-conserved terms is `{alpha_3: expr(alpha_0, alpha_1, alpha_2, alpha_4)}`, followed by renaming `alpha_4 → alpha_3`. Verified empirically: conserved B_u[3,5] = `alpha_3` (which was `_b4`, i.e., non-conserved `alpha_4`). **Recommended approach:** add an `elim_subs: dict | None` field to `UniformResult` so `derive_uniform_boundary_for_temo(conserve=True)` directly returns the substitution mapping (in terms of original build symbols or caller symbols), avoiding fragile post-hoc comparison.
+  - **Key insight:** The substitution mapping is determined by the uniform conservation step and is applied symbolically to the already-solved cut-cell stencil. Since the cut-cell entries are rational in psi and linear in 5 alphas, after substituting alpha_3 they become rational in psi and (at most quadratic) in 4 alphas — which is fine for code generation and numerical evaluation, just not for the TEMO solver.
   - **Implementation details:**
     1. Add `conserve: bool = True` parameter to `derive_cut_cell_scheme`
     2. Add `conservation_subs: dict | None` and `weights: list | None` fields to `CutCellResult`
-    3. When `conserve=True`, derive both conserved and non-conserved uniforms, compute subs map, apply post-TEMO
-    4. The substitution map extraction: conserved result uses caller's `alpha_symbols[:4]`, non-conserved uses `alpha_symbols[:5]` — find which symbol was eliminated and what it maps to
+    3. Add `elim_subs: dict | None` field to `UniformResult` (returned when `conserve=True`)
+    4. When `conserve=True`, derive both conserved and non-conserved uniforms, extract subs map from `UniformResult.elim_subs`, apply post-TEMO, rename surviving symbols
   - Files: `scripts/stencil_gen/stencil_gen/temo.py`
   - Test: `cd scripts/stencil_gen && uv run pytest tests/test_temo.py -v` (E2 tests must still pass)
 
@@ -367,9 +369,11 @@ caller's alpha symbols. Weights are rational functions of alpha_3 only.
   - `TestE4TEMOConstruction`: fixture calls `construct_cut_cell_stencil` directly (no conservation) — tests UNCHANGED
   - `TestE4CodeGeneration`: fixture uses `derive_uniform_boundary_for_temo(E4_1)` directly → needs update if we want conservative codegen. Add new fixture that goes through `derive_cut_cell_scheme` instead. `param_arrays={"alpha": 5}` → 4, alpha array assertion, floating/dirichlet coeff counts stay the same (R=5, T=7)
   - `TestE4TestFileGeneration`: same — update fixture path, `ALPHA_VALUES` 5→4
-  - `TestDeriveCutCellScheme`: `test_e4_1_alpha_count` 5→4, `test_e4_1_custom_alphas` range(5)→range(4)
-  - `TestBuildCutCellConservationSystem`: `test_e4_1_overdetermined_system` alpha count 5→4
-  - `test_e4_1_conservation_constant_weights_infeasible_r5`: alpha count 5→4
+  - `TestDeriveCutCellScheme`:
+    - `test_e4_1_alpha_count` 5→4, `test_e4_1_custom_alphas` range(5)→range(4)
+    - `test_e4_1_matches_manual_pipeline` (line 688): **must be updated** — currently compares `derive_cut_cell_scheme` output against non-conserved manual pipeline. After conservation, outputs differ (4 vs 5 alphas, quadratic vs linear entries). Either update to also apply conservation in the manual path, or change to verify only that the conserved result satisfies Taylor accuracy and conservation independently.
+  - `TestBuildCutCellConservationSystem`: `test_e4_1_overdetermined_system` — **alpha count stays at 5** (this test builds the stencil directly via `derive_uniform_boundary_for_temo(E4_1)` + `construct_cut_cell_stencil`, NOT through `derive_cut_cell_scheme`, so it sees the non-conserved 5-alpha stencil)
+  - `test_e4_1_conservation_constant_weights_infeasible_r5` — **alpha count stays at 5** (same reason: builds stencil directly, not through `derive_cut_cell_scheme`)
   - `test_e4_1_conservation_fails` xfail remains (uses naive weights, not SBP weights)
   - Files: `scripts/stencil_gen/tests/test_e4_cut_cell.py`
   - Test: `cd scripts/stencil_gen && uv run pytest tests/test_e4_cut_cell.py -v`
