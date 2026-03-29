@@ -344,7 +344,7 @@ caller's alpha symbols. Weights are rational functions of alpha_3 only.
   - **Root cause:** Conservation eliminates one last-row alpha by solving a compatibility condition from the weight equations. The weight equations involve products `w_i * B_u[i,j]`, and the weight solutions `w_i = f(build_syms)` are rational in build symbols. Substituting these back and solving the compatibility condition for `_b3` yields a nonlinear expression. When this is substituted into B_u, entries become quadratic.
   - **Resolution:** Conservation must be applied AFTER the TEMO pipeline, not before. See revised 23.3a-ii below.
 
-- [ ] **23.3a-ii** Apply conservation post-TEMO in `derive_cut_cell_scheme`:
+- [x] **23.3a-ii** Apply conservation post-TEMO in `derive_cut_cell_scheme`:
   - **Approach:** Keep `conserve=False` as default in `derive_uniform_boundary_for_temo`. Instead, add `conserve: bool = True` parameter to `derive_cut_cell_scheme`. When True:
     1. Derive B_u with `conserve=False` → 5 alphas, linear entries
     2. Also derive B_u with `conserve=True` → 4 alphas, quadratic entries (for substitution mapping and weights only)
@@ -358,8 +358,21 @@ caller's alpha symbols. Weights are rational functions of alpha_3 only.
   - **Implementation details:**
     1. Add `conserve: bool = True` parameter to `derive_cut_cell_scheme`
     2. Add `conservation_subs: dict | None` and `weights: list | None` fields to `CutCellResult`
-    3. Add `elim_subs: dict | None` field to `UniformResult` (returned when `conserve=True`)
-    4. When `conserve=True`, derive both conserved and non-conserved uniforms, extract subs map from `UniformResult.elim_subs`, apply post-TEMO, rename surviving symbols
+    3. Add `elim_subs: dict | None` and `build_symbols: list | None` fields to `UniformResult` (returned when `conserve=True`)
+    4. When `conserve=True`, derive both conserved and non-conserved uniforms, extract subs map from `UniformResult.elim_subs`, translate via `build_symbols` → nc-alpha mapping, apply post-TEMO, rename surviving symbols
+  - **Changes made:**
+    - `UniformResult`: added `elim_subs`, `build_symbols` fields (record build-symbol elimination mapping)
+    - `CutCellResult`: added `conservation_subs`, `weights` fields
+    - `assemble_cut_cell_result`: added `conservation_subs`, `weights` pass-through params
+    - `derive_cut_cell_scheme`: added `conserve: bool = True` param with post-TEMO conservation path
+    - Conservation code path in `derive_uniform_boundary_for_temo`: records `elim_subs` and `build_symbols`
+  - **Verification:**
+    - All 121 test_temo.py tests pass (E2 unchanged)
+    - E2_1/E2_2 reproduce tests in test_e4_cut_cell.py pass (conservation is no-op for these schemes)
+    - All 10 TestE4UniformConservation tests pass
+    - xfail `test_e4_1_conservation_fails` still xfails (correct — uses naive weights)
+    - E4_1 smoke test: `derive_cut_cell_scheme(E4_1, psi)` → 5×7 floating, 4 alphas, weights present
+    - Some E4 tests in TestDeriveCutCellScheme will fail (expected: alpha count 5→4) — fixed in 23.3a-iii
   - Files: `scripts/stencil_gen/stencil_gen/temo.py`
   - Test: `cd scripts/stencil_gen && uv run pytest tests/test_temo.py -v` (E2 tests must still pass)
 

@@ -152,6 +152,14 @@ class UniformResult:
     weights : list[Expr] | None
         SBP quadrature weights [w_0, ..., w_{r-1}] when conservation is
         enforced, else None.
+    elim_subs : dict | None
+        When conservation is enforced, maps each eliminated build symbol
+        to its replacement expression (in terms of remaining build symbols).
+        None when conservation is not applied.
+    build_symbols : list | None
+        Full ordered list of build symbols before elimination.  Used by
+        ``derive_cut_cell_scheme`` to translate *elim_subs* into the
+        non-conserved alpha space.  None when conservation is not applied.
     """
 
     B_u: Matrix
@@ -161,6 +169,8 @@ class UniformResult:
     q: int
     nu: int
     weights: list | None = None
+    elim_subs: dict | None = None
+    build_symbols: list | None = None
 
 
 def _build_uniform_vandermonde(
@@ -440,9 +450,14 @@ def derive_uniform_boundary_for_temo(
 
     # --- SBP conservation for nextra == 0 (compatibility-condition method) ---
     weights = None
+    elim_subs = None
+    build_symbols = None
     if conserve and nextra == 0 and n_free_per_row > 0 and n_constraints > 0:
         from sympy import expand, fraction, linear_eq_to_matrix
         from sympy import solve as sym_solve
+
+        build_symbols = list(_build)
+        elim_subs = {}
 
         w_syms = list(_symbols(f"w_0:{r_eff}"))
 
@@ -474,6 +489,7 @@ def derive_uniform_boundary_for_temo(
             for sym_to_elim in last_row_build:
                 sols = sym_solve(numer, sym_to_elim)
                 if sols:
+                    elim_subs[sym_to_elim] = sols[0]
                     B_u = B_u.subs(sym_to_elim, sols[0])
                     last_row_build.remove(sym_to_elim)
                     break
@@ -507,6 +523,8 @@ def derive_uniform_boundary_for_temo(
         q=q,
         nu=nu,
         weights=weights,
+        elim_subs=elim_subs,
+        build_symbols=build_symbols,
     )
 
 
@@ -1480,6 +1498,13 @@ class CutCellResult:
         (r, t, R, T, X) dimensions.
     alpha_symbols : list[Symbol]
         Free alpha symbols (from B_u).
+    conservation_subs : dict or None
+        When conservation is enforced, maps the eliminated non-conserved
+        alpha symbol(s) to replacement expressions (in terms of other
+        non-conserved alphas, before renaming).  None otherwise.
+    weights : list or None
+        SBP quadrature weights [w_0, ..., w_{r-1}] when conservation is
+        enforced, else None.
     """
 
     floating: Matrix
@@ -1488,6 +1513,8 @@ class CutCellResult:
     eta: "list | None"
     dims: Dimensions
     alpha_symbols: list
+    conservation_subs: "dict | None" = None
+    weights: "list | None" = None
 
 
 def _neumann_zeroed_col_for_row(i: int, nu: int) -> int:
@@ -2084,6 +2111,8 @@ def assemble_cut_cell_result(
     eta: "list | None",
     dims: Dimensions,
     alpha_symbols: list,
+    conservation_subs: "dict | None" = None,
+    weights: "list | None" = None,
 ) -> CutCellResult:
     """Assemble the full cut-cell stencil result with all BC variants.
 
@@ -2099,6 +2128,10 @@ def assemble_cut_cell_result(
         Scheme dimensions.
     alpha_symbols : list[Symbol]
         Free alpha symbols.
+    conservation_subs : dict or None
+        Substitution mapping from eliminated alphas (see ``CutCellResult``).
+    weights : list or None
+        SBP quadrature weights (see ``CutCellResult``).
 
     Returns
     -------
@@ -2115,6 +2148,8 @@ def assemble_cut_cell_result(
         eta=eta,
         dims=dims,
         alpha_symbols=alpha_symbols,
+        conservation_subs=conservation_subs,
+        weights=weights,
     )
 
 
@@ -2127,6 +2162,7 @@ def derive_cut_cell_scheme(
     scheme: SchemeParams,
     psi: Symbol,
     alpha_symbols: list[Symbol] | None = None,
+    conserve: bool = True,
 ) -> CutCellResult:
     """Derive a complete cut-cell stencil for the given scheme.
 
@@ -2140,7 +2176,15 @@ def derive_cut_cell_scheme(
     psi : Symbol
         The psi symbol for the cut-cell parameter.
     alpha_symbols : list of Symbol, optional
-        Free alpha symbols.  If None, creates alpha_0..alpha_{n-1}.
+        Free alpha symbols.  If None, creates ``alpha_0..alpha_{n-1}``.
+        When *conserve* is True the count must match the post-conservation
+        number of free parameters (fewer than non-conserved).
+    conserve : bool
+        If True (default), enforce SBP conservation on the uniform boundary
+        and propagate to the cut-cell stencil post-TEMO.  The TEMO pipeline
+        runs with the non-conserved (linear) B_u, and the conservation
+        substitution is applied afterwards to avoid quadratic-alpha issues
+        in the TEMO solver.
 
     Returns
     -------
@@ -2150,24 +2194,123 @@ def derive_cut_cell_scheme(
     """
     dims = compute_dimensions(scheme.p, scheme.q, scheme.s, scheme.nextra, scheme.nu)
 
-    uniform = derive_uniform_boundary_for_temo(scheme, alpha_symbols=alpha_symbols)
+    if not conserve:
+        # Original non-conservative path — unchanged.
+        uniform = derive_uniform_boundary_for_temo(
+            scheme, alpha_symbols=alpha_symbols,
+        )
+        floating_result = construct_cut_cell_stencil(
+            uniform.B_u, uniform.interior,
+            scheme.p, scheme.q, scheme.nu, scheme.nextra, psi,
+        )
+        if scheme.nu == 2:
+            B_uN, eta_u = derive_uniform_neumann(
+                uniform.interior, scheme.p, scheme.q, scheme.nu,
+            )
+            neumann_main, eta = construct_neumann_stencil(
+                uniform.B_u, B_uN, eta_u, uniform.interior,
+                scheme.p, scheme.q, scheme.nu, scheme.nextra, psi,
+            )
+        else:
+            neumann_main, eta = None, None
+        return assemble_cut_cell_result(
+            floating_result.matrix, neumann_main, eta, dims,
+            uniform.alpha_symbols,
+        )
 
+    # --- Conservative path (post-TEMO conservation) ---
+
+    # Step 1: Non-conserved uniform (default alpha names).
+    uniform_nc = derive_uniform_boundary_for_temo(scheme, conserve=False)
+    nc_alphas = uniform_nc.alpha_symbols
+
+    # Step 2: TEMO pipeline with non-conserved (linear) B_u.
     floating_result = construct_cut_cell_stencil(
-        uniform.B_u, uniform.interior,
+        uniform_nc.B_u, uniform_nc.interior,
         scheme.p, scheme.q, scheme.nu, scheme.nextra, psi,
     )
+    floating = floating_result.matrix
 
+    # Step 3: Conserved uniform — for substitution mapping and weights.
+    uniform_c = derive_uniform_boundary_for_temo(scheme, conserve=True)
+
+    # Step 4: Handle Neumann (before substitution, using nc symbols).
     if scheme.nu == 2:
         B_uN, eta_u = derive_uniform_neumann(
-            uniform.interior, scheme.p, scheme.q, scheme.nu,
+            uniform_nc.interior, scheme.p, scheme.q, scheme.nu,
         )
         neumann_main, eta = construct_neumann_stencil(
-            uniform.B_u, B_uN, eta_u, uniform.interior,
+            uniform_nc.B_u, B_uN, eta_u, uniform_nc.interior,
             scheme.p, scheme.q, scheme.nu, scheme.nextra, psi,
         )
     else:
         neumann_main, eta = None, None
 
+    # Step 5: Apply conservation substitution (if any).
+    if uniform_c.elim_subs:
+        # Translate elim_subs from build-symbol to nc-alpha space.
+        build_to_nc = dict(zip(uniform_c.build_symbols, nc_alphas))
+        nc_subs = {}
+        for bsym, bexpr in uniform_c.elim_subs.items():
+            nc_subs[build_to_nc[bsym]] = bexpr.xreplace(build_to_nc)
+
+        # Apply to floating matrix.
+        floating = floating.xreplace(nc_subs)
+
+        # Apply to Neumann if present.
+        if neumann_main is not None:
+            neumann_main = neumann_main.xreplace(nc_subs)
+            eta = [cancel(e.xreplace(nc_subs)) if hasattr(e, "xreplace") else e
+                   for e in eta]
+
+        # Determine surviving nc-alphas and final alpha names.
+        surviving = [a for a in nc_alphas if a not in nc_subs]
+        if alpha_symbols is None:
+            final_alphas = [Symbol(f"alpha_{k}") for k in range(len(surviving))]
+        else:
+            if len(alpha_symbols) != len(surviving):
+                raise ValueError(
+                    f"conserve=True requires {len(surviving)} alpha symbols, "
+                    f"got {len(alpha_symbols)}"
+                )
+            final_alphas = list(alpha_symbols)
+
+        # Rename surviving nc-alphas to final names.
+        rename = dict(zip(surviving, final_alphas))
+        floating = floating.xreplace(rename)
+        if neumann_main is not None:
+            neumann_main = neumann_main.xreplace(rename)
+            eta = [cancel(e.xreplace(rename)) if hasattr(e, "xreplace") else e
+                   for e in eta]
+
+        # Translate conserved-uniform weights to final alpha space.
+        c_to_final = dict(zip(uniform_c.alpha_symbols, final_alphas))
+        weights = [cancel(w.xreplace(c_to_final)) for w in uniform_c.weights]
+
+        # Record the substitution (in nc-alpha terms, before renaming).
+        cons_subs = dict(nc_subs)
+        out_alphas = list(final_alphas)
+    else:
+        # No elimination needed (n_constraints == 0).
+        if alpha_symbols is not None:
+            if len(alpha_symbols) != len(nc_alphas):
+                raise ValueError(
+                    f"Scheme requires {len(nc_alphas)} alpha symbols, "
+                    f"got {len(alpha_symbols)}"
+                )
+            rename = dict(zip(nc_alphas, alpha_symbols))
+            floating = floating.xreplace(rename)
+            if neumann_main is not None:
+                neumann_main = neumann_main.xreplace(rename)
+                eta = [cancel(e.xreplace(rename)) if hasattr(e, "xreplace") else e
+                       for e in eta]
+            out_alphas = list(alpha_symbols)
+        else:
+            out_alphas = list(nc_alphas)
+        cons_subs = None
+        weights = uniform_c.weights
+
     return assemble_cut_cell_result(
-        floating_result.matrix, neumann_main, eta, dims, uniform.alpha_symbols,
+        floating, neumann_main, eta, dims, out_alphas,
+        conservation_subs=cons_subs, weights=weights,
     )
