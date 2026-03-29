@@ -207,9 +207,12 @@ With r=4 and p=2, the interior stencil `[1/12, -2/3, 0, 2/3, -1/12]` at the near
 ### 23.4 — Re-generate E4_1 C++ code
 
 - [ ] **23.4a** Re-generate E4_1.cpp with correct dimensions and conservation:
-  - **Unblocked by 23.3a-i:** Conservation is now implementable via `conserve=True`.
-  - **Depends on:** 23.3a-ii (enable conservation by default), 23.3b (verify cut-cell conservation)
-  - After conservation is enabled by default, the code generation pipeline (`derive_cut_cell_scheme` → `generate_stencil_cpp`) will produce the conservative E4_1.cpp with R=5, T=7, 4 free alphas.
+  - **Unblocked by 23.3a-i:** Uniform conservation is implementable via `conserve=True`.
+  - **Depends on:** 23.3a-ii (post-TEMO conservation), 23.3c (cut-cell conservation — may not be feasible)
+  - **Note:** 23.3b found that uniform conservation does NOT propagate to the cut-cell.
+    The C++ code can still be regenerated with the uniform-conserved stencil (4 alphas),
+    but full cut-cell SBP conservation requires ψ-dependent weights (23.3c).
+    Code generation can proceed without cut-cell conservation if needed.
   - File: `src/stencils/E4_1.cpp`
 
 ### 23.5 — Update plans and decision records
@@ -395,9 +398,54 @@ caller's alpha symbols. Weights are rational functions of alpha_3 only.
 
 ### Revised 23.3b: Verify cut-cell conservation follows
 
-- [ ] **23.3b** After TEMO construction with post-TEMO conservation:
-  - `derive_cut_cell_scheme(E4_1, psi)` now returns a conservative stencil (4 alphas)
-  - Derive cut-cell weights: w_0(ψ) = ψ·w_0^u, w_i(ψ) = w_i^u for i≥1 (TEMO extension of uniform weights)
-  - Verify: `Σ_i w_i(ψ) · B_l[i,j] + IC(j) = target(j)` for all T-frame columns
-  - Update `test_e4_1_conservation_fails`: change from xfail to pass, use correct SBP weights
-  - File: `scripts/stencil_gen/tests/test_e4_cut_cell.py`
+- [x] **23.3b** Investigate cut-cell conservation after post-TEMO conservation:
+  - **Finding: conservation does NOT propagate from uniform to cut-cell.**
+  - **Bug fix:** `build_cut_cell_conservation_system` was checking the wrong columns:
+    - Old: T-frame cols 0..T-2 (included wall column, wrong target at j=0)
+    - Fixed: grid-point cols 0..T-3 (T-frame cols 1..T-2), target=-1 at grid point 0
+    - The T-frame col 0 is the wall (delta) point, not a grid point — SBP conservation
+      does not apply to it. Verified by checking E2_1: 3 eqs / 3 unknowns → consistent
+      (was 4 eqs / 3 unknowns → inconsistent with old formulation).
+  - **Bug fix:** `test_e4_1_conservation_fails` updated to use correct column mapping.
+    Test remains xfail — conservation is still not enforced.
+  - **Key findings from investigation:**
+    1. The plan assumed `w_0(ψ) = ψ·w_0^u, w_i = w_i^u` for cut-cell weights.
+       This is WRONG — the uniform weights do not extend to the cut-cell stencil.
+       The cut-cell conservation equations involve the T-frame grid-point columns
+       (not the uniform columns), and row 4 (near-interior) has no corresponding
+       uniform weight.
+    2. With the corrected formulation, E4_1 has 5 conservation equations and 4
+       weight unknowns (1 excess constraint). The excess constraint produces a
+       compatibility condition on the alpha parameters — a polynomial of degree 6
+       in ψ with nonlinear (quadratic) alpha coefficients.
+    3. For conservation to hold for all ψ ∈ (0,1], each ψ-coefficient must vanish,
+       giving 7 nonlinear alpha constraints with only 4 (or 5 non-conserved) alpha
+       unknowns. This is overdetermined.
+    4. The `test_e4_1_conservation_constant_weights_infeasible_r5` test still passes:
+       constant (ψ-independent) weights remain structurally infeasible (rank gap = 1).
+    5. E2_1 conservation IS consistent with the corrected formulation: 3 eqs / 3 unknowns
+       → ψ-dependent weights exist as rational functions of (alpha, ψ).
+  - **Next steps (new items needed):**
+    - Cut-cell conservation requires ψ-DEPENDENT weights (not constant), which changes
+      the SBP norm structure. The E2_1 case confirms this is the correct approach.
+    - For E4_1, the overdetermined system (5 eqs, 4 unknowns) means direct weight
+      solving won't work — need to jointly solve for weights AND alpha constraints.
+    - A bilinear solver (theta-linearization with ψ-coefficient extraction) on the
+      cut-cell system may resolve this, but requires consuming free alpha parameters.
+  - Files changed: `scripts/stencil_gen/stencil_gen/temo.py`, `scripts/stencil_gen/tests/test_e4_cut_cell.py`
+  - Verification: 63 passed + 1 xfail in test_e4_cut_cell.py, 121 passed in test_temo.py
+
+### 23.3c — Cut-cell conservation with ψ-dependent weights (NEW)
+
+- [ ] **23.3c** Implement ψ-dependent cut-cell conservation for E4_1:
+  - E2_1 shows ψ-dependent weights are achievable (3 eqs / 3 unknowns → consistent).
+  - For E4_1 (5 eqs / 4 unknowns), need to:
+    1. Solve 4 conservation equations for w_1..w_4 as functions of (alpha, ψ)
+    2. Substitute into the 5th equation to get a compatibility condition on alpha
+    3. Extract ψ-coefficients to get nonlinear alpha constraints
+    4. Determine if any alpha values satisfy all constraints (may require eliminating
+       additional free alphas beyond the uniform conservation substitution)
+  - If feasible, update `test_e4_1_conservation_fails` from xfail to pass.
+  - If infeasible, document the structural reason and consider alternatives
+    (e.g., enlarged stencil with nextra > 0).
+  - Files: `scripts/stencil_gen/stencil_gen/temo.py`, `scripts/stencil_gen/tests/test_e4_cut_cell.py`

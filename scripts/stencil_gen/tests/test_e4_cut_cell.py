@@ -824,17 +824,19 @@ class TestDeriveCutCellScheme:
             )
 
 
-@pytest.mark.xfail(reason="conservation not yet enforced for E4_1")
+@pytest.mark.xfail(reason="conservation not yet enforced for E4_1 cut-cell")
 def test_e4_1_conservation_fails():
     """E4_1 cut-cell stencil violates discrete conservation (SBP property).
 
-    For each T-frame column j in 0..T-2, the conservation sum must be zero:
-        w_0 * B[0,j] + w_1 * B[1,j] + w_2 * B[2,j] + w_3 * B[3,j] + IC(j) = target(j)
-    where w_0=psi, w_i=1 for i>=1, and IC(j) is the interior contribution.
-    Target: -1 for j=0 (wall), 0 for j>=1.
+    Conservation applies to grid-point columns (T-frame cols 1..T-2):
+        sum_i w_i * B[i, g+1] + IC(g) = target(g)
+    where g is the grid point (g = T-frame col - 1), w_0=psi,
+    w_i=1 for i>=1 (naive flat weights), and IC(g) is the interior
+    contribution to grid point g.
+    Target: -1 at grid point 0, 0 elsewhere.
 
-    This test exposes the bug: columns j=3,4,5 have nonzero IC but the boundary
-    block doesn't compensate, so conservation is violated.
+    The T-frame col 0 is the wall (delta) column, which is NOT a grid
+    point and is excluded from the SBP conservation check.
     """
     psi = Symbol("psi")
     ur = derive_uniform_boundary_for_temo(E4_1)
@@ -844,20 +846,22 @@ def test_e4_1_conservation_fails():
     m = stencil.matrix  # R=5 x T=7 matrix
     R, T = 5, 7
 
-    for j in range(T - 1):  # j = 0..5
+    for j_tf in range(1, T - 1):  # T-frame cols 1..5 (grid points 0..4)
+        g = j_tf - 1  # grid point index
         # Weighted column sum: w_0=psi for row 0, w_i=1 for rows 1..R-1
-        col_sum = psi * m[0, j] + m[1, j] + m[2, j] + m[3, j] + m[4, j]
+        col_sum = psi * m[0, j_tf] + m[1, j_tf] + m[2, j_tf] + m[3, j_tf] + m[4, j_tf]
 
-        # Interior contribution: T-frame column j -> grid-frame column j-1
-        ic = _interior_contribution(j - 1, R, 2, ur.interior)
+        # Interior contribution for grid point g
+        ic = _interior_contribution(g, R, 2, ur.interior)
         col_sum += ic
 
-        # Target: -1 for wall column (j=0), 0 for j>=1
-        target = -1 if j == 0 else 0
+        # Target: -1 at grid point 0, 0 elsewhere
+        target = -1 if g == 0 else 0
 
         residual = cancel(col_sum - target)
         assert residual == 0, (
-            f"Conservation violated at T-frame column j={j}: residual={residual}"
+            f"Conservation violated at grid point {g} (T-frame col {j_tf}): "
+            f"residual={residual}"
         )
 
 
@@ -865,7 +869,7 @@ class TestBuildCutCellConservationSystem:
     """Tests for build_cut_cell_conservation_system dimensions and IC values (22.2b)."""
 
     def test_e2_1_conservation_system_dimensions(self):
-        """E2_1: T-1=4 equations, 3 weight unknowns, all IC values zero."""
+        """E2_1: T-2=3 equations (grid-point cols), 3 weight unknowns, all IC zero."""
         psi = Symbol("psi")
         ur = derive_uniform_boundary_for_temo(E2_1)
         stencil = construct_cut_cell_stencil(
@@ -880,16 +884,16 @@ class TestBuildCutCellConservationSystem:
             stencil.matrix, R, T, p=E2_1.p, nu=E2_1.nu,
             interior_coeffs=ur.interior, psi=psi,
         )
-        assert len(eqs) == T - 1  # 4 equations
+        assert len(eqs) == T - 2  # 3 equations (grid-point cols 0..2)
         assert len(ws) == R - 1   # 3 weight unknowns (w_1, w_2, w_3)
 
-        # All IC values should be 0 for E2_1 (no interior row reaches T-frame cols 0..3)
-        for j in range(T - 1):
-            ic = _interior_contribution(j - 1, R, E2_1.p, ur.interior)
-            assert ic == 0, f"E2_1 IC({j}) should be 0, got {ic}"
+        # All IC values should be 0 for E2_1 (no interior row reaches grid points 0..2)
+        for g in range(T - 2):
+            ic = _interior_contribution(g, R, E2_1.p, ur.interior)
+            assert ic == 0, f"E2_1 IC(g={g}) should be 0, got {ic}"
 
     def test_e4_1_conservation_system_dimensions(self):
-        """E4_1: T-1=6 equations, 4 weight unknowns, nonzero IC at j=4,5."""
+        """E4_1: T-2=5 equations (grid-point cols), 4 weight unknowns, nonzero IC at g=3,4."""
         psi = Symbol("psi")
         ur = derive_uniform_boundary_for_temo(E4_1)
         stencil = construct_cut_cell_stencil(
@@ -904,22 +908,22 @@ class TestBuildCutCellConservationSystem:
             stencil.matrix, R, T, p=E4_1.p, nu=E4_1.nu,
             interior_coeffs=ur.interior, psi=psi,
         )
-        assert len(eqs) == T - 1  # 6 equations
+        assert len(eqs) == T - 2  # 5 equations (grid-point cols 0..4)
         assert len(ws) == R - 1   # 4 weight unknowns (w_1, w_2, w_3, w_4)
 
-        # Verify IC values for E4_1 at R=5
+        # Verify IC values for E4_1 at R=5 (grid points 0..4)
         expected_ic = {
             0: Rational(0), 1: Rational(0), 2: Rational(0),
-            3: Rational(0), 4: Rational(1, 12), 5: Rational(-7, 12),
+            3: Rational(1, 12), 4: Rational(-7, 12),
         }
-        for j in range(T - 1):
-            ic = _interior_contribution(j - 1, R, E4_1.p, ur.interior)
-            assert ic == expected_ic[j], (
-                f"E4_1 IC({j}): expected {expected_ic[j]}, got {ic}"
+        for g in range(T - 2):
+            ic = _interior_contribution(g, R, E4_1.p, ur.interior)
+            assert ic == expected_ic[g], (
+                f"E4_1 IC(g={g}): expected {expected_ic[g]}, got {ic}"
             )
 
     def test_e4_1_overdetermined_system(self):
-        """E4_1 has 6 equations and 4 weight unknowns -> 2 excess constraints."""
+        """E4_1 has 5 equations and 4 weight unknowns -> 1 excess constraint."""
         psi = Symbol("psi")
         ur = derive_uniform_boundary_for_temo(E4_1)
         stencil = construct_cut_cell_stencil(
@@ -932,7 +936,7 @@ class TestBuildCutCellConservationSystem:
             interior_coeffs=ur.interior, psi=psi,
         )
         excess = len(eqs) - len(ws)
-        assert excess == 2, f"Expected 2 excess constraints, got {excess}"
+        assert excess == 1, f"Expected 1 excess constraint, got {excess}"
 
         # Verify the stencil has 5 alpha symbols that must absorb these constraints
         alpha_syms = sorted(stencil.matrix.free_symbols - {psi}, key=lambda s: s.name)
@@ -962,11 +966,11 @@ def test_e4_1_conservation_constant_weights_infeasible_r5():
     m = stencil.matrix
     R, T = 5, 7
 
-    # Step 1: Build conservation equations (6 eqs, 4 weight unknowns)
+    # Step 1: Build conservation equations (5 eqs, 4 weight unknowns)
     eqs, w_syms = build_cut_cell_conservation_system(
         m, R, T, p=2, nu=1, interior_coeffs=ur.interior, psi=psi,
     )
-    assert len(eqs) == 6
+    assert len(eqs) == 5
     assert len(w_syms) == 4
 
     # Identify alpha symbols in the stencil

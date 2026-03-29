@@ -1421,22 +1421,29 @@ def build_cut_cell_conservation_system(
 ) -> tuple[list[Expr], list[Symbol]]:
     """Build conservation (SBP) constraint equations for a cut-cell stencil.
 
+    The cut-cell T-frame has columns:
+      col 0 = wall (delta) point,
+      col j (j >= 1) = grid point j-1.
+    Conservation (SBP property) applies to grid-point columns only, excluding
+    the wall column and the last grid-point column (analogous to the uniform
+    case which checks columns 0..t-2).
+
     Parameters
     ----------
     B_l : Matrix
         R x T cut-cell stencil matrix (entries are rational in psi and alpha).
     R : int
-        Number of boundary rows (including the wall row).
+        Number of boundary rows (including the cut-cell row).
     T : int
         Cut-cell stencil width (including the wall column).
     p : int
         Interior half-bandwidth.
     nu : int
-        Derivative order (1 or 2). Determines the wall column target.
+        Derivative order (1 or 2). Determines the boundary column target.
     interior_coeffs : list
         The ``2*p + 1`` interior stencil coefficients.
     psi : Symbol
-        The psi parameter (used as w_0, the wall row weight).
+        The psi parameter (used as w_0, the cut-cell row weight).
 
     Returns
     -------
@@ -1448,23 +1455,27 @@ def build_cut_cell_conservation_system(
     # Weight unknowns: w_1 .. w_{R-1} (w_0 = psi is fixed, not an unknown)
     w_syms = list(_symbols(f"w_1:{R}"))
 
+    # Grid-point columns: T-frame cols 1..T-2 (grid points 0..T-3).
+    # Skip col 0 (wall) and col T-1 (last grid-point column, analogous to
+    # skipping the last uniform column).
     equations: list[Expr] = []
-    for j in range(T - 1):  # T-frame columns j = 0 .. T-2
+    for j_tf in range(1, T - 1):  # T-frame columns 1 .. T-2
+        g = j_tf - 1  # grid point index
+
         # Weighted column sum from boundary rows
         # Row 0 has weight w_0 = psi (fixed)
-        col_sum: Expr = psi * B_l[0, j]
+        col_sum: Expr = psi * B_l[0, j_tf]
         # Rows 1..R-1 have symbolic weights w_1..w_{R-1}
         for i in range(1, R):
-            col_sum += w_syms[i - 1] * B_l[i, j]
+            col_sum += w_syms[i - 1] * B_l[i, j_tf]
 
-        # Interior contribution: T-frame column j -> grid-frame column j-1
-        # Interior starts at grid point R (boundary rows cover 0..R-1)
-        ic = _interior_contribution(j - 1, R, p, interior_coeffs)
+        # Interior contribution for grid point g
+        ic = _interior_contribution(g, R, p, interior_coeffs)
         col_sum += ic
 
         # Conservation target depends on derivative order
-        if j == 0 and nu == 1:
-            # SBP property for 1st derivative: column 0 sums to -1
+        if g == 0 and nu == 1:
+            # SBP property for 1st derivative: grid point 0 sums to -1
             target = S.NegativeOne
         else:
             # All other columns sum to 0; for nu=2, ALL columns sum to 0
