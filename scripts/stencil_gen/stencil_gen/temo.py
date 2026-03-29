@@ -149,6 +149,9 @@ class UniformResult:
         Boundary accuracy order.
     nu : int
         Derivative order.
+    weights : list[Expr] | None
+        SBP quadrature weights [w_0, ..., w_{r-1}] when conservation is
+        enforced, else None.
     """
 
     B_u: Matrix
@@ -157,6 +160,7 @@ class UniformResult:
     p: int
     q: int
     nu: int
+    weights: list | None = None
 
 
 def _build_uniform_vandermonde(
@@ -301,6 +305,7 @@ def derive_e2_uniform_boundary(
 def derive_uniform_boundary_for_temo(
     scheme: SchemeParams,
     alpha_symbols: list[Symbol] | None = None,
+    conserve: bool = False,
 ) -> UniformResult:
     """Derive the uniform boundary stencil for any scheme using boundary.py.
 
@@ -314,6 +319,10 @@ def derive_uniform_boundary_for_temo(
         Scheme parameters (p, q, s, nextra, nu).
     alpha_symbols : list of Symbol, optional
         Free alpha symbols to use.  If None, creates alpha_0..alpha_{n-1}.
+    conserve : bool
+        If True, enforce SBP conservation on the uniform boundary.
+        This eliminates one alpha per compatibility condition, yielding
+        fewer free parameters and SBP-compatible quadrature weights.
 
     Returns
     -------
@@ -329,12 +338,15 @@ def derive_uniform_boundary_for_temo(
     n_free_per_row = t - n_eqs
 
     # --- Count total alpha symbols ---
+    # Conservation compatibility conditions reduce the last-row free count.
+    n_constraints = max(0, (t - 1) - r_eff) if (conserve and nextra == 0) else 0
     if n_free_per_row <= 0:
         # Fully determined (e.g., E2_2: t=3, n_eqs=3)
         n_alpha = 0
     elif nextra == 0:
         # Early rows: 1 active each; last row: min(n_free, 2) active
-        n_alpha = (r_eff - 1) * 1 + min(n_free_per_row, 2)
+        n_last_active = min(n_free_per_row, 2)
+        n_alpha = (r_eff - 1) * 1 + max(0, n_last_active - n_constraints)
     else:
         # Early rows: n_free each; last row: phi placeholders (resolved by conservation)
         n_alpha = (r_eff - 1) * n_free_per_row
@@ -355,17 +367,25 @@ def derive_uniform_boundary_for_temo(
         for _i in range(r_eff):
             free_per_row.append([])
     elif nextra == 0:
-        # No conservation row
+        n_last_active = min(n_free_per_row, 2)
+        n_build_total = (r_eff - 1) + n_last_active
+
+        if conserve and n_constraints > 0:
+            # Use temporary symbols; conservation will eliminate n_constraints
+            _build = [Symbol(f"_b{k}") for k in range(n_build_total)]
+        else:
+            _build = list(alpha_symbols)
+
+        bld_idx = 0
         for i in range(r_eff - 1):
             # Early rows: 1 active alpha, rest zero
-            free = [alpha_symbols[alpha_idx]] + [S.Zero] * (n_free_per_row - 1)
-            alpha_idx += 1
+            free = [_build[bld_idx]] + [S.Zero] * (n_free_per_row - 1)
+            bld_idx += 1
             free_per_row.append(free)
-        # Last row: min(n_free, 2) active
-        active = min(n_free_per_row, 2)
-        last_free = [alpha_symbols[alpha_idx + k] for k in range(active)]
-        last_free += [S.Zero] * (n_free_per_row - active)
-        alpha_idx += active
+        # Last row: n_last_active symbols active
+        last_free = [_build[bld_idx + k] for k in range(n_last_active)]
+        last_free += [S.Zero] * (n_free_per_row - n_last_active)
+        bld_idx += n_last_active
         free_per_row.append(last_free)
     else:
         # Conservation-constrained last row
@@ -418,6 +438,67 @@ def derive_uniform_boundary_for_temo(
     interior_result = derive_interior(s, p, nu)
     interior = full_gamma_array(interior_result)
 
+    # --- SBP conservation for nextra == 0 (compatibility-condition method) ---
+    weights = None
+    if conserve and nextra == 0 and n_free_per_row > 0 and n_constraints > 0:
+        from sympy import expand, fraction, linear_eq_to_matrix
+        from sympy import solve as sym_solve
+
+        w_syms = list(_symbols(f"w_0:{r_eff}"))
+
+        # Build conservation equations: Σ_i w_i B_u[i,j] + IC(j) = target(j)
+        cons_eqs = []
+        for j in range(t - 1):
+            col_sum = S.Zero
+            for i_row in range(r_eff):
+                col_sum += w_syms[i_row] * B_u[i_row, j]
+            ic = _interior_contribution(j, r_eff, p, interior)
+            col_sum += ic
+            if j == 0:
+                col_sum += 1  # target = -1 ⟹ move to LHS
+            cons_eqs.append(expand(col_sum))
+
+        # Solve first r_eff equations for weights (alpha as parameters)
+        A_w, b_w = linear_eq_to_matrix(cons_eqs[:r_eff], w_syms)
+        w_sol_vec = A_w.solve(b_w)
+        w_sol = dict(zip(w_syms, w_sol_vec))
+
+        # Extract compatibility conditions from remaining equations
+        last_row_build = list(_build[(r_eff - 1):])
+        for k in range(r_eff, len(cons_eqs)):
+            residual = cancel(expand(cons_eqs[k].subs(w_sol)))
+            numer, _ = fraction(residual)
+            if numer == 0:
+                continue
+            # Eliminate the first last-row symbol that appears linearly
+            for sym_to_elim in last_row_build:
+                sols = sym_solve(numer, sym_to_elim)
+                if sols:
+                    B_u = B_u.subs(sym_to_elim, sols[0])
+                    last_row_build.remove(sym_to_elim)
+                    break
+
+        # Rename remaining build symbols → caller's alpha_symbols
+        remaining = [s for s in _build if s in B_u.free_symbols]
+        remaining.sort(key=lambda s: _build.index(s))
+        rename_map = dict(zip(remaining, alpha_symbols))
+        B_u = B_u.xreplace(rename_map)
+
+        # Recompute weights from the conservation-constrained B_u
+        cons_final = []
+        for j in range(t - 1):
+            col_sum = S.Zero
+            for i_row in range(r_eff):
+                col_sum += w_syms[i_row] * B_u[i_row, j]
+            ic = _interior_contribution(j, r_eff, p, interior)
+            col_sum += ic
+            if j == 0:
+                col_sum += 1
+            cons_final.append(expand(col_sum))
+        A_f, b_f = linear_eq_to_matrix(cons_final, w_syms)
+        w_vec = A_f[:r_eff, :].solve(b_f[:r_eff, :])
+        weights = [cancel(v) for v in w_vec]
+
     return UniformResult(
         B_u=B_u,
         interior=interior,
@@ -425,6 +506,7 @@ def derive_uniform_boundary_for_temo(
         p=p,
         q=q,
         nu=nu,
+        weights=weights,
     )
 
 

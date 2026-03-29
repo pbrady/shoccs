@@ -1031,3 +1031,88 @@ def test_e4_1_conservation_constant_weights_infeasible_r5():
                 f"{w} solution should depend on psi"
             )
 
+
+class TestE4UniformConservation:
+    """Tests for derive_uniform_boundary_for_temo(E4_1, conserve=True) (23.3a)."""
+
+    @pytest.fixture(scope="class")
+    def conserved(self):
+        return derive_uniform_boundary_for_temo(E4_1, conserve=True)
+
+    def test_alpha_count(self, conserved):
+        """Conservation reduces E4_1 from 5 to 4 free alphas."""
+        assert len(conserved.alpha_symbols) == 4
+        for k, sym in enumerate(conserved.alpha_symbols):
+            assert sym.name == f"alpha_{k}"
+
+    def test_shape_unchanged(self, conserved):
+        """B_u shape is still (4, 6) — conservation doesn't change dimensions."""
+        assert conserved.B_u.shape == (4, 6)
+
+    def test_weights_present(self, conserved):
+        """Conservation produces 4 quadrature weights."""
+        assert conserved.weights is not None
+        assert len(conserved.weights) == 4
+
+    def test_weights_depend_on_alpha_3(self, conserved):
+        """All weights are rational functions of alpha_3 only."""
+        alpha_3 = conserved.alpha_symbols[3]
+        for w in conserved.weights:
+            assert w.free_symbols <= {alpha_3}, (
+                f"Weight {w} depends on {w.free_symbols}, expected only {alpha_3}"
+            )
+
+    def test_conservation_holds(self, conserved):
+        """Weighted column sums satisfy the SBP conservation condition."""
+        B_u = conserved.B_u
+        r, t = B_u.shape
+        for j in range(t - 1):
+            col_sum = sum(conserved.weights[i] * B_u[i, j] for i in range(r))
+            ic = _interior_contribution(j, r, conserved.p, conserved.interior)
+            total = cancel(col_sum + ic)
+            target = -1 if j == 0 else 0
+            assert cancel(total - target) == 0, (
+                f"Conservation violated at col {j}: residual={cancel(total - target)}"
+            )
+
+    def test_taylor_accuracy(self, conserved):
+        """Each row still satisfies Taylor matching for q+1=4 equations."""
+        B_u = conserved.B_u
+        r, t = B_u.shape
+        for i in range(r):
+            for m in range(4):
+                moment = sum(B_u[i, j] * (j - i) ** m for j in range(t))
+                expected = 1 if m == 1 else 0
+                assert simplify(moment - expected) == 0, (
+                    f"Row {i}, moment {m}: got {simplify(moment)}, expected {expected}"
+                )
+
+    def test_rows_0_2_unchanged(self, conserved):
+        """Rows 0-2 are identical to the non-conservative result."""
+        ur_no_cons = derive_uniform_boundary_for_temo(E4_1, conserve=False)
+        for i in range(3):
+            for j in range(6):
+                diff = cancel(conserved.B_u[i, j] - ur_no_cons.B_u[i, j])
+                assert diff == 0, f"Row {i}, col {j} should be unchanged"
+
+    def test_only_alpha_symbols_in_Bu(self, conserved):
+        """B_u contains only the expected alpha symbols."""
+        expected_syms = set(conserved.alpha_symbols)
+        actual_syms = conserved.B_u.free_symbols
+        assert actual_syms <= expected_syms, (
+            f"Unexpected symbols in B_u: {actual_syms - expected_syms}"
+        )
+
+    def test_custom_alpha_symbols(self):
+        """conserve=True accepts 4 custom alpha names."""
+        syms = [Symbol(f"a{k}") for k in range(4)]
+        result = derive_uniform_boundary_for_temo(E4_1, alpha_symbols=syms, conserve=True)
+        assert result.alpha_symbols == syms
+        assert result.B_u.free_symbols <= set(syms)
+
+    def test_e2_1_unaffected(self):
+        """E2_1 (nextra=1) is unaffected by conserve=True — uses its own conservation."""
+        ur = derive_uniform_boundary_for_temo(E2_1, conserve=True)
+        assert len(ur.alpha_symbols) == 4
+        assert ur.weights is None  # nextra=1 conservation is inline, no explicit weights
+

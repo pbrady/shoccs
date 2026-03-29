@@ -188,31 +188,29 @@ With r=4 and p=2, the interior stencil `[1/12, -2/3, 0, 2/3, -1/12]` at the near
 
 ### 23.3 — Enforce conservation in the cut-cell stencil
 
-- [x] **23.3a** Verify conservation feasibility at R=5 via theta-linearization:
-  - **Goal:** Confirm that the conservation rank gap is 0 at R=5 (was 1 at R=4).
-  - **Result: INFEASIBLE.** Rank gap = 1 (same as R=4). Conservation with constant (ψ-independent) norm weights w_1..w_4 is structurally infeasible at R=5.
-  - **Evidence:**
-    - Theta-linearized system: 21 scalar equations (from 6 ψ-rational eqs × ψ-coefficient extraction), 14 unknowns (4 w + 1 row-0 alpha + 9 theta). rank(M)=8, rank([M|b])=9 → rank gap=1.
-    - Direct symbolic solve: solutions for w_1..w_3 are rational functions of ψ, not constants. System is solvable for each specific ψ (3 free parameters), but solutions vary with ψ.
-  - **Decision D23-1** recorded in `plans/meta.md`: theta-linearization approach confirms infeasibility; alternatives identified (ψ-dependent norm, larger stencil, different derivation).
-  - **Test:** `test_e4_1_conservation_constant_weights_infeasible_r5` in `test_e4_cut_cell.py` (asserts rank gap = 1 and ψ-dependent weights)
-  - **BLOCKS:** 23.3b, 23.3c, 23.3d (conservation enforcement), 23.4a (C++ regeneration with conservation)
+- [x] **23.3a** Conservation feasibility at R=5 — resolved via uniform-first approach:
+  - **Previous finding:** Cut-cell conservation with constant ψ-independent weights is infeasible (rank gap = 1).
+  - **Resolution:** Apply conservation to the UNIFORM boundary first (at TEMO dimensions r=4, t=6), then let TEMO design principles propagate it to the cut-cell stencil. The compatibility-condition method eliminates one alpha (alpha_3) and determines SBP quadrature weights as functions of the remaining alpha_3.
+  - **Implementation:** Added `conserve=True` parameter to `derive_uniform_boundary_for_temo`. Produces 4 free alphas (polynomial B_u), weights = [(33α₃+2)/(24α₃), (-22α₃-3)/(12α₃), (95α₃+6)/(24α₃), -1/(12α₃)].
+  - **Test:** 10 tests in `TestE4UniformConservation` (all pass).
+  - **Next:** Enable by default (23.3a-ii), then verify cut-cell conservation (23.3b).
 
-- [BLOCKED] **23.3b** Implement `solve_cut_cell_conservation` function:
-  - **Blocked by 23.3a:** Conservation with constant weights is infeasible (rank gap = 1). Cannot implement a solver for a system with no solution.
-  - **Unblocking requires:** New approach — see D23-1 alternatives (ψ-dependent norm, larger stencil, or different derivation).
+- [SUPERSEDED] **23.3b-old** Implement `solve_cut_cell_conservation` function:
+  - **Superseded:** The uniform-first approach (revised 23.3a/23.3b) replaces the cut-cell conservation solver. Conservation is enforced on the uniform boundary and propagates through TEMO.
 
-- [BLOCKED] **23.3c** Integrate conservation into `derive_cut_cell_scheme`:
-  - **Blocked by 23.3a/23.3b.**
+- [SUPERSEDED] **23.3c** Integrate conservation into `derive_cut_cell_scheme`:
+  - **Superseded:** Conservation is now applied within `derive_uniform_boundary_for_temo(conserve=True)`, which is already called by `derive_cut_cell_scheme`. No separate integration step needed — just enable the default.
 
-- [BLOCKED] **23.3d** Verify conservation holds symbolically and update tests:
-  - **Blocked by 23.3a/23.3b/23.3c.**
+- [SUPERSEDED] **23.3d** Verify conservation holds symbolically and update tests:
+  - **Superseded:** Replaced by revised 23.3b (cut-cell conservation verification).
 
 ### 23.4 — Re-generate E4_1 C++ code
 
-- [BLOCKED] **23.4a** Re-generate E4_1.cpp with correct dimensions and conservation:
-  - **Blocked by 23.3:** Conservation is infeasible with constant weights. Cannot regenerate with conservation enforcement.
-  - **Note:** The non-conservative stencil (R=5, 5 free alphas) CAN be regenerated from the current code generation tests (23.2g). This would update C++ to correct dimensions but without conservation. Deferring until conservation approach is decided.
+- [ ] **23.4a** Re-generate E4_1.cpp with correct dimensions and conservation:
+  - **Unblocked by 23.3a-i:** Conservation is now implementable via `conserve=True`.
+  - **Depends on:** 23.3a-ii (enable conservation by default), 23.3b (verify cut-cell conservation)
+  - After conservation is enabled by default, the code generation pipeline (`derive_cut_cell_scheme` → `generate_stencil_cpp`) will produce the conservative E4_1.cpp with R=5, T=7, 4 free alphas.
+  - File: `src/stencils/E4_1.cpp`
 
 ### 23.5 — Update plans and decision records
 
@@ -315,20 +313,50 @@ build_conservation_system(r=4, t=6, p=2, rows, interior)
 
 ### Revised 23.3a: Apply uniform conservation at TEMO dimensions
 
-- [ ] **23.3a** Update `derive_uniform_boundary_for_temo` to apply conservation:
-  1. After solving all r=4 boundary rows with `solve_boundary_row`
-  2. Call `build_conservation_system(r=4, t=6, p=2, rows, interior)` 
-  3. Call `solve_conservation(eqs, w_syms, last_free, rows, r=4)`
-  4. This constrains the last row and determines weights
-  5. Package the conservation-constrained B_u into `UniformResult`
-  6. The resulting B_u has fewer free alphas (expected: 4, matching Table 1)
-  - File: `scripts/stencil_gen/stencil_gen/temo.py`
-  - Test: verify B_u column sums satisfy conservation
+**Approach (verified by prototyping):** Instead of `build_conservation_system`+`solve_conservation`
+(which creates rational expressions via theta-linearization), use the **compatibility-condition
+method**: treat all alphas as parameters, solve the overdetermined weight system, extract the
+compatibility condition, solve for one last-row alpha to eliminate it, substitute back into B_u.
+This keeps B_u entries polynomial (quadratic at most) and produces clean weight expressions.
+
+**Implementation:** Added `conserve` parameter to `derive_uniform_boundary_for_temo` (default False).
+When True: builds 5 working symbols, applies conservation to eliminate 1, renames remaining 4 to
+caller's alpha symbols. Weights are rational functions of alpha_3 only.
+
+**Key results for E4_1 with conserve=True:**
+- B_u: (4, 6), 4 free alphas (polynomial entries, quadratic in last row)
+- Weights: w_0=(33α₃+2)/(24α₃), w_1=(-22α₃-3)/(12α₃), w_2=(95α₃+6)/(24α₃), w_3=-1/(12α₃)
+- Conservation: verified (all 5 column conditions satisfied)
+- Taylor accuracy: preserved (all 4 rows satisfy q+1=4 moment equations)
+
+- [x] **23.3a-i** Implement `conserve` parameter in `derive_uniform_boundary_for_temo`:
+  - Added `conserve: bool = False` parameter
+  - Added `weights: list | None` field to `UniformResult`
+  - Conservation logic: build equations, solve for weights, extract compatibility condition,
+    eliminate one last-row alpha, rename, recompute weights from final B_u
+  - Default `conserve=False` preserves all existing behavior
+  - Files: `scripts/stencil_gen/stencil_gen/temo.py`
+  - Test: 10 new tests in `TestE4UniformConservation` (all pass)
+  - Verification: all 305 existing tests pass + 1 xfail unchanged
+
+- [ ] **23.3a-ii** Enable conservation by default and update all E4_1 tests:
+  - Change default `conserve=False` → `conserve=True` in `derive_uniform_boundary_for_temo`
+  - Update `TestE4UniformBoundary`: alpha count 5→4, last-row assertions, custom alpha count
+  - Update `TestE4TEMOConstruction`: alpha range 5→4, uniform limit embed check for new B_u
+  - Update `TestE4CodeGeneration`: `param_arrays={"alpha": 5}` → 4, alpha array assertion, fixture
+  - Update `TestE4TestFileGeneration`: `ALPHA_VALUES` 5→4, alpha array in test structure
+  - Update `TestDeriveCutCellScheme`: alpha count 5→4, custom alphas range 5→4
+  - Update `TestBuildCutCellConservationSystem`: alpha count 5→4
+  - Update `test_e4_1_conservation_constant_weights_infeasible_r5`: alpha count 5→4 (still tests CUT-CELL infeasibility — remains valid)
+  - The `test_e4_1_conservation_fails` xfail remains (tests CUT-CELL conservation with naive weights [ψ,1,1,1,1], not the correct SBP weights)
+  - Files: `scripts/stencil_gen/stencil_gen/temo.py`, `scripts/stencil_gen/tests/test_e4_cut_cell.py`
+  - Test: `cd scripts/stencil_gen && uv run pytest tests/ -v`
 
 ### Revised 23.3b: Verify cut-cell conservation follows
 
 - [ ] **23.3b** After TEMO construction with conservation-constrained B_u:
-  - The cut-cell stencil should automatically satisfy conservation
-  - Verify: `Σ_i w_i(ψ) · B[i,j] = 0` for interior columns
-  - The weights w_i(ψ) come from the TEMO extension of the uniform weights
+  - Build cut-cell stencil from conserved B_u
+  - Derive cut-cell weights: w_0(ψ) = ψ·w_0^u, w_i(ψ) = w_i^u for i≥1 (TEMO extension of uniform weights)
+  - Verify: `Σ_i w_i(ψ) · B_l[i,j] + IC(j) = target(j)` for all T-frame columns
+  - Update `test_e4_1_conservation_fails`: change from xfail to pass, use correct weights
   - File: `scripts/stencil_gen/tests/test_e4_cut_cell.py`
