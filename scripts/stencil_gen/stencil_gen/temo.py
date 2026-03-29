@@ -37,9 +37,9 @@ class Dimensions(NamedTuple):
 def compute_dimensions(p: int, q: int, s: int, nextra: int, nu: int) -> Dimensions:
     """Compute stencil dimensions from scheme parameters.
 
-    Uses Eq. 11a from Brady & Livescu (2021) with D-R25 correction:
-        t = p + q + 1 + nextra     (stencil width)
-        r = p + 1 + nextra         (number of boundary rows)
+    Uses Eq. 11 from Brady & Livescu (2021):
+        t = p + q + 1 + nextra     (stencil width, Eq. 11a)
+        r = q + 1 + nextra         (number of boundary rows, Eq. 11b)
 
     For cut-cell stencils:
         R = r_eff + 1, T = t + 1
@@ -66,7 +66,7 @@ def compute_dimensions(p: int, q: int, s: int, nextra: int, nu: int) -> Dimensio
         Named tuple (r, t, R, T, X).
     """
     t = p + q + 1 + nextra
-    r = p + 1 + nextra
+    r = q + 1 + nextra
 
     if nu == 1:
         r_eff = r
