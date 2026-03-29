@@ -108,7 +108,7 @@ With r=4 and p=2, the interior stencil `[1/12, -2/3, 0, 2/3, -1/12]` at the near
   - Ordering: must complete 23.2a and 23.2b first
   - Test: `cd scripts/stencil_gen && uv run pytest tests/test_e4_cut_cell.py::TestE4TEMOConstruction -v` (all 9 tests should pass after test fixes in 23.2d)
 
-- [ ] **23.2d** Fix `TestE4UniformBoundary` test assertions for new dimensions:
+- [x] **23.2d** Fix `TestE4UniformBoundary` test assertions for new dimensions:
   - `test_shape`: change `(3, 6)` → `(4, 6)` (line ~52)
   - `test_four_alpha_symbols`: rename to `test_five_alpha_symbols`, change `len == 4` → `len == 5`, update name checks to `alpha_0..alpha_4` (lines ~54-59)
   - `test_zero_constraints`: add `B_u[2, 5] == 0` check (3 zeros now instead of 2) (line ~63)
@@ -118,7 +118,7 @@ With r=4 and p=2, the interior stencil `[1/12, -2/3, 0, 2/3, -1/12]` at the near
   - File: `scripts/stencil_gen/tests/test_e4_cut_cell.py`
   - Test: `cd scripts/stencil_gen && uv run pytest tests/test_e4_cut_cell.py::TestE4UniformBoundary -v`
 
-- [ ] **23.2e** Fix `TestE4TEMOConstruction` test assertions for R=5:
+- [x] **23.2e** Fix `TestE4TEMOConstruction` test assertions for R=5:
   - `test_shape`: change `(4, 7)` → `(5, 7)` (line ~211)
   - `test_entries_in_psi_alpha`: change `range(4)` → `range(5)` for alpha names (line ~223)
   - `test_uniform_limit_rows_0_2_embed_Bu`: change `range(3)` → `range(4)` to check rows 0-3 embed B_u, update `range(6)` to match t=6 columns (lines ~243-254)
@@ -129,7 +129,7 @@ With r=4 and p=2, the interior stencil `[1/12, -2/3, 0, 2/3, -1/12]` at the near
   - File: `scripts/stencil_gen/tests/test_e4_cut_cell.py`
   - Test: `cd scripts/stencil_gen && uv run pytest tests/test_e4_cut_cell.py::TestE4TEMOConstruction -v`
 
-- [ ] **23.2f** Fix `TestBuildCutCellConservationSystem` and `TestDeriveCutCellScheme`:
+- [x] **23.2f** Fix `TestBuildCutCellConservationSystem` and `TestDeriveCutCellScheme`:
   - `test_e4_1_conservation_system_dimensions`: change `R == 4` → `R == 5`, update expected IC values:
     ```
     old: {0: 0, 1: 0, 2: 0, 3: 1/12, 4: -7/12, 5: -7/12}
@@ -145,7 +145,7 @@ With r=4 and p=2, the interior stencil `[1/12, -2/3, 0, 2/3, -1/12]` at the near
   - File: `scripts/stencil_gen/tests/test_e4_cut_cell.py`
   - Test: `cd scripts/stencil_gen && uv run pytest tests/test_e4_cut_cell.py::TestBuildCutCellConservationSystem -v && uv run pytest tests/test_e4_cut_cell.py::TestDeriveCutCellScheme -v`
 
-- [ ] **23.2g** Fix `TestE4CodeGeneration` and `TestE4TestFileGeneration` for R=5:
+- [x] **23.2g** Fix `TestE4CodeGeneration` and `TestE4TestFileGeneration` for R=5:
   - `e4_spec` fixture: change `R=4` → `R=5` and `param_arrays={"alpha": 4}` → `{"alpha": 5}` in `StencilGenSpec` constructor (lines ~351, ~486)
   - `floating_flat`: update comment `R*T = 4*7 = 28` → `R*T = 5*7 = 35`
   - `dirichlet_flat`: padding `[Integer(0)] * 7` stays the same (T is still 7), but `cc.dirichlet` length changes from (R-1)*T = 3*7=21 to 4*7=28. Total: 35 (was 28). No code change needed — just the comment.
@@ -162,7 +162,7 @@ With r=4 and p=2, the interior stencil `[1/12, -2/3, 0, 2/3, -1/12]` at the near
   - File: `scripts/stencil_gen/tests/test_e4_cut_cell.py`
   - Test: `cd scripts/stencil_gen && uv run pytest tests/test_e4_cut_cell.py::TestE4CodeGeneration -v && uv run pytest tests/test_e4_cut_cell.py::TestE4TestFileGeneration -v`
 
-- [ ] **23.2h** Fix `test_e4_1_conservation_fails` xfail test:
+- [x] **23.2h** Fix `test_e4_1_conservation_fails` xfail test:
   - Update hardcoded `R, T = 4, 7` → `R, T = 5, 7`
   - Update column sum to include row 4: `psi * m[0, j] + m[1, j] + m[2, j] + m[3, j] + m[4, j]`
   - Verify xfail still triggers (conservation not yet enforced)
@@ -170,7 +170,7 @@ With r=4 and p=2, the interior stencil `[1/12, -2/3, 0, 2/3, -1/12]` at the near
   - File: `scripts/stencil_gen/tests/test_e4_cut_cell.py` (lines ~804-838)
   - Test: `cd scripts/stencil_gen && uv run pytest tests/test_e4_cut_cell.py::test_e4_1_conservation_fails -v`
 
-- [ ] **23.2i** Fix `test_temo.py` E4 dimension test assertions (missed by 23.2d-23.2h):
+- [x] **23.2i** Fix `test_temo.py` E4 dimension test assertions (missed by 23.2d-23.2h):
   - `test_e4_1_dimensions` (line 102): change expected from `Dimensions(r=3, t=6, R=4, T=7, X=0)` to `Dimensions(r=4, t=6, R=5, T=7, X=0)`. Straightforward — matches the corrected formula.
   - `test_e4_2_dimensions` (line 107): currently expects `Dimensions(r=3, t=6, R=3, T=7, X=3)`, actual is `Dimensions(r=4, t=6, R=4, T=7, X=4)`. **Investigate before updating:** The plan states "Eq. 11b applies only to 1st derivative operators; 2nd derivatives use different sizing." If E4_2 (nu=2) should use `r = p + 1 + nextra = 3` instead of `r = q + 1 + nextra = 4`, then `compute_dimensions` needs a `nu`-dependent formula for `r` itself (not just `r_eff`), and this test's expected values should stay. If the paper's formula is correct for both derivatives (with the existing `r_eff` adjustment), update the test to `Dimensions(r=4, t=6, R=4, T=7, X=4)`.
   - These failures were introduced by commit 27621e3 (dimension fix) and are currently untracked.

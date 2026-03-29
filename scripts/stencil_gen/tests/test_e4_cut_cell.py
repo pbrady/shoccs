@@ -47,28 +47,29 @@ class TestE4UniformBoundary:
         return derive_uniform_boundary_for_temo(E4_1)
 
     def test_shape(self, e4_result):
-        """E4_1 B_u has shape (3, 6) — r_eff=3 rows, t=6 columns."""
-        assert e4_result.B_u.shape == (3, 6)
+        """E4_1 B_u has shape (4, 6) — r_eff=4 rows, t=6 columns."""
+        assert e4_result.B_u.shape == (4, 6)
 
-    def test_four_alpha_symbols(self, e4_result):
-        """E4_1 has exactly 4 free alpha symbols."""
-        assert len(e4_result.alpha_symbols) == 4
-        # Verify they are named alpha_0..alpha_3
+    def test_five_alpha_symbols(self, e4_result):
+        """E4_1 has exactly 5 free alpha symbols."""
+        assert len(e4_result.alpha_symbols) == 5
+        # Verify they are named alpha_0..alpha_4
         for k, sym in enumerate(e4_result.alpha_symbols):
             assert sym.name == f"alpha_{k}"
 
     def test_zero_constraints(self, e4_result):
-        """B_u[0, 5] == 0 and B_u[1, 5] == 0 (zero-constrained entries)."""
+        """B_u[0, 5] == 0, B_u[1, 5] == 0, B_u[2, 5] == 0 (zero-constrained entries)."""
         assert e4_result.B_u[0, 5] == 0
         assert e4_result.B_u[1, 5] == 0
+        assert e4_result.B_u[2, 5] == 0
 
     def test_last_row_free_alphas(self, e4_result):
-        """B_u[2, 4] and B_u[2, 5] contain alpha_2, alpha_3."""
-        alpha_2 = e4_result.alpha_symbols[2]
+        """B_u[3, 4] and B_u[3, 5] contain alpha_3, alpha_4."""
         alpha_3 = e4_result.alpha_symbols[3]
-        # These entries should involve alpha_2 and alpha_3 respectively
-        assert alpha_2 in e4_result.B_u[2, 4].free_symbols
-        assert alpha_3 in e4_result.B_u[2, 5].free_symbols
+        alpha_4 = e4_result.alpha_symbols[4]
+        # These entries should involve alpha_3 and alpha_4 respectively
+        assert alpha_3 in e4_result.B_u[3, 4].free_symbols
+        assert alpha_4 in e4_result.B_u[3, 5].free_symbols
 
     def test_interior_coefficients(self, e4_result):
         """Interior coefficients are [1/12, -2/3, 0, 2/3, -1/12]."""
@@ -179,7 +180,7 @@ class TestE4UniformBoundary:
 
     def test_custom_alpha_symbols(self):
         """derive_uniform_boundary_for_temo(E4_1) accepts custom alpha names."""
-        syms = [Symbol(f"a{k}") for k in range(4)]
+        syms = [Symbol(f"a{k}") for k in range(5)]
         result = derive_uniform_boundary_for_temo(E4_1, alpha_symbols=syms)
         assert result.alpha_symbols == syms
         free = result.B_u.free_symbols
@@ -205,9 +206,9 @@ class TestE4TEMOConstruction:
         return ur, result, psi
 
     def test_shape(self, e4_temo):
-        """E4_1 cut-cell stencil has shape (4, 7) — R=4, T=7."""
+        """E4_1 cut-cell stencil has shape (5, 7) — R=5, T=7."""
         _, result, _ = e4_temo
-        assert result.matrix.shape == (4, 7)
+        assert result.matrix.shape == (5, 7)
 
     def test_no_betas(self, e4_temo):
         """E4_1 (nextra=0) produces no beta parameters."""
@@ -216,10 +217,10 @@ class TestE4TEMOConstruction:
         assert len(result.beta_symbols) == 0
 
     def test_entries_in_psi_alpha(self, e4_temo):
-        """All entries are rational in psi and alpha_{0..3} only."""
+        """All entries are rational in psi and alpha_{0..4} only."""
         _, result, _ = e4_temo
         all_syms = result.matrix.free_symbols
-        expected_names = {"psi"} | {f"alpha_{k}" for k in range(4)}
+        expected_names = {"psi"} | {f"alpha_{k}" for k in range(5)}
         actual_names = {s.name for s in all_syms}
         assert actual_names <= expected_names, (
             f"Unexpected symbols: {actual_names - expected_names}"
@@ -238,12 +239,12 @@ class TestE4TEMOConstruction:
                     f"{cancel(m1[i, j])} != {cancel(B_l_1[i, j])}"
                 )
 
-    def test_uniform_limit_rows_0_2_embed_Bu(self, e4_temo):
-        """At psi=1, rows 0-2: wall col=0, then cols 1-6 = B_u rows 0-2."""
+    def test_uniform_limit_rows_0_3_embed_Bu(self, e4_temo):
+        """At psi=1, rows 0-3: wall col=0, then cols 1-6 = B_u rows 0-3."""
         ur, result, psi = e4_temo
         m1 = result.matrix.subs(psi, 1)
         B_u = ur.B_u
-        for i in range(3):
+        for i in range(4):
             # Column 0 is the wall column
             # Columns 1..6 should match B_u[i, 0..5]
             for j in range(6):
@@ -252,20 +253,30 @@ class TestE4TEMOConstruction:
                     f"{cancel(m1[i, j + 1])} != {cancel(B_u[i, j])}"
                 )
 
-    def test_uniform_limit_row3_interior(self, e4_temo):
-        """At psi=1, row 3 is the interior stencil [0, 0, 1/12, -2/3, 0, 2/3, -1/12]."""
+    def test_uniform_limit_row4_not_interior(self, e4_temo):
+        """At psi=1, row 4 is NOT the raw interior stencil — it's derived via conservation+Taylor.
+
+        The interior stencil [1/12, -2/3, 0, 2/3, -1/12] overflows the T-frame at row 4,
+        so solve_uniform_limit computes a closure row that contains alpha symbols.
+        """
         ur, result, psi = e4_temo
         m1 = result.matrix.subs(psi, 1)
-        expected_row3 = [
+        B_l_1 = solve_uniform_limit(ur.B_u, ur.interior, ur.p, ur.q, ur.nu, 0)
+        # Row 4 must match the solve_uniform_limit result
+        for j in range(7):
+            assert simplify(m1[4, j] - B_l_1[4, j]) == 0, (
+                f"Row 4 uniform limit mismatch at col {j}: "
+                f"{cancel(m1[4, j])} != {cancel(B_l_1[4, j])}"
+            )
+        # Negative assertion: row 4 is NOT the raw interior stencil
+        raw_interior_in_T = [
             S.Zero, S.Zero,
             Rational(1, 12), Rational(-2, 3), S.Zero,
             Rational(2, 3), Rational(-1, 12),
         ]
-        for j in range(7):
-            assert simplify(m1[3, j] - expected_row3[j]) == 0, (
-                f"Row 3 interior mismatch at col {j}: "
-                f"{cancel(m1[3, j])} != {expected_row3[j]}"
-            )
+        assert any(
+            simplify(m1[4, j] - raw_interior_in_T[j]) != 0 for j in range(7)
+        ), "Row 4 should NOT be the raw interior stencil"
 
     def test_degenerate_limit(self, e4_temo):
         """At psi=0, matches the degenerate stencil B_d."""
@@ -341,21 +352,21 @@ class TestE4CodeGeneration:
             result.matrix, None, None, dims, ur.alpha_symbols,
         )
 
-        # floating_coeffs: R*T = 4*7 = 28 entries, row-major from cc.floating
+        # floating_coeffs: R*T = 5*7 = 35 entries, row-major from cc.floating
         floating_flat = list(cc.floating)
 
-        # dirichlet_coeffs: R*T = 28 entries (prepend T=7 zeros for row 0)
+        # dirichlet_coeffs: R*T = 35 entries (prepend T=7 zeros for row 0)
         dirichlet_flat = [Integer(0)] * 7 + list(cc.dirichlet)
 
         spec = StencilGenSpec(
             name="E4_1",
             P=2,
-            R=4,
+            R=5,
             T=7,
             X=0,
             derivative_order=1,
             is_uniform=False,
-            param_arrays={"alpha": 4},
+            param_arrays={"alpha": 5},
             interior_coeffs=ur.interior,
             floating_coeffs=floating_flat,
             dirichlet_coeffs=dirichlet_flat,
@@ -368,9 +379,9 @@ class TestE4CodeGeneration:
         return generate_stencil_cpp(e4_spec)
 
     def test_struct_constants(self, e4_code):
-        """Generated code has P=2, R=4, T=7, X=0."""
+        """Generated code has P=2, R=5, T=7, X=0."""
         assert "static constexpr int P = 2;" in e4_code
-        assert "static constexpr int R = 4;" in e4_code
+        assert "static constexpr int R = 5;" in e4_code
         assert "static constexpr int T = 7;" in e4_code
         assert "static constexpr int X = 0;" in e4_code
 
@@ -383,8 +394,8 @@ class TestE4CodeGeneration:
         assert "namespace ccs::stencils" in e4_code
 
     def test_alpha_array(self, e4_code):
-        """Generated code has std::array<real, 4> alpha member."""
-        assert "std::array<real, 4> alpha;" in e4_code
+        """Generated code has std::array<real, 5> alpha member."""
+        assert "std::array<real, 5> alpha;" in e4_code
 
     def test_constructor(self, e4_code):
         """Generated code has span constructor."""
@@ -401,25 +412,25 @@ class TestE4CodeGeneration:
         assert "interior(real h," in e4_code
 
     def test_nbs_floating_method(self, e4_code):
-        """Generated code has nbs_floating method with 28 coefficient assignments."""
+        """Generated code has nbs_floating method with 35 coefficient assignments."""
         assert "nbs_floating(real h," in e4_code
         floating_start = e4_code.index("nbs_floating(real h,")
         dirichlet_start = e4_code.index("nbs_dirichlet(real h,")
         floating_section = e4_code[floating_start:dirichlet_start]
-        # R*T = 4*7 = 28 coefficient assignments
-        assert floating_section.count("c[") == 28, (
-            f"Expected 28 c[] assignments in floating, got {floating_section.count('c[')}"
+        # R*T = 5*7 = 35 coefficient assignments
+        assert floating_section.count("c[") == 35, (
+            f"Expected 35 c[] assignments in floating, got {floating_section.count('c[')}"
         )
 
     def test_nbs_dirichlet_method(self, e4_code):
-        """Generated code has nbs_dirichlet method with 21 coefficient assignments."""
+        """Generated code has nbs_dirichlet method with 28 coefficient assignments."""
         assert "nbs_dirichlet(real h," in e4_code
         dirichlet_start = e4_code.index("nbs_dirichlet(real h,")
         neumann_start = e4_code.index("nbs_neumann")
         dirichlet_section = e4_code[dirichlet_start:neumann_start]
-        # (R-1)*T = 3*7 = 21 coefficient assignments
-        assert dirichlet_section.count("c[") == 21, (
-            f"Expected 21 c[] assignments in dirichlet, got {dirichlet_section.count('c[')}"
+        # (R-1)*T = 4*7 = 28 coefficient assignments
+        assert dirichlet_section.count("c[") == 28, (
+            f"Expected 28 c[] assignments in dirichlet, got {dirichlet_section.count('c[')}"
         )
 
     def test_nbs_neumann_stub(self, e4_code):
@@ -464,7 +475,7 @@ class TestE4CodeGeneration:
 class TestE4TestFileGeneration:
     """Tests for E4_1 C++ test file generation (21.4c)."""
 
-    ALPHA_VALUES = {"alpha": [0.1, -0.05, 0.02, 0.01]}
+    ALPHA_VALUES = {"alpha": [0.1, -0.05, 0.02, 0.01, 0.005]}
 
     @pytest.fixture(scope="class")
     def e4_spec(self):
@@ -485,29 +496,29 @@ class TestE4TestFileGeneration:
         return StencilGenSpec(
             name="E4_1",
             P=2,
-            R=4,
+            R=5,
             T=7,
             X=0,
             derivative_order=1,
             is_uniform=False,
-            param_arrays={"alpha": 4},
+            param_arrays={"alpha": 5},
             interior_coeffs=ur.interior,
             floating_coeffs=floating_flat,
             dirichlet_coeffs=dirichlet_flat,
         )
 
     def test_compute_floating_values(self, e4_spec):
-        """compute_test_values produces 28 floating coefficients at psi=1.0."""
+        """compute_test_values produces 35 floating coefficients at psi=1.0."""
         values = compute_test_values(
             e4_spec.floating_coeffs,
             alpha_values=self.ALPHA_VALUES,
             h=1.0,
             psi=1.0,
         )
-        assert len(values) == 28  # R*T = 4*7
+        assert len(values) == 35  # R*T = 5*7
 
     def test_compute_dirichlet_values(self, e4_spec):
-        """compute_test_values produces 21 Dirichlet coefficients at psi=0.7."""
+        """compute_test_values produces 28 Dirichlet coefficients at psi=0.7."""
         dirichlet_emitted = e4_spec.dirichlet_coeffs[e4_spec.T:]
         values = compute_test_values(
             dirichlet_emitted,
@@ -515,23 +526,27 @@ class TestE4TestFileGeneration:
             h=0.5,
             psi=0.7,
         )
-        assert len(values) == 21  # (R-1)*T = 3*7
+        assert len(values) == 28  # (R-1)*T = 4*7
 
-    def test_floating_uniform_limit_row3_interior(self, e4_spec):
-        """At psi=1.0, floating row 3 is the interior stencil [0,0,1/12,-2/3,0,2/3,-1/12]/h."""
+    def test_floating_uniform_limit_row4_not_interior(self, e4_spec):
+        """At psi=1.0, floating row 4 is NOT the raw interior stencil — it's derived via conservation+Taylor.
+
+        Compute expected values dynamically from the 5×7 floating matrix.
+        """
         values = compute_test_values(
             e4_spec.floating_coeffs,
             alpha_values=self.ALPHA_VALUES,
             h=2.0,
             psi=1.0,
         )
-        # Row 3 = indices 21..27
-        row3 = values[21:28]
-        expected = [0, 0, 1 / 24, -1 / 3, 0, 1 / 3, -1 / 24]
-        for i, (got, want) in enumerate(zip(row3, expected)):
-            assert abs(got - want) < 1e-12, (
-                f"Row 3 col {i}: got {got}, want {want}"
-            )
+        # Row 4 = indices 28..34
+        row4 = values[28:35]
+        # Row 4 should NOT be the raw interior stencil / h
+        raw_interior_over_h = [0, 0, 1 / 24, -1 / 3, 0, 1 / 3, -1 / 24]
+        assert any(
+            abs(got - want) > 1e-12
+            for got, want in zip(row4, raw_interior_over_h)
+        ), "Row 4 should NOT be the raw interior stencil"
 
     def test_generate_test_file_structure(self, e4_spec):
         """Generated test file has correct Catch2 structure for E4_1."""
@@ -554,9 +569,9 @@ class TestE4TestFileGeneration:
         assert 'TEST_CASE("E4_1")' in code
         assert 'type = "E4"' in code
         assert "order = 1" in code
-        assert "alpha = {0.1, -0.05, 0.02, 0.01}" in code
+        assert "alpha = {0.1, -0.05, 0.02, 0.01, 0.005}" in code
         assert "REQUIRE(p == 2)" in code
-        assert "REQUIRE(r == 4)" in code
+        assert "REQUIRE(r == 5)" in code
         assert "REQUIRE(t == 7)" in code
 
     def test_generate_test_file_multiple_cases(self, e4_spec):
@@ -648,12 +663,12 @@ class TestDeriveCutCellScheme:
     """Tests for derive_cut_cell_scheme high-level pipeline (21.5a)."""
 
     def test_e4_1_shape(self):
-        """E4_1 via derive_cut_cell_scheme has R=4, T=7 floating matrix."""
+        """E4_1 via derive_cut_cell_scheme has R=5, T=7 floating matrix."""
         psi = Symbol("psi")
         result = derive_cut_cell_scheme(E4_1, psi)
-        assert result.floating.shape == (4, 7)
-        assert result.dirichlet.shape == (3, 7)
-        assert result.dims.R == 4
+        assert result.floating.shape == (5, 7)
+        assert result.dirichlet.shape == (4, 7)
+        assert result.dims.R == 5
         assert result.dims.T == 7
         assert result.dims.X == 0
 
@@ -665,10 +680,10 @@ class TestDeriveCutCellScheme:
         assert result.eta is None
 
     def test_e4_1_alpha_count(self):
-        """E4_1 has 4 free alpha symbols."""
+        """E4_1 has 5 free alpha symbols."""
         psi = Symbol("psi")
         result = derive_cut_cell_scheme(E4_1, psi)
-        assert len(result.alpha_symbols) == 4
+        assert len(result.alpha_symbols) == 5
 
     def test_e4_1_matches_manual_pipeline(self):
         """derive_cut_cell_scheme(E4_1) matches the manual step-by-step pipeline."""
@@ -715,7 +730,7 @@ class TestDeriveCutCellScheme:
     def test_e4_1_custom_alphas(self):
         """derive_cut_cell_scheme accepts custom alpha symbols."""
         psi = Symbol("psi")
-        syms = [Symbol(f"a{k}") for k in range(4)]
+        syms = [Symbol(f"a{k}") for k in range(5)]
         result = derive_cut_cell_scheme(E4_1, psi, alpha_symbols=syms)
         assert result.alpha_symbols == syms
         assert result.floating.free_symbols <= {psi} | set(syms)
@@ -817,12 +832,12 @@ def test_e4_1_conservation_fails():
     stencil = construct_cut_cell_stencil(
         ur.B_u, ur.interior, p=2, q=3, nu=1, nextra=0, psi=psi,
     )
-    m = stencil.matrix  # R=4 x T=7 matrix
-    R, T = 4, 7
+    m = stencil.matrix  # R=5 x T=7 matrix
+    R, T = 5, 7
 
     for j in range(T - 1):  # j = 0..5
         # Weighted column sum: w_0=psi for row 0, w_i=1 for rows 1..R-1
-        col_sum = psi * m[0, j] + m[1, j] + m[2, j] + m[3, j]
+        col_sum = psi * m[0, j] + m[1, j] + m[2, j] + m[3, j] + m[4, j]
 
         # Interior contribution: T-frame column j -> grid-frame column j-1
         ic = _interior_contribution(j - 1, R, 2, ur.interior)
@@ -865,7 +880,7 @@ class TestBuildCutCellConservationSystem:
             assert ic == 0, f"E2_1 IC({j}) should be 0, got {ic}"
 
     def test_e4_1_conservation_system_dimensions(self):
-        """E4_1: T-1=6 equations, 3 weight unknowns, nonzero IC at j=3,4,5."""
+        """E4_1: T-1=6 equations, 4 weight unknowns, nonzero IC at j=4,5."""
         psi = Symbol("psi")
         ur = derive_uniform_boundary_for_temo(E4_1)
         stencil = construct_cut_cell_stencil(
@@ -873,7 +888,7 @@ class TestBuildCutCellConservationSystem:
             nextra=E4_1.nextra, psi=psi,
         )
         R, T = stencil.matrix.rows, stencil.matrix.cols
-        assert R == 4
+        assert R == 5
         assert T == 7
 
         eqs, ws = build_cut_cell_conservation_system(
@@ -881,12 +896,12 @@ class TestBuildCutCellConservationSystem:
             interior_coeffs=ur.interior, psi=psi,
         )
         assert len(eqs) == T - 1  # 6 equations
-        assert len(ws) == R - 1   # 3 weight unknowns (w_1, w_2, w_3)
+        assert len(ws) == R - 1   # 4 weight unknowns (w_1, w_2, w_3, w_4)
 
-        # Verify IC values for E4_1
+        # Verify IC values for E4_1 at R=5
         expected_ic = {
             0: Rational(0), 1: Rational(0), 2: Rational(0),
-            3: Rational(1, 12), 4: Rational(-7, 12), 5: Rational(-7, 12),
+            3: Rational(0), 4: Rational(1, 12), 5: Rational(-7, 12),
         }
         for j in range(T - 1):
             ic = _interior_contribution(j - 1, R, E4_1.p, ur.interior)
@@ -895,7 +910,7 @@ class TestBuildCutCellConservationSystem:
             )
 
     def test_e4_1_overdetermined_system(self):
-        """E4_1 has 6 equations and 3 weight unknowns -> 3 excess constraints."""
+        """E4_1 has 6 equations and 4 weight unknowns -> 2 excess constraints."""
         psi = Symbol("psi")
         ur = derive_uniform_boundary_for_temo(E4_1)
         stencil = construct_cut_cell_stencil(
@@ -908,11 +923,11 @@ class TestBuildCutCellConservationSystem:
             interior_coeffs=ur.interior, psi=psi,
         )
         excess = len(eqs) - len(ws)
-        assert excess == 3, f"Expected 3 excess constraints, got {excess}"
+        assert excess == 2, f"Expected 2 excess constraints, got {excess}"
 
-        # Verify the stencil has 4 alpha symbols that must absorb these constraints
+        # Verify the stencil has 5 alpha symbols that must absorb these constraints
         alpha_syms = sorted(stencil.matrix.free_symbols - {psi}, key=lambda s: s.name)
-        assert len(alpha_syms) == 4, (
-            f"Expected 4 alpha symbols, got {len(alpha_syms)}: {alpha_syms}"
+        assert len(alpha_syms) == 5, (
+            f"Expected 5 alpha symbols, got {len(alpha_syms)}: {alpha_syms}"
         )
 
