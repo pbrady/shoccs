@@ -1,2 +1,0 @@
-RALPH_STATUS: committed
-RALPH_SUMMARY: Refined 20.5c (degenerate row algorithm with q param), 20.5e Phase 2 (simplified alpha mapping with try-identity-first strategy), and 20.5g/h (test data normalization with h=1 left-boundary expected values)

@@ -1,2 +1,0 @@
-RALPH_STATUS: committed
-RALPH_SUMMARY: Refined 20.5e: split into Phase 1 (QQ(psi) field utilities + solve_in_field with alpha decomposition) and Phase 2 (conservation with E2_1 8→4 parameter reduction algorithm), added ordering dependency note to 20.5d

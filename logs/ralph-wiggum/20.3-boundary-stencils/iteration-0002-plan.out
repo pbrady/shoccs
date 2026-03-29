@@ -1,2 +1,0 @@
-RALPH_STATUS: committed
-RALPH_SUMMARY: Refined 20.3 plan: added ordering constraints, split E6u/E8u tests into separate items, formalized free parameter allocation algorithm, clarified Phase 20.2 dependency and interior_coeffs source
