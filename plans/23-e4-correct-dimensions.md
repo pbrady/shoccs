@@ -58,7 +58,7 @@ With r=4 and p=2, the interior stencil `[1/12, -2/3, 0, 2/3, -1/12]` at the near
 
 ### 23.1 — Delete invalid infeasibility tests
 
-- [ ] **23.1a** Remove the Phase 22 infeasibility test classes that were based on wrong R=4 dimensions:
+- [x] **23.1a** Remove the Phase 22 infeasibility test classes that were based on wrong R=4 dimensions:
   - Delete `TestApproachAMinorConditions` (3 test methods; proved infeasibility at R=4, now R=5)
   - Delete `TestApproachBParametricWeights` (3 test methods; same)
   - Delete `TestApproachCEntryLevelUnknowns` (3 test methods; same)
