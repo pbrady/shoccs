@@ -6,7 +6,7 @@
 
 **Read first:**
 - `scripts/stencil_gen/stencil_gen/temo.py` (just-fixed `compute_dimensions`, `construct_cut_cell_stencil`, `derive_uniform_boundary_for_temo`)
-- `scripts/stencil_gen/tests/test_e4_cut_cell.py` (currently 15 failures + 38 errors due to dimension change)
+- `scripts/stencil_gen/tests/test_e4_cut_cell.py` (currently 13 failures + 38 errors due to dimension change)
 - `scripts/stencil_gen/tests/test_temo.py` (E2_1 and E2_2 tests — should all still pass)
 - `plans/stencil-derivation-math-reference.md` (Section 4: TEMO, especially Eq. 11)
 - `src/stencils/E2_1.cpp` (reference conservative cut-cell stencil: R=4, T=5)
@@ -23,17 +23,34 @@ cd scripts/stencil_gen && uv run pytest tests/test_temo.py -v
 ## Current State
 
 - `compute_dimensions` fixed: E4_1 now gives r=4, t=6, R=5, T=7 (was r=3, R=4)
+- `derive_uniform_boundary_for_temo(E4_1)` works: produces 5 alphas and (4, 6) B_u matrix
+- `build_degenerate_stencil` BREAKS at R=5: near-interior row overdetermined (3 unknowns, 4 Taylor eqs)
+- `solve_uniform_limit` BREAKS at R=5: same overdetermination issue
+- `construct_cut_cell_stencil` BREAKS because it calls both above functions
 - E2_1 and E2_2 tests all pass (253 tests) — dimensions unchanged since p=q=1
-- E4_1 tests: 15 failures + 38 errors — all hardcoded R=4 assumptions
-- The "Approach A/B/C/D" infeasibility tests from Phase 22 are now invalid (they proved infeasibility at the WRONG dimensions)
+- E4_1 tests: 13 failures + 38 errors
+  - 4 failures: `TestE4UniformBoundary` (shape/alpha count assertions for old r=3)
+  - 6 failures: `TestDeriveCutCellScheme` E4_1 tests (pipeline crash in `construct_cut_cell_stencil`)
+  - 2 failures: `TestBuildCutCellConservationSystem` (hardcoded R=4 assertions)
+  - 1 failure: `TestApproachDIncreasedDimensions::test_nextra1_pipeline_rank_gap` (pipeline crash)
+  - 29 errors: `TestE4TEMOConstruction`, `TestE4CodeGeneration`, `TestE4TestFileGeneration` (fixture crashes)
+  - 9 errors: `TestApproachA/B/C` (fixture crashes because `construct_cut_cell_stencil` fails)
+- The Phase 22 infeasibility tests (Approaches A-D) are now invalid (proved infeasibility at the WRONG R=4)
 - The E4_1 C++ stencil in `src/stencils/E4_1.cpp` was generated with wrong dimensions and must be regenerated
-- `derive_uniform_boundary_for_temo` needs to handle r=4 (was only tested with r=3)
 
 **Key dimension change:**
 - E4_1 uniform boundary: 4×6 (was 3×6) — one more boundary row
 - E4_1 cut-cell: 5×7 (was 4×7) — one more row for conservation DOF
-- Conservation: 7 equations, 5 weight unknowns → 2 excess constraints (feasible)
-- Expected free params after conservation: 4 (matching Table 1)
+- Alpha count: 5 (was 4 at r=3). Distribution: rows 0-2 get 1 active alpha each, row 3 gets 2 active; `B_u[0,5]=B_u[1,5]=B_u[2,5]=0`
+- Conservation system: 6 equations (T-1), 4 weight unknowns (R-1) → 2 excess constraints
+- With 5 alpha symbols available to absorb excess constraints, conservation should be feasible
+
+**Root cause of pipeline breakage:**
+With r=4 and p=2, the interior stencil `[1/12, -2/3, 0, 2/3, -1/12]` at the near-interior row (row 4) covers grid points 2..6, but T-frame only has 7 columns (grid points 0..5). The rightmost coefficient (-1/12 at grid point 6) overflows the T-frame. The current `build_degenerate_stencil` and `solve_uniform_limit` functions use a conservation+Taylor approach for this case, but they fix TOO MANY columns via conservation, leaving fewer unknowns than Taylor equations:
+- `build_degenerate_stencil`: zeroed col + 3 conservation cols = 4 fixed → 3 unknowns < 4 eqs
+- `solve_uniform_limit`: 4 conservation cols fixed → 3 unknowns < 4 eqs
+
+**Fix:** Limit conservation-fixed columns to `T - n_zeroed - n_eqs` (degenerate) or `T - n_eqs` (uniform limit), selecting the rightmost eligible conservation columns. This ensures the Taylor system is exactly determined.
 
 ---
 
@@ -41,46 +58,129 @@ cd scripts/stencil_gen && uv run pytest tests/test_temo.py -v
 
 ### 23.1 — Delete invalid infeasibility tests
 
-- [ ] **23.1a** Remove the Phase 22 infeasibility test classes that were based on wrong dimensions:
-  - Delete `TestApproachAMinorConditions` (proved infeasibility at R=4, now R=5)
-  - Delete `TestApproachBParametricWeights` (same)
-  - Delete `TestApproachCEntryLevelUnknowns` (same)
-  - Delete `TestApproachDIncreasedDimensions` (same)
-  - Keep the xfail conservation test `test_e4_1_conservation_columns_xfail` — it should be fixed to pass later
+- [ ] **23.1a** Remove the Phase 22 infeasibility test classes that were based on wrong R=4 dimensions:
+  - Delete `TestApproachAMinorConditions` (3 test methods; proved infeasibility at R=4, now R=5)
+  - Delete `TestApproachBParametricWeights` (3 test methods; same)
+  - Delete `TestApproachCEntryLevelUnknowns` (3 test methods; same)
+  - Delete `TestApproachDIncreasedDimensions` (4 test methods; same; `test_nextra1_pipeline_rank_gap` also crashes)
+  - Keep the xfail conservation test `test_e4_1_conservation_fails` — it should be fixed to pass later (23.3b)
+  - Keep `TestBuildCutCellConservationSystem` — it tests valid infrastructure, just needs value updates (23.2f)
   - File: `scripts/stencil_gen/tests/test_e4_cut_cell.py`
-  - Test: errors should drop from 38 to near 0
+  - Verify: errors should drop from 38 to 29 (fixture-crash errors from `TestE4TEMOConstruction`, `TestE4CodeGeneration`, `TestE4TestFileGeneration` remain until pipeline is fixed)
+  - Test: `cd scripts/stencil_gen && uv run pytest tests/test_e4_cut_cell.py -v --tb=line 2>&1 | tail -5`
 
-### 23.2 — Fix E4_1 uniform boundary bridge for r=4
+### 23.2 — Fix pipeline and tests for R=5 dimensions
 
-- [ ] **23.2a** Update `derive_uniform_boundary_for_temo` to handle the new E4_1 dimensions:
-  - With r=4, the uniform boundary has 4 rows × 6 columns (was 3×6)
-  - Row 0..2: each has `t - (q+1) = 6 - 4 = 2` free columns
-  - Row 3: the conservation-constrained row (analogous to the last row in E2_1)
-  - The conservation constraint (column sums = 0) determines row 3's entries
-  - Free params: from Table 1, 4 survive conservation (α_{04}, α_{14}, α_{24}, α_{25}), 2 are zeroed (α_{05}, α_{15})
-  - File: `scripts/stencil_gen/stencil_gen/temo.py`
-  - Test: verify B_u shape is (4, 6)
+- [ ] **23.2a** Fix `build_degenerate_stencil` near-interior row for r=4 overflow:
+  - **Problem:** When `can_embed_interior` is False (interior stencil extends beyond T-frame), the current code fixes ALL columns where `j >= p+2` via conservation, then Taylor-solves the rest. With r=4, p=2, T=7: conservation fixes cols {2,4,5,6}, leaving unknowns {0,2,3} for 4 Taylor equations — overdetermined.
+  - **Fix:** In the `else` branch (lines ~517-571), limit conservation-fixed columns to `n_free = T - 1 - n_eqs` (= 7-1-4 = 2 for E4_1). Select the rightmost 2 eligible conservation columns (cols 5,6). This gives unknowns {0,2,3,4} for 4 Taylor equations — exactly determined.
+  - **Implementation:** Replace the fixed loop `for j in range(p + 2, T)` with logic that:
+    1. Collects all eligible conservation columns: those where `_interior_contribution(j-1, r+1, p, interior)` can be computed (includes j=2..6 for E4_1)
+    2. Takes only the rightmost `min(n_free, len(eligible))` columns
+    3. Taylor-solves the remaining unknowns
+  - **Invariant:** Must not change behavior for E2_1 (where the current logic works: r=3, p=1, `can_embed_interior` is False, conservation fixes cols {3,4}, unknowns {0,2}, exactly determined)
+  - File: `scripts/stencil_gen/stencil_gen/temo.py`, function `build_degenerate_stencil` (lines 429-572)
+  - Test: `cd scripts/stencil_gen && uv run pytest tests/test_temo.py -v -k degenerate` (E2 degenerate tests must still pass)
 
-- [ ] **23.2b** Fix all E4_1 dimension assertions in tests:
-  - Update shape checks from R=4 to R=5, uniform rows from 3 to 4
-  - Update coefficient count checks (floating: 5×7=35, Dirichlet: 4×7=28)
+- [ ] **23.2b** Fix `solve_uniform_limit` near-interior row for r=4 overflow:
+  - **Problem:** Same conservation overdetermination as 23.2a. Conservation fixes cols {2,4,5,6}, leaving unknowns {0,1,3} for 4 Taylor equations.
+  - **Fix:** In the `else` branch (lines ~983-1044), limit conservation-fixed columns to `n_free = T - n_eqs` (= 7-4 = 3 for E4_1, no zeroed col at psi=1). Select the rightmost 3 eligible columns (cols 4,5,6). This gives unknowns {0,1,2,3} for 4 Taylor equations — exactly determined.
+  - **Implementation:** Same approach as 23.2a: collect eligible conservation columns, take rightmost `n_free`, Taylor-solve the rest.
+  - **Invariant:** E2_1 behavior unchanged (r=3, p=1: conservation fixes cols {2,3,4}, unknowns {0,1}, exactly determined — same as current).
+  - File: `scripts/stencil_gen/stencil_gen/temo.py`, function `solve_uniform_limit` (lines 888-1045)
+  - Test: `cd scripts/stencil_gen && uv run pytest tests/test_temo.py -v -k uniform_limit` (E2 uniform limit tests must still pass)
+  - After this fix + 23.2a, the full TEMO pipeline (`construct_cut_cell_stencil`) should work for E4_1.
+  - Smoke test: `cd scripts/stencil_gen && uv run python -c "from stencil_gen.temo import *; psi=__import__('sympy').Symbol('psi'); ur=derive_uniform_boundary_for_temo(E4_1); print(construct_cut_cell_stencil(ur.B_u, ur.interior, 2, 3, 1, 0, psi).matrix.shape)"`  — should print `(5, 7)`
+
+- [ ] **23.2c** Verify `construct_cut_cell_stencil` works end-to-end for E4_1:
+  - After 23.2a + 23.2b, run the full pipeline and verify:
+    - `construct_cut_cell_stencil` returns a 5×7 matrix (no crash)
+    - Taylor accuracy: each row satisfies 4 moment equations for symbolic psi
+    - Degenerate limit (psi=0): matches `build_degenerate_stencil` output
+    - Uniform limit (psi=1): matches `solve_uniform_limit` output, rows 0-3 embed B_u, row 4 is the near-interior closure
+    - No beta symbols (nextra=0)
+    - Free symbols are psi + 5 alphas only
+  - Ordering: must complete 23.2a and 23.2b first
+  - Test: `cd scripts/stencil_gen && uv run pytest tests/test_e4_cut_cell.py::TestE4TEMOConstruction -v` (all 9 tests should pass after test fixes in 23.2d)
+
+- [ ] **23.2d** Fix `TestE4UniformBoundary` test assertions for new dimensions:
+  - `test_shape`: change `(3, 6)` → `(4, 6)` (line ~52)
+  - `test_four_alpha_symbols`: rename to `test_five_alpha_symbols`, change `len == 4` → `len == 5`, update name checks to `alpha_0..alpha_4` (lines ~54-59)
+  - `test_zero_constraints`: add `B_u[2, 5] == 0` check (3 zeros now instead of 2) (line ~63)
+  - `test_last_row_free_alphas`: update to check row 3 (was row 2) for `alpha_3, alpha_4` in `B_u[3, 4]` and `B_u[3, 5]` (lines ~67-72)
+  - `test_custom_alpha_symbols`: change `range(4)` → `range(5)` (line ~183)
+  - All other tests in this class should pass unchanged (Taylor accuracy, rows 0-1 match, etc.)
   - File: `scripts/stencil_gen/tests/test_e4_cut_cell.py`
-  - Test: `cd scripts/stencil_gen && uv run pytest tests/test_e4_cut_cell.py -v`
+  - Test: `cd scripts/stencil_gen && uv run pytest tests/test_e4_cut_cell.py::TestE4UniformBoundary -v`
+
+- [ ] **23.2e** Fix `TestE4TEMOConstruction` test assertions for R=5:
+  - `test_shape`: change `(4, 7)` → `(5, 7)` (line ~211)
+  - `test_entries_in_psi_alpha`: change `range(4)` → `range(5)` for alpha names (line ~223)
+  - `test_uniform_limit_rows_0_2_embed_Bu`: change `range(3)` → `range(4)` to check rows 0-3 embed B_u, update `range(6)` to match t=6 columns (lines ~243-254)
+  - `test_uniform_limit_row3_interior`: rename to `test_uniform_limit_row4_interior`, change `m1[3, j]` → `m1[4, j]`, and update expected row 4 values — these will NOT be `[0, 0, 1/12, -2/3, 0, 2/3, -1/12]` because the interior overflows the T-frame; determine new expected values from the fixed `solve_uniform_limit` output (lines ~256-269)
+  - `test_degenerate_limit`: verify automatically works (no hardcoded dims, uses `B_d.shape` dynamically)
+  - `test_taylor_accuracy_symbolic` and `test_taylor_accuracy_at_half`: should work unchanged (iterate over R dynamically)
+  - Ordering: must complete 23.2a-23.2c first (pipeline must work)
+  - File: `scripts/stencil_gen/tests/test_e4_cut_cell.py`
+  - Test: `cd scripts/stencil_gen && uv run pytest tests/test_e4_cut_cell.py::TestE4TEMOConstruction -v`
+
+- [ ] **23.2f** Fix `TestBuildCutCellConservationSystem` and `TestDeriveCutCellScheme`:
+  - `test_e4_1_conservation_system_dimensions`: change `R == 4` → `R == 5`, update expected IC values:
+    ```
+    old: {0: 0, 1: 0, 2: 0, 3: 1/12, 4: -7/12, 5: -7/12}
+    new: {0: 0, 1: 0, 2: 0, 3: 0, 4: 1/12, 5: -7/12}
+    ```
+    Change `len(ws) == R - 1` assertion from 3 to 4 weight unknowns (lines ~868-896)
+  - `test_e4_1_overdetermined_system`: change `excess == 3` → `excess == 2`, update alpha count from 4 to 5 (lines ~898-918)
+  - `TestDeriveCutCellScheme` E4_1 tests: change `.shape == (4, 7)` → `(5, 7)`, `.shape == (3, 7)` → `(4, 7)`, `dims.R == 4` → `5`, alpha count 4 → 5 (lines ~651-722)
+  - Ordering: must complete 23.2a-23.2c first
+  - File: `scripts/stencil_gen/tests/test_e4_cut_cell.py`
+  - Test: `cd scripts/stencil_gen && uv run pytest tests/test_e4_cut_cell.py::TestBuildCutCellConservationSystem -v && uv run pytest tests/test_e4_cut_cell.py::TestDeriveCutCellScheme -v`
+
+- [ ] **23.2g** Fix `TestE4CodeGeneration` and `TestE4TestFileGeneration` for R=5:
+  - `e4_spec` fixture: change `R=4` → `R=5` in `StencilGenSpec` constructor (lines ~351, ~486)
+  - `floating_flat`: update comment `R*T = 4*7 = 28` → `R*T = 5*7 = 35`
+  - `dirichlet_flat`: `[Integer(0)] * 7 + list(cc.dirichlet)` — the padding changes because dirichlet now has (R-1)*T = 4*7 = 28 rows (was 3*7=21). Update to `[Integer(0)] * T + list(cc.dirichlet)` if needed for the new layout.
+  - `test_struct_constants`: `R = 4` → `R = 5` (line ~374)
+  - `test_alpha_array`: `std::array<real, 4>` → `std::array<real, 5>` (line ~388)
+  - `test_nbs_floating_method`: coefficient count 28 → 35 (line ~411)
+  - `test_nbs_dirichlet_method`: coefficient count 21 → 28 (line ~422)
+  - `test_compute_floating_values`: count 28 → 35 (line ~508)
+  - `test_compute_dirichlet_values`: count 21 → 28 (line ~519)
+  - `test_floating_uniform_limit_row3_interior`: rename to `_row4_interior`, update row indices 21:28 → 28:35, update expected values (line ~521-535)
+  - `test_generate_test_file_structure`: `r == 4` → `r == 5`, `alpha = {0.1, -0.05, 0.02, 0.01}` → 5-element array (line ~559-561)
+  - `ALPHA_VALUES`: change from 4 elements to 5 elements (line ~468)
+  - Ordering: must complete 23.2a-23.2c first
+  - File: `scripts/stencil_gen/tests/test_e4_cut_cell.py`
+  - Test: `cd scripts/stencil_gen && uv run pytest tests/test_e4_cut_cell.py::TestE4CodeGeneration -v && uv run pytest tests/test_e4_cut_cell.py::TestE4TestFileGeneration -v`
+
+- [ ] **23.2h** Fix `test_e4_1_conservation_fails` xfail test:
+  - Update hardcoded `R, T = 4, 7` → `R, T = 5, 7`
+  - Update column sum to include row 4: `psi * m[0, j] + m[1, j] + m[2, j] + m[3, j] + m[4, j]`
+  - Verify xfail still triggers (conservation not yet enforced)
+  - Ordering: must complete 23.2a-23.2c first
+  - File: `scripts/stencil_gen/tests/test_e4_cut_cell.py` (lines ~804-838)
+  - Test: `cd scripts/stencil_gen && uv run pytest tests/test_e4_cut_cell.py::test_e4_1_conservation_fails -v`
 
 ### 23.3 — Enforce conservation in the cut-cell stencil
 
 - [ ] **23.3a** Add conservation enforcement to the E4_1 TEMO pipeline:
-  - After constructing the 5×7 cut-cell stencil B_l(ψ), apply conservation
-  - Conservation: Σ_i w_i · B[i,j] = 0 for interior columns, with w_0 = ψ
-  - With R=5 and 5 weight unknowns, the 7-equation system has 2 excess constraints
-  - These 2 constraints consume 2 of the 10 free stencil entries
-  - Plus the wall-column constraint consumes 1 more → 7 free entries
-  - With 2 zeroed entries and 1 more from alpha distribution → 4 free alphas (matches Table 1)
+  - After constructing the 5×7 cut-cell stencil B_l(ψ), apply conservation.
+  - Conservation: Σ_i w_i · B[i,j] + IC(j) = target(j) for j = 0..T-2
+    - w_0 = ψ (fixed), w_1..w_4 are unknowns (4 unknowns)
+    - 6 equations, 4 weight unknowns → 2 excess constraints
+    - The 5 alpha symbols provide degrees of freedom to absorb these 2 constraints
+    - After conservation: 5 - 2 = 3 surviving free alpha parameters (tentative; verify during implementation)
+  - Implementation approach: use `build_cut_cell_conservation_system` to set up the system, then solve for weights and alpha values that satisfy the constraints. The bilinear nature (w_i × alpha_j terms) requires either:
+    1. Linearization (theta substitution as in the old Approach C, but now feasible at R=5), or
+    2. Fix weights to w_i=1 for i≥1, solve for alphas, or
+    3. Use the paper's approach: enforce conservation as additional constraints in the uniform boundary derivation
+  - Design decision needed: which approach to conservation enforcement (record in meta.md as decision D23-1)
   - File: `scripts/stencil_gen/stencil_gen/temo.py`
 
 - [ ] **23.3b** Verify conservation holds symbolically:
-  - Check `Σ_i w_i · B[i,j] = 0` as a polynomial identity in ψ and α for ALL interior columns
-  - Remove the xfail marker from the conservation test
+  - Check `Σ_i w_i · B[i,j] + IC(j) = target(j)` as a polynomial identity in ψ and remaining alphas for ALL interior columns
+  - Remove the xfail marker from `test_e4_1_conservation_fails`
   - File: `scripts/stencil_gen/tests/test_e4_cut_cell.py`
   - Test: `cd scripts/stencil_gen && uv run pytest tests/test_e4_cut_cell.py -v -k conservation`
 
@@ -90,6 +190,8 @@ cd scripts/stencil_gen && uv run pytest tests/test_temo.py -v
   - P=2, R=5, T=7 (was R=4)
   - 5×7=35 floating coefficients (was 4×7=28)
   - 4×7=28 Dirichlet coefficients (was 3×7=21)
+  - std::array<real, 5> alpha (was 4)
+  - Dirichlet info: {P, R-1=4, T, 0} (was R-1=3)
   - Update `src/stencils/E4_1.cpp` and `src/stencils/E4_1.t.cpp`
   - Rebuild and test: `cmake --build build --target t-E4_1 && ctest --test-dir build -R t-E4_1`
   - File: `src/stencils/E4_1.cpp`, `src/stencils/E4_1.t.cpp`
@@ -111,9 +213,33 @@ cd scripts/stencil_gen && uv run pytest tests/test_temo.py -v
 - [ ] **23.6a** Verify all E2 tests still pass:
   - Run full test suite and confirm E2_1 and E2_2 tests are unaffected
   - Test: `cd scripts/stencil_gen && uv run pytest tests/test_temo.py -v`
+  - Critical: 23.2a and 23.2b MUST NOT change E2_1 or E2_2 behavior. Verify by running E2 tests after each fix.
 
 ---
 
 ## Key Insight
 
 The paper's Eq. 11b (`r = q + 1 + nextra`) was correct all along. The D-R25 "correction" to `r = p + 1 + nextra` was introduced because E4_2 (2nd derivative) dimensions didn't match, but the Eq. 11 sizing formula applies only to 1st derivative operators. For E4_1 (1st derivative, q=3, nextra=0), the correct uniform boundary has r=4 rows (not 3), giving the cut-cell stencil R=5 rows — enough for conservation.
+
+## Pipeline Fix Design Notes
+
+The near-interior row overflow issue affects `build_degenerate_stencil` and `solve_uniform_limit`. Both use a conservation+Taylor approach when the interior stencil doesn't fit in the T-frame. The fix is the same for both:
+
+**Current (broken for r=4):** Fix ALL columns where `j >= p+2` via conservation, then Taylor-solve the rest. This leaves too few unknowns.
+
+**Fixed:** Count how many conservation columns can be fixed without overdetermining the Taylor system:
+```
+n_zeroed = 1 if degenerate else 0
+n_free = T - n_zeroed - n_eqs  # how many cols to fix via conservation
+```
+Then select the rightmost `n_free` eligible conservation columns. This ensures the Taylor system has exactly `n_eqs` unknowns.
+
+**Eligible conservation columns:** Any column j where the interior contribution `IC(j-1, R, p, interior)` is a computable constant. For the near-interior row, this includes ALL T-frame columns (ICs depend on fixed interior coefficients).
+
+**E2_1 backward compatibility:** For E2_1 (r=3, p=1, T=5, n_eqs=2):
+- Degenerate: n_free = 5 - 1 - 2 = 2. Current code fixes {3, 4}. New code also picks rightmost 2 from eligible → same result.
+- Uniform limit: n_free = 5 - 0 - 2 = 3. Current code fixes {2, 3, 4}. New code picks rightmost 3 → same result.
+
+**E4_1 new behavior:**
+- Degenerate: n_free = 7 - 1 - 4 = 2. Fix cols {5, 6}. Unknowns = {0, 2, 3, 4}. 4×4 Taylor system.
+- Uniform limit: n_free = 7 - 0 - 4 = 3. Fix cols {4, 5, 6}. Unknowns = {0, 1, 2, 3}. 4×4 Taylor system.

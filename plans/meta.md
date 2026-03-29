@@ -327,28 +327,24 @@ The existing Mathematica notebooks are too slow for iterating on new stencil sch
 **Decision:** The Category A zeroed-column variant for 2nd-derivative Neumann stencils is B^{d,0} (row 0: x_0 zeroed, wall gets `alpha^{uN}`; rows >= 1: wall zeroed, x_0 gets `alpha^{uN}`). This is the **opposite** of the floating/Dirichlet variant B^{d,1} (D-R22).
 **Why:** Verified against `E2_2.cpp` `nbs_neumann` at psi=0: row 0 = `[-2, 0, 2, 0]` (x_0 zeroed, wall = -2 from uniform Neumann) and row 1 = `[0, -2, 2, 0]` (wall zeroed, x_0 = -2). The math reference Step 6 ("all schemes use alpha^d_{i,0} = 0 for i >= 1") applies to the floating/Dirichlet stencils but not the Neumann stencil, because the Neumann stencil operates on the uniform Neumann base `B^{uN}_l` (which has different alpha^u values). For E2_2, the uniform Neumann is `[-2, 2, 0], eta^u = -2`.
 
-### D-R25: E4 Dimension Formula
-**Decision:** **(d) Fix the row count formula: `r = p + 1 + nextra` (not `r = q + 1 + nextra`). The column formula `t = p + q + 1 + nextra` (Eq. 11a) is correct.**
-**Evidence:**
-- The math reference Table 1 gives r+1=4, t+1=7 for E4_1 → r=3, t=6 (uniform).
-- Eq. 11a: t = p+q+1+nextra = 2+3+1+0 = 6 ✓
-- Eq. 11b: r = q+1+nextra = 3+1+0 = 4 ✗ (should be 3)
-- Corrected: r = p+1+nextra = 2+1+0 = 3 ✓
-- Verified against all schemes:
-  - E2_1 (p=1, nextra=1): r = 1+1+1 = 3 ✓ (C++: R=4, so r=R-1=3)
-  - E2_2 (p=1, nextra=0): r = 1+1+0 = 2 ✓ (C++: R=2, for nu=2 r=R=2)
-  - E4_1 (p=2, nextra=0): r = 2+1+0 = 3 ✓ (Table 1: r+1=4, r=3)
-  - E4u_1 (p=2, uniform): r = 2p-1 = 3 ✓ (C++: R=3)
-  - E6u_1 (p=3, uniform): r = 2p-1 = 5 ✓ (C++: R=5)
-  - E8u_1 (p=4, uniform): r = 2p-1 = 7 ✓ (C++: R=7)
-- Note: For uniform-only stencils (E4u, E6u, E8u), r = 2p-1 and t = r+p = 3p-1. The TEMO width t = p+q+1+nextra is wider (e.g., E4u has t=5 but E4_1 TEMO has t=6) because the extra columns provide optimization flexibility for the cut-cell extension.
-- Note: The existing E4_2.cpp (R=3, T=5) uses a smaller boundary than the full TEMO formula would give (t=4 vs t=6). This may be a hand-optimized version; Phase 21 targets the full TEMO E4_1 dimensions from Table 1.
-**Impact:** `compute_dimensions` in `temo.py` must be updated (Phase 21 item 21.0a).
-**Options considered:**
-- (a) Derive the correct general formula → partially done (t formula confirmed, r formula corrected)
-- (b) Hard-code E4 dimensions → not needed, formula works
-- (c) Determine if Table 1 has a typo → no typo, formula was wrong
-- **(d) Fix r formula to `r = p + 1 + nextra`** ← CHOSEN
+### D-R25: E4 Dimension Formula (REVERTED in 27621e3)
+**Decision:** **(e) REVERTED. Restore the original Eq. 11b formula: `r = q + 1 + nextra`.** The D-R25(d) correction `r = p + 1 + nextra` was wrong — it was based on matching Table 1's r+1=4 for E4_1, but Table 1 dimensions were ALSO wrong (the paper's errata or our reading of Table 1 was the root cause). The Eq. 11 formulas from the paper are correct as written; the issue was that D-R25(d) was trying to match incorrect target dimensions.
+**Evidence for reversion:**
+- With `r = q + 1 + nextra = 4` for E4_1, the cut-cell stencil has R=5, T=7.
+- R=5 gives 4 weight unknowns for conservation (6 equations, 2 excess) — feasible.
+- With the old `r = p + 1 + nextra = 3` (R=4), conservation had 3 unknowns for 6 equations (3 excess) — proven infeasible by Phase 22 investigations.
+- The Eq. 11 sizing formula applies to 1st derivatives (nu=1). For 2nd derivatives (nu=2), `r_eff = r - 1` handles the overlap.
+**Impact:** `compute_dimensions` was restored to `r = q + 1 + nextra` (commit 27621e3). Phase 23 addresses the downstream effects.
+**Previous (wrong):**
+- **(d) Fix r formula to `r = p + 1 + nextra`** ← WAS CHOSEN, NOW REVERTED
+
+### D23-near-interior: Near-Interior Row Overflow Handling
+**Decision:** **(a) Limit conservation-fixed columns in the near-interior row to avoid overdetermining the Taylor system.**
+When the interior stencil extends beyond the T-frame (i.e., `r + p + 1 > t`), the `build_degenerate_stencil` and `solve_uniform_limit` functions must not fix more columns via conservation than the Taylor system can accommodate.
+**Rule:** `n_conservation_cols = T - n_zeroed - n_eqs`, selecting the rightmost eligible conservation columns. Eligible columns are those where the interior contribution IC(j) is computable (always true for T-frame columns).
+**Why:** With r=4, p=2, T=7, n_eqs=4: the old code fixed 3-4 conservation columns, leaving 3 unknowns for 4 Taylor equations (inconsistent). The fix limits conservation to 2 columns (degenerate) or 3 columns (uniform limit), keeping exactly `n_eqs` unknowns.
+**Backward compatible:** For E2_1 (r=3, p=1, T=5, n_eqs=2), the formula gives the same column selection as the current code.
+**Status:** TBD (Phase 23 item 23.2a/23.2b)
 
 ### DD22-4: Conservation Wall Column Target by Derivative Order
 **Decision:** **(a) Column 0 target depends on `nu`: −1 for 1st derivative, 0 for 2nd derivative.**
