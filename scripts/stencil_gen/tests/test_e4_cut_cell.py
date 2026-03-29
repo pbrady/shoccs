@@ -5,7 +5,7 @@ import pathlib
 import pytest
 from sympy import (
     Integer, Matrix, Poly, Rational, S, Symbol, cancel, collect, expand,
-    factor, fraction, linear_eq_to_matrix, linsolve, simplify, solve,
+    factor, fraction, groebner, linear_eq_to_matrix, linsolve, simplify, solve,
 )
 
 from stencil_gen.codegen import (
@@ -824,7 +824,10 @@ class TestDeriveCutCellScheme:
             )
 
 
-@pytest.mark.xfail(reason="conservation not yet enforced for E4_1 cut-cell")
+@pytest.mark.xfail(reason=(
+    "E4_1 cut-cell conservation is structurally infeasible at R=5, T=7, nextra=0. "
+    "Proven via Groebner basis in test_e4_1_psi_dependent_conservation_infeasible (23.3c-ii)."
+))
 def test_e4_1_conservation_fails():
     """E4_1 cut-cell stencil violates discrete conservation (SBP property).
 
@@ -1093,6 +1096,78 @@ def test_e4_1_conservation_constant_weights_infeasible_r5():
             assert psi in sol[0][w].free_symbols, (
                 f"{w} solution should depend on psi"
             )
+
+
+def test_e4_1_psi_dependent_conservation_infeasible(
+    e4_1_cut_cell_conservation,
+):
+    """E4_1 cut-cell conservation with psi-dependent weights is infeasible (23.3c-ii).
+
+    Even allowing weights w_1..w_4 to be rational functions of psi, conservation
+    cannot be satisfied for all psi in (0,1] with constant alpha parameters.
+
+    Method:
+      1. Solve 4 of 5 conservation equations for w_1..w_4 (rational in psi, alpha).
+      2. Substitute into the 5th equation -> compatibility condition C(psi, alpha)=0.
+      3. C is a degree-6 polynomial in psi; for it to vanish for all psi, all 7
+         psi-coefficients must be zero.
+      4. The resulting 7 nonlinear equations in 5 alpha unknowns have Groebner
+         basis = {1}, proving the system is inconsistent.
+
+    This result holds for ALL 5 choices of which equation to omit (C(5,4)=5 subsets).
+    """
+    eqs, w_syms, alpha_syms, psi = e4_1_cut_cell_conservation
+
+    # Solve first 4 equations for weights as functions of (psi, alpha)
+    sol4 = solve(eqs[:4], w_syms, dict=True)
+    assert len(sol4) == 1
+    sol4 = sol4[0]
+
+    # All weight solutions must depend on psi (psi-dependent weights)
+    for w in w_syms:
+        assert psi in sol4[w].free_symbols, f"{w} should depend on psi"
+
+    # Substitute into 5th equation -> compatibility condition
+    residual = cancel(eqs[4].subs(sol4))
+    assert residual != 0, "Residual should be non-zero (system overdetermined)"
+
+    num, _den = fraction(residual)
+    num_expanded = expand(num)
+
+    # Extract psi-coefficients
+    assert psi in num_expanded.free_symbols
+    p_poly = Poly(num_expanded, psi)
+    assert p_poly.degree() == 6
+    coeffs = p_poly.all_coeffs()
+    assert len(coeffs) == 7
+
+    # Groebner basis of the 7 alpha constraints is {1} -> inconsistent
+    gb = groebner(coeffs, list(alpha_syms), order="lex")
+    assert list(gb) == [1], (
+        f"Expected Groebner basis [1] (inconsistent), got {list(gb)}"
+    )
+
+    # Cross-check: sympy.solve also finds no solution
+    sol_alpha = solve(coeffs, list(alpha_syms), dict=True)
+    assert len(sol_alpha) == 0
+
+
+@pytest.fixture(scope="module")
+def e4_1_cut_cell_conservation():
+    """Build E4_1 cut-cell conservation system (shared by infeasibility tests)."""
+    psi = Symbol("psi")
+    ur = derive_uniform_boundary_for_temo(E4_1)
+    stencil = construct_cut_cell_stencil(
+        ur.B_u, ur.interior, p=2, q=3, nu=1, nextra=0, psi=psi,
+    )
+    m = stencil.matrix
+    R, T = m.rows, m.cols
+
+    eqs, w_syms = build_cut_cell_conservation_system(
+        m, R, T, p=2, nu=1, interior_coeffs=ur.interior, psi=psi,
+    )
+    alpha_syms = sorted(m.free_symbols - {psi}, key=lambda s: s.name)
+    return eqs, w_syms, alpha_syms, psi
 
 
 class TestE4UniformConservation:

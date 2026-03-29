@@ -449,15 +449,32 @@ caller's alpha symbols. Weights are rational functions of alpha_3 only.
   - Validates the column mapping fix from 23.3b end-to-end for the solvable case.
   - Verification: 63 passed + 1 xfail in test_e4_cut_cell.py, 121 passed in test_temo.py
   - File: `scripts/stencil_gen/tests/test_e4_cut_cell.py`
-- [ ] **23.3c-ii** Implement ψ-dependent cut-cell conservation for E4_1:
-  - E2_1 solvability (23.3c-i) confirms ψ-dependent weights are achievable.
-  - For E4_1 (5 eqs / 4 unknowns), need to:
-    1. Solve 4 conservation equations for w_1..w_4 as functions of (alpha, ψ)
-    2. Substitute into the 5th equation to get a compatibility condition on alpha
-    3. Extract ψ-coefficients to get nonlinear alpha constraints
-    4. Determine if any alpha values satisfy all constraints (may require eliminating
-       additional free alphas beyond the uniform conservation substitution)
-  - If feasible, update `test_e4_1_conservation_fails` from xfail to pass.
-  - If infeasible, document the structural reason and consider alternatives
-    (e.g., enlarged stencil with nextra > 0).
-  - Files: `scripts/stencil_gen/stencil_gen/temo.py`, `scripts/stencil_gen/tests/test_e4_cut_cell.py`
+- [x] **23.3c-ii** Investigate ψ-dependent cut-cell conservation for E4_1:
+  - **Finding: INFEASIBLE.** Cut-cell conservation with ψ-dependent weights and
+    constant alpha parameters is structurally impossible at R=5, T=7 (nextra=0).
+  - **Method:**
+    1. Solved 4 of 5 conservation equations for w_1..w_4 as functions of (alpha, ψ)
+    2. Substituted into the 5th equation → compatibility condition C(ψ, α) = 0
+    3. C is a degree-6 polynomial in ψ; for it to vanish for all ψ ∈ (0,1], all 7
+       ψ-coefficients must be zero
+    4. The resulting 7 nonlinear equations in 5 alpha unknowns have **Groebner basis = {1}**,
+       proving the system is inconsistent (no solution exists over any field)
+  - **Exhaustive check:** All C(5,4) = 5 choices of which equation to omit yield the
+    same result: degree-6 compatibility condition with 0 alpha solutions.
+  - **Post-TEMO conserved stencil (4 alphas):** Also infeasible (same structure).
+  - **Structural reason:** The overdetermined system (5 eqs, 4 weight unknowns) produces
+    a compatibility condition whose ψ-coefficient system has 7 constraints for 5 alpha
+    unknowns. The nonlinear coupling (bilinear w_i × α_k terms in the conservation
+    equations, combined with the rational ψ-dependence of the TEMO stencil entries)
+    makes the system inherently overconstrained.
+  - **Alternatives (not implemented):**
+    - nextra > 0: Enlarges the stencil (R=6, T=8 at nextra=1, 12 alphas), reducing the
+      constraint ratio. Feasibility unknown; much larger symbolic computation.
+    - ψ-dependent alpha: Allowing alpha parameters to depend on ψ would trivially satisfy
+      conservation but defeats the purpose of constant free parameters.
+  - **Test added:** `test_e4_1_psi_dependent_conservation_infeasible` — verifies Groebner
+    basis = [1] and sympy.solve returns 0 solutions.
+  - **xfail updated:** `test_e4_1_conservation_fails` reason now references the proven
+    infeasibility (23.3c-ii).
+  - Verification: 65 passed + 1 xfail in test_e4_cut_cell.py, 121 passed in test_temo.py
+  - File: `scripts/stencil_gen/tests/test_e4_cut_cell.py`
