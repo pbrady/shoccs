@@ -75,9 +75,10 @@ With r=4 and p=2, the interior stencil `[1/12, -2/3, 0, 2/3, -1/12]` at the near
   - **Problem:** When `can_embed_interior` is False (interior stencil extends beyond T-frame), the current code fixes ALL columns where `j >= p+2` via conservation, then Taylor-solves the rest. With r=4, p=2, T=7: conservation fixes cols {4,5,6} (from `range(p+2, T)`), plus zeroed col {1} → 4 known, leaving unknowns {0,2,3} for 4 Taylor equations — overdetermined.
   - **Fix:** In the `else` branch (lines ~517-571), limit conservation-fixed columns to `n_free = T - 1 - n_eqs` (= 7-1-4 = 2 for E4_1). Select the rightmost 2 eligible conservation columns (cols 5,6). This gives unknowns {0,2,3,4} for 4 Taylor equations — exactly determined.
   - **Implementation:** Replace the fixed loop `for j in range(p + 2, T)` with logic that:
-    1. Collects all eligible conservation columns: those where `_interior_contribution(j-1, r+1, p, interior)` can be computed (includes j=2..6 for E4_1)
-    2. Takes only the rightmost `min(n_free, len(eligible))` columns
-    3. Taylor-solves the remaining unknowns
+    1. Computes `n_free = T - 1 - n_eqs` (1 for zeroed col, n_eqs for Taylor unknowns)
+    2. Collects eligible conservation columns: `list(range(p + 2, T))` (same range as current loop — `build_degenerate_stencil` uses `-sum(B_d[i, j] for i in range(1, r))`, not `_interior_contribution`)
+    3. Takes only the rightmost `min(n_free, len(eligible))` columns
+    4. Taylor-solves the remaining unknowns
   - **Invariant:** Must not change behavior for E2_1 (where the current logic works: r=3, p=1, `can_embed_interior` is False, conservation fixes cols {3,4}, unknowns {0,2}, exactly determined)
   - File: `scripts/stencil_gen/stencil_gen/temo.py`, function `build_degenerate_stencil` (lines 429-572)
   - Test: `cd scripts/stencil_gen && uv run pytest tests/test_temo.py -v -k degenerate` (E2 degenerate tests must still pass)
@@ -85,8 +86,12 @@ With r=4 and p=2, the interior stencil `[1/12, -2/3, 0, 2/3, -1/12]` at the near
 - [ ] **23.2b** Fix `solve_uniform_limit` near-interior row for r=4 overflow:
   - **Problem:** Same conservation overdetermination as 23.2a. Conservation fixes cols {2,4,5,6}, leaving unknowns {0,1,3} for 4 Taylor equations.
   - **Fix:** In the `else` branch (lines ~983-1044), limit conservation-fixed columns to `n_free = T - n_eqs` (= 7-4 = 3 for E4_1, no zeroed col at psi=1). Select the rightmost 3 eligible columns (cols 4,5,6). This gives unknowns {0,1,2,3} for 4 Taylor equations — exactly determined.
-  - **Implementation:** Same approach as 23.2a: collect eligible conservation columns, take rightmost `n_free`, Taylor-solve the rest.
-  - **Invariant:** E2_1 behavior unchanged (r=3, p=1: conservation fixes cols {2,3,4}, unknowns {0,1}, exactly determined — same as current).
+  - **Implementation:** In the `else` branch, replace the column-selection loop with:
+    1. Compute `n_free = T - n_eqs` (no zeroed col at psi=1)
+    2. Collect eligible conservation columns using the existing criterion `j < R - p or j >= p + 2` over `range(2, T)`
+    3. Take only the rightmost `min(n_free, len(eligible))` columns
+    4. Taylor-solve the remaining unknowns (same overdetermination check already present)
+  - **Invariant:** E2_1 behavior unchanged (r=3, p=1, R=4: eligible={2,3,4}, n_free=3, rightmost 3={2,3,4} — same as current).
   - File: `scripts/stencil_gen/stencil_gen/temo.py`, function `solve_uniform_limit` (lines 888-1045)
   - Test: `cd scripts/stencil_gen && uv run pytest tests/test_temo.py -v -k uniform_limit` (E2 uniform limit tests must still pass)
   - After this fix + 23.2a, the full TEMO pipeline (`construct_cut_cell_stencil`) should work for E4_1.
@@ -117,7 +122,7 @@ With r=4 and p=2, the interior stencil `[1/12, -2/3, 0, 2/3, -1/12]` at the near
   - `test_shape`: change `(4, 7)` → `(5, 7)` (line ~211)
   - `test_entries_in_psi_alpha`: change `range(4)` → `range(5)` for alpha names (line ~223)
   - `test_uniform_limit_rows_0_2_embed_Bu`: change `range(3)` → `range(4)` to check rows 0-3 embed B_u, update `range(6)` to match t=6 columns (lines ~243-254)
-  - `test_uniform_limit_row3_interior`: rename to `test_uniform_limit_row4_interior`, change `m1[3, j]` → `m1[4, j]`, and update expected row 4 values — these will NOT be `[0, 0, 1/12, -2/3, 0, 2/3, -1/12]` because the interior overflows the T-frame; determine new expected values from the fixed `solve_uniform_limit` output (lines ~256-269)
+  - `test_uniform_limit_row3_interior`: rename to `test_uniform_limit_row4_not_interior`, change `m1[3, j]` → `m1[4, j]`. The expected values are NOT the simple interior stencil anymore — at R=5, the interior overflows the T-frame, so row 4 is derived via conservation+Taylor and contains alpha symbols. **Replace the hardcoded expected array** with a dynamic check: verify row 4 matches `B_l_1[4, j]` from `solve_uniform_limit(ur.B_u, ur.interior, ur.p, ur.q, ur.nu, 0)`. Also add a negative assertion: `m1[4, :] != [0, 0, 1/12, -2/3, 0, 2/3, -1/12]` to document this is no longer the raw interior stencil. (Lines ~256-269)
   - `test_degenerate_limit`: verify automatically works (no hardcoded dims, uses `B_d.shape` dynamically)
   - `test_taylor_accuracy_symbolic` and `test_taylor_accuracy_at_half`: should work unchanged (iterate over R dynamically)
   - Ordering: must complete 23.2a-23.2c first (pipeline must work)
@@ -132,24 +137,27 @@ With r=4 and p=2, the interior stencil `[1/12, -2/3, 0, 2/3, -1/12]` at the near
     ```
     Change `len(ws) == R - 1` assertion from 3 to 4 weight unknowns (lines ~868-896)
   - `test_e4_1_overdetermined_system`: change `excess == 3` → `excess == 2`, update alpha count from 4 to 5 (lines ~898-918)
-  - `TestDeriveCutCellScheme` E4_1 tests: change `.shape == (4, 7)` → `(5, 7)`, `.shape == (3, 7)` → `(4, 7)`, `dims.R == 4` → `5`, alpha count 4 → 5 (lines ~651-722)
+  - `TestDeriveCutCellScheme` E4_1 tests (lines ~651-722):
+    - `test_e4_1_shape`: `.shape == (4, 7)` → `(5, 7)`, `.shape == (3, 7)` → `(4, 7)`, `dims.R == 4` → `5`
+    - `test_e4_1_alpha_count`: `len == 4` → `5`
+    - `test_e4_1_custom_alphas`: `range(4)` → `range(5)` (line ~719)
   - Ordering: must complete 23.2a-23.2c first
   - File: `scripts/stencil_gen/tests/test_e4_cut_cell.py`
   - Test: `cd scripts/stencil_gen && uv run pytest tests/test_e4_cut_cell.py::TestBuildCutCellConservationSystem -v && uv run pytest tests/test_e4_cut_cell.py::TestDeriveCutCellScheme -v`
 
 - [ ] **23.2g** Fix `TestE4CodeGeneration` and `TestE4TestFileGeneration` for R=5:
-  - `e4_spec` fixture: change `R=4` → `R=5` in `StencilGenSpec` constructor (lines ~351, ~486)
+  - `e4_spec` fixture: change `R=4` → `R=5` and `param_arrays={"alpha": 4}` → `{"alpha": 5}` in `StencilGenSpec` constructor (lines ~351, ~486)
   - `floating_flat`: update comment `R*T = 4*7 = 28` → `R*T = 5*7 = 35`
-  - `dirichlet_flat`: `[Integer(0)] * 7 + list(cc.dirichlet)` — the padding changes because dirichlet now has (R-1)*T = 4*7 = 28 rows (was 3*7=21). Update to `[Integer(0)] * T + list(cc.dirichlet)` if needed for the new layout.
+  - `dirichlet_flat`: padding `[Integer(0)] * 7` stays the same (T is still 7), but `cc.dirichlet` length changes from (R-1)*T = 3*7=21 to 4*7=28. Total: 35 (was 28). No code change needed — just the comment.
   - `test_struct_constants`: `R = 4` → `R = 5` (line ~374)
   - `test_alpha_array`: `std::array<real, 4>` → `std::array<real, 5>` (line ~388)
   - `test_nbs_floating_method`: coefficient count 28 → 35 (line ~411)
   - `test_nbs_dirichlet_method`: coefficient count 21 → 28 (line ~422)
   - `test_compute_floating_values`: count 28 → 35 (line ~508)
   - `test_compute_dirichlet_values`: count 21 → 28 (line ~519)
-  - `test_floating_uniform_limit_row3_interior`: rename to `_row4_interior`, update row indices 21:28 → 28:35, update expected values (line ~521-535)
-  - `test_generate_test_file_structure`: `r == 4` → `r == 5`, `alpha = {0.1, -0.05, 0.02, 0.01}` → 5-element array (line ~559-561)
-  - `ALPHA_VALUES`: change from 4 elements to 5 elements (line ~468)
+  - `test_floating_uniform_limit_row3_interior`: rename to `_row4_interior`, update row indices 21:28 → 28:35. The expected values will NOT be the simple interior/h pattern — row 4 at psi=1 uses conservation+Taylor (involves alphas). **Compute expected values numerically** by running `compute_test_values` on the 5×7 floating matrix with the ALPHA_VALUES and psi=1.0, then extracting indices 28:35. Replace the hardcoded `expected` list with these computed values. (Lines ~521-535)
+  - `test_generate_test_file_structure`: `r == 4` → `r == 5`, `alpha = {0.1, -0.05, 0.02, 0.01}` → 5-element array `{0.1, -0.05, 0.02, 0.01, 0.005}` (line ~559-561)
+  - `ALPHA_VALUES`: change from 4 to 5 elements: `{"alpha": [0.1, -0.05, 0.02, 0.01, 0.005]}` (line ~468). Both fixtures and all tests referencing this dict are affected.
   - Ordering: must complete 23.2a-23.2c first
   - File: `scripts/stencil_gen/tests/test_e4_cut_cell.py`
   - Test: `cd scripts/stencil_gen && uv run pytest tests/test_e4_cut_cell.py::TestE4CodeGeneration -v && uv run pytest tests/test_e4_cut_cell.py::TestE4TestFileGeneration -v`
