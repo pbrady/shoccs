@@ -437,19 +437,17 @@ caller's alpha symbols. Weights are rational functions of alpha_3 only.
 
 ### 23.3c — Cut-cell conservation with ψ-dependent weights (NEW)
 
-- [ ] **23.3c-i** [Review follow-up] Verify E2_1 cut-cell conservation solvability:
-  - 23.3b claims "E2_1: 3 eqs / 3 unknowns → consistent" after the column mapping fix,
-    but only dimensions were tested (`test_e2_1_conservation_system_dimensions`).
-    No test actually **solves** the E2_1 system to verify weights exist.
-  - Add a test that calls `sympy.solve` on the E2_1 cut-cell conservation system
-    (from `build_cut_cell_conservation_system`) and verifies:
-    1. The solution exists (system is consistent, not just square)
-    2. The resulting weights w_1, w_2, w_3 are rational functions of (alpha, ψ)
-    3. Substituting the solution back into all 3 equations yields 0
-  - This validates the column mapping fix end-to-end for the solvable case
-    (complementing the infeasibility test `test_e4_1_conservation_constant_weights_infeasible_r5`
-    which validates the negative case).
-  - Also serves as a reference implementation for the E4_1 weight solver in 23.3c-ii.
+- [x] **23.3c-i** [Review follow-up] Verify E2_1 cut-cell conservation solvability:
+  - Added `test_e2_1_conservation_solvable` in `TestBuildCutCellConservationSystem`.
+  - Test builds E2_1 cut-cell system (3 eqs, 3 unknowns), solves with `sympy.solve`,
+    and verifies:
+    1. Unique solution exists (system is consistent)
+    2. All 3 weights (w_1, w_2, w_3) are rational functions of (alpha, psi)
+    3. Each weight depends on psi (ψ-dependent weights)
+    4. Free symbols are a subset of {psi} ∪ {alphas}
+    5. Substituting solution back into all 3 equations yields 0
+  - Validates the column mapping fix from 23.3b end-to-end for the solvable case.
+  - Verification: 63 passed + 1 xfail in test_e4_cut_cell.py, 121 passed in test_temo.py
   - File: `scripts/stencil_gen/tests/test_e4_cut_cell.py`
 - [ ] **23.3c-ii** Implement ψ-dependent cut-cell conservation for E4_1:
   - E2_1 solvability (23.3c-i) confirms ψ-dependent weights are achievable.

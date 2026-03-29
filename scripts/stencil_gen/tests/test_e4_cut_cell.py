@@ -892,6 +892,56 @@ class TestBuildCutCellConservationSystem:
             ic = _interior_contribution(g, R, E2_1.p, ur.interior)
             assert ic == 0, f"E2_1 IC(g={g}) should be 0, got {ic}"
 
+    def test_e2_1_conservation_solvable(self):
+        """E2_1: 3 eqs / 3 unknowns → solvable, weights are rational in (alpha, psi).
+
+        Validates the column mapping fix from 23.3b end-to-end: the corrected
+        grid-point column range (T-frame cols 1..T-2) gives a consistent square
+        system whose solution yields psi-dependent SBP weights.
+        """
+        psi = Symbol("psi")
+        ur = derive_uniform_boundary_for_temo(E2_1)
+        stencil = construct_cut_cell_stencil(
+            ur.B_u, ur.interior, p=E2_1.p, q=E2_1.q, nu=E2_1.nu,
+            nextra=E2_1.nextra, psi=psi,
+        )
+        R, T = stencil.matrix.rows, stencil.matrix.cols
+
+        eqs, ws = build_cut_cell_conservation_system(
+            stencil.matrix, R, T, p=E2_1.p, nu=E2_1.nu,
+            interior_coeffs=ur.interior, psi=psi,
+        )
+        assert len(eqs) == 3
+        assert len(ws) == 3
+
+        # Solve the system for w_1, w_2, w_3
+        sol = solve(eqs, ws, dict=True)
+        assert len(sol) == 1, f"Expected unique solution, got {len(sol)}"
+        sol = sol[0]
+
+        # All three weights must be present in the solution
+        for w in ws:
+            assert w in sol, f"Weight {w} missing from solution"
+
+        # Weights should be rational functions of (alpha, psi)
+        alpha_syms = sorted(stencil.matrix.free_symbols - {psi}, key=lambda s: s.name)
+        for w in ws:
+            w_val = sol[w]
+            free = w_val.free_symbols
+            # Must depend on psi (ψ-dependent weights)
+            assert psi in free, f"{w} solution should depend on psi, got {w_val}"
+            # Free symbols should be a subset of {psi} ∪ alphas
+            assert free <= {psi} | set(alpha_syms), (
+                f"{w} has unexpected symbols: {free - {psi} - set(alpha_syms)}"
+            )
+
+        # Substituting solution back into all 3 equations must yield 0
+        for i, eq in enumerate(eqs):
+            residual = cancel(eq.subs(sol))
+            assert residual == 0, (
+                f"Equation {i} residual non-zero after substitution: {residual}"
+            )
+
     def test_e4_1_conservation_system_dimensions(self):
         """E4_1: T-2=5 equations (grid-point cols), 4 weight unknowns, nonzero IC at g=3,4."""
         psi = Symbol("psi")
