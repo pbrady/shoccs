@@ -63,7 +63,7 @@ With r=4 and p=2, the interior stencil `[1/12, -2/3, 0, 2/3, -1/12]` at the near
   - Delete `TestApproachBParametricWeights` (3 test methods; same)
   - Delete `TestApproachCEntryLevelUnknowns` (3 test methods; same)
   - Delete `TestApproachDIncreasedDimensions` (4 test methods; same; `test_nextra1_pipeline_rank_gap` also crashes)
-  - Keep the xfail conservation test `test_e4_1_conservation_fails` — it should be fixed to pass later (23.3b)
+  - Keep the xfail conservation test `test_e4_1_conservation_fails` — it should be fixed to pass later (23.3d)
   - Keep `TestBuildCutCellConservationSystem` — it tests valid infrastructure, just needs value updates (23.2f)
   - File: `scripts/stencil_gen/tests/test_e4_cut_cell.py`
   - Verify: errors should drop from 38 to 29 (fixture-crash errors from `TestE4TEMOConstruction`, `TestE4CodeGeneration`, `TestE4TestFileGeneration` remain until pipeline is fixed)
@@ -205,6 +205,7 @@ With r=4 and p=2, the interior stencil `[1/12, -2/3, 0, 2/3, -1/12]` at the near
     9. Return solution dict mapping each w_i and constrained α_k to expressions in surviving free alphas
   - **Note on surviving alphas:** The exact number of free alphas after conservation depends on the rank of the scalar system. The plan estimates 3 surviving (5 - 2 excess), but this may vary. The function should detect the free parameters from the linsolve result.
   - **Invariant:** The function is only called for E4_1 (R=5); E2_1 and E2_2 conservation is handled by the existing uniform-boundary `solve_conservation` path.
+  - Ordering: must complete 23.2a-23.2c first (needs working pipeline); should complete 23.3a first (feasibility confirmation — if rank gap ≠ 0, this function cannot produce a solution)
   - File: `scripts/stencil_gen/stencil_gen/temo.py` (add after `build_cut_cell_conservation_system`, around line 1360)
   - Test: `cd scripts/stencil_gen && uv run pytest tests/test_e4_cut_cell.py -v -k "conservation and not fails"`
 
@@ -224,7 +225,7 @@ With r=4 and p=2, the interior stencil `[1/12, -2/3, 0, 2/3, -1/12]` at the near
   - Update `test_e4_1_conservation_fails` (lines 804-838):
     - Remove the `@pytest.mark.xfail` marker
     - Use the conservative stencil from `derive_cut_cell_scheme(E4_1, psi)` instead of the raw `construct_cut_cell_stencil` output
-    - Update R from 4 to 5, column sum to include row 4
+    - R and column sum already updated to R=5 with row 4 in 23.2h; no further dimension changes needed
     - Use the solved weights (w_0=ψ, w_1..w_4 from the conservation solution) instead of assuming w_i=1
     - Verify `Σ_i w_i · B[i,j] + IC(j) = target(j)` as a polynomial identity in ψ and surviving alphas for ALL j=0..T-2
   - Update `TestBuildCutCellConservationSystem` tests (if needed) to reflect the conservative stencil
