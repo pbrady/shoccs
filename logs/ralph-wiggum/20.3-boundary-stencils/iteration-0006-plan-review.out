@@ -1,0 +1,20 @@
+## Review Summary
+
+**Reviewed:** Commit b2a4697 ("Refine 20.3: add test organization, isolation strategy, and 20.3b test cases") against plan `plans/20.3-boundary-stencils.md`.
+
+**What the commit does well:**
+- Adds a clear Test File Organization section with naming conventions, `-k` filter patterns, and deferred import strategy
+- Introduces module-scoped pytest fixtures replacing module-level pipeline calls — prevents cross-test contamination and enables lazy evaluation
+- Adds 4 concrete, self-contained test cases for 20.3b (`test_solve_row_*`)
+- Correctly centralizes the `_run_pipeline` helper with deferred imports so `pytest -k "taylor"` works before conservation.py exists
+- Adds `_interior_contribution` helper for conservation column-sum verification
+- Updates 20.3c to explicitly state "no dedicated tests" with justification
+- Updates 20.3e/f/g to use fixture pattern consistently
+
+**Specificity:** All items name exact files, function signatures, test commands, and `-k` filters. Test cases include inline expected values. ✓
+
+**Ordering:** Dependencies are correctly declared and match the ordering constraints diagram. ✓
+
+**No accidental deletions:** All removed content was intentionally replaced (module-level calls → fixtures, `_run_pipeline` centralized, IC(j) reference updated). ✓
+
+**One issue found and fixed:** 20.3d had a test command (`-k "conservation"`) and naming convention entry (`test_conservation_*`) but no concrete test cases — the only item with this gap. Added 3 test cases: weight count verification, placeholder resolution check, and redundant column consistency. Committed as a separate commit.

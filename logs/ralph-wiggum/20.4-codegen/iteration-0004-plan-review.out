@@ -1,0 +1,33 @@
+## Review Summary
+
+**Commit reviewed:** e5f1eac — "Refine 20.4: add helper signatures, step mapping, progress checklist, style notes"
+
+**Plan reviewed:** `plans/20.4-codegen.md` (C++ Code Generation Module)
+
+### What was reviewed
+
+I verified the commit's 144 net-new lines across these additions:
+- Explicit `_emit_*` helper function signatures and `generate_stencil_cpp` orchestration code (20.4e)
+- Algorithm-step-to-helper mapping table with a new "Algorithm Steps" column
+- Clarified emit order for uniform and cut-cell interior methods (20.4c)
+- Documented subspan placement interaction between `_emit_nbs_dispatcher` and `_emit_nbs_methods` (20.4d/20.4e)
+- Progress checklist with exact files, functions, and test commands for each sub-phase
+- Style divergence notes (nu=2 format, shorthand, empty `param_arrays`)
+
+### Checks performed
+
+1. **No accidental deletions:** All 22 deleted lines were replaced with expanded, more precise versions. Confirmed by diffing the pre/post commit content.
+2. **Source file cross-references verified:** Spot-checked line-number references against `E4u_1.cpp`, `E8u_1.cpp`, `polyE2_1.cpp`, `E4u_1.t.cpp`, `E2_2.cpp`, and `E4_2.cpp`. All references are accurate.
+3. **Dependency ordering:** The 7 sub-phases (20.4a–20.4g) are correctly ordered. Each phase's file targets, test commands, and blocking dependencies are specified.
+4. **Checklist items:** Each progress checklist item names exact files to create/modify and exact pytest commands to verify. All match the corresponding section descriptions.
+5. **Cross-cutting decisions:** The plan's internal decisions (CSE usage policy, subspan placement, nbs_neumann stub style, numerical-vs-string validation) are all documented in-plan and are scoped to Phase 20.4 — no meta.md decision log entries needed.
+
+### Minor observations (not blocking, no update needed)
+
+1. **Overly conservative dependency claims:** The "Implementation order" section says "20.4c depends on 20.4a" and "20.4b depends on 20.4a," but `format_rational_h_division` explicitly says "Not using StencilCodePrinter" and `apply_cse` is a pure `sympy.cse()` wrapper. Both are actually independent of 20.4a. The ordering is still valid — this just slightly overstates the dependency graph.
+
+2. **Helper table Sections column:** `_emit_header` shows Sections "1–3" but the "What it emits" column correctly says "namespace open + struct open" (spanning into Section 4). The Algorithm Steps column ("2–4") and description are accurate; only the Sections shorthand is slightly off.
+
+### Verdict
+
+**No plan update committed.** The refinement is well-structured, specific, correctly ordered, and internally consistent. The two minor observations above are cosmetic and don't affect implementability or correctness.

@@ -1,0 +1,2 @@
+RALPH_STATUS: committed
+RALPH_SUMMARY: Added implementation order diagram, self-contained E2 B_u derivation (bypassing unimplemented 20.3), expanded solve_uniform_limit E2_1 worked example, and concrete Jacobian-based alpha mapping algorithm

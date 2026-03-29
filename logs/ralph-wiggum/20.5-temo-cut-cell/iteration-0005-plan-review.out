@@ -1,0 +1,31 @@
+I've completed a thorough review of the plan refinement. Let me summarize my findings.
+
+---
+
+**Review Summary — Commit c7eebe32**
+
+**What was reviewed:**
+- The Implementation Order section (new, lines 62-84)
+- 20.5b refinement: inline `derive_e2_uniform_boundary()` replacing `boundary.py` dependency (lines 224-261)
+- 20.5d refinement: expanded `solve_uniform_limit` E2_1 worked example with 4 explicit steps (lines 576-594)
+- 20.5e Phase 2 refinement: concrete Jacobian-based `map_alpha_to_cpp` algorithm (lines 788-828)
+- New sub-item: E2_1 unit-alpha C++ fixture generation (lines 819-828)
+- Preservation of all existing sections (verified via section header diff)
+
+**Findings — No blocking issues:**
+
+1. **Dependency ordering is correct.** The diagram correctly captures that 20.5e Phase 1 must precede 20.5d (because `solve_temo_row` delegates to `solve_in_field`). The ordering is valid but conservative — 20.5c and 20.5e Phase 1 are technically independent (20.5c's psi=0 Taylor solve doesn't need QQ(psi) field arithmetic), but the serial ordering is simpler and not wrong.
+
+2. **Math is correct in worked examples.** Verified: E2_1 row 3 deltas `[-4, -3, -2, -1, 0]` at psi=1, the 2 Taylor equations (k=0: sum=0, k=1: weighted sum=1), conservation fixing cols 2-4, and the resulting 2x2 solve for (wall, x_0). All consistent with the delta formulas and dimension counts.
+
+3. **No content accidentally deleted.** All 10 original section headers (20.5a-h, Performance Budget, Key Implementation Notes) are preserved. Line count went from 1044 to 1145 (net +101, matching the +115/-14 diff).
+
+4. **Sub-items are specific.** Functions name exact files (`scripts/stencil_gen/stencil_gen/temo.py`), test commands (`uv run pytest tests/test_temo.py -v -k uniform`), data structures (`UniformResult` with typed fields), and algorithms (7-step Jacobian mapping).
+
+5. **Alpha mapping algorithm is sound.** The Jacobian-based approach correctly exploits linearity in alpha to determine the constant mapping matrix M via unit-vector probing at a single psi value. The claim that M is psi-independent follows from the linearity property.
+
+6. **Cross-cutting decisions are already recorded.** D-R22 through D-R25 in `plans/meta.md` cover the variant naming, Neumann derivation method, and E4 dimension TBD. No new cross-cutting decisions were introduced by this refinement.
+
+7. **Minor observation:** `UniformResult` dropped `quadrature_weights` that the old version included, creating a small inconsistency with the interface contract (lines 192-197). This is defensible since the TEMO conservation uses fixed weights (`w_0=psi, w_i=1`), not SBP norm weights, and the inline derivation is explicitly marked as temporary (to be replaced when Module 20.3 is implemented).
+
+**Verdict: No plan update needed.** The refinement is well-structured, mathematically correct, and internally consistent.

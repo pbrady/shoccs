@@ -1,0 +1,19 @@
+## Review Summary
+
+**Reviewed:** Commit 602ae4f (plan refinement for 20.3-boundary-stencils.md)
+
+**What the commit did well:**
+- Added a clear ordering constraints diagram with dependency explanations
+- Split the oversized 20.3f (E6u + E8u) into 20.3f (E6u) and 20.3g (E8u) — sensible split
+- Formalized the free parameter allocation algorithm with an explicit `n_alpha` formula, verified against all 3 schemes
+- Added blocking dependency note on Phase 20.2 to item 20.3c
+- Added concrete symbolic spot-check expressions for E6u/E8u constrained rows
+- Added polynomial exactness test details for E6u and E8u
+- All C++ source line references verified correct (E4u lines 80-94, E6u lines 81-134, E8u lines 83-185)
+- All coefficient expressions verified against the C++ source
+- All alpha values verified against test files
+- All float expected values verified against C++ test files
+- No items accidentally deleted — all old content preserved and enhanced in the split
+
+**Issue found and fixed (commit 2937a72):**
+- 20.3b (`solve_boundary_row`) directly calls 20.3a's `build_taylor_system()`, making them sequential, not parallel. The ordering diagram, bullet points, and 20.3b's header were updated to reflect this dependency: 20.3a → 20.3b → 20.3c.

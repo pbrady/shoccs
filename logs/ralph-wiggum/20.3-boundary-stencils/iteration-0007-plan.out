@@ -1,0 +1,26 @@
+I've now read the entire plan (1291 lines), all "Read first" source files, and the meta decision log. Let me assess each item:
+
+**20.3a (Taylor system builder):** Exact function signature, worked example with full V matrix, 5 concrete test cases with expected values. Fully concrete.
+
+**20.3b (Single-row boundary solver):** Step-by-step algorithm, column partitioning convention, free parameter naming table mapping to C++ indices, worked example for E4u row 0, 4 test cases. Fully concrete.
+
+**20.3c (Full boundary derivation driver):** Exact BoundaryResult dataclass, 7-step algorithm with placeholder handling, zero-padding explanation, dependency on 20.2 properly flagged. Fully concrete.
+
+**20.3d (Conservation constraint solver):** Exact function signatures, IC(j) formula with concrete examples per scheme, worked example for E4u_1 with all 4 equations, 3 test cases. Verified against E4u_1.cpp lines 90-94. Fully concrete.
+
+**20.3e (E4u tests):** 8 test cases with exact symbolic expected values and 15+10 floating-point coefficients verified against E4u_1.t.cpp. Fully concrete.
+
+**20.3f (E6u tests):** 8 test cases with exact symbolic coefficients for all 5 rows (40 total), verified against E6u_1.cpp lines 81-134 and E6u_1.t.cpp. Fully concrete.
+
+**20.3g (E8u tests):** 11 test cases with exact symbolic coefficients for all 7 rows (77 total), verified against E8u_1.cpp lines 83-185 and E8u_1.t.cpp. Includes performance assertion. Fully concrete.
+
+Cross-cutting concerns are already handled:
+- Test isolation strategy with deferred imports documented
+- Module-scoped fixtures for lazy pipeline execution
+- Interior contribution helper for conservation verification
+- Ordering constraints visualized in ASCII diagram
+
+All items specify exact files, function signatures, algorithms, test commands, and expected values. Every item fits within the ~300-line / 1-2 file budget. No further refinement is needed.
+
+RALPH_STATUS: done
+RALPH_SUMMARY: Plan is fully refined — all 7 items (20.3a–g) have concrete function signatures, algorithms, expected values verified against C++ source, and test commands

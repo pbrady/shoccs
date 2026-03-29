@@ -1,0 +1,14 @@
+**Review summary for commit 66ceada (Refine 20.5f):**
+
+**What was reviewed:**
+- The augmented Vandermonde formulation for Neumann stencil derivation (virtual column formula, variant table, uniform Neumann targets)
+- Both worked examples (E2_2 rows 0 and 1) verified against `E2_2.cpp` `nbs_neumann` — all coefficient expressions match the C++ code exactly
+- Psi limit checks at psi=0 and psi=1, including h-scaling to match test expectations
+- Psi=0.8 right boundary values traced through reversal/negation to match `E2_2.t.cpp`
+- Decisions D-R23 and D-R24 in `meta.md` — properly recorded with rationale and cross-references
+- D-R22 updated to reference D-R24 for the Neumann case
+- Verification items cover virtual columns, uniform Neumann, eta values, psi limits, and right boundary — comprehensive
+- No items accidentally deleted; new items are a superset of the old ones
+
+**Issue found and fixed:**
+- Implementation sub-items in 20.5f were out of dependency order: `derive_uniform_neumann` was listed 5th but is a prerequisite for `solve_neumann_uniform_limit` (3rd) and `identify_neumann_prescribed_entries` (2nd). Reordered to: derive_uniform_neumann → build_neumann_vandermonde → solve_neumann_uniform_limit → identify_neumann_prescribed_entries → construct_neumann_stencil → assemble_cut_cell_result. Committed as `a985c1a`.

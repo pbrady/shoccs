@@ -1,0 +1,2 @@
+RALPH_STATUS: committed
+RALPH_SUMMARY: Fix 20.5 variant definitions (per-row B^{d,1} for 2nd deriv), column convention, Taylor count formula, and E2_2 worked examples verified against C++

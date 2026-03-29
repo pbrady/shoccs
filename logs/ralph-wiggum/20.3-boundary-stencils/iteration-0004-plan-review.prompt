@@ -1,0 +1,19 @@
+You are running inside an automated Ralph Wiggum plan-review pass.
+
+Repository root: /workspace
+Implementation plan: /workspace/plans/20.3-boundary-stencils.md
+Review target commit: c6d2914a3b56fd69bef205743d00f5b7235f12a7
+
+Your job is to review the plan refinement and ensure quality.
+
+Required process:
+1. Read the implementation plan.
+2. Inspect commit c6d2914a3b56fd69bef205743d00f5b7235f12a7 (the plan refinement) and assess whether:
+   - Sub-items are specific enough (name exact files, patterns, test commands).
+   - Sub-items are correctly ordered (dependencies respected).
+   - No items were accidentally deleted or corrupted.
+   - Cross-cutting decisions are recorded in the decision log if needed.
+3. If you find issues, update the plan in place and commit. Never use --no-verify.
+4. Do not modify source code.
+5. Return a concise plain-text summary of what you reviewed and whether you
+   updated the plan.

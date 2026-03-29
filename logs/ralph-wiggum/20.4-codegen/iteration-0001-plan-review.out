@@ -1,0 +1,19 @@
+**Review summary:**
+
+Reviewed commit `e206fab` which refines plan 20.4-codegen.md (+256/-12 lines). The refinement adds:
+
+- Dependency interface section documenting expected APIs from 20.2/20.3
+- 15-step algorithm for `generate_stencil_cpp` with explicit decision logic
+- Lua table key mapping and `scheme_type` derivation
+- Compilation test improvements (struct injection, `<ranges>` include, stencil stub)
+- Indentation/return conventions for `generate_interior_method` and `generate_nbs_method`
+- "Out of scope" section (from_lua registration, interp generation, Neumann)
+
+**Verified against source code:**
+- E4u_1.cpp: struct pattern, constants, constructors, query methods, interior, nbs dispatcher, nbs_floating/dirichlet, nbs_neumann stub, factory function all match plan descriptions
+- polyE2_1.cpp: cut-cell patterns (multi-array members, psi naming, subspan in helpers, span-returning nbs_neumann) all match
+- E4u_1.t.cpp: test structure, Lua config, Catch2 matchers, reference values all match
+
+**Issue found and fixed:** `test_e4u_dirichlet_numerical` in 20.4g used `boundary.dirichlet_coeffs` directly (R*T entries) without slicing `[T:]` to skip row 0. This contradicted the dependency interface section and 20.4e Step 12, both of which clearly document the slicing requirement. Without the slice, the test would compare row-0 coefficients against the E4u_1.t.cpp reference values (which are rows 1-2), producing wrong results. Fixed by adding `boundary.dirichlet_coeffs[5:]`.
+
+**No other issues found.** Sub-items are specific (exact files, patterns, test commands), dependencies are correctly ordered, no items were deleted or corrupted, and cross-cutting decisions (dirichlet slicing, subspan location, nbs_neumann style) are consistently documented.

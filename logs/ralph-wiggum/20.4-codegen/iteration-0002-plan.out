@@ -1,0 +1,2 @@
+RALPH_STATUS: committed
+RALPH_SUMMARY: Refined 20.4c (format_rational_h_division helper + nu=2 table), 20.4e (decomposition into 7 _emit_* helpers), 20.4f (n_coeffs/ex/psi sizing details), 20.4g (blocking dependency note on 20.2/20.3)

@@ -1,0 +1,29 @@
+The reference values in the plan's `test_e4u_dirichlet_numerical` (lines 1479-1484) match exactly against the actual E4u_1.t.cpp test file (lines 76-85). The h=0.5 and psi=0.0 values also match the actual test call at line 74.
+
+---
+
+**Review Summary**
+
+I reviewed commit 6ab4dcb (plan refinement for 20.4-codegen.md). The commit makes 6 targeted changes:
+
+1. **20.4c cut-cell interior:** Documents nu-dependent h-division loop (`v /= h` for nu=1, `v /= (h * h)` for nu=2). Verified against actual E2_2.cpp and E4_2.cpp.
+
+2. **20.4c `format_rational_h_division`:** Adds nu=2 test cases (Rational(4,3), Rational(-5,2), Rational(0,1)). Algorithm trace confirms all expectations are correct.
+
+3. **20.4d Step 6:** Parameterizes boundary h-division by nu. The skeleton template now branches on nu for both h-division and right-boundary logic. Verified patterns match E4u_1 (nu=1) and E2_2/E4_2 (nu=2).
+
+4. **20.4e formatting note:** Adds guidance that generator should emit NO blank line after `{` in nbs methods. Reasonable normalization of inconsistent hand-written style.
+
+5. **20.4f `compute_test_values`:** Replaces hardcoded `v / h` with nu-aware `h_divisor = h if nu == 1 else h * h`. Callers default to nu=1, which is correct for the E4u_1 validation tests.
+
+6. **20.4f test data:** Replaces `[...]` placeholder in `test_test_gen_values` with complete 15-value expected array. Uses `[0.0] * 15` dummy values for `test_test_gen_structure`. Values verified against E4u_1.t.cpp.
+
+**Assessment: No issues found.**
+
+- All sub-items name exact files, functions, patterns, and test commands.
+- Dependency ordering is correct (changes span 20.4c, 20.4d, 20.4e, 20.4f — all in dependency order).
+- No sections were deleted or corrupted (all 7 sections 20.4a–20.4g present, plus Out of Scope and Implementation Order).
+- No cross-cutting decisions were introduced — the nu-parameterization is a natural extension within the existing plan structure, not an architectural change.
+- All code patterns and line references verified against actual source files.
+
+No plan updates needed. No commit required.

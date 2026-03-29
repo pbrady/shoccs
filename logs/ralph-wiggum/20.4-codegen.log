@@ -1,0 +1,463 @@
+ralph_wiggum: mode=full plan=/workspace/plans/20.4-codegen.md max_iterations=50
+ralph_wiggum: starting plan refinement loop (max_iterations=50)
+==> claude plan pass: iteration 1
+RALPH_STATUS: committed
+RALPH_SUMMARY: Refined 20.4 with dependency interfaces, 15-step struct generator algorithm, Lua mapping details, compilation test fix, and out-of-scope section
+==> plan result [committed]: Refined 20.4 with dependency interfaces, 15-step struct generator algorithm, Lua mapping details, compilation test fix, and out-of-scope section
+==> claude plan review: iteration 1
+**Review summary:**
+
+Reviewed commit `e206fab` which refines plan 20.4-codegen.md (+256/-12 lines). The refinement adds:
+
+- Dependency interface section documenting expected APIs from 20.2/20.3
+- 15-step algorithm for `generate_stencil_cpp` with explicit decision logic
+- Lua table key mapping and `scheme_type` derivation
+- Compilation test improvements (struct injection, `<ranges>` include, stencil stub)
+- Indentation/return conventions for `generate_interior_method` and `generate_nbs_method`
+- "Out of scope" section (from_lua registration, interp generation, Neumann)
+
+**Verified against source code:**
+- E4u_1.cpp: struct pattern, constants, constructors, query methods, interior, nbs dispatcher, nbs_floating/dirichlet, nbs_neumann stub, factory function all match plan descriptions
+- polyE2_1.cpp: cut-cell patterns (multi-array members, psi naming, subspan in helpers, span-returning nbs_neumann) all match
+- E4u_1.t.cpp: test structure, Lua config, Catch2 matchers, reference values all match
+
+**Issue found and fixed:** `test_e4u_dirichlet_numerical` in 20.4g used `boundary.dirichlet_coeffs` directly (R*T entries) without slicing `[T:]` to skip row 0. This contradicted the dependency interface section and 20.4e Step 12, both of which clearly document the slicing requirement. Without the slice, the test would compare row-0 coefficients against the E4u_1.t.cpp reference values (which are rows 1-2), producing wrong results. Fixed by adding `boundary.dirichlet_coeffs[5:]`.
+
+**No other issues found.** Sub-items are specific (exact files, patterns, test commands), dependencies are correctly ordered, no items were deleted or corrupted, and cross-cutting decisions (dirichlet slicing, subspan location, nbs_neumann style) are consistently documented.
+==> plan review summary:
+**Review summary:**
+
+Reviewed commit `e206fab` which refines plan 20.4-codegen.md (+256/-12 lines). The refinement adds:
+
+- Dependency interface section documenting expected APIs from 20.2/20.3
+- 15-step algorithm for `generate_stencil_cpp` with explicit decision logic
+- Lua table key mapping and `scheme_type` derivation
+- Compilation test improvements (struct injection, `<ranges>` include, stencil stub)
+- Indentation/return conventions for `generate_interior_method` and `generate_nbs_method`
+- "Out of scope" section (from_lua registration, interp generation, Neumann)
+
+**Verified against source code:**
+- E4u_1.cpp: struct pattern, constants, constructors, query methods, interior, nbs dispatcher, nbs_floating/dirichlet, nbs_neumann stub, factory function all match plan descriptions
+- polyE2_1.cpp: cut-cell patterns (multi-array members, psi naming, subspan in helpers, span-returning nbs_neumann) all match
+- E4u_1.t.cpp: test structure, Lua config, Catch2 matchers, reference values all match
+
+**Issue found and fixed:** `test_e4u_dirichlet_numerical` in 20.4g used `boundary.dirichlet_coeffs` directly (R*T entries) without slicing `[T:]` to skip row 0. This contradicted the dependency interface section and 20.4e Step 12, both of which clearly document the slicing requirement. Without the slice, the test would compare row-0 coefficients against the E4u_1.t.cpp reference values (which are rows 1-2), producing wrong results. Fixed by adding `boundary.dirichlet_coeffs[5:]`.
+
+**No other issues found.** Sub-items are specific (exact files, patterns, test commands), dependencies are correctly ordered, no items were deleted or corrupted, and cross-cutting decisions (dirichlet slicing, subspan location, nbs_neumann style) are consistently documented.
+==> claude plan pass: iteration 2
+RALPH_STATUS: committed
+RALPH_SUMMARY: Refined 20.4c (format_rational_h_division helper + nu=2 table), 20.4e (decomposition into 7 _emit_* helpers), 20.4f (n_coeffs/ex/psi sizing details), 20.4g (blocking dependency note on 20.2/20.3)
+==> plan result [committed]: Refined 20.4c (format_rational_h_division helper + nu=2 table), 20.4e (decomposition into 7 _emit_* helpers), 20.4f (n_coeffs/ex/psi sizing details), 20.4g (blocking dependency note on 20.2/20.3)
+==> claude plan review: iteration 2
+**Review Summary for commit 927b3ea**
+
+Reviewed the refinement of `/workspace/plans/20.4-codegen.md` (108 insertions, 8 deletions across 5 areas).
+
+**What was refined:**
+- 20.4c: Formalized `format_rational_h_division` with function signature, algorithm, nu=2 format table, and test assertions
+- 20.4e: Added `_emit_*` decomposition table (7 helpers) with section mapping and critical `dirichlet_coeffs[T:]` slicing note
+- 20.4f: Added scoped block sizing details (`n_coeffs` computation, `ex` vector, psi/right conventions)
+- 20.4g: Added blocking dependency note on 20.2/20.3 with `importorskip` guard
+- Implementation order: Clarified steps 1–6 work independently of 20.2/20.3
+
+**Checks performed:**
+1. **Specificity** — All sub-items name exact files, function signatures, algorithms, format tables, and test assertions. Sufficient for implementation. ✓
+2. **Ordering** — Dependency chain 20.4a→b→c→d→e→f→g is correct. 20.2/20.3 blocking correctly scoped to step 7 only. ✓
+3. **No accidental deletions** — All 8 deleted lines were intentional replacements with more detailed content. All 7 sub-tasks (20.4a–20.4g) remain intact. ✓
+4. **Decision log** — All changes are internal to 20.4; no cross-cutting decisions requiring a meta.md entry. ✓
+5. **Format table accuracy** — Verified nu=1 tables against E4u_1.cpp/E8u_1.cpp (exact match). Nu=2 table verified against E2_2.cpp (match for q=1 cases). E4_2.cpp uses `12.` (float literal denominator) vs plan's `12` (integer) — semantically equivalent in C++, consistent with the plan's explicit "numerical comparison, not string comparison" philosophy. ✓
+6. **Test data consistency** — Cross-checked 20.4g test values (psi=1.0/Floating, psi=0.0/Dirichlet, h=2.0/0.5) against E4u_1.t.cpp. Match confirmed. ✓
+
+**Result: No plan update needed.** The refinement is well-targeted, specific, correctly ordered, and internally consistent.
+==> plan review summary:
+**Review Summary for commit 927b3ea**
+
+Reviewed the refinement of `/workspace/plans/20.4-codegen.md` (108 insertions, 8 deletions across 5 areas).
+
+**What was refined:**
+- 20.4c: Formalized `format_rational_h_division` with function signature, algorithm, nu=2 format table, and test assertions
+- 20.4e: Added `_emit_*` decomposition table (7 helpers) with section mapping and critical `dirichlet_coeffs[T:]` slicing note
+- 20.4f: Added scoped block sizing details (`n_coeffs` computation, `ex` vector, psi/right conventions)
+- 20.4g: Added blocking dependency note on 20.2/20.3 with `importorskip` guard
+- Implementation order: Clarified steps 1–6 work independently of 20.2/20.3
+
+**Checks performed:**
+1. **Specificity** — All sub-items name exact files, function signatures, algorithms, format tables, and test assertions. Sufficient for implementation. ✓
+2. **Ordering** — Dependency chain 20.4a→b→c→d→e→f→g is correct. 20.2/20.3 blocking correctly scoped to step 7 only. ✓
+3. **No accidental deletions** — All 8 deleted lines were intentional replacements with more detailed content. All 7 sub-tasks (20.4a–20.4g) remain intact. ✓
+4. **Decision log** — All changes are internal to 20.4; no cross-cutting decisions requiring a meta.md entry. ✓
+5. **Format table accuracy** — Verified nu=1 tables against E4u_1.cpp/E8u_1.cpp (exact match). Nu=2 table verified against E2_2.cpp (match for q=1 cases). E4_2.cpp uses `12.` (float literal denominator) vs plan's `12` (integer) — semantically equivalent in C++, consistent with the plan's explicit "numerical comparison, not string comparison" philosophy. ✓
+6. **Test data consistency** — Cross-checked 20.4g test values (psi=1.0/Floating, psi=0.0/Dirichlet, h=2.0/0.5) against E4u_1.t.cpp. Match confirmed. ✓
+
+**Result: No plan update needed.** The refinement is well-targeted, specific, correctly ordered, and internally consistent.
+==> claude plan pass: iteration 3
+RALPH_STATUS: committed
+RALPH_SUMMARY: Parameterize h-division by derivative order (nu) in 20.4d/20.4f, complete test data placeholders, add nu=2 format_rational_h_division tests
+==> plan result [committed]: Parameterize h-division by derivative order (nu) in 20.4d/20.4f, complete test data placeholders, add nu=2 format_rational_h_division tests
+==> claude plan review: iteration 3
+The reference values in the plan's `test_e4u_dirichlet_numerical` (lines 1479-1484) match exactly against the actual E4u_1.t.cpp test file (lines 76-85). The h=0.5 and psi=0.0 values also match the actual test call at line 74.
+
+---
+
+**Review Summary**
+
+I reviewed commit 6ab4dcb (plan refinement for 20.4-codegen.md). The commit makes 6 targeted changes:
+
+1. **20.4c cut-cell interior:** Documents nu-dependent h-division loop (`v /= h` for nu=1, `v /= (h * h)` for nu=2). Verified against actual E2_2.cpp and E4_2.cpp.
+
+2. **20.4c `format_rational_h_division`:** Adds nu=2 test cases (Rational(4,3), Rational(-5,2), Rational(0,1)). Algorithm trace confirms all expectations are correct.
+
+3. **20.4d Step 6:** Parameterizes boundary h-division by nu. The skeleton template now branches on nu for both h-division and right-boundary logic. Verified patterns match E4u_1 (nu=1) and E2_2/E4_2 (nu=2).
+
+4. **20.4e formatting note:** Adds guidance that generator should emit NO blank line after `{` in nbs methods. Reasonable normalization of inconsistent hand-written style.
+
+5. **20.4f `compute_test_values`:** Replaces hardcoded `v / h` with nu-aware `h_divisor = h if nu == 1 else h * h`. Callers default to nu=1, which is correct for the E4u_1 validation tests.
+
+6. **20.4f test data:** Replaces `[...]` placeholder in `test_test_gen_values` with complete 15-value expected array. Uses `[0.0] * 15` dummy values for `test_test_gen_structure`. Values verified against E4u_1.t.cpp.
+
+**Assessment: No issues found.**
+
+- All sub-items name exact files, functions, patterns, and test commands.
+- Dependency ordering is correct (changes span 20.4c, 20.4d, 20.4e, 20.4f — all in dependency order).
+- No sections were deleted or corrupted (all 7 sections 20.4a–20.4g present, plus Out of Scope and Implementation Order).
+- No cross-cutting decisions were introduced — the nu-parameterization is a natural extension within the existing plan structure, not an architectural change.
+- All code patterns and line references verified against actual source files.
+
+No plan updates needed. No commit required.
+==> plan review summary:
+The reference values in the plan's `test_e4u_dirichlet_numerical` (lines 1479-1484) match exactly against the actual E4u_1.t.cpp test file (lines 76-85). The h=0.5 and psi=0.0 values also match the actual test call at line 74.
+
+---
+
+**Review Summary**
+
+I reviewed commit 6ab4dcb (plan refinement for 20.4-codegen.md). The commit makes 6 targeted changes:
+
+1. **20.4c cut-cell interior:** Documents nu-dependent h-division loop (`v /= h` for nu=1, `v /= (h * h)` for nu=2). Verified against actual E2_2.cpp and E4_2.cpp.
+
+2. **20.4c `format_rational_h_division`:** Adds nu=2 test cases (Rational(4,3), Rational(-5,2), Rational(0,1)). Algorithm trace confirms all expectations are correct.
+
+3. **20.4d Step 6:** Parameterizes boundary h-division by nu. The skeleton template now branches on nu for both h-division and right-boundary logic. Verified patterns match E4u_1 (nu=1) and E2_2/E4_2 (nu=2).
+
+4. **20.4e formatting note:** Adds guidance that generator should emit NO blank line after `{` in nbs methods. Reasonable normalization of inconsistent hand-written style.
+
+5. **20.4f `compute_test_values`:** Replaces hardcoded `v / h` with nu-aware `h_divisor = h if nu == 1 else h * h`. Callers default to nu=1, which is correct for the E4u_1 validation tests.
+
+6. **20.4f test data:** Replaces `[...]` placeholder in `test_test_gen_values` with complete 15-value expected array. Uses `[0.0] * 15` dummy values for `test_test_gen_structure`. Values verified against E4u_1.t.cpp.
+
+**Assessment: No issues found.**
+
+- All sub-items name exact files, functions, patterns, and test commands.
+- Dependency ordering is correct (changes span 20.4c, 20.4d, 20.4e, 20.4f — all in dependency order).
+- No sections were deleted or corrupted (all 7 sections 20.4a–20.4g present, plus Out of Scope and Implementation Order).
+- No cross-cutting decisions were introduced — the nu-parameterization is a natural extension within the existing plan structure, not an architectural change.
+- All code patterns and line references verified against actual source files.
+
+No plan updates needed. No commit required.
+==> claude plan pass: iteration 4
+RALPH_STATUS: committed
+RALPH_SUMMARY: Refined 20.4e with explicit helper signatures/step mapping, added progress checklist, clarified interior emit order and subspan placement interaction, documented style divergence notes
+==> plan result [committed]: Refined 20.4e with explicit helper signatures/step mapping, added progress checklist, clarified interior emit order and subspan placement interaction, documented style divergence notes
+==> claude plan review: iteration 4
+## Review Summary
+
+**Commit reviewed:** e5f1eac — "Refine 20.4: add helper signatures, step mapping, progress checklist, style notes"
+
+**Plan reviewed:** `plans/20.4-codegen.md` (C++ Code Generation Module)
+
+### What was reviewed
+
+I verified the commit's 144 net-new lines across these additions:
+- Explicit `_emit_*` helper function signatures and `generate_stencil_cpp` orchestration code (20.4e)
+- Algorithm-step-to-helper mapping table with a new "Algorithm Steps" column
+- Clarified emit order for uniform and cut-cell interior methods (20.4c)
+- Documented subspan placement interaction between `_emit_nbs_dispatcher` and `_emit_nbs_methods` (20.4d/20.4e)
+- Progress checklist with exact files, functions, and test commands for each sub-phase
+- Style divergence notes (nu=2 format, shorthand, empty `param_arrays`)
+
+### Checks performed
+
+1. **No accidental deletions:** All 22 deleted lines were replaced with expanded, more precise versions. Confirmed by diffing the pre/post commit content.
+2. **Source file cross-references verified:** Spot-checked line-number references against `E4u_1.cpp`, `E8u_1.cpp`, `polyE2_1.cpp`, `E4u_1.t.cpp`, `E2_2.cpp`, and `E4_2.cpp`. All references are accurate.
+3. **Dependency ordering:** The 7 sub-phases (20.4a–20.4g) are correctly ordered. Each phase's file targets, test commands, and blocking dependencies are specified.
+4. **Checklist items:** Each progress checklist item names exact files to create/modify and exact pytest commands to verify. All match the corresponding section descriptions.
+5. **Cross-cutting decisions:** The plan's internal decisions (CSE usage policy, subspan placement, nbs_neumann stub style, numerical-vs-string validation) are all documented in-plan and are scoped to Phase 20.4 — no meta.md decision log entries needed.
+
+### Minor observations (not blocking, no update needed)
+
+1. **Overly conservative dependency claims:** The "Implementation order" section says "20.4c depends on 20.4a" and "20.4b depends on 20.4a," but `format_rational_h_division` explicitly says "Not using StencilCodePrinter" and `apply_cse` is a pure `sympy.cse()` wrapper. Both are actually independent of 20.4a. The ordering is still valid — this just slightly overstates the dependency graph.
+
+2. **Helper table Sections column:** `_emit_header` shows Sections "1–3" but the "What it emits" column correctly says "namespace open + struct open" (spanning into Section 4). The Algorithm Steps column ("2–4") and description are accurate; only the Sections shorthand is slightly off.
+
+### Verdict
+
+**No plan update committed.** The refinement is well-structured, specific, correctly ordered, and internally consistent. The two minor observations above are cosmetic and don't affect implementability or correctness.
+==> plan review summary:
+## Review Summary
+
+**Commit reviewed:** e5f1eac — "Refine 20.4: add helper signatures, step mapping, progress checklist, style notes"
+
+**Plan reviewed:** `plans/20.4-codegen.md` (C++ Code Generation Module)
+
+### What was reviewed
+
+I verified the commit's 144 net-new lines across these additions:
+- Explicit `_emit_*` helper function signatures and `generate_stencil_cpp` orchestration code (20.4e)
+- Algorithm-step-to-helper mapping table with a new "Algorithm Steps" column
+- Clarified emit order for uniform and cut-cell interior methods (20.4c)
+- Documented subspan placement interaction between `_emit_nbs_dispatcher` and `_emit_nbs_methods` (20.4d/20.4e)
+- Progress checklist with exact files, functions, and test commands for each sub-phase
+- Style divergence notes (nu=2 format, shorthand, empty `param_arrays`)
+
+### Checks performed
+
+1. **No accidental deletions:** All 22 deleted lines were replaced with expanded, more precise versions. Confirmed by diffing the pre/post commit content.
+2. **Source file cross-references verified:** Spot-checked line-number references against `E4u_1.cpp`, `E8u_1.cpp`, `polyE2_1.cpp`, `E4u_1.t.cpp`, `E2_2.cpp`, and `E4_2.cpp`. All references are accurate.
+3. **Dependency ordering:** The 7 sub-phases (20.4a–20.4g) are correctly ordered. Each phase's file targets, test commands, and blocking dependencies are specified.
+4. **Checklist items:** Each progress checklist item names exact files to create/modify and exact pytest commands to verify. All match the corresponding section descriptions.
+5. **Cross-cutting decisions:** The plan's internal decisions (CSE usage policy, subspan placement, nbs_neumann stub style, numerical-vs-string validation) are all documented in-plan and are scoped to Phase 20.4 — no meta.md decision log entries needed.
+
+### Minor observations (not blocking, no update needed)
+
+1. **Overly conservative dependency claims:** The "Implementation order" section says "20.4c depends on 20.4a" and "20.4b depends on 20.4a," but `format_rational_h_division` explicitly says "Not using StencilCodePrinter" and `apply_cse` is a pure `sympy.cse()` wrapper. Both are actually independent of 20.4a. The ordering is still valid — this just slightly overstates the dependency graph.
+
+2. **Helper table Sections column:** `_emit_header` shows Sections "1–3" but the "What it emits" column correctly says "namespace open + struct open" (spanning into Section 4). The Algorithm Steps column ("2–4") and description are accurate; only the Sections shorthand is slightly off.
+
+### Verdict
+
+**No plan update committed.** The refinement is well-structured, specific, correctly ordered, and internally consistent. The two minor observations above are cosmetic and don't affect implementability or correctness.
+==> claude plan pass: iteration 5
+RALPH_STATUS: committed
+RALPH_SUMMARY: Added test fixture definitions and method signature formatting rule to 20.4d/e sections
+==> plan result [committed]: Added test fixture definitions and method signature formatting rule to 20.4d/e sections
+==> claude plan review: iteration 5
+The plan is complete and well-structured. Here is my review summary:
+
+---
+
+**Review of commit e8981b2 — "Refine 20.4: add test fixtures, method signature formatting rule"**
+
+**Reviewed:** 3 additions totaling 116 lines in `plans/20.4-codegen.md`:
+
+1. **Method signature formatting rule** (20.4d Step 3, lines 577-588): Specifies single-line signatures for uniform stencils (unnamed `real` psi parameter) and two-line signatures for cut-cell stencils (named `real psi`). Verified against `src/stencils/E4u_1.cpp:77` and `src/stencils/polyE2_1.cpp:170-171` — both patterns match the source exactly.
+
+2. **Shared test fixtures** (20.4d, lines 727-787): Defines `e4u_floating_coeffs` (15 entries), `e4u_dirichlet_coeffs` (10 entries via slice), `poly_floating_coeffs` (12 entries), `uniform_printer`, and `cutcell_printer`. Verified all 15 E4u coefficient expressions against `E4u_1.cpp:80-94` — exact match. Spot-checked 4 polyE2_1 coefficients against `polyE2_1.cpp:187-190` by manually expanding CSE temporaries — correct. Array sizing (R*T) and Dirichlet slicing (floating_coeffs[5:]) are consistent with spec parameters.
+
+3. **StencilGenSpec fixtures** (20.4e, lines 1250-1289): Defines `e4u_spec` and `poly_spec` with correct P/R/T/X values, coefficient lists, and param_arrays. Dirichlet dummy row-0 padding and interp fields are correctly set.
+
+**Assessment:**
+- **Specificity:** All sub-items name exact fixtures, parameters, array sizes, and line references. Sufficient for implementation.
+- **Ordering:** Shared fixtures are defined before the tests that reference them (20.4d fixtures before 20.4d/e/f tests; StencilGenSpec fixtures before 20.4e tests). Dependencies respected.
+- **Integrity:** Pure addition (116 insertions, 0 deletions). The existing "Tests" sections and surrounding content are intact.
+- **Cross-cutting decisions:** The signature formatting rule is documented where it applies (20.4d Step 3). No separate decision log entry needed.
+
+**Result:** No issues found. Plan was not updated.
+==> plan review summary:
+The plan is complete and well-structured. Here is my review summary:
+
+---
+
+**Review of commit e8981b2 — "Refine 20.4: add test fixtures, method signature formatting rule"**
+
+**Reviewed:** 3 additions totaling 116 lines in `plans/20.4-codegen.md`:
+
+1. **Method signature formatting rule** (20.4d Step 3, lines 577-588): Specifies single-line signatures for uniform stencils (unnamed `real` psi parameter) and two-line signatures for cut-cell stencils (named `real psi`). Verified against `src/stencils/E4u_1.cpp:77` and `src/stencils/polyE2_1.cpp:170-171` — both patterns match the source exactly.
+
+2. **Shared test fixtures** (20.4d, lines 727-787): Defines `e4u_floating_coeffs` (15 entries), `e4u_dirichlet_coeffs` (10 entries via slice), `poly_floating_coeffs` (12 entries), `uniform_printer`, and `cutcell_printer`. Verified all 15 E4u coefficient expressions against `E4u_1.cpp:80-94` — exact match. Spot-checked 4 polyE2_1 coefficients against `polyE2_1.cpp:187-190` by manually expanding CSE temporaries — correct. Array sizing (R*T) and Dirichlet slicing (floating_coeffs[5:]) are consistent with spec parameters.
+
+3. **StencilGenSpec fixtures** (20.4e, lines 1250-1289): Defines `e4u_spec` and `poly_spec` with correct P/R/T/X values, coefficient lists, and param_arrays. Dirichlet dummy row-0 padding and interp fields are correctly set.
+
+**Assessment:**
+- **Specificity:** All sub-items name exact fixtures, parameters, array sizes, and line references. Sufficient for implementation.
+- **Ordering:** Shared fixtures are defined before the tests that reference them (20.4d fixtures before 20.4d/e/f tests; StencilGenSpec fixtures before 20.4e tests). Dependencies respected.
+- **Integrity:** Pure addition (116 insertions, 0 deletions). The existing "Tests" sections and surrounding content are intact.
+- **Cross-cutting decisions:** The signature formatting rule is documented where it applies (20.4d Step 3). No separate decision log entry needed.
+
+**Result:** No issues found. Plan was not updated.
+==> claude plan pass: iteration 6
+I've now read the entire plan (20.4-codegen.md, ~1900 lines) and all referenced source files:
+- `E4u_1.cpp`, `polyE2_1.cpp`, `E8u_1.cpp` (first 120 lines)
+- `stencil.hpp`, `E4u_1.t.cpp`
+- `plans/meta.md`, `stencil-derivation-math-reference.md` Section 7
+- Existing `stencil_gen` Python files
+
+The plan is already fully refined. Every section (20.4a through 20.4g) specifies:
+- **Exact file paths** to create/modify
+- **Complete function signatures** with types
+- **Step-by-step algorithms** with code examples
+- **Format tables** mapping input to expected C++ output
+- **Test code** with concrete expected values matching existing source
+- **Test commands** for verification
+- **Ordering constraints** (implementation order at line 1825)
+
+The progress checklist (lines 1839-1878) breaks work into concrete passes of 1-2 files, each <300 lines of diff. Cross-cutting decisions are already recorded in `plans/meta.md` (D-R18: Stencil Derivation Tooling).
+
+I verified consistency between the plan's test data and the actual source code (e.g., E4u_1 floating/Dirichlet coefficient values, interior coefficient rationals, nbs method patterns, blank line conventions). No gaps or ambiguities remain.
+
+RALPH_STATUS: done
+RALPH_SUMMARY: Plan is fully refined — all items have exact files, signatures, algorithms, test data, and verification commands
+==> plan result [done]: Plan is fully refined — all items have exact files, signatures, algorithms, test data, and verification commands
+ralph_wiggum: worktree drift detected after plan done status
+
+--- baseline ---
+?? logs/ralph-wiggum/20.2-interior-stencils.log
+?? logs/ralph-wiggum/20.2-interior-stencils/iteration-0001-plan.log
+?? logs/ralph-wiggum/20.2-interior-stencils/iteration-0001-plan.out
+?? logs/ralph-wiggum/20.2-interior-stencils/iteration-0001-plan.prompt
+?? logs/ralph-wiggum/20.3-boundary-stencils.log
+?? logs/ralph-wiggum/20.3-boundary-stencils/iteration-0001-plan-review.log
+?? logs/ralph-wiggum/20.3-boundary-stencils/iteration-0001-plan-review.out
+?? logs/ralph-wiggum/20.3-boundary-stencils/iteration-0001-plan-review.prompt
+?? logs/ralph-wiggum/20.3-boundary-stencils/iteration-0001-plan.log
+?? logs/ralph-wiggum/20.3-boundary-stencils/iteration-0001-plan.out
+?? logs/ralph-wiggum/20.3-boundary-stencils/iteration-0001-plan.prompt
+?? logs/ralph-wiggum/20.3-boundary-stencils/iteration-0002-plan-review.log
+?? logs/ralph-wiggum/20.3-boundary-stencils/iteration-0002-plan-review.out
+?? logs/ralph-wiggum/20.3-boundary-stencils/iteration-0002-plan-review.prompt
+?? logs/ralph-wiggum/20.3-boundary-stencils/iteration-0002-plan.log
+?? logs/ralph-wiggum/20.3-boundary-stencils/iteration-0002-plan.out
+?? logs/ralph-wiggum/20.3-boundary-stencils/iteration-0002-plan.prompt
+?? logs/ralph-wiggum/20.3-boundary-stencils/iteration-0003-plan-review.log
+?? logs/ralph-wiggum/20.3-boundary-stencils/iteration-0003-plan-review.out
+?? logs/ralph-wiggum/20.3-boundary-stencils/iteration-0003-plan-review.prompt
+?? logs/ralph-wiggum/20.3-boundary-stencils/iteration-0003-plan.log
+?? logs/ralph-wiggum/20.3-boundary-stencils/iteration-0003-plan.out
+?? logs/ralph-wiggum/20.3-boundary-stencils/iteration-0003-plan.prompt
+?? logs/ralph-wiggum/20.3-boundary-stencils/iteration-0004-plan-review.log
+?? logs/ralph-wiggum/20.3-boundary-stencils/iteration-0004-plan-review.out
+?? logs/ralph-wiggum/20.3-boundary-stencils/iteration-0004-plan-review.prompt
+?? logs/ralph-wiggum/20.3-boundary-stencils/iteration-0004-plan.log
+?? logs/ralph-wiggum/20.3-boundary-stencils/iteration-0004-plan.out
+?? logs/ralph-wiggum/20.3-boundary-stencils/iteration-0004-plan.prompt
+?? logs/ralph-wiggum/20.3-boundary-stencils/iteration-0005-plan-review.log
+?? logs/ralph-wiggum/20.3-boundary-stencils/iteration-0005-plan-review.out
+?? logs/ralph-wiggum/20.3-boundary-stencils/iteration-0005-plan-review.prompt
+?? logs/ralph-wiggum/20.3-boundary-stencils/iteration-0005-plan.log
+?? logs/ralph-wiggum/20.3-boundary-stencils/iteration-0005-plan.out
+?? logs/ralph-wiggum/20.3-boundary-stencils/iteration-0005-plan.prompt
+?? logs/ralph-wiggum/20.3-boundary-stencils/iteration-0006-plan-review.log
+?? logs/ralph-wiggum/20.3-boundary-stencils/iteration-0006-plan-review.out
+?? logs/ralph-wiggum/20.3-boundary-stencils/iteration-0006-plan-review.prompt
+?? logs/ralph-wiggum/20.3-boundary-stencils/iteration-0006-plan.log
+?? logs/ralph-wiggum/20.3-boundary-stencils/iteration-0006-plan.out
+?? logs/ralph-wiggum/20.3-boundary-stencils/iteration-0006-plan.prompt
+?? logs/ralph-wiggum/20.3-boundary-stencils/iteration-0007-plan.log
+?? logs/ralph-wiggum/20.3-boundary-stencils/iteration-0007-plan.out
+?? logs/ralph-wiggum/20.3-boundary-stencils/iteration-0007-plan.prompt
+?? logs/ralph-wiggum/20.4-codegen.log
+?? logs/ralph-wiggum/20.4-codegen/iteration-0001-plan-review.log
+?? logs/ralph-wiggum/20.4-codegen/iteration-0001-plan-review.out
+?? logs/ralph-wiggum/20.4-codegen/iteration-0001-plan-review.prompt
+?? logs/ralph-wiggum/20.4-codegen/iteration-0001-plan.log
+?? logs/ralph-wiggum/20.4-codegen/iteration-0001-plan.out
+?? logs/ralph-wiggum/20.4-codegen/iteration-0001-plan.prompt
+?? logs/ralph-wiggum/20.4-codegen/iteration-0002-plan-review.log
+?? logs/ralph-wiggum/20.4-codegen/iteration-0002-plan-review.out
+?? logs/ralph-wiggum/20.4-codegen/iteration-0002-plan-review.prompt
+?? logs/ralph-wiggum/20.4-codegen/iteration-0002-plan.log
+?? logs/ralph-wiggum/20.4-codegen/iteration-0002-plan.out
+?? logs/ralph-wiggum/20.4-codegen/iteration-0002-plan.prompt
+?? logs/ralph-wiggum/20.4-codegen/iteration-0003-plan-review.log
+?? logs/ralph-wiggum/20.4-codegen/iteration-0003-plan-review.out
+?? logs/ralph-wiggum/20.4-codegen/iteration-0003-plan-review.prompt
+?? logs/ralph-wiggum/20.4-codegen/iteration-0003-plan.log
+?? logs/ralph-wiggum/20.4-codegen/iteration-0003-plan.out
+?? logs/ralph-wiggum/20.4-codegen/iteration-0003-plan.prompt
+?? logs/ralph-wiggum/20.4-codegen/iteration-0004-plan-review.log
+?? logs/ralph-wiggum/20.4-codegen/iteration-0004-plan-review.out
+?? logs/ralph-wiggum/20.4-codegen/iteration-0004-plan-review.prompt
+?? logs/ralph-wiggum/20.4-codegen/iteration-0004-plan.log
+?? logs/ralph-wiggum/20.4-codegen/iteration-0004-plan.out
+?? logs/ralph-wiggum/20.4-codegen/iteration-0004-plan.prompt
+?? logs/ralph-wiggum/20.4-codegen/iteration-0005-plan-review.log
+?? logs/ralph-wiggum/20.4-codegen/iteration-0005-plan-review.out
+?? logs/ralph-wiggum/20.4-codegen/iteration-0005-plan-review.prompt
+?? logs/ralph-wiggum/20.4-codegen/iteration-0005-plan.log
+?? logs/ralph-wiggum/20.4-codegen/iteration-0005-plan.out
+?? logs/ralph-wiggum/20.4-codegen/iteration-0005-plan.prompt
+?? papers/BradyLivescu2019.pdf
+?? papers/BradyLivscu2021.pdf
+?? papers/StabilityAndGroupVelocity.pdf
+
+--- current ---
+?? logs/ralph-wiggum/20.2-interior-stencils.log
+?? logs/ralph-wiggum/20.2-interior-stencils/iteration-0001-plan.log
+?? logs/ralph-wiggum/20.2-interior-stencils/iteration-0001-plan.out
+?? logs/ralph-wiggum/20.2-interior-stencils/iteration-0001-plan.prompt
+?? logs/ralph-wiggum/20.3-boundary-stencils.log
+?? logs/ralph-wiggum/20.3-boundary-stencils/iteration-0001-plan-review.log
+?? logs/ralph-wiggum/20.3-boundary-stencils/iteration-0001-plan-review.out
+?? logs/ralph-wiggum/20.3-boundary-stencils/iteration-0001-plan-review.prompt
+?? logs/ralph-wiggum/20.3-boundary-stencils/iteration-0001-plan.log
+?? logs/ralph-wiggum/20.3-boundary-stencils/iteration-0001-plan.out
+?? logs/ralph-wiggum/20.3-boundary-stencils/iteration-0001-plan.prompt
+?? logs/ralph-wiggum/20.3-boundary-stencils/iteration-0002-plan-review.log
+?? logs/ralph-wiggum/20.3-boundary-stencils/iteration-0002-plan-review.out
+?? logs/ralph-wiggum/20.3-boundary-stencils/iteration-0002-plan-review.prompt
+?? logs/ralph-wiggum/20.3-boundary-stencils/iteration-0002-plan.log
+?? logs/ralph-wiggum/20.3-boundary-stencils/iteration-0002-plan.out
+?? logs/ralph-wiggum/20.3-boundary-stencils/iteration-0002-plan.prompt
+?? logs/ralph-wiggum/20.3-boundary-stencils/iteration-0003-plan-review.log
+?? logs/ralph-wiggum/20.3-boundary-stencils/iteration-0003-plan-review.out
+?? logs/ralph-wiggum/20.3-boundary-stencils/iteration-0003-plan-review.prompt
+?? logs/ralph-wiggum/20.3-boundary-stencils/iteration-0003-plan.log
+?? logs/ralph-wiggum/20.3-boundary-stencils/iteration-0003-plan.out
+?? logs/ralph-wiggum/20.3-boundary-stencils/iteration-0003-plan.prompt
+?? logs/ralph-wiggum/20.3-boundary-stencils/iteration-0004-plan-review.log
+?? logs/ralph-wiggum/20.3-boundary-stencils/iteration-0004-plan-review.out
+?? logs/ralph-wiggum/20.3-boundary-stencils/iteration-0004-plan-review.prompt
+?? logs/ralph-wiggum/20.3-boundary-stencils/iteration-0004-plan.log
+?? logs/ralph-wiggum/20.3-boundary-stencils/iteration-0004-plan.out
+?? logs/ralph-wiggum/20.3-boundary-stencils/iteration-0004-plan.prompt
+?? logs/ralph-wiggum/20.3-boundary-stencils/iteration-0005-plan-review.log
+?? logs/ralph-wiggum/20.3-boundary-stencils/iteration-0005-plan-review.out
+?? logs/ralph-wiggum/20.3-boundary-stencils/iteration-0005-plan-review.prompt
+?? logs/ralph-wiggum/20.3-boundary-stencils/iteration-0005-plan.log
+?? logs/ralph-wiggum/20.3-boundary-stencils/iteration-0005-plan.out
+?? logs/ralph-wiggum/20.3-boundary-stencils/iteration-0005-plan.prompt
+?? logs/ralph-wiggum/20.3-boundary-stencils/iteration-0006-plan-review.log
+?? logs/ralph-wiggum/20.3-boundary-stencils/iteration-0006-plan-review.out
+?? logs/ralph-wiggum/20.3-boundary-stencils/iteration-0006-plan-review.prompt
+?? logs/ralph-wiggum/20.3-boundary-stencils/iteration-0006-plan.log
+?? logs/ralph-wiggum/20.3-boundary-stencils/iteration-0006-plan.out
+?? logs/ralph-wiggum/20.3-boundary-stencils/iteration-0006-plan.prompt
+?? logs/ralph-wiggum/20.3-boundary-stencils/iteration-0007-plan.log
+?? logs/ralph-wiggum/20.3-boundary-stencils/iteration-0007-plan.out
+?? logs/ralph-wiggum/20.3-boundary-stencils/iteration-0007-plan.prompt
+?? logs/ralph-wiggum/20.4-codegen.log
+?? logs/ralph-wiggum/20.4-codegen/iteration-0001-plan-review.log
+?? logs/ralph-wiggum/20.4-codegen/iteration-0001-plan-review.out
+?? logs/ralph-wiggum/20.4-codegen/iteration-0001-plan-review.prompt
+?? logs/ralph-wiggum/20.4-codegen/iteration-0001-plan.log
+?? logs/ralph-wiggum/20.4-codegen/iteration-0001-plan.out
+?? logs/ralph-wiggum/20.4-codegen/iteration-0001-plan.prompt
+?? logs/ralph-wiggum/20.4-codegen/iteration-0002-plan-review.log
+?? logs/ralph-wiggum/20.4-codegen/iteration-0002-plan-review.out
+?? logs/ralph-wiggum/20.4-codegen/iteration-0002-plan-review.prompt
+?? logs/ralph-wiggum/20.4-codegen/iteration-0002-plan.log
+?? logs/ralph-wiggum/20.4-codegen/iteration-0002-plan.out
+?? logs/ralph-wiggum/20.4-codegen/iteration-0002-plan.prompt
+?? logs/ralph-wiggum/20.4-codegen/iteration-0003-plan-review.log
+?? logs/ralph-wiggum/20.4-codegen/iteration-0003-plan-review.out
+?? logs/ralph-wiggum/20.4-codegen/iteration-0003-plan-review.prompt
+?? logs/ralph-wiggum/20.4-codegen/iteration-0003-plan.log
+?? logs/ralph-wiggum/20.4-codegen/iteration-0003-plan.out
+?? logs/ralph-wiggum/20.4-codegen/iteration-0003-plan.prompt
+?? logs/ralph-wiggum/20.4-codegen/iteration-0004-plan-review.log
+?? logs/ralph-wiggum/20.4-codegen/iteration-0004-plan-review.out
+?? logs/ralph-wiggum/20.4-codegen/iteration-0004-plan-review.prompt
+?? logs/ralph-wiggum/20.4-codegen/iteration-0004-plan.log
+?? logs/ralph-wiggum/20.4-codegen/iteration-0004-plan.out
+?? logs/ralph-wiggum/20.4-codegen/iteration-0004-plan.prompt
+?? logs/ralph-wiggum/20.4-codegen/iteration-0005-plan-review.log
+?? logs/ralph-wiggum/20.4-codegen/iteration-0005-plan-review.out
+?? logs/ralph-wiggum/20.4-codegen/iteration-0005-plan-review.prompt
+?? logs/ralph-wiggum/20.4-codegen/iteration-0005-plan.log
+?? logs/ralph-wiggum/20.4-codegen/iteration-0005-plan.out
+?? logs/ralph-wiggum/20.4-codegen/iteration-0005-plan.prompt
+?? logs/ralph-wiggum/20.4-codegen/iteration-0006-plan.log
+?? logs/ralph-wiggum/20.4-codegen/iteration-0006-plan.out
+?? logs/ralph-wiggum/20.4-codegen/iteration-0006-plan.prompt
+?? papers/BradyLivescu2019.pdf
+?? papers/BradyLivscu2021.pdf
+?? papers/StabilityAndGroupVelocity.pdf

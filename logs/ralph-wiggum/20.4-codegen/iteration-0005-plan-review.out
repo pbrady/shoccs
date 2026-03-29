@@ -1,0 +1,21 @@
+The plan is complete and well-structured. Here is my review summary:
+
+---
+
+**Review of commit e8981b2 — "Refine 20.4: add test fixtures, method signature formatting rule"**
+
+**Reviewed:** 3 additions totaling 116 lines in `plans/20.4-codegen.md`:
+
+1. **Method signature formatting rule** (20.4d Step 3, lines 577-588): Specifies single-line signatures for uniform stencils (unnamed `real` psi parameter) and two-line signatures for cut-cell stencils (named `real psi`). Verified against `src/stencils/E4u_1.cpp:77` and `src/stencils/polyE2_1.cpp:170-171` — both patterns match the source exactly.
+
+2. **Shared test fixtures** (20.4d, lines 727-787): Defines `e4u_floating_coeffs` (15 entries), `e4u_dirichlet_coeffs` (10 entries via slice), `poly_floating_coeffs` (12 entries), `uniform_printer`, and `cutcell_printer`. Verified all 15 E4u coefficient expressions against `E4u_1.cpp:80-94` — exact match. Spot-checked 4 polyE2_1 coefficients against `polyE2_1.cpp:187-190` by manually expanding CSE temporaries — correct. Array sizing (R*T) and Dirichlet slicing (floating_coeffs[5:]) are consistent with spec parameters.
+
+3. **StencilGenSpec fixtures** (20.4e, lines 1250-1289): Defines `e4u_spec` and `poly_spec` with correct P/R/T/X values, coefficient lists, and param_arrays. Dirichlet dummy row-0 padding and interp fields are correctly set.
+
+**Assessment:**
+- **Specificity:** All sub-items name exact fixtures, parameters, array sizes, and line references. Sufficient for implementation.
+- **Ordering:** Shared fixtures are defined before the tests that reference them (20.4d fixtures before 20.4d/e/f tests; StencilGenSpec fixtures before 20.4e tests). Dependencies respected.
+- **Integrity:** Pure addition (116 insertions, 0 deletions). The existing "Tests" sections and surrounding content are intact.
+- **Cross-cutting decisions:** The signature formatting rule is documented where it applies (20.4d Step 3). No separate decision log entry needed.
+
+**Result:** No issues found. Plan was not updated.

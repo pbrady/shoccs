@@ -1,0 +1,2 @@
+RALPH_STATUS: committed
+RALPH_SUMMARY: Refined 20.3d conservation constraint: fixed column range (0..t-2 not 1..t-2), column 0 RHS (-1 from SBP), added equation count proof (3p-2 square system), complete E4u worked example with all 4 equations, and clarified 20.3c placeholder naming/dependency.

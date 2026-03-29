@@ -1,0 +1,26 @@
+## Summary
+
+**Reviewed:** Commit 5b50907 (Refine 20.5: fix variant definitions, column convention, Taylor count formula)
+
+**Assessment of the refinement:** The commit is a substantial and well-executed improvement:
+- Correctly fixes the 2nd derivative variant from uniform B^{d,1/2} to per-row B^{d,1} (verified against `E2_2.cpp` at psi=0)
+- Adds Column Convention section documenting the C++/math-reference column swap
+- Fixes Taylor constraint count to `n_eqs = max(q+1, nu+1)` (critical for nu=2 with q=1)
+- Adds `solve_uniform_limit` step for near-interior row target values
+- Replaces confused E2_2 inline corrections with verified worked examples for both rows
+- Records D-R22 decision in meta.md
+- Dependency ordering is correct; no items were deleted or corrupted
+
+**Issues found and fixed (committed as 0f91a2b):**
+
+1. **E2_1 worked example row 3 had incorrect constant values** — The values `[-1/2, 0, 0, 1/2, 0]` were carried over from the old plan's assumption that row 3 is the interior stencil. Mathematically, the interior stencil `[0, 0, 0, -1/2, 0]` at x_3 fails the k=0 Taylor condition, and conservation at psi=0 (w_0=0) makes the actual values alpha-dependent: `d_{3,j} = -(a_{1,j} + a_{2,j})`.
+
+2. **Row 3 explanatory text contradicted the general principle** — Line 246 says the near-interior row is "NOT simply the interior stencil placed at the boundary", but the worked example text described exactly that. Replaced with correct explanation referencing conservation and the psi→0 limit.
+
+3. **Column labels inconsistent** — Changed `col-0, col-1, ...` to `x_0, x_1, ...` to match the rest of the plan.
+
+4. **Stale variant name** — Changed `B^{d,0}` label (old plan's name) to `B^d` (consistent with E2_2 example and the plan's simplified mapping).
+
+5. **Implementation note updated** — `build_degenerate_stencil` row r now says "Taylor solve at psi=0" instead of "interior stencil coefficients at appropriate columns", with a note that E2_2 (where the interior stencil fits) is the coincident case.
+
+6. **Added verification item** — E2_1 degenerate row 3 must satisfy Taylor accuracy at psi=0 and conservation constraint.

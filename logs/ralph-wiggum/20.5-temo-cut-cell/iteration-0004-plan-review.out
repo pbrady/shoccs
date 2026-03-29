@@ -1,0 +1,17 @@
+The cross-references between 20.5d and 20.5e are consistent: 20.5d's `solve_temo_row` explicitly notes it delegates to `solve_in_field` from 20.5e Phase 1, and 20.5e Phase 1 explicitly says it must be implemented before 20.5d.
+
+**Review Summary:**
+
+The commit f9e0f07 (Refine 20.5e: split QQ(psi) utilities from conservation, add alpha decomposition) is a well-structured refinement. Here are my findings:
+
+**Specificity:** All sub-items name exact function signatures, file paths (`scripts/stencil_gen/stencil_gen/temo.py`), test commands, and expected values. Phase 1 and Phase 2 both have detailed algorithms (e.g., the 5-step conservation algorithm for E2_1, the alpha-decomposition solve strategy).
+
+**Dependency ordering:** Correctly documented. The cross-dependency (20.5e Phase 1 → 20.5d → 20.5e Phase 2) is noted in both 20.5d (ordering note on `solve_temo_row`) and 20.5e (implementation order header). The actual implementation order is: 20.5a → 20.5b → 20.5c → 20.5e Phase 1 → 20.5d → 20.5e Phase 2 → 20.5f → 20.5g → 20.5h.
+
+**No items deleted or corrupted:** All 6 old 20.5e items are expanded into 16 more specific items. The old `field_solve` → 5 granular utilities; old `build_cut_cell_conservation` → `apply_cut_cell_conservation` + `map_alpha_to_cpp` with detailed algorithms. Verify and performance items are all preserved (some enhanced — e.g., "symbolically" added to conservation check, concrete E2_1 test values added).
+
+**Decision log:** No new architectural decisions were introduced. The Phase 1/Phase 2 split is an implementation ordering choice, not an architecture decision. Existing decisions (D-R22 through D-R25) remain relevant and unchanged.
+
+**Minor observation:** The Phase 1 test pattern `"field_solve or solve_in_field"` includes the old function name `field_solve` alongside the new `solve_in_field`. This is harmless (OR pattern, and the file doesn't exist yet) and could be seen as covering both potential test naming conventions.
+
+**Verdict:** No updates needed. The plan refinement is clean, specific, correctly ordered, and complete.

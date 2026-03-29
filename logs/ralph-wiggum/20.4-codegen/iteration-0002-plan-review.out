@@ -1,0 +1,20 @@
+**Review Summary for commit 927b3ea**
+
+Reviewed the refinement of `/workspace/plans/20.4-codegen.md` (108 insertions, 8 deletions across 5 areas).
+
+**What was refined:**
+- 20.4c: Formalized `format_rational_h_division` with function signature, algorithm, nu=2 format table, and test assertions
+- 20.4e: Added `_emit_*` decomposition table (7 helpers) with section mapping and critical `dirichlet_coeffs[T:]` slicing note
+- 20.4f: Added scoped block sizing details (`n_coeffs` computation, `ex` vector, psi/right conventions)
+- 20.4g: Added blocking dependency note on 20.2/20.3 with `importorskip` guard
+- Implementation order: Clarified steps 1–6 work independently of 20.2/20.3
+
+**Checks performed:**
+1. **Specificity** — All sub-items name exact files, function signatures, algorithms, format tables, and test assertions. Sufficient for implementation. ✓
+2. **Ordering** — Dependency chain 20.4a→b→c→d→e→f→g is correct. 20.2/20.3 blocking correctly scoped to step 7 only. ✓
+3. **No accidental deletions** — All 8 deleted lines were intentional replacements with more detailed content. All 7 sub-tasks (20.4a–20.4g) remain intact. ✓
+4. **Decision log** — All changes are internal to 20.4; no cross-cutting decisions requiring a meta.md entry. ✓
+5. **Format table accuracy** — Verified nu=1 tables against E4u_1.cpp/E8u_1.cpp (exact match). Nu=2 table verified against E2_2.cpp (match for q=1 cases). E4_2.cpp uses `12.` (float literal denominator) vs plan's `12` (integer) — semantically equivalent in C++, consistent with the plan's explicit "numerical comparison, not string comparison" philosophy. ✓
+6. **Test data consistency** — Cross-checked 20.4g test values (psi=1.0/Floating, psi=0.0/Dirichlet, h=2.0/0.5) against E4u_1.t.cpp. Match confirmed. ✓
+
+**Result: No plan update needed.** The refinement is well-targeted, specific, correctly ordered, and internally consistent.
