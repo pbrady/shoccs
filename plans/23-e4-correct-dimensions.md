@@ -155,7 +155,7 @@ With r=4 and p=2, the interior stencil `[1/12, -2/3, 0, 2/3, -1/12]` at the near
   - `test_nbs_dirichlet_method`: coefficient count 21 → 28 (line ~422)
   - `test_compute_floating_values`: count 28 → 35 (line ~508)
   - `test_compute_dirichlet_values`: count 21 → 28 (line ~519)
-  - `test_floating_uniform_limit_row3_interior`: rename to `_row4_interior`, update row indices 21:28 → 28:35. The expected values will NOT be the simple interior/h pattern — row 4 at psi=1 uses conservation+Taylor (involves alphas). **Compute expected values numerically** by running `compute_test_values` on the 5×7 floating matrix with the ALPHA_VALUES and psi=1.0, then extracting indices 28:35. Replace the hardcoded `expected` list with these computed values. (Lines ~521-535)
+  - `test_floating_uniform_limit_row3_interior`: rename to `_row4_not_interior`, update row indices 21:28 → 28:35. The expected values will NOT be the simple interior/h pattern — row 4 at psi=1 uses conservation+Taylor (involves alphas). **Compute expected values numerically** by running `compute_test_values` on the 5×7 floating matrix with the ALPHA_VALUES and psi=1.0, then extracting indices 28:35. Replace the hardcoded `expected` list with these computed values. (Lines ~521-535)
   - `test_generate_test_file_structure`: `r == 4` → `r == 5`, `alpha = {0.1, -0.05, 0.02, 0.01}` → 5-element array `{0.1, -0.05, 0.02, 0.01, 0.005}` (line ~559-561)
   - `ALPHA_VALUES`: change from 4 to 5 elements: `{"alpha": [0.1, -0.05, 0.02, 0.01, 0.005]}` (line ~468). Both fixtures and all tests referencing this dict are affected.
   - Ordering: must complete 23.2a-23.2c first
