@@ -72,7 +72,7 @@ With r=4 and p=2, the interior stencil `[1/12, -2/3, 0, 2/3, -1/12]` at the near
 ### 23.2 — Fix pipeline and tests for R=5 dimensions
 
 - [ ] **23.2a** Fix `build_degenerate_stencil` near-interior row for r=4 overflow:
-  - **Problem:** When `can_embed_interior` is False (interior stencil extends beyond T-frame), the current code fixes ALL columns where `j >= p+2` via conservation, then Taylor-solves the rest. With r=4, p=2, T=7: conservation fixes cols {2,4,5,6}, leaving unknowns {0,2,3} for 4 Taylor equations — overdetermined.
+  - **Problem:** When `can_embed_interior` is False (interior stencil extends beyond T-frame), the current code fixes ALL columns where `j >= p+2` via conservation, then Taylor-solves the rest. With r=4, p=2, T=7: conservation fixes cols {4,5,6} (from `range(p+2, T)`), plus zeroed col {1} → 4 known, leaving unknowns {0,2,3} for 4 Taylor equations — overdetermined.
   - **Fix:** In the `else` branch (lines ~517-571), limit conservation-fixed columns to `n_free = T - 1 - n_eqs` (= 7-1-4 = 2 for E4_1). Select the rightmost 2 eligible conservation columns (cols 5,6). This gives unknowns {0,2,3,4} for 4 Taylor equations — exactly determined.
   - **Implementation:** Replace the fixed loop `for j in range(p + 2, T)` with logic that:
     1. Collects all eligible conservation columns: those where `_interior_contribution(j-1, r+1, p, interior)` can be computed (includes j=2..6 for E4_1)
