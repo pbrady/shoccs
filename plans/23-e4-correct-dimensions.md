@@ -185,7 +185,7 @@ With r=4 and p=2, the interior stencil `[1/12, -2/3, 0, 2/3, -1/12]` at the near
     8. Check rank(M) == rank([M|b]) — if so, conservation is feasible
   - **Expected:** rank gap = 0 (the extra row and weight at R=5 resolve the R=4 infeasibility)
   - **If rank gap ≠ 0:** BLOCKED — conservation infeasibility is structural even at R=5
-  - **Implementation:** Add test `test_e4_1_conservation_feasible_r5` in `test_e4_cut_cell.py`, following the pattern from `TestApproachCEntryLevelUnknowns.test_rank_gap_constant_weights_8_betas` (lines 1331-1416) but using the standard alpha-parameterized pipeline at R=5 instead of the beta-parameterized one at R=4.
+  - **Implementation:** Add test `test_e4_1_conservation_feasible_r5` in `test_e4_cut_cell.py`. The pattern to follow was in the now-deleted `TestApproachCEntryLevelUnknowns.test_rank_gap_constant_weights_8_betas` (see commit `545cd12^` for the original, lines 1331-1416). The algorithm: (1) build conservation equations from `build_cut_cell_conservation_system`, (2) for each bilinear term w_i × α_k (i≥1), substitute θ_{i,k}, (3) clear ψ-denominators via `cancel`/`fraction`, (4) collect ψ-coefficients via `Poly(num, psi).all_coeffs()`, (5) build `linear_eq_to_matrix` over [w_1..w_4, row-0 alphas, θ symbols], (6) check rank(M)==rank([M|b]). Use the standard alpha-parameterized pipeline at R=5 (5 alphas) instead of the beta-parameterized one at R=4.
   - Ordering: must complete 23.2a-23.2c first
   - File: `scripts/stencil_gen/tests/test_e4_cut_cell.py`
   - Test: `cd scripts/stencil_gen && uv run pytest tests/test_e4_cut_cell.py::test_e4_1_conservation_feasible_r5 -v`
