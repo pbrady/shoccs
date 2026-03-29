@@ -39,7 +39,7 @@ build_conservation_system(r=4, t=6, p=2, rows, interior)
 
 ### 24.1 — Add conservation to `derive_uniform_boundary_for_temo`
 
-- [ ] **24.1a** Modify `derive_uniform_boundary_for_temo` in `temo.py` to apply conservation:
+- [x] **24.1a** Modify `derive_uniform_boundary_for_temo` in `temo.py` to apply conservation:
   - After the existing loop that calls `solve_boundary_row` for each of r rows
   - Add these lines (pseudo-code):
     ```python
@@ -64,7 +64,7 @@ build_conservation_system(r=4, t=6, p=2, rows, interior)
 
 ### 24.2 — Test E4_1 uniform conservation
 
-- [ ] **24.2a** Add test verifying E4_1 uniform boundary has conservation:
+- [x] **24.2a** Add test verifying E4_1 uniform boundary has conservation:
   - Call `derive_uniform_boundary_for_temo(E4_1)`
   - Verify: B_u shape is (4, 6)
   - Verify: exactly 4 free alpha symbols remain (was 5 before conservation)
@@ -75,25 +75,32 @@ build_conservation_system(r=4, t=6, p=2, rows, interior)
 
 ### 24.3 — Verify cut-cell conservation follows
 
-- [ ] **24.3a** After TEMO construction with the conservation-constrained B_u, verify column sums:
-  - Build the cut-cell stencil using `construct_cut_cell_stencil` with the new B_u
-  - For each interior column j, check `Σ_i w_i(ψ) · B[i,j] = 0`
-  - The weights w_i(ψ) should be derivable from the uniform weights via the TEMO extension
-  - If this doesn't hold automatically: the TEMO construction may need a conservation step too
-  - But the paper suggests it should follow from uniform conservation by construction
-  - File: `scripts/stencil_gen/tests/test_e4_cut_cell.py`
-  - Test: `cd scripts/stencil_gen && uv run pytest tests/test_e4_cut_cell.py -v -k "cutcell_conservation" --timeout=120`
+- [x] **24.3a** After TEMO construction with the conservation-constrained B_u, verify column sums:
+  - Build the cut-cell stencil using `derive_cut_cell_scheme(E4_1, psi, conserve=True)`
+  - **RESULT: INFEASIBLE.** Even with conservation-constrained uniform boundary (4 alphas),
+    the overdetermined cut-cell conservation system (5 equations, 4 weight unknowns) is
+    inconsistent. The 5th compatibility condition is a degree-6 polynomial in psi whose
+    7 psi-coefficients are non-trivial in (alpha_0..alpha_3). Groebner basis = {1} confirms
+    no alpha assignment exists. This matches the Phase 23.3c-ii finding.
+  - TEMO construction does NOT automatically preserve the SBP conservation property.
+  - File: `scripts/stencil_gen/tests/test_e4_cut_cell.py` (class `TestCutCellConservationAfterUniform`)
+  - Test: `cd scripts/stencil_gen && uv run pytest tests/test_e4_cut_cell.py -v -k "CutCellConservationAfterUniform"` — all 5 tests pass
 
 ### 24.4 — Update E4_1 alpha count and re-generate C++
 
-- [ ] **24.4a** Update E4_1 tests for 4 free alphas (was 5):
-  - Fix any assertions about alpha count
-  - Re-generate E4_1.cpp with conservation-constrained stencil
-  - File: `scripts/stencil_gen/tests/test_e4_cut_cell.py`, `scripts/stencil_gen/output/E4_1.cpp`
+- [x] **24.4a** Update E4_1 tests for 4 free alphas (was 5):
+  - Updated `TestE4CodeGeneration` and `TestE4TestFileGeneration` to use
+    `derive_cut_cell_scheme(E4_1, psi, conserve=True)` instead of manual non-conserved pipeline
+  - Changed `param_arrays={"alpha": 5}` → `{"alpha": 4}` in both fixtures
+  - Updated `test_alpha_array` assertion: `std::array<real, 4>` (was 5)
+  - Updated `ALPHA_VALUES` from 5 values to 4
+  - Updated test file assertion for alpha init list
+  - Re-generated `output/E4_1.cpp` and `output/E4_1.t.cpp` with 4-alpha conservation
+  - All 14 codegen + 6 test file generation tests pass
 
 ### 24.5 — Regression: E2_1 unchanged
 
-- [ ] **24.5a** Verify E2_1 tests still pass:
+- [x] **24.5a** Verify E2_1 tests still pass:
   - E2_1 already had conservation via `derive_e2_uniform_boundary`
-  - The new code path should produce identical results
-  - Test: `cd scripts/stencil_gen && uv run pytest tests/test_temo.py -v --timeout=120`
+  - All 121 TEMO tests pass (`tests/test_temo.py`)
+  - Full E4 cut-cell suite: 70 passed, 1 xfailed (`tests/test_e4_cut_cell.py`)

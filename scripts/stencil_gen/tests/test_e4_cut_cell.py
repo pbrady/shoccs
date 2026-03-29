@@ -337,26 +337,22 @@ class TestE4TEMOConstruction:
 
 
 class TestE4CodeGeneration:
-    """Tests for E4_1 C++ code generation (21.4b)."""
+    """Tests for E4_1 C++ code generation (21.4b, updated for 4-alpha conservation)."""
 
     @pytest.fixture(scope="class")
     def e4_spec(self):
-        """Build the full StencilGenSpec from the TEMO pipeline."""
+        """Build the full StencilGenSpec via derive_cut_cell_scheme (conserve=True)."""
         psi = Symbol("psi")
-        ur = derive_uniform_boundary_for_temo(E4_1)
-        result = construct_cut_cell_stencil(
-            ur.B_u, ur.interior, p=2, q=3, nu=1, nextra=0, psi=psi,
-        )
-        dims = compute_dimensions(E4_1.p, E4_1.q, E4_1.s, E4_1.nextra, E4_1.nu)
-        cc = assemble_cut_cell_result(
-            result.matrix, None, None, dims, ur.alpha_symbols,
-        )
+        cc = derive_cut_cell_scheme(E4_1, psi, conserve=True)
 
         # floating_coeffs: R*T = 5*7 = 35 entries, row-major from cc.floating
         floating_flat = list(cc.floating)
 
         # dirichlet_coeffs: R*T = 35 entries (prepend T=7 zeros for row 0)
         dirichlet_flat = [Integer(0)] * 7 + list(cc.dirichlet)
+
+        interior = [Rational(1, 12), Rational(-2, 3), S.Zero,
+                    Rational(2, 3), Rational(-1, 12)]
 
         spec = StencilGenSpec(
             name="E4_1",
@@ -366,8 +362,8 @@ class TestE4CodeGeneration:
             X=0,
             derivative_order=1,
             is_uniform=False,
-            param_arrays={"alpha": 5},
-            interior_coeffs=ur.interior,
+            param_arrays={"alpha": 4},
+            interior_coeffs=interior,
             floating_coeffs=floating_flat,
             dirichlet_coeffs=dirichlet_flat,
         )
@@ -394,8 +390,8 @@ class TestE4CodeGeneration:
         assert "namespace ccs::stencils" in e4_code
 
     def test_alpha_array(self, e4_code):
-        """Generated code has std::array<real, 5> alpha member."""
-        assert "std::array<real, 5> alpha;" in e4_code
+        """Generated code has std::array<real, 4> alpha member (conservation reduces from 5)."""
+        assert "std::array<real, 4> alpha;" in e4_code
 
     def test_constructor(self, e4_code):
         """Generated code has span constructor."""
@@ -473,25 +469,21 @@ class TestE4CodeGeneration:
 
 
 class TestE4TestFileGeneration:
-    """Tests for E4_1 C++ test file generation (21.4c)."""
+    """Tests for E4_1 C++ test file generation (21.4c, updated for 4-alpha conservation)."""
 
-    ALPHA_VALUES = {"alpha": [0.1, -0.05, 0.02, 0.01, 0.005]}
+    ALPHA_VALUES = {"alpha": [0.1, -0.05, 0.02, 0.01]}
 
     @pytest.fixture(scope="class")
     def e4_spec(self):
-        """Build the full StencilGenSpec from the TEMO pipeline."""
+        """Build the full StencilGenSpec via derive_cut_cell_scheme (conserve=True)."""
         psi = Symbol("psi")
-        ur = derive_uniform_boundary_for_temo(E4_1)
-        result = construct_cut_cell_stencil(
-            ur.B_u, ur.interior, p=2, q=3, nu=1, nextra=0, psi=psi,
-        )
-        dims = compute_dimensions(E4_1.p, E4_1.q, E4_1.s, E4_1.nextra, E4_1.nu)
-        cc = assemble_cut_cell_result(
-            result.matrix, None, None, dims, ur.alpha_symbols,
-        )
+        cc = derive_cut_cell_scheme(E4_1, psi, conserve=True)
 
         floating_flat = list(cc.floating)
         dirichlet_flat = [Integer(0)] * 7 + list(cc.dirichlet)
+
+        interior = [Rational(1, 12), Rational(-2, 3), S.Zero,
+                    Rational(2, 3), Rational(-1, 12)]
 
         return StencilGenSpec(
             name="E4_1",
@@ -501,8 +493,8 @@ class TestE4TestFileGeneration:
             X=0,
             derivative_order=1,
             is_uniform=False,
-            param_arrays={"alpha": 5},
-            interior_coeffs=ur.interior,
+            param_arrays={"alpha": 4},
+            interior_coeffs=interior,
             floating_coeffs=floating_flat,
             dirichlet_coeffs=dirichlet_flat,
         )
@@ -569,7 +561,7 @@ class TestE4TestFileGeneration:
         assert 'TEST_CASE("E4_1")' in code
         assert 'type = "E4"' in code
         assert "order = 1" in code
-        assert "alpha = {0.1, -0.05, 0.02, 0.01, 0.005}" in code
+        assert "alpha = {0.1, -0.05, 0.02, 0.01}" in code
         assert "REQUIRE(p == 2)" in code
         assert "REQUIRE(r == 5)" in code
         assert "REQUIRE(t == 7)" in code
@@ -1253,4 +1245,78 @@ class TestE4UniformConservation:
         ur = derive_uniform_boundary_for_temo(E2_1, conserve=True)
         assert len(ur.alpha_symbols) == 4
         assert ur.weights is None  # nextra=1 conservation is inline, no explicit weights
+
+
+class TestCutCellConservationAfterUniform:
+    """Tests for 24.3a: does cut-cell conservation follow from uniform conservation?
+
+    Result: NO.  Even with the conservation-constrained uniform boundary
+    (4 alphas), the overdetermined cut-cell conservation system (5 equations
+    in 4 weight unknowns) is inconsistent.  The 5th compatibility condition
+    is a degree-6 polynomial in psi whose coefficients are non-trivial
+    functions of (alpha_0, ..., alpha_3), and no alpha assignment zeroes
+    all of them simultaneously.
+
+    This matches the Phase 23.3c-ii finding: TEMO construction does NOT
+    preserve the SBP conservation property automatically.
+    """
+
+    @pytest.fixture(scope="class")
+    def conserved_cut_cell(self):
+        """Build E4_1 cut-cell stencil with uniform conservation enforced."""
+        psi = Symbol("psi")
+        result = derive_cut_cell_scheme(E4_1, psi, conserve=True)
+        interior = [Rational(1, 12), Rational(-2, 3), S.Zero,
+                    Rational(2, 3), Rational(-1, 12)]
+        eqs, w_syms = build_cut_cell_conservation_system(
+            result.floating, result.floating.rows, result.floating.cols,
+            p=2, nu=1, interior_coeffs=interior, psi=psi,
+        )
+        alpha_syms = sorted(
+            result.floating.free_symbols - {psi}, key=lambda s: s.name
+        )
+        return eqs, w_syms, alpha_syms, psi
+
+    def test_conservation_system_dimensions(self, conserved_cut_cell):
+        """5 conservation equations, 4 weight unknowns (w_1..w_4)."""
+        eqs, w_syms, alpha_syms, _ = conserved_cut_cell
+        assert len(eqs) == 5
+        assert len(w_syms) == 4
+        assert len(alpha_syms) == 4
+
+    def test_first_four_eqs_solvable(self, conserved_cut_cell):
+        """First 4 equations can be solved for w_1..w_4."""
+        eqs, w_syms, _, _ = conserved_cut_cell
+        sol = solve(eqs[:4], w_syms, dict=True)
+        assert len(sol) == 1
+
+    def test_fifth_eq_residual_nonzero(self, conserved_cut_cell):
+        """5th equation is not satisfied — conservation is infeasible."""
+        eqs, w_syms, _, psi = conserved_cut_cell
+        sol = solve(eqs[:4], w_syms, dict=True)[0]
+        residual = cancel(eqs[4].subs(sol))
+        assert residual != 0, "Expected non-zero residual (infeasible)"
+
+    def test_residual_is_degree_6_in_psi(self, conserved_cut_cell):
+        """Compatibility residual is degree 6 in psi (7 alpha-constraints)."""
+        eqs, w_syms, _, psi = conserved_cut_cell
+        sol = solve(eqs[:4], w_syms, dict=True)[0]
+        residual = cancel(eqs[4].subs(sol))
+        num, _ = fraction(residual)
+        p_poly = Poly(expand(num), psi)
+        assert p_poly.degree() == 6
+        assert len(p_poly.all_coeffs()) == 7
+
+    def test_groebner_confirms_infeasibility(self, conserved_cut_cell):
+        """Groebner basis of 7 alpha constraints is {1} — no solution exists."""
+        eqs, w_syms, alpha_syms, psi = conserved_cut_cell
+        sol = solve(eqs[:4], w_syms, dict=True)[0]
+        residual = cancel(eqs[4].subs(sol))
+        num, _ = fraction(residual)
+        p_poly = Poly(expand(num), psi)
+        coeffs = p_poly.all_coeffs()
+        gb = groebner(coeffs, list(alpha_syms), order="lex")
+        assert list(gb) == [1], (
+            f"Expected Groebner basis [1] (inconsistent), got {list(gb)}"
+        )
 
