@@ -170,6 +170,13 @@ With r=4 and p=2, the interior stencil `[1/12, -2/3, 0, 2/3, -1/12]` at the near
   - File: `scripts/stencil_gen/tests/test_e4_cut_cell.py` (lines ~804-838)
   - Test: `cd scripts/stencil_gen && uv run pytest tests/test_e4_cut_cell.py::test_e4_1_conservation_fails -v`
 
+- [ ] **23.2i** Fix `test_temo.py` E4 dimension test assertions (missed by 23.2d-23.2h):
+  - `test_e4_1_dimensions` (line 102): change expected from `Dimensions(r=3, t=6, R=4, T=7, X=0)` to `Dimensions(r=4, t=6, R=5, T=7, X=0)`. Straightforward — matches the corrected formula.
+  - `test_e4_2_dimensions` (line 107): currently expects `Dimensions(r=3, t=6, R=3, T=7, X=3)`, actual is `Dimensions(r=4, t=6, R=4, T=7, X=4)`. **Investigate before updating:** The plan states "Eq. 11b applies only to 1st derivative operators; 2nd derivatives use different sizing." If E4_2 (nu=2) should use `r = p + 1 + nextra = 3` instead of `r = q + 1 + nextra = 4`, then `compute_dimensions` needs a `nu`-dependent formula for `r` itself (not just `r_eff`), and this test's expected values should stay. If the paper's formula is correct for both derivatives (with the existing `r_eff` adjustment), update the test to `Dimensions(r=4, t=6, R=4, T=7, X=4)`.
+  - These failures were introduced by commit 27621e3 (dimension fix) and are currently untracked.
+  - File: `scripts/stencil_gen/tests/test_temo.py`
+  - Test: `cd scripts/stencil_gen && uv run pytest tests/test_temo.py::TestDimensions -v`
+
 ### 23.3 — Enforce conservation in the cut-cell stencil
 
 - [ ] **23.3a** Verify conservation feasibility at R=5 via theta-linearization:
@@ -264,8 +271,9 @@ With r=4 and p=2, the interior stencil `[1/12, -2/3, 0, 2/3, -1/12]` at the near
 
 ### 23.6 — Regression: verify E2_1 and E2_2 unchanged
 
-- [ ] **23.6a** Verify all E2 tests still pass:
+- [ ] **23.6a** Verify all E2 tests still pass and no test_temo.py failures remain:
   - Run full test suite and confirm E2_1 and E2_2 tests are unaffected
+  - Confirm the 2 E4 dimension tests in test_temo.py (fixed in 23.2i) now pass
   - Test: `cd scripts/stencil_gen && uv run pytest tests/test_temo.py -v`
   - Critical: 23.2a and 23.2b MUST NOT change E2_1 or E2_2 behavior. Verify by running E2 tests after each fix.
 
