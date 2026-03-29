@@ -172,23 +172,63 @@ With r=4 and p=2, the interior stencil `[1/12, -2/3, 0, 2/3, -1/12]` at the near
 
 ### 23.3 — Enforce conservation in the cut-cell stencil
 
-- [ ] **23.3a** Add conservation enforcement to the E4_1 TEMO pipeline:
-  - After constructing the 5×7 cut-cell stencil B_l(ψ), apply conservation.
-  - Conservation: Σ_i w_i · B[i,j] + IC(j) = target(j) for j = 0..T-2
-    - w_0 = ψ (fixed), w_1..w_4 are unknowns (4 unknowns)
-    - 6 equations, 4 weight unknowns → 2 excess constraints
-    - The 5 alpha symbols provide degrees of freedom to absorb these 2 constraints
-    - After conservation: 5 - 2 = 3 surviving free alpha parameters (tentative; verify during implementation)
-  - Implementation approach: use `build_cut_cell_conservation_system` to set up the system, then solve for weights and alpha values that satisfy the constraints. The bilinear nature (w_i × alpha_j terms) requires either:
-    1. Linearization (theta substitution as in the old Approach C, but now feasible at R=5), or
-    2. Fix weights to w_i=1 for i≥1, solve for alphas, or
-    3. Use the paper's approach: enforce conservation as additional constraints in the uniform boundary derivation
-  - Design decision needed: which approach to conservation enforcement (record in meta.md as decision D23-1)
-  - File: `scripts/stencil_gen/stencil_gen/temo.py`
+- [ ] **23.3a** Verify conservation feasibility at R=5 via theta-linearization:
+  - **Goal:** Confirm that the conservation rank gap is 0 at R=5 (was 1 at R=4).
+  - After 23.2a-23.2c produce a working 5×7 stencil, replicate the Phase 22 Approach C analysis at R=5:
+    1. Build the 5×7 stencil via `construct_cut_cell_stencil`
+    2. Build conservation equations via `build_cut_cell_conservation_system` → 6 equations in w_1..w_4
+    3. Each equation is rational in ψ with bilinear terms w_i × α_k (since B_l[i,j] contains α_0..α_4 in rows 0-3)
+    4. Clear the common ψ-denominator from each equation → polynomial in ψ
+    5. Collect ψ-coefficients → scalar equations that are bilinear in (w_i, α_k)
+    6. Theta-linearize: for row 0 (weight=ψ, fixed), keep as-is; for rows 1-4, replace w_i × α_k → θ_{i,k}
+    7. Linear unknowns: {w_1..w_4, θ_{i,k} for each bilinear pair} (exact count depends on which α_k appear in which rows)
+    8. Check rank(M) == rank([M|b]) — if so, conservation is feasible
+  - **Expected:** rank gap = 0 (the extra row and weight at R=5 resolve the R=4 infeasibility)
+  - **If rank gap ≠ 0:** BLOCKED — conservation infeasibility is structural even at R=5
+  - **Implementation:** Add test `test_e4_1_conservation_feasible_r5` in `test_e4_cut_cell.py`, following the pattern from `TestApproachCEntryLevelUnknowns.test_rank_gap_constant_weights_8_betas` (lines 1331-1416) but using the standard alpha-parameterized pipeline at R=5 instead of the beta-parameterized one at R=4.
+  - Ordering: must complete 23.2a-23.2c first
+  - File: `scripts/stencil_gen/tests/test_e4_cut_cell.py`
+  - Test: `cd scripts/stencil_gen && uv run pytest tests/test_e4_cut_cell.py::test_e4_1_conservation_feasible_r5 -v`
+  - Also record decision **D23-1** in `plans/meta.md`: theta-linearization approach (same as `solve_conservation` in `conservation.py`, extended for the ψ-parameterized cut-cell case)
 
-- [ ] **23.3b** Verify conservation holds symbolically:
-  - Check `Σ_i w_i · B[i,j] + IC(j) = target(j)` as a polynomial identity in ψ and remaining alphas for ALL interior columns
-  - Remove the xfail marker from `test_e4_1_conservation_fails`
+- [ ] **23.3b** Implement `solve_cut_cell_conservation` function:
+  - **Function signature:** `solve_cut_cell_conservation(B_l: Matrix, R: int, T: int, p: int, nu: int, interior_coeffs: list, psi: Symbol, alpha_syms: list[Symbol]) -> dict[Symbol, Expr]`
+  - **Algorithm** (mirrors `solve_conservation` from `conservation.py:88-167`, adapted for the ψ variable):
+    1. Call `build_cut_cell_conservation_system(B_l, R, T, p, nu, interior_coeffs, psi)` → 6 equations, w_syms=[w_1..w_4]
+    2. Identify bilinear products: for each equation, find all terms of the form `w_i * expr_involving_alpha_k` (i=1..4)
+    3. Create θ_{i,k} symbols for each unique bilinear pair w_i × α_k
+    4. Build substitution dict: `{w_i * α_k: θ_{i,k}}` and apply `expand().subs()` to each equation
+    5. Clear ψ-denominators: for each linearized equation, `cancel()` → `fraction()` → take numerator
+    6. Collect ψ-coefficients: `Poly(num, psi).all_coeffs()` → scalar equations (no ψ)
+    7. Solve the scalar linear system: `linear_eq_to_matrix(scalar_eqs, [w_1..w_4] + [θ_...])` → `linsolve()`
+    8. Recover α constraints: for each θ_{i,k}, α_k = θ_{i,k} / w_i; collect all α constraints and simplify
+    9. Return solution dict mapping each w_i and constrained α_k to expressions in surviving free alphas
+  - **Note on surviving alphas:** The exact number of free alphas after conservation depends on the rank of the scalar system. The plan estimates 3 surviving (5 - 2 excess), but this may vary. The function should detect the free parameters from the linsolve result.
+  - **Invariant:** The function is only called for E4_1 (R=5); E2_1 and E2_2 conservation is handled by the existing uniform-boundary `solve_conservation` path.
+  - File: `scripts/stencil_gen/stencil_gen/temo.py` (add after `build_cut_cell_conservation_system`, around line 1360)
+  - Test: `cd scripts/stencil_gen && uv run pytest tests/test_e4_cut_cell.py -v -k "conservation and not fails"`
+
+- [ ] **23.3c** Integrate conservation into `derive_cut_cell_scheme`:
+  - In `derive_cut_cell_scheme` (temo.py line 2028), after `construct_cut_cell_stencil` produces `floating_result`:
+    1. Call `solve_cut_cell_conservation(floating_result.matrix, ...)` → solution dict
+    2. Substitute constrained alpha values into `floating_result.matrix`
+    3. Update `alpha_symbols` list to contain only the surviving free alphas
+    4. Pass the updated matrix and alpha list to `assemble_cut_cell_result`
+  - Add `weights: dict[Symbol, Expr] | None` field to `CutCellResult` to carry the norm weight solution (needed for 23.4 C++ generation)
+  - **Guard:** Only apply conservation when the scheme has a conservation solver (E4_1). For E2_1/E2_2, skip (conservation is handled in their uniform boundary derivation).
+  - Ordering: must complete 23.3a and 23.3b first
+  - File: `scripts/stencil_gen/stencil_gen/temo.py`
+  - Test: `cd scripts/stencil_gen && uv run pytest tests/test_e4_cut_cell.py::TestDeriveCutCellScheme -v`
+
+- [ ] **23.3d** Verify conservation holds symbolically and update tests:
+  - Update `test_e4_1_conservation_fails` (lines 804-838):
+    - Remove the `@pytest.mark.xfail` marker
+    - Use the conservative stencil from `derive_cut_cell_scheme(E4_1, psi)` instead of the raw `construct_cut_cell_stencil` output
+    - Update R from 4 to 5, column sum to include row 4
+    - Use the solved weights (w_0=ψ, w_1..w_4 from the conservation solution) instead of assuming w_i=1
+    - Verify `Σ_i w_i · B[i,j] + IC(j) = target(j)` as a polynomial identity in ψ and surviving alphas for ALL j=0..T-2
+  - Update `TestBuildCutCellConservationSystem` tests (if needed) to reflect the conservative stencil
+  - Ordering: must complete 23.3b and 23.3c first
   - File: `scripts/stencil_gen/tests/test_e4_cut_cell.py`
   - Test: `cd scripts/stencil_gen && uv run pytest tests/test_e4_cut_cell.py -v -k conservation`
 
@@ -198,10 +238,14 @@ With r=4 and p=2, the interior stencil `[1/12, -2/3, 0, 2/3, -1/12]` at the near
   - P=2, R=5, T=7 (was R=4)
   - 5×7=35 floating coefficients (was 4×7=28)
   - 4×7=28 Dirichlet coefficients (was 3×7=21)
-  - std::array<real, 5> alpha (was 4)
+  - Alpha array size: number of surviving free alphas after conservation (estimated 3, verify from 23.3b result). If conservation leaves N free alphas → `std::array<real, N> alpha`.
   - Dirichlet info: {P, R-1=4, T, 0} (was R-1=3)
-  - Update `src/stencils/E4_1.cpp` and `src/stencils/E4_1.t.cpp`
-  - Rebuild and test: `cmake --build build --target t-E4_1 && ctest --test-dir build -R t-E4_1`
+  - **Process:**
+    1. Run the test suite which generates C++ to `scripts/stencil_gen/output/E4_1.cpp` and `E4_1.t.cpp` (via `TestE4CodeGeneration.test_write_output` and `TestE4TestFileGeneration.test_write_test_output`)
+    2. Copy generated files: `cp scripts/stencil_gen/output/E4_1.cpp src/stencils/E4_1.cpp && cp scripts/stencil_gen/output/E4_1.t.cpp src/stencils/E4_1.t.cpp`
+    3. Rebuild and test: `cmake --build build --target t-E4_1 && ctest --test-dir build -R t-E4_1`
+  - **Note:** The `TestE4CodeGeneration` and `TestE4TestFileGeneration` tests (fixed in 23.2g) must produce correct C++ before this step.
+  - Ordering: must complete 23.2g and 23.3c first (need both correct dimensions AND conservation)
   - File: `src/stencils/E4_1.cpp`, `src/stencils/E4_1.t.cpp`
 
 ### 23.5 — Update plans and decision records
@@ -209,11 +253,12 @@ With r=4 and p=2, the interior stencil `[1/12, -2/3, 0, 2/3, -1/12]` at the near
 - [ ] **23.5a** Update meta.md: revert D-R25, document the correct formula:
   - D-R25 was wrong — Eq. 11b gives `r = q + 1 + nextra`, not `r = p + 1 + nextra`
   - The formulas were only for 1st derivative operators; 2nd derivatives use different sizing
+  - Add new decision D23-1 (conservation approach): theta-linearization with ψ-coefficient extraction (done as part of 23.3a, but ensure it's in meta.md)
   - File: `plans/meta.md`
 
 - [ ] **23.5b** Update Phase 22 plan to document the resolution:
   - The infeasibility was caused by wrong dimensions, not a fundamental mathematical limitation
-  - With correct R=5, conservation is feasible
+  - With correct R=5, conservation is feasible (verified in 23.3a)
   - File: `plans/22-cut-cell-conservation.md`
 
 ### 23.6 — Regression: verify E2_1 and E2_2 unchanged
@@ -251,3 +296,31 @@ Then select the rightmost `n_free` eligible conservation columns. This ensures t
 **E4_1 new behavior:**
 - Degenerate: n_free = 7 - 1 - 4 = 2. Fix cols {5, 6}. Unknowns = {0, 2, 3, 4}. 4×4 Taylor system.
 - Uniform limit: n_free = 7 - 0 - 4 = 3. Fix cols {4, 5, 6}. Unknowns = {0, 1, 2, 3}. 4×4 Taylor system.
+
+## Conservation Enforcement Design Notes
+
+**Approach chosen:** Theta-linearization with ψ-coefficient extraction (decision D23-1).
+
+This extends the existing `solve_conservation` pattern from `conservation.py` (used for uniform boundary E2_1/E2_2) to the ψ-parameterized cut-cell case. The key differences from the uniform case:
+
+1. **ψ as an additional variable:** Conservation must hold for ALL ψ ∈ (0,1], not just at a specific point. This requires extracting ψ-coefficients to convert rational-in-ψ equations into scalar equations.
+
+2. **Bilinear terms:** The conservation equations contain w_i × B_l[i,j](ψ, α), where B_l entries are rational in ψ and linear in α_0..α_4. This produces bilinear products w_i × α_k.
+
+3. **Theta linearization:** Replace each bilinear product w_i × α_k with θ_{i,k}. After solving the linear system, recover α constraints from θ_{i,k} = w_i × α_k.
+
+**Step-by-step:**
+1. Conservation equations (6 total): `ψ·B_l[0,j] + Σ_{i=1}^{4} w_i·B_l[i,j] + IC(j) = target(j)`
+2. B_l[i,j] for rows 0-3: rational in ψ, linear in α_0..α_4 (from B_u derivation)
+3. B_l[4,j] (near-interior): rational in ψ, may contain α symbols from limit computations
+4. Clear ψ-denominators → polynomial equations in ψ
+5. Collect ψ-coefficients → scalar bilinear equations
+6. Theta-linearize → scalar linear system
+7. Solve → weights and α constraints in terms of surviving free αs
+
+**Why this should work at R=5 (where it failed at R=4):**
+- At R=4: 3 weight unknowns, 4 alpha symbols → Phase 22 showed rank gap = 1 (structural infeasibility)
+- At R=5: 4 weight unknowns, 5 alpha symbols → more DOF. The extra row provides an additional weight unknown (w_4) and an additional alpha (α_4), changing the rank structure of the ψ-coefficient system.
+- The Phase 22 tests (`TestApproachDIncreasedDimensions`) tested (R, T) = (4,7)..(8,11) but always used the OLD r=3 dimensions for deriving B_u. With the CORRECT r=4, B_u has different alpha structure (5 alphas instead of 4, different distribution across rows), which changes the conservation system's rank properties.
+
+**Reference implementation:** `conservation.py:solve_conservation()` (lines 88-167) handles the simpler case (no ψ, bilinear in w_i × phi_k). The cut-cell version adds ψ-coefficient extraction between steps 1 and 3 of that function.
