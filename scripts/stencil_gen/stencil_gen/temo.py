@@ -512,11 +512,16 @@ def build_degenerate_stencil(
     else:
         # Conservation approach: use column-sum constraints from boundary rows
         # to fix interior columns, then solve Taylor system for the rest.
-        # This is valid when the uniform boundary has conservation (nextra > 0)
-        # or when the stencil doesn't fit and we need boundary-modified values.
+        # Limit the number of conservation-fixed columns so that the Taylor
+        # system remains exactly determined (n_eqs unknowns for n_eqs equations).
         fixed_cols: set[int] = set()
         if r >= 2:
-            for j in range(p + 2, T):
+            eligible = list(range(p + 2, T))
+            # 1 for the zeroed column, n_eqs for Taylor unknowns
+            n_fix = T - 1 - n_eqs
+            # Take the rightmost eligible columns
+            cons_cols = eligible[-min(n_fix, len(eligible)):]
+            for j in cons_cols:
                 val = -sum(B_d[i, j] for i in range(1, r))
                 B_d[r, j] = val
                 fixed_cols.add(j)
@@ -994,13 +999,17 @@ def solve_uniform_limit(
 
         # Conservation at psi=1 (all weights = 1).
         # sum_{i=0}^{R-1} B_l(1)[i, j] = 0 for interior columns.
-        # A T-frame column j is conserved if:
-        #   (a) no interior stencil reaches it: j < R-p, OR
-        #   (b) uniform conservation applies: j >= p+2
-        fixed_cols: set[int] = set()
+        # Limit conservation-fixed columns so the Taylor system is exactly
+        # determined (n_eqs unknowns for n_eqs equations; no zeroed col at
+        # psi=1).
+        n_fix = T - n_eqs
+        eligible = []
         for j in range(2, T):
-            if not (j < R - p or j >= p + 2):
-                continue
+            if j < R - p or j >= p + 2:
+                eligible.append(j)
+        cons_cols = eligible[-min(n_fix, len(eligible)):]
+        fixed_cols: set[int] = set()
+        for j in cons_cols:
             val = -sum(B_l_1[i, j] for i in range(r))
             B_l_1[r, j] = val
             fixed_cols.add(j)

@@ -71,7 +71,7 @@ With r=4 and p=2, the interior stencil `[1/12, -2/3, 0, 2/3, -1/12]` at the near
 
 ### 23.2 — Fix pipeline and tests for R=5 dimensions
 
-- [ ] **23.2a** Fix `build_degenerate_stencil` near-interior row for r=4 overflow:
+- [x] **23.2a** Fix `build_degenerate_stencil` near-interior row for r=4 overflow:
   - **Problem:** When `can_embed_interior` is False (interior stencil extends beyond T-frame), the current code fixes ALL columns where `j >= p+2` via conservation, then Taylor-solves the rest. With r=4, p=2, T=7: conservation fixes cols {4,5,6} (from `range(p+2, T)`), plus zeroed col {1} → 4 known, leaving unknowns {0,2,3} for 4 Taylor equations — overdetermined.
   - **Fix:** In the `else` branch (lines ~517-571), limit conservation-fixed columns to `n_free = T - 1 - n_eqs` (= 7-1-4 = 2 for E4_1). Select the rightmost 2 eligible conservation columns (cols 5,6). This gives unknowns {0,2,3,4} for 4 Taylor equations — exactly determined.
   - **Implementation:** Replace the fixed loop `for j in range(p + 2, T)` with logic that:
@@ -83,7 +83,7 @@ With r=4 and p=2, the interior stencil `[1/12, -2/3, 0, 2/3, -1/12]` at the near
   - File: `scripts/stencil_gen/stencil_gen/temo.py`, function `build_degenerate_stencil` (lines 429-572)
   - Test: `cd scripts/stencil_gen && uv run pytest tests/test_temo.py -v -k degenerate` (E2 degenerate tests must still pass)
 
-- [ ] **23.2b** Fix `solve_uniform_limit` near-interior row for r=4 overflow:
+- [x] **23.2b** Fix `solve_uniform_limit` near-interior row for r=4 overflow:
   - **Problem:** Same conservation overdetermination as 23.2a. Conservation fixes cols {2,4,5,6}, leaving unknowns {0,1,3} for 4 Taylor equations.
   - **Fix:** In the `else` branch (lines ~983-1044), limit conservation-fixed columns to `n_free = T - n_eqs` (= 7-4 = 3 for E4_1, no zeroed col at psi=1). Select the rightmost 3 eligible columns (cols 4,5,6). This gives unknowns {0,1,2,3} for 4 Taylor equations — exactly determined.
   - **Implementation:** In the `else` branch, replace the column-selection loop with:
@@ -97,7 +97,7 @@ With r=4 and p=2, the interior stencil `[1/12, -2/3, 0, 2/3, -1/12]` at the near
   - After this fix + 23.2a, the full TEMO pipeline (`construct_cut_cell_stencil`) should work for E4_1.
   - Smoke test: `cd scripts/stencil_gen && uv run python -c "from stencil_gen.temo import *; psi=__import__('sympy').Symbol('psi'); ur=derive_uniform_boundary_for_temo(E4_1); print(construct_cut_cell_stencil(ur.B_u, ur.interior, 2, 3, 1, 0, psi).matrix.shape)"`  — should print `(5, 7)`
 
-- [ ] **23.2c** Verify `construct_cut_cell_stencil` works end-to-end for E4_1:
+- [x] **23.2c** Verify `construct_cut_cell_stencil` works end-to-end for E4_1:
   - After 23.2a + 23.2b, run the full pipeline and verify:
     - `construct_cut_cell_stencil` returns a 5×7 matrix (no crash)
     - Taylor accuracy: each row satisfies 4 moment equations for symbolic psi
