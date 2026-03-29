@@ -4,8 +4,8 @@ import pathlib
 
 import pytest
 from sympy import (
-    Integer, Matrix, Rational, S, Symbol, cancel, collect, expand,
-    factor, fraction, linear_eq_to_matrix, simplify, solve,
+    Integer, Matrix, Poly, Rational, S, Symbol, cancel, collect, expand,
+    factor, fraction, linear_eq_to_matrix, linsolve, simplify, solve,
 )
 
 from stencil_gen.codegen import (
@@ -930,4 +930,104 @@ class TestBuildCutCellConservationSystem:
         assert len(alpha_syms) == 5, (
             f"Expected 5 alpha symbols, got {len(alpha_syms)}: {alpha_syms}"
         )
+
+
+def test_e4_1_conservation_constant_weights_infeasible_r5():
+    """E4_1 conservation with constant weights is infeasible at R=5 (23.3a).
+
+    The conservation equations are rational in psi with bilinear terms w_i * alpha_k.
+    We theta-linearize (replace w_i * alpha_k -> theta_{i,k}), clear psi-denominators,
+    extract psi-coefficients to get scalar linear equations, then check
+    rank(M) vs rank([M|b]) via the Rouche-Capelli theorem.
+
+    Result: rank gap = 1, meaning the system is inconsistent. Conservation with
+    constant (psi-independent) weights w_1..w_4 is structurally infeasible at R=5.
+    Direct symbolic solve confirms: w_i solutions are rational functions of psi,
+    not constants. A psi-dependent norm formulation would be needed.
+    """
+    psi = Symbol("psi")
+    ur = derive_uniform_boundary_for_temo(E4_1)
+    stencil = construct_cut_cell_stencil(
+        ur.B_u, ur.interior, p=2, q=3, nu=1, nextra=0, psi=psi,
+    )
+    m = stencil.matrix
+    R, T = 5, 7
+
+    # Step 1: Build conservation equations (6 eqs, 4 weight unknowns)
+    eqs, w_syms = build_cut_cell_conservation_system(
+        m, R, T, p=2, nu=1, interior_coeffs=ur.interior, psi=psi,
+    )
+    assert len(eqs) == 6
+    assert len(w_syms) == 4
+
+    # Identify alpha symbols in the stencil
+    alpha_syms = sorted(m.free_symbols - {psi}, key=lambda s: s.name)
+    assert len(alpha_syms) == 5
+
+    # Step 2: Identify which alphas appear in each row and create theta symbols
+    theta_syms = []
+    theta_map = {}  # (row_index, alpha) -> theta symbol
+    row_alpha_map = {}  # row_index -> [alphas]
+    for i in range(1, R):
+        row_alphas = set()
+        for j in range(T):
+            row_alphas.update(s for s in m[i, j].free_symbols if s in alpha_syms)
+        row_alphas_sorted = sorted(row_alphas, key=lambda s: s.name)
+        row_alpha_map[i] = row_alphas_sorted
+        for alpha in row_alphas_sorted:
+            theta = Symbol(f"th_{i}_{alpha.name}")
+            theta_syms.append(theta)
+            theta_map[(i, alpha)] = theta
+
+    # Alphas that appear in row 0 (linear, since w_0=psi is a parameter)
+    row0_alphas = set()
+    for j in range(T):
+        row0_alphas.update(s for s in m[0, j].free_symbols if s in alpha_syms)
+    row0_alpha_list = sorted(row0_alphas, key=lambda s: s.name)
+
+    # Build substitution dict for all bilinear pairs w_i * alpha_k
+    subs_dict = {}
+    for i in range(1, R):
+        w_i = w_syms[i - 1]
+        for alpha in row_alpha_map[i]:
+            subs_dict[w_i * alpha] = theta_map[(i, alpha)]
+
+    # Step 3: Clear psi-denominators, expand, theta-linearize, extract psi-coefficients
+    scalar_eqs = []
+    for eq in eqs:
+        num, _den = fraction(cancel(eq))
+        poly_num = expand(num)
+        lin_num = poly_num.subs(subs_dict)
+        if psi in lin_num.free_symbols:
+            p_poly = Poly(lin_num, psi)
+            scalar_eqs.extend(p_poly.all_coeffs())
+        else:
+            scalar_eqs.append(lin_num)
+
+    # Step 4: Build linear system and check rank (Rouche-Capelli)
+    lin_unknowns = list(w_syms) + row0_alpha_list + theta_syms
+    M_mat, b_vec = linear_eq_to_matrix(scalar_eqs, lin_unknowns)
+    M_aug = M_mat.row_join(b_vec)
+
+    rank_M = M_mat.rank()
+    rank_aug = M_aug.rank()
+
+    # Conservation with constant weights is INFEASIBLE: rank gap = 1
+    assert rank_aug - rank_M == 1, (
+        f"Expected rank gap 1, got {rank_aug - rank_M} "
+        f"(rank(M)={rank_M}, rank([M|b])={rank_aug})"
+    )
+    assert rank_M == 8
+    assert rank_aug == 9
+
+    # Cross-check: direct symbolic solve produces psi-DEPENDENT weights,
+    # confirming constant weights cannot satisfy conservation for all psi
+    all_unknowns = list(w_syms) + list(alpha_syms)
+    sol = solve(eqs, all_unknowns, dict=True)
+    assert len(sol) == 1
+    for w in w_syms:
+        if w in sol[0]:
+            assert psi in sol[0][w].free_symbols, (
+                f"{w} solution should depend on psi"
+            )
 

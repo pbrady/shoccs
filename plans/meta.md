@@ -346,6 +346,19 @@ When the interior stencil extends beyond the T-frame (i.e., `r + p + 1 > t`), th
 **Backward compatible:** For E2_1 (r=3, p=1, T=5, n_eqs=2), the formula gives the same column selection as the current code.
 **Status:** TBD (Phase 23 item 23.2a/23.2b)
 
+### D23-1: E4_1 Conservation Infeasible with Constant Weights at R=5
+**Decision:** Conservation (SBP property) for the E4_1 cut-cell stencil is **infeasible with constant (ψ-independent) norm weights** at R=5. This was the expected-feasible case after the dimension correction from D-R25.
+**Evidence:**
+- Theta-linearization of the 6 conservation equations (21 scalar ψ-coefficients, 14 linearized unknowns) gives rank(M)=8, rank([M|b])=9 → rank gap = 1 (Rouché-Capelli inconsistency).
+- Direct symbolic solve confirms: the weight solutions w_1..w_3 are rational functions of ψ, not constants. The system IS solvable for each specific ψ value (6 eqs in 9 unknowns, 3 free parameters), but the solutions vary with ψ.
+- The standard SBP norm requires H = diag(ψ, w_1, w_2, w_3, w_4, 1, 1, ...) with constant w_i. This is structurally incompatible with E4_1's TEMO-derived stencil.
+**Impact:** Items 23.3b–23.3d (conservation enforcement) and 23.4a (C++ regeneration with conservation) are blocked. The current non-conservative E4_1 stencil can still be used for accuracy (Taylor order maintained), but not for provable stability.
+**Potential alternatives (not yet investigated):**
+- (a) ψ-dependent norm: allow w_i = f_i(ψ) (rational in ψ). Non-standard but physically motivated (mesh varies with ψ). Requires positivity analysis for ψ ∈ (0,1].
+- (b) Larger stencil: increase nextra to add more DOF (more rows/alphas). Increases the operator bandwidth.
+- (c) Different boundary derivation: use a formulation that builds conservation in from the start (rather than post-hoc enforcement on the TEMO stencil).
+**Test:** `test_e4_1_conservation_constant_weights_infeasible_r5` in `test_e4_cut_cell.py`
+
 ### DD22-4: Conservation Wall Column Target by Derivative Order
 **Decision:** **(a) Column 0 target depends on `nu`: −1 for 1st derivative, 0 for 2nd derivative.**
 For the 1st derivative (nu=1), the SBP property `Q + Qᵀ = B` where `B = diag(-1, 0, ..., 0, 1)` requires the norm-weighted column 0 sum to equal −1. For the 2nd derivative (nu=2), constant annihilation `HD₂·𝟏 = 0` requires ALL column sums to equal 0. The `build_cut_cell_conservation_system` function (Phase 22, item 22.2a) parameterizes the target by `nu`. The existing `conservation.py` module (`build_conservation_system`) hardcodes the nu=1 convention and is currently only used for nu=1 cases; updating it for nu=2 is out of scope for Phase 22.
