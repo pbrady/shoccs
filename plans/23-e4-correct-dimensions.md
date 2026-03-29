@@ -177,17 +177,14 @@ With r=4 and p=2, the interior stencil `[1/12, -2/3, 0, 2/3, -1/12]` at the near
   - File: `scripts/stencil_gen/tests/test_temo.py`
   - Test: `cd scripts/stencil_gen && uv run pytest tests/test_temo.py::TestDimensions -v`
 
-- [ ] **23.2j** **[Review follow-up]** Investigate E4_2 dimension correctness — test was updated without required investigation:
-  - **Problem:** 23.2i required investigating whether `compute_dimensions` is correct for E4_2 (nu=2) before updating `test_e4_2_dimensions`. The test was blindly updated to `Dimensions(r=4, t=6, R=4, T=7, X=4)` to match code output, but the existing C++ reference `src/stencils/E4_2.cpp` has `R=3, T=5, X=3` — a major disagreement on both R and T.
-  - **Evidence of incorrectness:** Eq. 11b (`r = q+1+nextra`) gives `r=4` for E4_2, but the plan's Key Insight (line 284) and Section 6 of the math reference both state Eq. 11 applies only to 1st derivative operators. The C++ reference (which was generated from a working pipeline and validated) has `R=3, T=5`, implying the 2nd derivative formula should give `r=3, t=4` for E4_2.
-  - **Investigation needed:**
-    1. Determine the correct dimension formula for 2nd-derivative stencils (nu=2). The E2_2 case (`r=2, t=3, R=3, T=4`) coincidentally works with Eq. 11b because `q+1=2=p+1` when `p=q=1`. For E4_2 (`p=2, q=3`), the formulas diverge: `q+1=4` vs `p+1=3`.
-    2. If `r = p+1+nextra` is correct for nu=2 (giving `r=3` for E4_2), fix `compute_dimensions` to use a nu-dependent `r` formula and revert the test to expect `Dimensions(r=3, t=?, R=3, T=5, X=3)`. The `t` value also needs investigation — `t=p+q+1=6` doesn't match `T=5` (i.e., `t=4`).
-    3. If the current formula is correct and the C++ reference is wrong, document why.
-  - **Risk:** Without this fix, any future E4_2 pipeline work will silently use wrong dimensions. The test currently masks this by tracking the (potentially incorrect) code output.
-  - Ordering: independent of 23.3; can be done in parallel
-  - Files: `scripts/stencil_gen/stencil_gen/temo.py` (function `compute_dimensions`), `scripts/stencil_gen/tests/test_temo.py`, `plans/stencil-derivation-math-reference.md`
-  - Test: `cd scripts/stencil_gen && uv run pytest tests/test_temo.py::TestDimensions -v`
+- [x] **23.2j** **[Review follow-up]** Investigate E4_2 dimension correctness — test was updated without required investigation:
+  - **Resolution:** Eq. 11 (`r = q+1+nextra`, `t = p+q+1+nextra`) applies only to 1st derivatives. For 2nd derivatives (nu=2), the correct formulas are `r = p+1+nextra` and `t = p+2+nextra`. E2_2 coincidentally worked because p=q=1.
+  - **Changes made:**
+    1. Fixed `compute_dimensions` to use nu-dependent formulas: nu=1 uses Eq. 11, nu=2 uses `r=p+1+nextra`, `t=p+2+nextra`
+    2. Updated `test_e4_2_dimensions` to expect `Dimensions(r=3, t=4, R=3, T=5, X=3)` — matches C++ E4_2.cpp and Section 6 of math reference
+    3. Added `test_e4_2_matches_cpp` to cross-check against C++ reference values
+  - **Verification:** All 121 test_temo.py tests pass, E2 tests unaffected, E4_2 dimensions now match C++ (R=3, T=5, X=3)
+  - Files: `scripts/stencil_gen/stencil_gen/temo.py`, `scripts/stencil_gen/tests/test_temo.py`
 
 ### 23.3 — Enforce conservation in the cut-cell stencil
 

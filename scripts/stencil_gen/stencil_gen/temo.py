@@ -37,9 +37,15 @@ class Dimensions(NamedTuple):
 def compute_dimensions(p: int, q: int, s: int, nextra: int, nu: int) -> Dimensions:
     """Compute stencil dimensions from scheme parameters.
 
-    Uses Eq. 11 from Brady & Livescu (2021):
+    For 1st derivatives (nu=1), uses Eq. 11 from Brady & Livescu (2021):
         t = p + q + 1 + nextra     (stencil width, Eq. 11a)
         r = q + 1 + nextra         (number of boundary rows, Eq. 11b)
+
+    For 2nd derivatives (nu=2), Eq. 11 does not apply.  The uniform
+    boundary uses the smaller sizing (matches C++ E2_2/E4_2 references
+    and Section 6 of the math reference):
+        t = p + 2 + nextra
+        r = p + 1 + nextra
 
     For cut-cell stencils:
         R = r_eff + 1, T = t + 1
@@ -65,12 +71,13 @@ def compute_dimensions(p: int, q: int, s: int, nextra: int, nu: int) -> Dimensio
     Dimensions
         Named tuple (r, t, R, T, X).
     """
-    t = p + q + 1 + nextra
-    r = q + 1 + nextra
-
     if nu == 1:
+        t = p + q + 1 + nextra
+        r = q + 1 + nextra
         r_eff = r
     elif nu == 2:
+        t = p + 2 + nextra
+        r = p + 1 + nextra
         r_eff = r - 1
     else:
         raise ValueError(f"Unsupported derivative order nu={nu}; must be 1 or 2")
