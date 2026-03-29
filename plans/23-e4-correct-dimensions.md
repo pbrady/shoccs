@@ -339,24 +339,46 @@ caller's alpha symbols. Weights are rational functions of alpha_3 only.
   - Test: 10 new tests in `TestE4UniformConservation` (all pass)
   - Verification: all 305 existing tests pass + 1 xfail unchanged
 
-- [ ] **23.3a-ii** Enable conservation by default and update all E4_1 tests:
-  - Change default `conserve=False` → `conserve=True` in `derive_uniform_boundary_for_temo`
-  - Update `TestE4UniformBoundary`: alpha count 5→4, last-row assertions, custom alpha count
-  - Update `TestE4TEMOConstruction`: alpha range 5→4, uniform limit embed check for new B_u
-  - Update `TestE4CodeGeneration`: `param_arrays={"alpha": 5}` → 4, alpha array assertion, fixture
-  - Update `TestE4TestFileGeneration`: `ALPHA_VALUES` 5→4, alpha array in test structure
-  - Update `TestDeriveCutCellScheme`: alpha count 5→4, custom alphas range 5→4
-  - Update `TestBuildCutCellConservationSystem`: alpha count 5→4
-  - Update `test_e4_1_conservation_constant_weights_infeasible_r5`: alpha count 5→4 (still tests CUT-CELL infeasibility — remains valid)
-  - The `test_e4_1_conservation_fails` xfail remains (tests CUT-CELL conservation with naive weights [ψ,1,1,1,1], not the correct SBP weights)
-  - Files: `scripts/stencil_gen/stencil_gen/temo.py`, `scripts/stencil_gen/tests/test_e4_cut_cell.py`
-  - Test: `cd scripts/stencil_gen && uv run pytest tests/ -v`
+- [SUPERSEDED] **23.3a-ii-old** Enable conservation by default in `derive_uniform_boundary_for_temo`:
+  - **Superseded:** Changing the default to `conserve=True` breaks the TEMO pipeline. The conserved B_u has **quadratic** alpha entries (cross-terms like `alpha_2 * alpha_3`) because the compatibility condition substitution introduces nonlinear relationships between build symbols. The `decompose_alpha_terms` function in `solve_in_field` (line 789) only handles linear alpha terms, causing `construct_cut_cell_stencil` to crash with "Cross-term detected" errors.
+  - **Root cause:** Conservation eliminates one last-row alpha by solving a compatibility condition from the weight equations. The weight equations involve products `w_i * B_u[i,j]`, and the weight solutions `w_i = f(build_syms)` are rational in build symbols. Substituting these back and solving the compatibility condition for `_b3` yields a nonlinear expression. When this is substituted into B_u, entries become quadratic.
+  - **Resolution:** Conservation must be applied AFTER the TEMO pipeline, not before. See revised 23.3a-ii below.
+
+- [ ] **23.3a-ii** Apply conservation post-TEMO in `derive_cut_cell_scheme`:
+  - **Approach:** Keep `conserve=False` as default in `derive_uniform_boundary_for_temo`. Instead, add `conserve: bool = True` parameter to `derive_cut_cell_scheme`. When True:
+    1. Derive B_u with `conserve=False` → 5 alphas, linear entries
+    2. Also derive B_u with `conserve=True` → 4 alphas, quadratic entries (for substitution mapping and weights only)
+    3. Run TEMO pipeline with the **non-conserved** (linear) B_u — works fine
+    4. Extract the substitution mapping: compare conserved vs non-conserved alpha_symbols, build `{alpha_4: expr(alpha_0..alpha_3)}`
+    5. Apply the substitution to the cut-cell stencil matrices (floating, dirichlet)
+    6. Return `CutCellResult` with 4 alphas and the uniform weights
+  - **Key insight:** The substitution mapping is determined by the uniform conservation step and is applied symbolically to the already-solved cut-cell stencil. Since the cut-cell entries are rational in psi and linear in 5 alphas, after substituting alpha_4 they become rational in psi and (at most quadratic) in 4 alphas — which is fine for code generation and numerical evaluation, just not for the TEMO solver.
+  - **Implementation details:**
+    1. Add `conserve: bool = True` parameter to `derive_cut_cell_scheme`
+    2. Add `conservation_subs: dict | None` and `weights: list | None` fields to `CutCellResult`
+    3. When `conserve=True`, derive both conserved and non-conserved uniforms, compute subs map, apply post-TEMO
+    4. The substitution map extraction: conserved result uses caller's `alpha_symbols[:4]`, non-conserved uses `alpha_symbols[:5]` — find which symbol was eliminated and what it maps to
+  - Files: `scripts/stencil_gen/stencil_gen/temo.py`
+  - Test: `cd scripts/stencil_gen && uv run pytest tests/test_temo.py -v` (E2 tests must still pass)
+
+- [ ] **23.3a-iii** Update all E4_1 tests for post-TEMO conservation:
+  - `derive_uniform_boundary_for_temo(E4_1)` stays at 5 alphas — `TestE4UniformBoundary` tests UNCHANGED
+  - `TestE4UniformConservation` tests UNCHANGED (still test `conserve=True` on B_u directly)
+  - `TestE4TEMOConstruction`: fixture calls `construct_cut_cell_stencil` directly (no conservation) — tests UNCHANGED
+  - `TestE4CodeGeneration`: fixture uses `derive_uniform_boundary_for_temo(E4_1)` directly → needs update if we want conservative codegen. Add new fixture that goes through `derive_cut_cell_scheme` instead. `param_arrays={"alpha": 5}` → 4, alpha array assertion, floating/dirichlet coeff counts stay the same (R=5, T=7)
+  - `TestE4TestFileGeneration`: same — update fixture path, `ALPHA_VALUES` 5→4
+  - `TestDeriveCutCellScheme`: `test_e4_1_alpha_count` 5→4, `test_e4_1_custom_alphas` range(5)→range(4)
+  - `TestBuildCutCellConservationSystem`: `test_e4_1_overdetermined_system` alpha count 5→4
+  - `test_e4_1_conservation_constant_weights_infeasible_r5`: alpha count 5→4
+  - `test_e4_1_conservation_fails` xfail remains (uses naive weights, not SBP weights)
+  - Files: `scripts/stencil_gen/tests/test_e4_cut_cell.py`
+  - Test: `cd scripts/stencil_gen && uv run pytest tests/test_e4_cut_cell.py -v`
 
 ### Revised 23.3b: Verify cut-cell conservation follows
 
-- [ ] **23.3b** After TEMO construction with conservation-constrained B_u:
-  - Build cut-cell stencil from conserved B_u
+- [ ] **23.3b** After TEMO construction with post-TEMO conservation:
+  - `derive_cut_cell_scheme(E4_1, psi)` now returns a conservative stencil (4 alphas)
   - Derive cut-cell weights: w_0(ψ) = ψ·w_0^u, w_i(ψ) = w_i^u for i≥1 (TEMO extension of uniform weights)
   - Verify: `Σ_i w_i(ψ) · B_l[i,j] + IC(j) = target(j)` for all T-frame columns
-  - Update `test_e4_1_conservation_fails`: change from xfail to pass, use correct weights
+  - Update `test_e4_1_conservation_fails`: change from xfail to pass, use correct SBP weights
   - File: `scripts/stencil_gen/tests/test_e4_cut_cell.py`
