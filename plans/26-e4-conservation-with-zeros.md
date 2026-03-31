@@ -335,7 +335,7 @@ With alpha_3=alpha_4=0, `sympy.solve()` produces a clean single-branch solution 
 
 ### 26.6 — Re-generate E4_1 C++ code
 
-- [ ] **26.6a** Re-generate E4_1 C++ stencil and test file:
+- [x] **26.6a** Re-generate E4_1 C++ stencil and test file:
   - **Prerequisite:** 26.5a + 26.5d must be complete (Python pipeline returns 2-alpha conservative stencil).
   - **Workflow:**
     1. Run Python codegen tests which write to `scripts/stencil_gen/output/`:
@@ -352,10 +352,12 @@ With alpha_3=alpha_4=0, `sympy.solve()` produces a clean single-branch solution 
     - Lua config: `alpha = {0.1, -0.05}` (was `{0.1, -0.05, 0.02, 0.01}`)
     - All `REQUIRE_THAT(c, Approx(T{...}))` expected values change (new symbolic expressions)
     - Test structure (Floating/Dirichlet sections, psi values) is unchanged
+    - Test uses psi=0.9, 0.3, 0.7 (was 1.0, 0.3, 0.7) to avoid pole at psi=1
   - **Psi boundary divergence (from 26.4c finding):** The generated `E4_1.cpp` should include a comment that coefficients diverge at psi=0 and psi=1. The C++ runtime that calls this stencil must clamp psi away from boundaries (e.g., psi ∈ [0.01, 0.99]) or fall back to the non-conservative stencil for full cells (psi=1).
   - **Build and test:**
-    - `cmake --build build --target t-E4_1`
-    - `ctest --test-dir build -R t-E4_1`
+    - `cmake --build build --target t-E4_1` ✓
+    - `ctest --test-dir build -R t-E4_1` ✓ (16 assertions, all pass)
+  - **Done:** Regenerated E4_1.cpp (2-alpha conservative stencil) and E4_1.t.cpp (updated test values, psi=0.9 replaces psi=1.0). Build and test pass. Note: t-E2_1 has a pre-existing floating-point precision failure unrelated to this change.
 
 ### 26.7 — Update memory and plans
 
