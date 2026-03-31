@@ -328,7 +328,8 @@ From the paper's Table A.4: boundary row entries have degree ≤ 4 in ψ. Since 
     simultaneous solve requires restructuring.
   - Must come after 27.1c decision. If 27.1c says "boundary rows already
     polynomial", use existing `construct_cut_cell_stencil` output for rows
-    0..r-1. If 27.1c says "polynomial ansatz needed", must come after 27.2a.
+    0..r-1. If 27.1c says "polynomial ansatz needed", must come after 27.2b
+    (boundary rows validated before using them as near-interior input).
 
 - [ ] **27.3b** Validate the near-interior row
   - File: `scripts/stencil_gen/tests/test_e4_cut_cell.py` (new test class
@@ -398,7 +399,8 @@ From the paper's Table A.4: boundary row entries have degree ≤ 4 in ψ. Since 
     file's import block (line 32 of `test_e4_cut_cell.py`).
   - **Size estimate:** ~60-80 lines for the new function, ~15 lines to
     simplify the `scheme.zeros` branch in `derive_cut_cell_scheme`.
-  - Must come after 27.3a.
+  - Must come after 27.3b (near-interior row validated before wiring into
+    full construction).
 
 - [ ] **27.4b** Validate the full E4_1 stencil
   - File: `scripts/stencil_gen/tests/test_e4_cut_cell.py` (new test class
@@ -457,7 +459,7 @@ From the paper's Table A.4: boundary row entries have degree ≤ 4 in ψ. Since 
        0-3 (no `1.0/psi` or `1.0/(psi - 1)` divisions) and rational
        expressions for row 4 with a common denominator.
   - **Concrete verification of the generated code:** Compare the current
-    E4_1.cpp (277 lines) against the regenerated version:
+    E4_1.cpp (323 lines) against the regenerated version:
     - Current code has `1.0 / (t40)` where `t40 = psi + 3` (line 137),
       `1.0 / (t32)` where `t32 = psi + 2` (line 129), `1/(alpha[1]*t13)`
       where `t13 = psi - 1` (line 110), and `t17 = t16/psi` (line 113).
