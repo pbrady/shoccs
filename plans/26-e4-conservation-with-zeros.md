@@ -372,6 +372,19 @@ With alpha_3=alpha_4=0, `sympy.solve()` produces a clean single-branch solution 
   - **Fix:** Add a comment in `E4_1.cpp` near the alpha declaration documenting that `alpha[1]` must be nonzero. Consider adding a runtime assert or guard. Update the codegen template if this constraint should appear automatically.
   - **Done:** Added comment block near alpha declaration in `E4_1.cpp` documenting alpha[0] (free) and alpha[1] (must be nonzero, used as denominator). No runtime assert added — a comment is sufficient since alpha values come from Lua config and division-by-zero would be immediately obvious from NaN/Inf output. Codegen template not updated (YAGNI — only E4_1 has this constraint).
 
+- [ ] **26.6-followup-b2** Add runtime guard for alpha[1] ≠ 0 in E4_1 constructor:
+  - **Problem:** The comment added in 26.6-followup-b documents the constraint, but `copy_zero_padded` (`stencil.hpp:40-45`) silently zero-fills alpha[1] if the Lua config provides fewer than 2 alpha values (e.g., `alpha = {0.1}`). This produces division by zero whose root cause is non-obvious from the resulting NaN output. The comment in the C++ source is invisible to users editing Lua configs.
+  - **Fix:** Add a runtime check in the `E4_1` constructor (after `copy_zero_padded`) that throws or asserts if `alpha[1] == 0.0`:
+    ```cpp
+    E4_1(std::span<const real> a)
+    {
+        copy_zero_padded(a, alpha);
+        if (alpha[1] == 0.0)
+            throw std::invalid_argument("E4_1: alpha[1] must be nonzero (used as denominator)");
+    }
+    ```
+  - **Test:** Add a Catch2 `REQUIRE_THROWS` test in `E4_1.t.cpp` constructing E4_1 with a single-element alpha span.
+
 - [ ] **26.6-followup-c** Add missing singularity comments to generated E4_1.cpp:
   - **Problem:** Plan item 26.6a specifies: "The generated E4_1.cpp should include a comment that coefficients diverge at psi=0 and psi=1." This was not done — the generated file has no such comment.
   - **Fix:** Add a comment block to `E4_1.cpp` (either manually or via the codegen template) documenting:
