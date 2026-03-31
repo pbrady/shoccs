@@ -363,22 +363,24 @@ different purpose (proving infeasibility of constant weights).
     guards in E4_1.cpp remain necessary.
   - Must come after 27.3b. Must resolve BEFORE 27.4a proceeds.
 
-- [ ] **27.3d** Test 27.3c Finding 2: weights-only conservation is infeasible with polynomial boundary rows
+- [x] **27.3d** Test 27.3c Finding 2: weights-only conservation is infeasible with polynomial boundary rows
   - **Rationale:** Finding 2 is the critical result that rules out approach (A)
     and forces approach (B). It must have an automated regression test so the
     decision can be validated if the polynomial ansatz or conservation system
     changes.
-  - File: `scripts/stencil_gen/tests/test_e4_cut_cell.py` (add to
-    `TestFractionFreeConservation` or a new class
+  - File: `scripts/stencil_gen/tests/test_e4_cut_cell.py` (new class
     `TestApproachAInfeasibility`)
-  - Test: build conservation equations from **polynomial** boundary rows
-    (use `solve_temo_row_polynomial` for rows 0..R-2, `solve_temo_row` for
-    row R-1, with c_*=0), then attempt a weights-only solve
-    (`solve_for = w_syms[:3]` or `w_syms`). Verify the linear system is
-    inconsistent: `rank(A) < rank([A|b])` for any representative alpha
-    values (e.g., alpha=0, alpha=(1/10,1/5,1/3)).
-  - This mirrors the existing `test_e4_1_conservation_constant_weights_infeasible_r5`
-    (line 1481) but uses polynomial boundary rows instead of rational ones.
+  - Tests written (all 3 PASS):
+    1. `test_weights_only_inconsistent_alpha_zero`: With all alphas=0,
+       rank(A) < rank([A|b]) — system is inconsistent.
+    2. `test_weights_only_inconsistent_alpha_nonzero`: With alpha=(1/10,1/5,1/3),
+       rank(A) < rank([A|b]) — system is inconsistent.
+    3. `test_weights_only_inconsistent_alpha_symbolic`: With symbolic alphas,
+       theta-linearization + psi-coefficient extraction shows
+       rank(A) < rank([A|b]) — system is inconsistent for ALL alpha values.
+  - Mirrors `test_e4_1_conservation_constant_weights_infeasible_r5` (line 1484)
+    but uses polynomial boundary rows instead of rational ones.
+  - All 114 existing tests pass (1 xfail expected). No regressions.
   - Test: `cd scripts/stencil_gen && uv run pytest tests/test_e4_cut_cell.py -v -k "TestApproachAInfeasibility" --timeout=300`
   - Must come after 27.3c.
 

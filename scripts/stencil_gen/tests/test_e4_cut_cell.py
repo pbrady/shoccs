@@ -2157,3 +2157,198 @@ class TestFractionFreeConservation:
             assert s in sol, f"Missing {s} from solution"
         assert len(sol) == 5
 
+
+class TestApproachAInfeasibility:
+    """Tests that weights-only conservation is infeasible with polynomial boundary rows (27.3d).
+
+    This validates 27.3c Finding 2: with polynomial boundary rows (from
+    solve_temo_row_polynomial) and c_*=0, the conservation system cannot be
+    satisfied by weights alone, regardless of alpha values.  This is the
+    critical result that rules out approach (A) and forces approach (B)
+    (accept psi(psi-1) denominators from bilinear alpha+weight solve).
+    """
+
+    @pytest.fixture(scope="class")
+    def poly_stencil(self):
+        """Build stencil with polynomial boundary rows + rational near-interior row."""
+        psi = Symbol("psi")
+        uniform = derive_uniform_boundary_for_temo(E4_1, zeros=set(E4_1.zeros))
+        B_u = uniform.B_u
+        interior = uniform.interior
+        p, q, nu, nextra = 2, 3, 1, 0
+        R = B_u.rows + 1  # 5
+        T = B_u.cols + 1  # 7
+
+        B_l_1 = solve_uniform_limit(B_u, interior, p, q, nu, nextra)
+        B_d = build_degenerate_stencil(B_u, interior, p, q, nu)
+        K, _ = make_psi_field(psi)
+
+        alpha_syms = sorted(B_u.free_symbols, key=lambda s: s.name)
+
+        rows = []
+        for i in range(R):
+            V, rhs_vec = build_temo_vandermonde(i, T, q, nu, psi)
+            prescribed = identify_prescribed_entries(
+                i, B_u.rows, B_u.cols, nextra, nu, B_u, B_l_1, B_d, psi,
+                max(q + 1, nu + 1),
+            )
+            if i < R - 1:  # polynomial boundary rows
+                result = solve_temo_row_polynomial(
+                    i, V, rhs_vec, prescribed, psi, alpha_syms,
+                )
+            else:  # rational near-interior row
+                result = solve_temo_row(
+                    i, V, rhs_vec, prescribed, psi, K, alpha_syms,
+                )
+            rows.append(result.coeffs)
+
+        matrix = Matrix(rows)
+
+        # Set c_* symbols (extra polynomial unknowns) to zero
+        c_syms = [s for s in matrix.free_symbols if s.name.startswith("c_")]
+        if c_syms:
+            matrix = matrix.xreplace({c: 0 for c in c_syms})
+
+        return matrix, R, T, p, q, nu, psi, alpha_syms, interior
+
+    def test_weights_only_inconsistent_alpha_zero(self, poly_stencil):
+        """Weights-only solve is inconsistent with all alphas set to zero."""
+        matrix, R, T, p, _, nu, psi, alpha_syms, interior = poly_stencil
+
+        # Substitute alpha=0
+        m_eval = matrix.xreplace({a: 0 for a in alpha_syms})
+
+        eqs, w_syms = build_cut_cell_conservation_system(
+            m_eval, R, T, p=p, nu=nu, interior_coeffs=interior, psi=psi,
+        )
+        assert len(eqs) == 5
+        assert len(w_syms) == 4
+
+        # Clear psi denominators and build scalar system
+        scalar_eqs = []
+        for eq in eqs:
+            num, _den = fraction(cancel(eq))
+            poly_num = expand(num)
+            if psi in poly_num.free_symbols:
+                p_poly = Poly(poly_num, psi)
+                scalar_eqs.extend(p_poly.all_coeffs())
+            else:
+                scalar_eqs.append(poly_num)
+
+        M_mat, b_vec = linear_eq_to_matrix(scalar_eqs, list(w_syms))
+        M_aug = M_mat.row_join(b_vec)
+
+        rank_M = M_mat.rank()
+        rank_aug = M_aug.rank()
+
+        # System is inconsistent: rank gap >= 1
+        assert rank_aug > rank_M, (
+            f"Expected inconsistent system (rank gap >= 1), got "
+            f"rank(M)={rank_M}, rank([M|b])={rank_aug}"
+        )
+
+    def test_weights_only_inconsistent_alpha_nonzero(self, poly_stencil):
+        """Weights-only solve is inconsistent with representative nonzero alphas."""
+        matrix, R, T, p, _, nu, psi, alpha_syms, interior = poly_stencil
+
+        # Try alpha = (1/10, 1/5, 1/3) for first 3 alphas, 0 for rest
+        alpha_vals = [Rational(1, 10), Rational(1, 5), Rational(1, 3)]
+        subs = {}
+        for i, a in enumerate(alpha_syms):
+            subs[a] = alpha_vals[i] if i < len(alpha_vals) else 0
+        m_eval = matrix.xreplace(subs)
+
+        eqs, w_syms = build_cut_cell_conservation_system(
+            m_eval, R, T, p=p, nu=nu, interior_coeffs=interior, psi=psi,
+        )
+
+        scalar_eqs = []
+        for eq in eqs:
+            num, _den = fraction(cancel(eq))
+            poly_num = expand(num)
+            if psi in poly_num.free_symbols:
+                p_poly = Poly(poly_num, psi)
+                scalar_eqs.extend(p_poly.all_coeffs())
+            else:
+                scalar_eqs.append(poly_num)
+
+        M_mat, b_vec = linear_eq_to_matrix(scalar_eqs, list(w_syms))
+        M_aug = M_mat.row_join(b_vec)
+
+        rank_M = M_mat.rank()
+        rank_aug = M_aug.rank()
+
+        assert rank_aug > rank_M, (
+            f"Expected inconsistent system (rank gap >= 1), got "
+            f"rank(M)={rank_M}, rank([M|b])={rank_aug}"
+        )
+
+    def test_weights_only_inconsistent_alpha_symbolic(self, poly_stencil):
+        """Weights-only solve is inconsistent with symbolic alpha values.
+
+        This is the strongest version: even with alphas as free parameters,
+        the 5-equation system for 4 weight unknowns is overdetermined and
+        inconsistent, proving no choice of alpha values can make weights-only
+        conservation work.
+        """
+        matrix, R, T, p, _, nu, psi, alpha_syms, interior = poly_stencil
+
+        eqs, w_syms = build_cut_cell_conservation_system(
+            matrix, R, T, p=p, nu=nu, interior_coeffs=interior, psi=psi,
+        )
+        assert len(eqs) == 5
+        assert len(w_syms) == 4
+
+        # Theta-linearize bilinear w_i * alpha_k terms
+        theta_syms = []
+        theta_map = {}
+        row_alpha_map = {}
+        for i in range(1, R):
+            row_alphas = set()
+            for j in range(T):
+                row_alphas.update(
+                    s for s in matrix[i, j].free_symbols if s in alpha_syms
+                )
+            row_alphas_sorted = sorted(row_alphas, key=lambda s: s.name)
+            row_alpha_map[i] = row_alphas_sorted
+            for alpha in row_alphas_sorted:
+                theta = Symbol(f"th_{i}_{alpha.name}")
+                theta_syms.append(theta)
+                theta_map[(i, alpha)] = theta
+
+        # Row 0 alphas (appear linearly since w_0=psi is fixed)
+        row0_alpha_list = sorted(
+            {s for j in range(T) for s in matrix[0, j].free_symbols
+             if s in alpha_syms},
+            key=lambda s: s.name,
+        )
+
+        subs_dict = {}
+        for i in range(1, R):
+            w_i = w_syms[i - 1]
+            for alpha in row_alpha_map[i]:
+                subs_dict[w_i * alpha] = theta_map[(i, alpha)]
+
+        scalar_eqs = []
+        for eq in eqs:
+            num, _den = fraction(cancel(eq))
+            poly_num = expand(num)
+            lin_num = poly_num.subs(subs_dict)
+            if psi in lin_num.free_symbols:
+                p_poly = Poly(lin_num, psi)
+                scalar_eqs.extend(p_poly.all_coeffs())
+            else:
+                scalar_eqs.append(lin_num)
+
+        lin_unknowns = list(w_syms) + row0_alpha_list + theta_syms
+        M_mat, b_vec = linear_eq_to_matrix(scalar_eqs, lin_unknowns)
+        M_aug = M_mat.row_join(b_vec)
+
+        rank_M = M_mat.rank()
+        rank_aug = M_aug.rank()
+
+        assert rank_aug > rank_M, (
+            f"Expected inconsistent system (rank gap >= 1), got "
+            f"rank(M)={rank_M}, rank([M|b])={rank_aug}"
+        )
+
