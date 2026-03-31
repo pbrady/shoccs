@@ -291,7 +291,7 @@ different purpose (proving infeasibility of constant weights).
   - Test: `cd scripts/stencil_gen && uv run pytest tests/test_e4_cut_cell.py -v -k "TestFractionFreeConservation" --timeout=300`
   - Must come after 27.3a.
 
-- [ ] **27.3c** Decision gate: conservation solve approach after bilinearity finding
+- [x] **27.3c** Decision gate: conservation solve approach after bilinearity finding
   - **Context:** 27.3a proved that solving conservation for both alpha AND
     weight unknowns (`solve_for=[alpha_0, alpha_1, w_1, w_2, w_3]`)
     inherently produces ψ(ψ-1) denominator factors in the alpha solutions.
@@ -299,30 +299,67 @@ different purpose (proving infeasibility of constant weights).
     solver artifact. After `xreplace(sol)`, boundary row entries (polynomial
     before conservation) reacquire ψ(ψ-1) denominators via the substituted
     alpha values.
-  - **Decision required:** Choose between:
-    - **(A) Keep alphas as user-specified constants** (match the paper).
-      Do NOT solve for alpha_0, alpha_1 in conservation. Only solve for
-      weights. The paper claims this avoids singularities. **Caution:**
-      27.3a item 3 found that the weights-only solve produces weight
-      solutions with "psi in denominator but NOT (psi-1)" when alphas
-      are symbolic. The paper's claim is that these denominators are of
-      the e0 type (benign, nonvanishing on [0,1]) — this needs
-      verification. Note: `test_weight_denominators_benign` confirms
-      weights from the FULL 5-unknown solve are ψ-independent; this does
-      NOT apply to a weights-only solve. Requires changing `solve_for`
-      to `w_syms[:3]` only, and keeping alpha_0, alpha_1, alpha_2 as 3
-      free params (up from 2). The conservation system (5 eqs, 3
-      unknowns) is overdetermined — need to verify consistency and that
-      weight denominators are benign on [0,1].
-    - **(B) Accept ψ(ψ-1) denominators.** Keep the current 5-unknown
-      conservation solve. The stencil retains singularities at ψ=0 and
-      ψ=1, requiring runtime clamping (as the current E4_1.cpp does).
-      The polynomial ansatz for boundary rows is still valuable for the
-      pre-conservation structure but the final result is unchanged.
-    - **(C) Different zeros configuration.** Change zeros or nextra to
-      decouple the bilinear structure. Needs investigation.
-  - Recommend (A) as primary approach — it matches the paper's design and
-    eliminates singularities by construction.
+  - **Investigation results (27.3c):** Tested all three approaches with
+    POLYNOMIAL boundary rows (from `solve_temo_row_polynomial`). Key findings:
+
+    **Finding 1 — Polynomial ansatz introduces extra free parameters:**
+    The polynomial ansatz for boundary rows produces 12 extra free symbols
+    `c_{i}_{6}_{k}` (i=0..3, k=2..4) from the underdetermined polynomial
+    system for column 6 (endpoint-constrained). These propagate into columns
+    2-5 of all boundary rows and appear in conservation equations 1-4.
+    The conservation equations involve bilinear `w_k * c_{i}_6_{k}` products,
+    making the system nonlinear in (w, c_*) jointly.
+
+    **Finding 2 — Approach (A) is INFEASIBLE:**
+    Weights-only conservation solve is INCONSISTENT for E4_1 with polynomial
+    boundary rows, regardless of parameter settings:
+    - With c_*=0, alpha=0: Rank(A)=4, Rank([A|b])=5 for 4 weights (INCONSISTENT)
+    - With c_*=0, alpha=(1/10,1/5,1/3): same ranks (INCONSISTENT)
+    - With c_*=0, alpha=(1/2,-1/4,3/7): same ranks (INCONSISTENT)
+    - With c_*=0, alpha symbolic: same ranks (INCONSISTENT)
+    - Variant 2 (3 weights): Rank(A)=3, Rank([A|b])=4 (INCONSISTENT)
+    - Variant 3 (4 weights): Rank(A)=4, Rank([A|b])=5 (INCONSISTENT)
+    Including c_* as solve targets does NOT help because the system is
+    bilinear in w x c_* (e.g., `w_1 * c_1_6_2 * psi^2` terms in Eq 1).
+
+    **Finding 3 — OLD stencil (rational boundary rows) also INCONSISTENT:**
+    The weights-only solve is also inconsistent with rational boundary rows
+    (from `solve_temo_row`): Rank(A)=4, Rank([A|b])=5 for 4 weights. This
+    is not a polynomial-ansatz-specific issue — it is fundamental to E4_1
+    with zeros={3,4}.
+
+    **Finding 4 — Original bilinear approach works with polynomial rows:**
+    `solve_for=[alpha_0, alpha_1, w_1, w_2, w_3]` with c_*=0 produces a
+    unique solution. Alpha denominators contain ψ(ψ-1) factors (as expected
+    from 27.3a). Weight solutions are psi-independent (w_1, w_2, w_3 have
+    den=1). The denominator structure is:
+    - `alpha_0 den = 6*psi*w_4*(psi-1)*(degree-6 poly in psi with w_4)`
+    - `alpha_1 den = w_4*(psi-1)*(same degree-6 poly)`
+    - `w_1, w_2, w_3 den = 1`
+    Note: the degree-6 polynomial factor is new compared to the rational
+    boundary row case (which had simpler denominators). This is because
+    the polynomial boundary rows produce different conservation equations.
+
+  - **Decision: (B) Accept ψ(ψ-1) denominators.**
+    Approach (A) is ruled out: the 5-equation conservation system for E4_1
+    with zeros={3,4} CANNOT be satisfied by weights alone — regardless of
+    alpha values, c_* values, or boundary row construction method. The
+    system fundamentally requires solving for at least 2 alpha parameters
+    alongside the weights, which produces ψ(ψ-1) denominators.
+
+    The polynomial ansatz for boundary rows (27.2a) remains valuable:
+    boundary rows are polynomial PRE-conservation, giving cleaner
+    intermediate expressions. After conservation xreplace, the final
+    stencil reacquires ψ(ψ-1) denominators via alpha substitution.
+    Runtime clamping (as in current E4_1.cpp) is still required.
+
+    **Implication for 27.4a:** Use the original `solve_for=[alpha_0,
+    alpha_1, w_1, w_2, w_3]` with c_*=0 (set the extra polynomial
+    coefficients to zero). The polynomial ansatz gives simpler pre-
+    conservation expressions but the final result has the same singularity
+    structure. Change 1 (polynomial boundary rows) and Change 3
+    (fraction-free solve) from 27.4a still apply. The `psi_eps`/`std::clamp`
+    guards in E4_1.cpp remain necessary.
   - Must come after 27.3b. Must resolve BEFORE 27.4a proceeds.
 
 ### 27.4 — Full E4_1 construction
@@ -376,13 +413,17 @@ different purpose (proving infeasibility of constant weights).
     renaming at lines 2291-2304, assembly at lines 2308-2312) remains
     completely unchanged. The `xreplace(sol)` at line 2287 also stays.
 
-    **WARNING (from 27.3a):** Change 3 alone does NOT eliminate ψ(ψ-1)
-    denominators — the fraction-free solve produces identical results to
-    the old solver (`test_matches_old_solver`). The alpha solutions in
-    `sol` still contain ψ(ψ-1) factors, so `xreplace(sol)` reintroduces
-    them into boundary rows. This change is only useful if 27.3c chooses
-    approach (A) (weights-only conservation solve) or if a different
-    `solve_for` list is used. Update this item after 27.3c resolves.
+    **27.3c resolved: approach (B).**  Change 3 (fraction-free solve) does
+    NOT eliminate ψ(ψ-1) denominators — the alpha solutions inherently
+    contain these factors regardless of solver.  The `solve_for` list
+    remains `[alpha_0, alpha_1, w_1, w_2, w_3]` as before.  Change 3 is
+    still worth applying for robustness (prevents accidental denominator
+    blow-up in the solver) even though the final result is identical.
+    The polynomial ansatz (Change 1) gives cleaner PRE-conservation
+    expressions; the polynomial boundary rows need c_*=0 substitution
+    before conservation (add `floating = floating.xreplace({c: 0 for c in
+    c_syms})` after the row loop, where c_syms are the residual polynomial
+    coefficients).  Runtime `psi_eps`/`std::clamp` guards remain necessary.
 
   - The non-zeros paths (E2_1, E2_2, generic conservative at lines 2314-2433)
     remain completely unchanged.
@@ -399,18 +440,15 @@ different purpose (proving infeasibility of constant weights).
 - [ ] **27.4b** Validate the full E4_1 stencil
   - File: `scripts/stencil_gen/tests/test_e4_cut_cell.py` (new test class
     `TestPolynomialFullStencil`)
-  - **NOTE:** The exact test expectations depend on 27.3c's decision:
-    - If approach (A): boundary rows are polynomial, near-interior has
-      Vandermonde denominators, all entries well-defined on [0,1].
-    - If approach (B): boundary rows have ψ(ψ-1) denominators from alpha
-      substitution; test should document these as known limitations.
-    Adjust tests below accordingly after 27.3c resolves.
+  - **NOTE (27.3c resolved: approach B):** Boundary rows have ψ(ψ-1)
+    denominators after alpha substitution (from conservation solve).
+    Tests should document these as known limitations. The polynomial
+    ansatz gives polynomial PRE-conservation entries, but the final
+    stencil has the same singularity structure as before.
   - Tests:
     1. `test_all_entries_well_defined`: For all 5 rows × 7 cols, check
-       denominators. If 27.3c chose (A): verify no ψ or (ψ-1) factors —
-       rows 0-3 should be purely polynomial (den is constant), row 4
-       should have Vandermonde-family denominators (nonvanishing on [0,1]).
-       If 27.3c chose (B): document which entries have ψ(ψ-1) poles.
+       denominators. Document which entries have ψ(ψ-1) poles (expected
+       after alpha substitution from conservation solve — approach B).
     2. `test_taylor_accuracy_all_rows`: All 5 rows satisfy Taylor accuracy
        (reuse pattern from `TestE4CutCellSchemeWithZeros.test_taylor_accuracy`
        at line 1056).
@@ -420,10 +458,8 @@ different purpose (proving infeasibility of constant weights).
     4. `test_psi_0_limit`: At ψ→0, entries approach degenerate stencil values.
        Substitute ψ=0 and alpha values, verify entries are finite and match.
     5. `test_psi_1_limit`: At ψ=1, entries match uniform limit B_l(1).
-    6. `test_free_parameter_count`: If 27.3c chose (A): 3 free parameters
-       (alpha_0, alpha_1, alpha_2 — all alphas remain free, only weights
-       solved). If 27.3c chose (B): 2 free parameters (alpha_0, alpha_1
-       in final naming, same as current).
+    6. `test_free_parameter_count`: 2 free parameters (alpha_0, alpha_1
+       in final naming, same as current — 27.3c chose approach B).
     7. `test_matches_derive_cut_cell_scheme`: Calling `derive_cut_cell_scheme(E4_1, psi)`
        uses the modified zeros path and produces the correct result.
     8. `test_weights_well_defined`: All 5 weights have no ψ(ψ-1) denominator
@@ -440,24 +476,18 @@ different purpose (proving infeasibility of constant weights).
 
 - [ ] **27.5a** Verify ψ-clamping and alpha guards in regenerated E4_1.cpp
   - **This is a post-27.6a verification step**, not a manual edit.
-  - If 27.3c chose (A): the regenerated E4_1.cpp SHOULD be free of
-    singularity guards (no ψ(ψ-1) poles in the stencil).
-  - If 27.3c chose (B): the regenerated E4_1.cpp will STILL need
-    `psi_eps`/`std::clamp` guards. Verify they are present and correct.
+  - **27.3c chose approach (B):** The regenerated E4_1.cpp will STILL need
+    `psi_eps`/`std::clamp` guards because ψ(ψ-1) denominators persist.
   - File: `src/stencils/E4_1.cpp` (after 27.6a copies the regenerated file)
-  - Verify the following are ABSENT:
-    - `psi_eps` and `std::clamp` (currently lines 98-99 and 214-215)
-    - `alpha[1] < 197.0 / 288.0` constructor check (currently lines 35-38)
-    - The singularity-explanation comment block (currently lines 17-28)
-    - Any `1.0/psi` or `1.0/(psi - 1)` patterns in floating/dirichlet methods
-    - Division by `t13` where `t13 = psi - 1` (currently line 110)
-    - Division by `psi` in `t17 = t16/psi` (currently line 113)
+  - Verify the following guards are PRESENT (manually re-add after regen
+    if the codegen pipeline does not emit them):
+    - `psi_eps` and `std::clamp` for ψ near 0 and 1
+    - `alpha[1] < 197.0 / 288.0` constructor check (or equivalent bound
+      for the new denominator structure)
   - **Note:** The codegen pipeline (`scripts/stencil_gen/stencil_gen/codegen.py`)
     does NOT hardcode any guards — the `psi_eps`/`std::clamp` and `alpha[1]`
     check in the current E4_1.cpp were added manually after code generation.
-    After regeneration, these should NOT reappear. If the regenerated code
-    DOES contain `1.0/psi`-type divisions (from CSE of rational entries), the
-    fix is in the stencil derivation (27.3a/27.4a), not the codegen template.
+    After regeneration, these must be re-added manually.
   - Test: `cmake --build build --target t-E4_1 && ctest --test-dir build -R t-E4_1`
   - Must come after 27.6a (regeneration produces the new file first).
 
