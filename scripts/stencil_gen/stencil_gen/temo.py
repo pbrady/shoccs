@@ -2263,6 +2263,54 @@ def derive_cut_cell_scheme(
     """
     dims = compute_dimensions(scheme.p, scheme.q, scheme.s, scheme.nextra, scheme.nu)
 
+    # --- Zero-constrained cut-cell conservation path ---
+    if scheme.zeros:
+        # Step 1: Build uniform with zeros (no uniform conservation)
+        uniform = derive_uniform_boundary_for_temo(
+            scheme, zeros=set(scheme.zeros),
+        )
+        # Step 2: TEMO pipeline
+        floating_result = construct_cut_cell_stencil(
+            uniform.B_u, uniform.interior,
+            scheme.p, scheme.q, scheme.nu, scheme.nextra, psi,
+        )
+        floating = floating_result.matrix
+        R, T = floating.shape
+        # Step 3: Solve cut-cell conservation
+        eqs, w_syms = build_cut_cell_conservation_system(
+            floating, R, T, scheme.p, scheme.nu,
+            uniform.interior, psi,
+        )
+        solve_for = list(uniform.alpha_symbols[:2]) + list(w_syms[:3])
+        sol = solve_cut_cell_conservation(eqs, solve_for)
+        # Step 4: Apply solution to stencil
+        floating = floating.xreplace(sol)
+        # Step 5: Compute weights (w_0=psi, w_1..w_3 from sol, w_4 free)
+        weights = [psi] + [sol[w] for w in w_syms[:3]] + [w_syms[3]]
+        # Step 6: Rename remaining free params for codegen
+        # alpha_2 -> alpha_0, w_4 -> alpha_1
+        free_alpha = uniform.alpha_symbols[2]
+        free_w = w_syms[3]
+        n_free = 2
+        if alpha_symbols is None:
+            final = [Symbol(f"alpha_{k}") for k in range(n_free)]
+        else:
+            if len(alpha_symbols) != n_free:
+                raise ValueError(
+                    f"zeros path produces {n_free} free params, "
+                    f"got {len(alpha_symbols)} alpha_symbols"
+                )
+            final = list(alpha_symbols)
+        rename = {free_alpha: final[0], free_w: final[1]}
+        floating = floating.xreplace(rename)
+        weights = [cancel(w.xreplace(rename)) if hasattr(w, 'xreplace') else w
+                   for w in weights]
+        # Step 7: Assemble result
+        return assemble_cut_cell_result(
+            floating, None, None, dims, final,
+            weights=weights,
+        )
+
     if not conserve:
         # Original non-conservative path — unchanged.
         uniform = derive_uniform_boundary_for_temo(

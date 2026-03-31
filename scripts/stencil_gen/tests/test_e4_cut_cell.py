@@ -534,11 +534,11 @@ class TestE4TEMOConstruction:
 
 
 class TestE4CodeGeneration:
-    """Tests for E4_1 C++ code generation (21.4b, updated for 4-alpha conservation)."""
+    """Tests for E4_1 C++ code generation (21.4b, updated for 2-alpha zeros conservation)."""
 
     @pytest.fixture(scope="class")
     def e4_spec(self):
-        """Build the full StencilGenSpec via derive_cut_cell_scheme (conserve=True)."""
+        """Build the full StencilGenSpec via derive_cut_cell_scheme (zeros path)."""
         psi = Symbol("psi")
         cc = derive_cut_cell_scheme(E4_1, psi, conserve=True)
 
@@ -559,7 +559,7 @@ class TestE4CodeGeneration:
             X=0,
             derivative_order=1,
             is_uniform=False,
-            param_arrays={"alpha": 4},
+            param_arrays={"alpha": 2},
             interior_coeffs=interior,
             floating_coeffs=floating_flat,
             dirichlet_coeffs=dirichlet_flat,
@@ -587,8 +587,8 @@ class TestE4CodeGeneration:
         assert "namespace ccs::stencils" in e4_code
 
     def test_alpha_array(self, e4_code):
-        """Generated code has std::array<real, 4> alpha member (conservation reduces from 5)."""
-        assert "std::array<real, 4> alpha;" in e4_code
+        """Generated code has std::array<real, 2> alpha member (zeros + cut-cell conservation)."""
+        assert "std::array<real, 2> alpha;" in e4_code
 
     def test_constructor(self, e4_code):
         """Generated code has span constructor."""
@@ -666,13 +666,13 @@ class TestE4CodeGeneration:
 
 
 class TestE4TestFileGeneration:
-    """Tests for E4_1 C++ test file generation (21.4c, updated for 4-alpha conservation)."""
+    """Tests for E4_1 C++ test file generation (21.4c, updated for 2-alpha zeros conservation)."""
 
-    ALPHA_VALUES = {"alpha": [0.1, -0.05, 0.02, 0.01]}
+    ALPHA_VALUES = {"alpha": [0.1, -0.05]}
 
     @pytest.fixture(scope="class")
     def e4_spec(self):
-        """Build the full StencilGenSpec via derive_cut_cell_scheme (conserve=True)."""
+        """Build the full StencilGenSpec via derive_cut_cell_scheme (zeros path)."""
         psi = Symbol("psi")
         cc = derive_cut_cell_scheme(E4_1, psi, conserve=True)
 
@@ -690,19 +690,19 @@ class TestE4TestFileGeneration:
             X=0,
             derivative_order=1,
             is_uniform=False,
-            param_arrays={"alpha": 4},
+            param_arrays={"alpha": 2},
             interior_coeffs=interior,
             floating_coeffs=floating_flat,
             dirichlet_coeffs=dirichlet_flat,
         )
 
     def test_compute_floating_values(self, e4_spec):
-        """compute_test_values produces 35 floating coefficients at psi=1.0."""
+        """compute_test_values produces 35 floating coefficients at psi=0.9."""
         values = compute_test_values(
             e4_spec.floating_coeffs,
             alpha_values=self.ALPHA_VALUES,
             h=1.0,
-            psi=1.0,
+            psi=0.9,
         )
         assert len(values) == 35  # R*T = 5*7
 
@@ -717,16 +717,18 @@ class TestE4TestFileGeneration:
         )
         assert len(values) == 28  # (R-1)*T = 4*7
 
-    def test_floating_uniform_limit_row4_not_interior(self, e4_spec):
-        """At psi=1.0, floating row 4 is NOT the raw interior stencil — it's derived via conservation+Taylor.
+    def test_floating_row4_not_interior(self, e4_spec):
+        """At psi=0.9, floating row 4 is NOT the raw interior stencil.
 
-        Compute expected values dynamically from the 5×7 floating matrix.
+        The zeros-conservative stencil diverges at psi=1, so we test at an
+        interior psi value.  Row 4 is derived via conservation+Taylor, not
+        the raw interior coefficients.
         """
         values = compute_test_values(
             e4_spec.floating_coeffs,
             alpha_values=self.ALPHA_VALUES,
             h=2.0,
-            psi=1.0,
+            psi=0.9,
         )
         # Row 4 = indices 28..34
         row4 = values[28:35]
@@ -743,13 +745,13 @@ class TestE4TestFileGeneration:
             e4_spec.floating_coeffs,
             alpha_values=self.ALPHA_VALUES,
             h=1.0,
-            psi=1.0,
+            psi=0.9,
         )
         cases = [
             TestCase(
                 bc_type="Floating",
                 h=1.0,
-                psi=1.0,
+                psi=0.9,
                 alpha_values=self.ALPHA_VALUES,
                 expected_coeffs=floating_vals,
             ),
@@ -758,7 +760,7 @@ class TestE4TestFileGeneration:
         assert 'TEST_CASE("E4_1")' in code
         assert 'type = "E4"' in code
         assert "order = 1" in code
-        assert "alpha = {0.1, -0.05, 0.02, 0.01}" in code
+        assert "alpha = {0.1, -0.05}" in code
         assert "REQUIRE(p == 2)" in code
         assert "REQUIRE(r == 5)" in code
         assert "REQUIRE(t == 7)" in code
@@ -770,11 +772,11 @@ class TestE4TestFileGeneration:
             TestCase(
                 bc_type="Floating",
                 h=2.0,
-                psi=1.0,
+                psi=0.9,
                 alpha_values=self.ALPHA_VALUES,
                 expected_coeffs=compute_test_values(
                     e4_spec.floating_coeffs,
-                    alpha_values=self.ALPHA_VALUES, h=2.0, psi=1.0,
+                    alpha_values=self.ALPHA_VALUES, h=2.0, psi=0.9,
                 ),
             ),
             TestCase(
@@ -810,11 +812,11 @@ class TestE4TestFileGeneration:
             TestCase(
                 bc_type="Floating",
                 h=2.0,
-                psi=1.0,
+                psi=0.9,
                 alpha_values=self.ALPHA_VALUES,
                 expected_coeffs=compute_test_values(
                     e4_spec.floating_coeffs,
-                    alpha_values=self.ALPHA_VALUES, h=2.0, psi=1.0,
+                    alpha_values=self.ALPHA_VALUES, h=2.0, psi=0.9,
                 ),
             ),
             TestCase(
@@ -869,42 +871,46 @@ class TestDeriveCutCellScheme:
         assert result.eta is None
 
     def test_e4_1_alpha_count(self):
-        """E4_1 has 4 free alpha symbols (conservation eliminates 1)."""
+        """E4_1 has 2 free alpha symbols (zeros + cut-cell conservation)."""
         psi = Symbol("psi")
         result = derive_cut_cell_scheme(E4_1, psi)
-        assert len(result.alpha_symbols) == 4
+        assert len(result.alpha_symbols) == 2
 
     def test_e4_1_matches_manual_pipeline(self):
-        """derive_cut_cell_scheme(E4_1) equals manual pipeline + conservation subs."""
+        """derive_cut_cell_scheme(E4_1) equals manual zeros + cut-cell conservation pipeline."""
         psi = Symbol("psi")
 
-        # Manual non-conserved pipeline (5 alphas)
-        ur = derive_uniform_boundary_for_temo(E4_1)
+        # Manual zeros pipeline
+        ur = derive_uniform_boundary_for_temo(E4_1, zeros={3, 4})
         stencil = construct_cut_cell_stencil(
             ur.B_u, ur.interior, p=2, q=3, nu=1, nextra=0, psi=psi,
         )
-        dims = compute_dimensions(E4_1.p, E4_1.q, E4_1.s, E4_1.nextra, E4_1.nu)
-        manual = assemble_cut_cell_result(
-            stencil.matrix, None, None, dims, ur.alpha_symbols,
-        )
+        floating = stencil.matrix
+        R, T = floating.shape
 
-        # Conservative high-level pipeline (4 alphas)
+        # Solve cut-cell conservation
+        eqs, w_syms = build_cut_cell_conservation_system(
+            floating, R, T, p=2, nu=1,
+            interior_coeffs=ur.interior, psi=psi,
+        )
+        solve_for = list(ur.alpha_symbols[:2]) + list(w_syms[:3])
+        sol = solve_cut_cell_conservation(eqs, solve_for)
+
+        # Apply solution and rename free params
+        floating = floating.xreplace(sol)
+        rename = {ur.alpha_symbols[2]: Symbol("alpha_0"), w_syms[3]: Symbol("alpha_1")}
+        floating = floating.xreplace(rename)
+
+        # High-level pipeline
         auto = derive_cut_cell_scheme(E4_1, psi)
 
-        # Apply conservation_subs to manual, then rename surviving alphas
-        assert auto.conservation_subs is not None
-        manual_subbed = manual.floating.xreplace(auto.conservation_subs)
-        # Rename surviving nc-alphas (alpha_0..alpha_2, alpha_4) to final (alpha_0..alpha_3)
-        nc_alphas = ur.alpha_symbols  # [alpha_0..alpha_4]
-        surviving = [a for a in nc_alphas if a not in auto.conservation_subs]
-        rename = dict(zip(surviving, auto.alpha_symbols))
-        manual_subbed = manual_subbed.xreplace(rename)
+        # Zeros path has no conservation_subs
+        assert auto.conservation_subs is None
 
         # Compare floating matrices entry by entry
-        R, T = auto.floating.shape
         for i in range(R):
             for j in range(T):
-                assert cancel(auto.floating[i, j] - manual_subbed[i, j]) == 0, (
+                assert cancel(auto.floating[i, j] - floating[i, j]) == 0, (
                     f"Floating mismatch at [{i},{j}]"
                 )
 
@@ -926,9 +932,9 @@ class TestDeriveCutCellScheme:
                 )
 
     def test_e4_1_custom_alphas(self):
-        """derive_cut_cell_scheme accepts custom alpha symbols (4 post-conservation)."""
+        """derive_cut_cell_scheme accepts custom alpha symbols (2 post-zeros-conservation)."""
         psi = Symbol("psi")
-        syms = [Symbol(f"a{k}") for k in range(4)]
+        syms = [Symbol(f"a{k}") for k in range(2)]
         result = derive_cut_cell_scheme(E4_1, psi, alpha_symbols=syms)
         assert result.alpha_symbols == syms
         assert result.floating.free_symbols <= {psi} | set(syms)
@@ -1665,9 +1671,12 @@ class TestCutCellConservationAfterUniform:
 
     @pytest.fixture(scope="class")
     def conserved_cut_cell(self):
-        """Build E4_1 cut-cell stencil with uniform conservation enforced."""
+        """Build E4_1-like cut-cell stencil with uniform conservation (no zeros)."""
         psi = Symbol("psi")
-        result = derive_cut_cell_scheme(E4_1, psi, conserve=True)
+        # Use a local SchemeParams without zeros to test the uniform-only path.
+        # The real E4_1 now has zeros=(3,4) which takes a different code path.
+        e4_no_zeros = SchemeParams(p=2, q=3, s=0, nextra=0, nu=1)
+        result = derive_cut_cell_scheme(e4_no_zeros, psi, conserve=True)
         interior = [Rational(1, 12), Rational(-2, 3), S.Zero,
                     Rational(2, 3), Rational(-1, 12)]
         eqs, w_syms = build_cut_cell_conservation_system(

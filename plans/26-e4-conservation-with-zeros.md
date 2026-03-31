@@ -220,7 +220,7 @@ With alpha_3=alpha_4=0, `sympy.solve()` produces a clean single-branch solution 
 
 ### 26.5 — Integrate into `derive_cut_cell_scheme`
 
-- [ ] **26.5a** Update `derive_cut_cell_scheme` to use zeros and cut-cell conservation:
+- [x] **26.5a** Update `derive_cut_cell_scheme` to use zeros and cut-cell conservation:
   - **File:** `scripts/stencil_gen/stencil_gen/temo.py` (`derive_cut_cell_scheme`, line ~2172)
   - **Add a new code path** detected by `scheme.zeros` being non-empty:
     ```python
@@ -278,6 +278,7 @@ With alpha_3=alpha_4=0, `sympy.solve()` produces a clean single-branch solution 
   - **The existing `conserve=True` path (lines ~2232-2327) is unchanged** — it continues to handle schemes without zeros (E2_1, E2_2, E4_2).
   - **Psi boundary divergence (from 26.4c finding):** The conservative stencil has poles at psi=0 and psi=1 (alpha_0 diverges). The result or codegen output must document that coefficients are valid only for psi in the open interval (0, 1). Consider adding a `valid_psi_range=(0, 1)` annotation to the result or a comment in the generated C++ code.
   - **Test:** `cd scripts/stencil_gen && uv run pytest tests/test_e4_cut_cell.py -v -k "SchemeWithZeros" --timeout=300`
+  - **Done:** Implemented zeros path before the `if not conserve:` check. The path builds zero-constrained B_u, runs TEMO, solves cut-cell conservation for [alpha_0, alpha_1, w_1, w_2, w_3], renames {alpha_2 → alpha_0, w_4 → alpha_1}, and returns 2-alpha result. All existing tests pass (88 passed, 1 xfail).
 
 - [ ] **26.5b** E2_1 regression test:
   - **File:** `scripts/stencil_gen/tests/test_temo.py`
@@ -298,7 +299,7 @@ With alpha_3=alpha_4=0, `sympy.solve()` produces a clean single-branch solution 
     - `test_custom_alphas`: accepts `alpha_symbols=[Symbol("a"), Symbol("b")]`
   - **Test:** `cd scripts/stencil_gen && uv run pytest tests/test_e4_cut_cell.py -v -k "SchemeWithZeros" --timeout=300`
 
-- [ ] **26.5d** Update existing E4_1 tests broken by the zeros path:
+- [x] **26.5d** Update existing E4_1 tests broken by the zeros path:
   - **File:** `scripts/stencil_gen/tests/test_e4_cut_cell.py`
   - **Why this is needed:** Once 26.5a adds `scheme.zeros` dispatch, all existing calls to `derive_cut_cell_scheme(E4_1, ...)` hit the zeros path (2 alphas) instead of the old uniform conservation path (4 alphas). The following test classes/methods must be updated:
   - **`TestDeriveCutCellScheme` (line ~654):**
@@ -321,6 +322,14 @@ With alpha_3=alpha_4=0, `sympy.solve()` produces a clean single-branch solution 
     - All `compute_test_values` calls automatically produce new expected values.
   - **Ordering constraint:** Must be done together with or immediately after 26.5a. Tests will fail between 26.5a and 26.5d.
   - **Test:** `cd scripts/stencil_gen && uv run pytest tests/test_e4_cut_cell.py -v --timeout=300`
+  - **Done:** Updated all affected tests:
+    - `test_e4_1_alpha_count`: 4 → 2
+    - `test_e4_1_custom_alphas`: 4 → 2 symbols
+    - `test_e4_1_matches_manual_pipeline`: Rewritten to verify zeros + cut-cell conservation pipeline
+    - `TestCutCellConservationAfterUniform`: Fixture uses local SchemeParams without zeros
+    - `TestE4CodeGeneration`: param_arrays=2, std::array<real, 2>
+    - `TestE4TestFileGeneration`: ALPHA_VALUES 2 values, param_arrays=2, assertion updated
+    - **Psi divergence fix:** Changed all psi=1.0 in TestE4TestFileGeneration to psi=0.9 (conservative stencil has poles at psi=0 and psi=1 per 26.4c)
 
 ### 26.6 — Re-generate E4_1 C++ code
 
