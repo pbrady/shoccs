@@ -97,6 +97,7 @@ With alpha_3=alpha_4=0, `sympy.solve()` produces a clean single-branch solution 
         alpha_symbols = [s for k, s in enumerate(alpha_symbols) if k not in zeros]
     ```
     This reduces E4_1 from 5 to 3 alpha_symbols.
+  - **`alpha_symbols` interaction:** When `zeros` is used, `alpha_symbols` must be None (auto-created) or have the pre-zeros count (5 for E4_1). The returned `UniformResult.alpha_symbols` has the post-zeros count (3). This is fine because 26.5a always passes `alpha_symbols=None`.
   - **No other logic changes needed:** The nextra>0 and conserve branches are unaffected since E4_1 has nextra=0 and zeros+conserve is forbidden.
   - **Test:** `cd scripts/stencil_gen && uv run pytest tests/test_temo.py -v -k "E2" --timeout=60` (E2 unchanged)
 
@@ -227,7 +228,7 @@ With alpha_3=alpha_4=0, `sympy.solve()` produces a clean single-branch solution 
 ### 26.5 — Integrate into `derive_cut_cell_scheme`
 
 - [ ] **26.5a** Update `derive_cut_cell_scheme` to use zeros and cut-cell conservation:
-  - **File:** `scripts/stencil_gen/stencil_gen/temo.py` (line 2172, `derive_cut_cell_scheme`)
+  - **File:** `scripts/stencil_gen/stencil_gen/temo.py` (`derive_cut_cell_scheme`, line ~2172)
   - **Add a new code path** detected by `scheme.zeros` being non-empty:
     ```python
     # --- Zero-constrained cut-cell conservation path ---
@@ -259,9 +260,15 @@ With alpha_3=alpha_4=0, `sympy.solve()` produces a clean single-branch solution 
         # alpha_2 -> alpha_0, w_4 -> alpha_1
         free_alpha = uniform.alpha_symbols[2]  # alpha_2
         free_w = w_syms[3]  # w_4
+        n_free = 2  # E4_1 zeros path always produces exactly 2 free params
         if alpha_symbols is None:
-            final = [Symbol("alpha_0"), Symbol("alpha_1")]
+            final = [Symbol(f"alpha_{k}") for k in range(n_free)]
         else:
+            if len(alpha_symbols) != n_free:
+                raise ValueError(
+                    f"zeros path produces {n_free} free params, "
+                    f"got {len(alpha_symbols)} alpha_symbols"
+                )
             final = list(alpha_symbols)
         rename = {free_alpha: final[0], free_w: final[1]}
         floating = floating.xreplace(rename)
@@ -273,9 +280,10 @@ With alpha_3=alpha_4=0, `sympy.solve()` produces a clean single-branch solution 
             weights=weights,
         )
     ```
-  - **Ordering constraint:** This block should go BEFORE the existing `if not conserve:` check (line 2208) since `scheme.zeros` takes priority.
-  - **The existing `conserve=True` path (lines 2232-2327) is unchanged** — it continues to handle non-zero schemes like E4_1 without zeros (backward-compatible) or E4_2.
-  - **Test:** `cd scripts/stencil_gen && uv run pytest tests/test_e4_cut_cell.py -v --timeout=300`
+  - **Ordering constraint:** This block should go BEFORE the existing `if not conserve:` check (line ~2208) since `scheme.zeros` takes priority.
+  - **`conserve` parameter interaction:** When `scheme.zeros` is non-empty, the zeros path is always taken regardless of `conserve`. The `conserve` parameter is silently ignored — cut-cell conservation is always applied via `solve_cut_cell_conservation`. This is intentional: the zeros approach replaces uniform conservation entirely for E4_1.
+  - **The existing `conserve=True` path (lines ~2232-2327) is unchanged** — it continues to handle schemes without zeros (E2_1, E2_2, E4_2).
+  - **Test:** `cd scripts/stencil_gen && uv run pytest tests/test_e4_cut_cell.py -v -k "SchemeWithZeros" --timeout=300`
 
 - [ ] **26.5b** E2_1 regression test:
   - **File:** `scripts/stencil_gen/tests/test_temo.py`
@@ -296,20 +304,52 @@ With alpha_3=alpha_4=0, `sympy.solve()` produces a clean single-branch solution 
     - `test_custom_alphas`: accepts `alpha_symbols=[Symbol("a"), Symbol("b")]`
   - **Test:** `cd scripts/stencil_gen && uv run pytest tests/test_e4_cut_cell.py -v -k "SchemeWithZeros" --timeout=300`
 
+- [ ] **26.5d** Update existing E4_1 tests broken by the zeros path:
+  - **File:** `scripts/stencil_gen/tests/test_e4_cut_cell.py`
+  - **Why this is needed:** Once 26.5a adds `scheme.zeros` dispatch, all existing calls to `derive_cut_cell_scheme(E4_1, ...)` hit the zeros path (2 alphas) instead of the old uniform conservation path (4 alphas). The following test classes/methods must be updated:
+  - **`TestDeriveCutCellScheme` (line ~654):**
+    - `test_e4_1_alpha_count` (line ~674): change expected from 4 to 2
+    - `test_e4_1_custom_alphas` (line ~731): pass 2 symbols instead of 4; update assertion
+    - `test_e4_1_matches_manual_pipeline` (line ~680): **Rewrite entirely.** The old test verified `conservation_subs` from the uniform conservation path. The zeros path has no `conservation_subs` (it's None). Instead, verify that the result matches: (1) build zero-constrained B_u, (2) TEMO, (3) solve cut-cell conservation, (4) substitute — yielding the same floating matrix as `derive_cut_cell_scheme(E4_1, psi)`.
+    - `test_e4_1_taylor_accuracy` (line ~714): No change needed (Taylor accuracy is independent of alpha count).
+    - E2 tests (`test_e2_1_reproduces_existing`, `test_e2_2_reproduces_existing`): No change needed (E2 has empty zeros).
+  - **`TestCutCellConservationAfterUniform` (line ~1250):**
+    - This class proves that uniform-conservation-only is infeasible for E4_1 at the cut-cell level (Groebner basis = {1}). It is still a valuable regression test documenting *why* the zeros approach was necessary.
+    - **Fix:** Change the fixture to use a local `SchemeParams(p=2, q=3, s=0, nextra=0, nu=1)` without zeros (avoiding the new `E4_1` constant which has `zeros=(3,4)`). This preserves the infeasibility proof without being affected by the zeros path.
+    - Only the fixture `conserved_cut_cell` (line ~1264) needs updating: replace `E4_1` with the local SchemeParams.
+  - **`TestE4CodeGeneration` (line ~339):**
+    - Fixture `e4_spec` (line ~342): `derive_cut_cell_scheme(E4_1, psi, conserve=True)` now returns 2 alphas. Update `param_arrays={"alpha": 2}`.
+    - `test_alpha_array` (line ~392): expect `std::array<real, 2> alpha` instead of 4.
+  - **`TestE4TestFileGeneration` (line ~471):**
+    - `ALPHA_VALUES` (line ~474): change to `{"alpha": [0.1, -0.05]}` (2 values).
+    - Fixture `e4_spec` (line ~476): update `param_arrays={"alpha": 2}`.
+    - `test_generate_test_file_structure` (line ~543): assert changes to `alpha = {0.1, -0.05}` (2 values).
+    - All `compute_test_values` calls automatically produce new expected values.
+  - **Ordering constraint:** Must be done together with or immediately after 26.5a. Tests will fail between 26.5a and 26.5d.
+  - **Test:** `cd scripts/stencil_gen && uv run pytest tests/test_e4_cut_cell.py -v --timeout=300`
+
 ### 26.6 — Re-generate E4_1 C++ code
 
-- [ ] **26.6a** Generate conservative E4_1 C++ stencil:
-  - **Files:** `scripts/stencil_gen/output/E4_1.cpp` → `src/stencils/E4_1.cpp`
-  - The `StencilGenSpec` will have:
-    - `name="E4_1"`, `P=2`, `R=5`, `T=7`, `X=0`, `derivative_order=1`, `is_uniform=False`
-    - `param_arrays={"alpha": 2}` — both alpha_2 and w_4 mapped to `alpha[0]` and `alpha[1]`
-  - **C++ struct changes:**
-    - `std::array<real, 4> alpha` → `std::array<real, 2> alpha` (was 4 after uniform conservation, now 2 after cut-cell conservation)
-    - Constructor: `E4_1(std::span<const real> a)` still works with `copy_zero_padded`
-  - **Coefficient expressions:** Entries are rational functions of (psi, alpha[0], alpha[1]). Expect larger CSE output since conservation introduces rational psi-dependency beyond what TEMO alone produces.
-  - **Test file:** Update `src/stencils/E4_1.t.cpp` with new test values computed from `compute_test_values` with 2-element alpha array
-  - **Build:** `cmake --build build --target t-E4_1`
-  - **Test:** `ctest --test-dir build -R t-E4_1`
+- [ ] **26.6a** Re-generate E4_1 C++ stencil and test file:
+  - **Prerequisite:** 26.5a + 26.5d must be complete (Python pipeline returns 2-alpha conservative stencil).
+  - **Workflow:**
+    1. Run Python codegen tests which write to `scripts/stencil_gen/output/`:
+       `cd scripts/stencil_gen && uv run pytest tests/test_e4_cut_cell.py -v -k "test_write_output or test_write_test_output" --timeout=300`
+    2. Copy generated files:
+       `cp scripts/stencil_gen/output/E4_1.cpp src/stencils/E4_1.cpp`
+       `cp scripts/stencil_gen/output/E4_1.t.cpp src/stencils/E4_1.t.cpp`
+  - **Expected C++ changes in `src/stencils/E4_1.cpp`:**
+    - `std::array<real, 4> alpha` → `std::array<real, 2> alpha`
+    - P=2, R=5, T=7, X=0 are unchanged
+    - Coefficient expressions become rational functions of (psi, alpha[0], alpha[1]); CSE temporaries will differ
+    - `nbs_floating`, `nbs_dirichlet` method signatures unchanged
+  - **Expected C++ changes in `src/stencils/E4_1.t.cpp`:**
+    - Lua config: `alpha = {0.1, -0.05}` (was `{0.1, -0.05, 0.02, 0.01}`)
+    - All `REQUIRE_THAT(c, Approx(T{...}))` expected values change (new symbolic expressions)
+    - Test structure (Floating/Dirichlet sections, psi values) is unchanged
+  - **Build and test:**
+    - `cmake --build build --target t-E4_1`
+    - `ctest --test-dir build -R t-E4_1`
 
 ### 26.7 — Update memory and plans
 
