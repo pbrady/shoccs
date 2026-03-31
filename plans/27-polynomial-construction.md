@@ -266,15 +266,12 @@ From the paper's Table A.4: boundary row entries have degree ≤ 4 in ψ. Since 
   - Remove the alpha[1] lower-bound check in the constructor (lines 35-38):
     `if (alpha[1] < 197.0 / 288.0) throw ...`
   - Remove the comment block explaining the singularity constraints (lines 17-28).
-  - **Do NOT do this until 27.6a regenerates E4_1.cpp** — the regeneration will
-    produce a new file that inherently doesn't need these guards. This item
-    is only needed if we modify the generated file manually rather than
-    regenerating.
-  - **Note:** If 27.6a fully regenerates E4_1.cpp, this item becomes a
-    verification step (confirm the generated file has no clamping/guards)
-    rather than a manual edit.
+  - **Note:** This item is a verification/cleanup step AFTER 27.6a regenerates
+    E4_1.cpp. If the regenerated file is already clean (no clamping or alpha
+    guards), this reduces to a verification check. If any guards remain in
+    the generated file, remove them manually.
   - Test: `cmake --build build --target t-E4_1 && ctest --test-dir build -R t-E4_1`
-  - Must come after 27.4b (polynomial construction is verified).
+  - Must come after 27.6a (regeneration produces the new file first).
 
 ### 27.6 — Regenerate E4_1 C++ and verify
 
@@ -296,7 +293,7 @@ From the paper's Table A.4: boundary row entries have degree ≤ 4 in ψ. Since 
   - Build and test: `cmake --build build --target t-E4_1 && ctest --test-dir build -R t-E4_1`
   - Also run the full C++ test suite to check for regressions:
     `cmake --build build && ctest --test-dir build`
-  - Must come after 27.5a (or replaces 27.5a if the regenerated file is clean).
+  - Must come after 27.4b (polynomial construction is verified).
 
 ### 27.7 — E2_1 regression
 
