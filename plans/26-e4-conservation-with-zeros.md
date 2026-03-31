@@ -422,14 +422,49 @@ With alpha_3=alpha_4=0, `sympy.solve()` produces a clean single-branch solution 
   - **Test:** `cmake --build build --target t-E4_1 && ctest --test-dir build -R t-E4_1`
   - **Done:** Added SECTION "Interior polynomial denominator singularity" that verifies D(psi) changes sign in (0.3, 0.32), bisects to find the root within 1e-8, then evaluates both Floating and Dirichlet stencils at psi_pole+1e-6, confirming coefficients exceed 1e4. 323 assertions, all pass.
 
-- [ ] **26.6-followup-d5** Implement numerical robustness fix (design decision required):
-  - **Fix options (choose one or combine):**
-    1. **Stencil-specific psi clamp:** Add a guard in `E4_1::nbs_floating`/`nbs_dirichlet` clamping psi to `[eps, 1-eps]` with `eps` large enough for stability (e.g., `1e-4`). Only addresses boundary poles, not the interior polynomial singularity.
-    2. **Uniform stencil fallback:** When psi > 1 - eps (near-full cell), use the non-conservative uniform stencil instead (psi=1 means full cell where the uniform stencil is exact).
-    3. **Coefficient magnitude analysis:** Determine the maximum acceptable psi range empirically by running the solver with decreasing psi and finding where CFL-limited time steps become impractical.
-    4. **Alpha[1] lower bound:** Require alpha[1] ≥ 197/288 ≈ 0.684 to eliminate the interior singularity entirely (since `D(0) = 288*alpha[1] - 197 ≥ 0` and `D` is increasing on (0,1)). Update constructor guard. Alternatively, add a runtime check that `|D(psi)| > eps` before evaluating.
-  - **Recommendation:** Option 4 (alpha[1] lower bound) is the cleanest — it eliminates the interior pole at construction time. Combine with option 1 (stencil-level boundary clamp with eps=1e-4) for the boundary poles. This avoids changing the geometry-level snap tolerance and provides defense in depth.
-  - After implementing, update tests from d2/d3/d4 to verify the fix (remove xfails, tighten bounds, etc.).
+**26.6-followup-d5** Implement numerical robustness fix:
+
+  **Design decision (resolved):** Combine Option 4 (alpha[1] lower bound ≥ 197/288) with Option 1 (stencil-level psi clamp with eps=1e-4). Option 4 eliminates the interior polynomial singularity at construction time. Option 1 guards against boundary poles (psi=0 and psi=1) at the stencil level, providing defense in depth without changing the geometry-level snap tolerance.
+
+  **Pole inventory in E4_1.cpp:** `1/(psi-1)` (Floating line 104, Dirichlet line 228), `1/psi` (Floating line 108), `1/alpha[1]` (Floating line 105, Dirichlet line 226), `1/(288*alpha[1] + 648*psi + 12*psi³ + 90*psi² - 197)` (Floating line 145 and Dirichlet line 230).
+
+- [ ] **26.6-followup-d5a** Add stencil-level psi boundary clamp (eps=1e-4):
+  - **Files:** `src/stencils/E4_1.cpp`, `src/stencils/E4_1.t.cpp`
+  - **E4_1.cpp changes:** In both `nbs_floating` and `nbs_dirichlet`, add at the top (before any computation):
+    ```cpp
+    constexpr real psi_eps = 1e-4;
+    psi = std::clamp(psi, psi_eps, 1.0 - psi_eps);
+    ```
+    This ensures coefficients involving `1/psi` and `1/(psi-1)` remain O(1/psi_eps) = O(1e4), well within numerical stability.
+  - **E4_1.t.cpp changes:** Flip the three d3 "magnitude exceeds safe bound" SECTIONs from `REQUIRE(max_abs > 1e8)` to `REQUIRE(max_abs < 1e8)`:
+    - "Floating near psi=1: magnitude exceeds safe bound" → "Floating near psi=1: magnitude within safe bound"
+    - "Dirichlet near psi=1: magnitude exceeds safe bound" → "Dirichlet near psi=1: magnitude within safe bound"
+    - "Floating near psi=0: magnitude exceeds safe bound" → "Floating near psi=0: magnitude within safe bound"
+    Update comments to note the psi clamp is active. The d2 finiteness tests and d4 interior singularity test are unaffected (psi=0.3 is well within [1e-4, 1-1e-4]).
+  - **Main coefficient tests unaffected:** The psi values 0.9, 0.3, 0.7 are within [1e-4, 1-1e-4], so REQUIRE_THAT expected values don't change.
+  - **Test:** `cmake --build build --target t-E4_1 && ctest --test-dir build -R t-E4_1`
+
+- [ ] **26.6-followup-d5b** Require alpha[1] >= 197/288 and regenerate C++ files:
+  - **Why:** The polynomial denominator `D(psi) = 288*alpha[1] + 648*psi + 12*psi³ + 90*psi² - 197` has a real zero inside (0,1) whenever alpha[1] < 197/288 ≈ 0.684. Since D'(psi) = 36*psi² + 180*psi + 648 > 0 for all psi, D is strictly increasing. If D(0) = 288*alpha[1] - 197 ≥ 0 (i.e. alpha[1] ≥ 197/288), then D(psi) > 0 for all psi ∈ (0,1), eliminating the interior singularity.
+  - **Python changes** (`scripts/stencil_gen/tests/test_e4_cut_cell.py`):
+    - Line 671: Change `ALPHA_VALUES = {"alpha": [0.1, -0.05]}` → `{"alpha": [0.1, 0.7]}`
+    - Line 763: Change assertion `"alpha = {0.1, -0.05}"` → `"alpha = {0.1, 0.7}"`
+    - Run Python tests: `cd scripts/stencil_gen && uv run pytest tests/test_e4_cut_cell.py -v -k "test_write_output or test_write_test_output" --timeout=300`
+  - **Regenerate C++ files:**
+    - `cp scripts/stencil_gen/output/E4_1.cpp src/stencils/E4_1.cpp`
+    - `cp scripts/stencil_gen/output/E4_1.t.cpp src/stencils/E4_1.t.cpp`
+  - **Re-apply manual additions to E4_1.cpp** (not emitted by codegen):
+    - `#include <stdexcept>` header
+    - Constructor guard: change to `if (alpha[1] < 197.0 / 288.0)` with error message `"E4_1: alpha[1] must be >= 197/288 ≈ 0.684 to avoid interior denominator singularity"`
+    - Singularity comment block (from d-followup-c)
+    - Psi clamp in nbs_floating/nbs_dirichlet (from d5a)
+  - **Re-apply manual test SECTIONs to E4_1.t.cpp:**
+    - d2 finiteness tests (near psi=0 and psi=1): unchanged logic
+    - d3 magnitude tests: use `< 1e8` (psi clamp active)
+    - d4 interior singularity test: rewrite to verify NO singularity exists — with alpha[1]=0.7 > 197/288, D(psi) > 0 for all psi ∈ (0,1). Test that D(psi) > 0 at several sample psi values and that stencil coefficients remain bounded.
+    - Alpha throws test: update to test `alpha[1] < 197/288` bound instead of `alpha[1] == 0`
+  - **Test:** `cmake --build build --target t-E4_1 && ctest --test-dir build -R t-E4_1`
+  - **Python test:** `cd scripts/stencil_gen && uv run pytest tests/test_e4_cut_cell.py -v --timeout=300`
 
 ### 26.7 — Update memory and plans
 
