@@ -31,11 +31,13 @@ from stencil_gen.temo import (
     compute_dimensions,
     construct_cut_cell_stencil,
     derive_cut_cell_scheme,
+    identify_prescribed_entries,
     derive_e2_uniform_boundary,
     derive_uniform_boundary_for_temo,
     make_psi_field,
     solve_cut_cell_conservation,
     solve_temo_row,
+    solve_temo_row_polynomial,
     solve_uniform_limit,
 )
 
@@ -1920,5 +1922,130 @@ class TestPolynomialStructure:
                 for alpha in alpha_syms:
                     assert not den.has(alpha), (
                         f"Row {i} col {j}: denominator depends on {alpha}"
+                    )
+
+
+class TestPolynomialBoundaryRows:
+    """Tests for solve_temo_row_polynomial applied to E4_1 boundary rows (27.2b).
+
+    Verifies that the polynomial ansatz produces entries that are:
+    - Polynomial in ψ (no denominator)
+    - Degree ≤ 4 in ψ
+    - Taylor-accurate
+    - Matching both ψ-limits (uniform and degenerate)
+    - At most linear in each alpha symbol
+    """
+
+    @pytest.fixture(scope="class")
+    def poly_rows(self):
+        """Compute polynomial boundary rows for E4_1 (rows 0-3)."""
+        psi = Symbol("psi")
+        uniform = derive_uniform_boundary_for_temo(
+            E4_1, zeros=set(E4_1.zeros)
+        )
+        B_u = uniform.B_u
+        interior = uniform.interior
+        p, q, nu, nextra = 2, 3, 1, 0
+        R = B_u.rows + 1  # 5
+        T = B_u.cols + 1  # 7
+
+        B_l_1 = solve_uniform_limit(B_u, interior, p, q, nu, nextra)
+        B_d = build_degenerate_stencil(B_u, interior, p, q, nu)
+
+        alpha_syms = sorted(B_u.free_symbols, key=lambda s: s.name)
+
+        rows = []
+        for i in range(R - 1):  # boundary rows 0..3
+            V, rhs_vec = build_temo_vandermonde(i, T, q, nu, psi)
+            prescribed = identify_prescribed_entries(
+                i, B_u.rows, B_u.cols, nextra, nu, B_u, B_l_1, B_d, psi,
+                max(q + 1, nu + 1),
+            )
+            result = solve_temo_row_polynomial(
+                i, V, rhs_vec, prescribed, psi, alpha_syms
+            )
+            rows.append(result.coeffs)
+
+        return rows, psi, alpha_syms, B_l_1, B_d, T, q, nu
+
+    def test_all_entries_polynomial(self, poly_rows):
+        """Every boundary row entry is a polynomial in ψ (no denominator)."""
+        rows, psi, _, _, _, T, _, _ = poly_rows
+        for i, row in enumerate(rows):
+            for j in range(T):
+                entry = row[j]
+                num, den = fraction(cancel(entry))
+                assert not den.has(psi), (
+                    f"Row {i} col {j}: has ψ-dependent denominator {den}"
+                )
+
+    def test_degree_bound(self, poly_rows):
+        """Max ψ-degree of each entry is ≤ 4 (for E4_1 with q=3)."""
+        rows, psi, _, _, _, T, _, _ = poly_rows
+        for i, row in enumerate(rows):
+            for j in range(T):
+                entry = expand(row[j])
+                if entry == 0 or not entry.has(psi):
+                    continue
+                p = Poly(entry, psi)
+                assert p.degree() <= 4, (
+                    f"Row {i} col {j}: ψ-degree {p.degree()} > 4"
+                )
+
+    def test_taylor_accuracy_symbolic(self, poly_rows):
+        """Each row satisfies Taylor accuracy as a polynomial identity in ψ.
+
+        Verify sum_j c_j * delta_j^m / m! = delta_{m,nu} for m=0..q.
+        """
+        rows, psi, _, _, _, T, q, nu = poly_rows
+        from sympy import factorial
+
+        for i, row in enumerate(rows):
+            deltas = build_cut_cell_deltas(i, T, psi)
+            for m in range(q + 1):
+                # Taylor condition: sum_j c_j * delta_j^m / m! = (1 if m==nu else 0)
+                lhs = sum(row[j] * deltas[j] ** m / factorial(m) for j in range(T))
+                expected = Rational(1) if m == nu else Rational(0)
+                residual = expand(lhs - expected)
+                assert residual == 0, (
+                    f"Row {i}, m={m}: Taylor residual = {residual}"
+                )
+
+    def test_psi_1_matches_uniform(self, poly_rows):
+        """At ψ=1, boundary row entries match B_l(1) (uniform limit)."""
+        rows, psi, _, B_l_1, _, T, _, _ = poly_rows
+        for i, row in enumerate(rows):
+            for j in range(T):
+                val = expand(row[j].subs(psi, 1))
+                expected = expand(B_l_1[i, j])
+                assert expand(val - expected) == 0, (
+                    f"Row {i} col {j}: at ψ=1 got {val}, expected {expected}"
+                )
+
+    def test_psi_0_matches_degenerate(self, poly_rows):
+        """At ψ=0, boundary row entries match B_d (degenerate stencil)."""
+        rows, psi, _, _, B_d, T, _, _ = poly_rows
+        for i, row in enumerate(rows):
+            for j in range(T):
+                val = expand(row[j].subs(psi, 0))
+                expected = expand(B_d[i, j])
+                assert expand(val - expected) == 0, (
+                    f"Row {i} col {j}: at ψ=0 got {val}, expected {expected}"
+                )
+
+    def test_linear_in_alphas(self, poly_rows):
+        """Each entry is at most degree 1 in each alpha symbol."""
+        rows, psi, alpha_syms, _, _, T, _, _ = poly_rows
+        for i, row in enumerate(rows):
+            for j in range(T):
+                entry = expand(row[j])
+                if entry == 0:
+                    continue
+                for alpha in alpha_syms:
+                    if not entry.has(alpha):
+                        continue
+                    p = Poly(entry, alpha)
+                    assert p.degree() <= 1, (
+                        f"Row {i} col {j}: degree {p.degree()} > 1 in {alpha}"
                     )
 

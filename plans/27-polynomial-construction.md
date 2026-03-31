@@ -182,10 +182,10 @@ different purpose (proving infeasibility of constant weights).
     - Added `expand` and `fraction` to the module-level imports in temo.py.
   - Must come before 27.2b.
 
-- [ ] **27.2b** Test polynomial boundary rows for E4_1
+- [x] **27.2b** Test polynomial boundary rows for E4_1
   - File: `scripts/stencil_gen/tests/test_e4_cut_cell.py` (new test class
     `TestPolynomialBoundaryRows`)
-  - Tests to write:
+  - Tests written (all 6 PASS):
     1. `test_all_entries_polynomial`: For rows 0-3, every entry from
        `solve_temo_row_polynomial` is a polynomial in ψ (no denominator after
        `fraction(cancel(entry))`).
@@ -199,6 +199,9 @@ different purpose (proving infeasibility of constant weights).
        `B_d` (the degenerate stencil from `build_degenerate_stencil`).
     6. `test_linear_in_alphas`: Each entry is at most degree 1 in each
        alpha symbol.
+  - Also added `identify_prescribed_entries` and `solve_temo_row_polynomial`
+    to the test file's top-level imports.
+  - All 104 existing tests pass (1 xfail expected). No regressions.
   - Test: `cd scripts/stencil_gen && uv run pytest tests/test_e4_cut_cell.py -v -k "TestPolynomialBoundaryRows" --timeout=300`
   - Must come after 27.2a.
 
