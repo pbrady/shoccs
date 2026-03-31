@@ -393,11 +393,12 @@ With alpha_3=alpha_4=0, `sympy.solve()` produces a clean single-branch solution 
   - **Pole inventory in E4_1.cpp:** `1/(psi-1)` (Floating line 104, Dirichlet line 228), `1/psi` (Floating line 108), `1/alpha[1]` (Floating line 105, Dirichlet line 226), `1/(288*alpha[1] + 648*psi + 12*psi³ + 90*psi² - 197)` (Floating line 145 **and** Dirichlet line 230 — both methods, not just Dirichlet).
   - **CRITICAL — Interior singularity from polynomial denominator:** The denominator `D(psi) = 288*alpha[1] + 648*psi + 12*psi³ + 90*psi² - 197` has a real zero **inside** (0,1) for all alpha[1] < 197/288 ≈ 0.684. Concrete examples: alpha[1]=-0.05 → zero at psi≈0.312; alpha[1]=0.1 → zero at psi≈0.251; alpha[1]=0.5 → zero at psi≈0.081. The test default alpha[1]=-0.05 places this singularity at psi≈0.312, well within the normal cut-cell range. **This pole cannot be fixed by psi clamping** — it requires constraining alpha[1] or adding a runtime check on the denominator magnitude.
 
-- [ ] **26.6-followup-d1** Fix singularity comment in E4_1.cpp:
+- [x] **26.6-followup-d1** Fix singularity comment in E4_1.cpp:
   - **File:** `src/stencils/E4_1.cpp`
   - Lines 23-24 say "The Dirichlet denominator" but the expression `288*alpha[1] + 648*psi + 12*psi^3 + 90*psi^2 - 197` appears in **both** `nbs_floating` (line 145) and `nbs_dirichlet` (line 230).
   - **Fix:** Change "The Dirichlet denominator" to "The denominator" (no method qualifier).
   - **Test:** `cmake --build build --target t-E4_1 && ctest --test-dir build -R t-E4_1`
+  - **Done:** Changed "The Dirichlet denominator" → "The denominator" on line 23. Build and test pass (113 assertions).
 
 - [ ] **26.6-followup-d2** Add near-psi=0 finiteness tests in E4_1.t.cpp:
   - **File:** `src/stencils/E4_1.t.cpp`

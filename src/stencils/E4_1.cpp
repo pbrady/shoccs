@@ -20,7 +20,7 @@ struct E4_1 {
     //     (nbs_floating, nbs_dirichlet divide by (psi - 1)).
     //   - alpha[1] must be nonzero (nbs_floating and nbs_dirichlet divide by
     //     alpha[1]).
-    //   - The Dirichlet denominator 288*alpha[1] + 648*psi + 12*psi^3 +
+    //   - The denominator 288*alpha[1] + 648*psi + 12*psi^3 +
     //     90*psi^2 - 197 must be nonzero for the chosen alpha[1] and psi.
     //
     // alpha[0]: boundary shape parameter (free)
