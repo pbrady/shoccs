@@ -1811,3 +1811,114 @@ class TestCutCellConservationAfterUniform:
             f"Expected Groebner basis [1] (inconsistent), got {list(gb)}"
         )
 
+
+class TestPolynomialStructure:
+    """Diagnostic: verify boundary rows are polynomial after QQ(ψ) solve (27.1a).
+
+    For E4_1 with zeros={3,4}, call construct_cut_cell_stencil to get the raw
+    TEMO output (before conservation). Check whether cancel(entry) is polynomial
+    in ψ for each boundary row (i=0..3).
+    """
+
+    @pytest.fixture(scope="class")
+    def temo_output(self):
+        """Get raw TEMO output for E4_1 before conservation solve."""
+        psi = Symbol("psi")
+        uniform = derive_uniform_boundary_for_temo(
+            E4_1, zeros=set(E4_1.zeros)
+        )
+        result = construct_cut_cell_stencil(
+            uniform.B_u, uniform.interior, 2, 3, 1, 0, psi
+        )
+        return result, psi, uniform
+
+    def test_boundary_rows_have_vandermonde_denominators(self, temo_output):
+        """27.1a: Boundary rows have ψ-dependent Vandermonde denominators after cancel.
+
+        Diagnostic finding: boundary rows from solve_temo_row are rational in ψ
+        with Vandermonde-type denominators like (ψ+1)(ψ+2)(ψ+3). These are
+        benign (nonvanishing on [0,1]) but NOT polynomial.
+        Decision: polynomial ansatz (27.2a) IS needed.
+        """
+        result, psi, _ = temo_output
+        m = result.matrix
+        R, T = m.shape
+        assert R == 5 and T == 7
+
+        has_psi_denom = False
+        for i in range(R - 1):  # rows 0..3 (boundary rows)
+            for j in range(T):
+                entry = m[i, j]
+                num, den = fraction(cancel(entry))
+                if den.has(psi):
+                    has_psi_denom = True
+                    # Verify denominators are Vandermonde-type (nonvanishing on [0,1])
+                    p = Poly(den, psi)
+                    val_0 = p.eval(0)
+                    val_1 = p.eval(1)
+                    assert val_0 != 0, f"Row {i} col {j}: denominator vanishes at psi=0"
+                    assert val_1 != 0, f"Row {i} col {j}: denominator vanishes at psi=1"
+
+        # Confirm that boundary rows ARE rational (not polynomial) — this
+        # is the diagnostic finding that triggers the 27.2a polynomial ansatz.
+        assert has_psi_denom, (
+            "Unexpected: boundary rows are already polynomial. "
+            "Skip 27.2a and proceed directly to 27.3a."
+        )
+
+    def test_numerator_degree_bound(self, temo_output):
+        """27.1b: Numerators of boundary row entries have bounded degree in ψ.
+
+        Since boundary rows are rational (not polynomial), we check numerator
+        degree instead. For E4_1, numerator degree should be bounded.
+        """
+        result, psi, _ = temo_output
+        m = result.matrix
+        R, T = m.shape
+
+        max_num_degree = 0
+        max_den_degree = 0
+        for i in range(R - 1):  # rows 0..3
+            for j in range(T):
+                entry = cancel(m[i, j])
+                if entry == 0:
+                    continue
+                num, den = fraction(entry)
+                if num.has(psi):
+                    p = Poly(num, psi)
+                    max_num_degree = max(max_num_degree, p.degree())
+                if den.has(psi):
+                    p = Poly(den, psi)
+                    max_den_degree = max(max_den_degree, p.degree())
+
+        # Verify degrees are reasonable (numerator ≤ 7, denominator ≤ 3)
+        assert max_num_degree <= 7, f"Max numerator degree {max_num_degree} > 7"
+        assert max_den_degree <= 3, f"Max denominator degree {max_den_degree} > 3"
+
+    def test_entries_linear_in_alphas(self, temo_output):
+        """27.1b: Each entry's numerator is at most degree 1 in each alpha symbol."""
+        result, psi, uniform = temo_output
+        m = result.matrix
+        R, T = m.shape
+        alpha_syms = uniform.alpha_symbols
+
+        for i in range(R - 1):  # rows 0..3
+            for j in range(T):
+                entry = cancel(m[i, j])
+                if entry == 0:
+                    continue
+                num, den = fraction(entry)
+                # Check numerator is linear in each alpha
+                for alpha in alpha_syms:
+                    if not num.has(alpha):
+                        continue
+                    p = Poly(expand(num), alpha)
+                    assert p.degree() <= 1, (
+                        f"Row {i} col {j}: numerator degree {p.degree()} > 1 in {alpha}"
+                    )
+                # Denominator should be free of alpha symbols
+                for alpha in alpha_syms:
+                    assert not den.has(alpha), (
+                        f"Row {i} col {j}: denominator depends on {alpha}"
+                    )
+

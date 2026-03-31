@@ -125,53 +125,29 @@ different purpose (proving infeasibility of constant weights).
 
 ### 27.1 — Understand the polynomial structure
 
-- [ ] **27.1a** Diagnostic: verify boundary rows are polynomial after QQ(ψ) solve
-  - Write a diagnostic test in `scripts/stencil_gen/tests/test_e4_cut_cell.py`
-  - For E4_1 with `zeros={3,4}`, call `construct_cut_cell_stencil` to get the
-    raw TEMO output (before conservation)
-  - For each boundary row i=0..3, check whether `cancel(entry)` is polynomial
-    in ψ by extracting `fraction(entry)` and checking if the denominator is
-    constant (no ψ)
-  - **Expected result:** boundary row entries from `solve_temo_row` are
-    rational in ψ with Vandermonde-type denominators (e.g. `(ψ+1)(ψ+2)(ψ+3)`)
-    that factor out. After `cancel`, they should simplify to polynomials.
-    If they DO simplify to polynomials, we may only need to change the
-    conservation approach (not the boundary solve). If they DON'T, we need
-    the polynomial ansatz.
-  - File: `scripts/stencil_gen/tests/test_e4_cut_cell.py` (new test class
-    `TestPolynomialStructure` near the end)
-  - **Implementation detail:** Use the existing fixture pattern from the file.
-    Call `derive_uniform_boundary_for_temo(E4_1, zeros=set(E4_1.zeros))` to
-    get the uniform result, then `construct_cut_cell_stencil(uniform.B_u,
-    uniform.interior, 2, 3, 1, 0, psi)`. For each entry in rows 0-3, do:
-    ```python
-    num, den = fraction(cancel(entry))
-    assert not den.has(psi), f"Row {i} col {j} has psi-dependent denominator"
-    ```
+- [x] **27.1a** Diagnostic: verify boundary rows are polynomial after QQ(ψ) solve
+  - **Result:** Boundary rows are NOT polynomial after `cancel()`. They have
+    Vandermonde-type denominators: `(ψ+1)(ψ+2)(ψ+3)`, `2(ψ+1)`, `2(ψ+2)`,
+    `6(ψ+3)`. All denominators are nonvanishing on [0,1] (benign).
+  - Test class `TestPolynomialStructure` added near end of
+    `scripts/stencil_gen/tests/test_e4_cut_cell.py`.
+  - `test_boundary_rows_have_vandermonde_denominators` — PASS (confirms
+    denominators exist and are Vandermonde-type/benign)
   - Test: `cd scripts/stencil_gen && uv run pytest tests/test_e4_cut_cell.py -v -k "TestPolynomialStructure" --timeout=300`
 
-- [ ] **27.1b** Verify degree bound for polynomial entries
-  - In the same `TestPolynomialStructure` class, for each boundary row entry
-    that IS polynomial after `cancel`, compute its degree in ψ using
-    `Poly(entry, psi).degree()`
-  - Verify the maximum degree matches the paper's bound: ≤ q+1 = 4 for E4_1
-    (q=3, plus 1 from the degree-1 prescribed entries interacting with the
-    degree-3 Vandermonde column)
-  - Also check: the entries are linear in the alpha symbols (degree ≤ 1 in
-    each alpha_k) by using `Poly(entry, alpha_k).degree()` for each alpha
-  - File: same test class as 27.1a
+- [x] **27.1b** Verify degree bound for polynomial entries
+  - Adapted for rational entries: checks numerator degree ≤ 7, denominator
+    degree ≤ 3, and numerator is linear in each alpha symbol.
+  - `test_numerator_degree_bound` — PASS
+  - `test_entries_linear_in_alphas` — PASS (numerators linear in alpha,
+    denominators free of alpha)
 
-- [ ] **27.1c** Decision gate: polynomial ansatz needed?
-  - **After 27.1a/27.1b pass or fail**, record the outcome as a comment in
-    this plan file under this item.
-  - **If boundary rows ARE polynomial after cancel:** The existing `solve_temo_row`
-    with QQ(ψ) produces correct polynomial entries. Skip 27.2a entirely —
-    proceed directly to 27.3a (the conservation approach is the actual problem).
-    In this case, 27.3a should use the existing `construct_cut_cell_stencil`
-    output for boundary rows and only restructure the near-interior solve.
-  - **If boundary rows are NOT polynomial after cancel:** The polynomial ansatz
-    (27.2a) is required. Proceed with 27.2a.
-  - **Decision outcome:** _(to be filled in after 27.1a/27.1b run)_
+- [x] **27.1c** Decision gate: polynomial ansatz needed?
+  - **Decision outcome:** Boundary rows are NOT polynomial after cancel.
+    The polynomial ansatz (27.2a) IS required. Proceed with 27.2a.
+  - The Vandermonde-type denominators are benign (nonvanishing on [0,1]),
+    but the paper expects polynomial boundary rows. The polynomial ansatz
+    will eliminate these denominators entirely.
 
 ### 27.2 — Implement polynomial boundary row solve
 
