@@ -200,6 +200,30 @@ TEST_CASE("E4_1")
         }
     }
 
+    SECTION("Floating near psi=snap_tol produces finite values")
+    {
+        auto [p, r, t, x] = st.query(bcs::Floating);
+        T c(r * t);
+        T ex{};
+
+        st.nbs(1.0, bcs::Floating, 1e-12, false, c, ex);
+        for (std::size_t i = 0; i < c.size(); ++i) {
+            REQUIRE(std::isfinite(c[i]));
+        }
+    }
+
+    SECTION("Dirichlet near psi=snap_tol produces finite values")
+    {
+        auto [p, r, t, x] = st.query(bcs::Dirichlet);
+        T c(r * t);
+        T ex{};
+
+        st.nbs(1.0, bcs::Dirichlet, 1e-12, false, c, ex);
+        for (std::size_t i = 0; i < c.size(); ++i) {
+            REQUIRE(std::isfinite(c[i]));
+        }
+    }
+
     SECTION("alpha[1]=0 throws")
     {
         std::array<real, 1> short_alpha{0.1};

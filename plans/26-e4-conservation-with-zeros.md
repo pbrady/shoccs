@@ -400,11 +400,12 @@ With alpha_3=alpha_4=0, `sympy.solve()` produces a clean single-branch solution 
   - **Test:** `cmake --build build --target t-E4_1 && ctest --test-dir build -R t-E4_1`
   - **Done:** Changed "The Dirichlet denominator" → "The denominator" on line 23. Build and test pass (113 assertions).
 
-- [ ] **26.6-followup-d2** Add near-psi=0 finiteness tests in E4_1.t.cpp:
+- [x] **26.6-followup-d2** Add near-psi=0 finiteness tests in E4_1.t.cpp:
   - **File:** `src/stencils/E4_1.t.cpp`
   - Both `nbs_floating` and `nbs_dirichlet` divide by `psi`, so near-psi=0 is a boundary pole symmetric with the existing near-psi=1 tests.
   - Add two new SECTIONs: "Floating near psi=snap_tol produces finite values" and "Dirichlet near psi=snap_tol produces finite values". Use `psi = 1e-12` (the current snap_tol lower bound). Check `std::isfinite(c[i])` for all coefficients.
   - **Test:** `cmake --build build --target t-E4_1 && ctest --test-dir build -R t-E4_1`
+  - **Done:** Added both SECTIONs. Build and test pass (208 assertions, was 113).
 
 - [ ] **26.6-followup-d3** Strengthen near-boundary tests with magnitude bounds:
   - **File:** `src/stencils/E4_1.t.cpp`
