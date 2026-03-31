@@ -276,6 +276,7 @@ With alpha_3=alpha_4=0, `sympy.solve()` produces a clean single-branch solution 
   - **Ordering constraint:** This block should go BEFORE the existing `if not conserve:` check (line ~2208) since `scheme.zeros` takes priority.
   - **`conserve` parameter interaction:** When `scheme.zeros` is non-empty, the zeros path is always taken regardless of `conserve`. The `conserve` parameter is silently ignored — cut-cell conservation is always applied via `solve_cut_cell_conservation`. This is intentional: the zeros approach replaces uniform conservation entirely for E4_1.
   - **The existing `conserve=True` path (lines ~2232-2327) is unchanged** — it continues to handle schemes without zeros (E2_1, E2_2, E4_2).
+  - **Psi boundary divergence (from 26.4c finding):** The conservative stencil has poles at psi=0 and psi=1 (alpha_0 diverges). The result or codegen output must document that coefficients are valid only for psi in the open interval (0, 1). Consider adding a `valid_psi_range=(0, 1)` annotation to the result or a comment in the generated C++ code.
   - **Test:** `cd scripts/stencil_gen && uv run pytest tests/test_e4_cut_cell.py -v -k "SchemeWithZeros" --timeout=300`
 
 - [ ] **26.5b** E2_1 regression test:
@@ -340,6 +341,7 @@ With alpha_3=alpha_4=0, `sympy.solve()` produces a clean single-branch solution 
     - Lua config: `alpha = {0.1, -0.05}` (was `{0.1, -0.05, 0.02, 0.01}`)
     - All `REQUIRE_THAT(c, Approx(T{...}))` expected values change (new symbolic expressions)
     - Test structure (Floating/Dirichlet sections, psi values) is unchanged
+  - **Psi boundary divergence (from 26.4c finding):** The generated `E4_1.cpp` should include a comment that coefficients diverge at psi=0 and psi=1. The C++ runtime that calls this stencil must clamp psi away from boundaries (e.g., psi ∈ [0.01, 0.99]) or fall back to the non-conservative stencil for full cells (psi=1).
   - **Build and test:**
     - `cmake --build build --target t-E4_1`
     - `ctest --test-dir build -R t-E4_1`
