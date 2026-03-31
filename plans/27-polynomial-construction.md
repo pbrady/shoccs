@@ -46,7 +46,9 @@ The key: if we ASSUME entries are polynomials of a specific degree d, Taylor acc
 
 From the paper's Table A.4: boundary row entries have degree ≤ 4 in ψ. Since q=3 (Taylor accuracy order) and the grid spacing introduces ψ-dependence through `Δ_{i,wall} = -(ψ+i)`, the maximum ψ-degree in the Vandermonde is q=3. Combined with a degree-1 prescribed entry, the solved entries are degree ≤ 4 in ψ.
 
-## Procedure
+## Procedure (Paper's Ideal Structure)
+
+The paper constructs the stencil as follows (for reference):
 
 1. For each boundary row i=0..r-1:
    a. Set up the Taylor Vandermonde system (n_eqs × T matrix) with ψ-dependent first column
@@ -65,17 +67,47 @@ From the paper's Table A.4: boundary row entries have degree ≤ 4 in ψ. Since 
 
 3. Conservation applies to the FULL system simultaneously with the near-interior row solve.
 
+## Implementation Strategy
+
+Our implementation differs from the paper's procedure in step 2: instead of
+solving Taylor + conservation simultaneously (which creates a bilinear system
+in weight × row-entry products — see "Bilinearity Constraint" below), we:
+
+1. Use the existing TEMO pipeline (`construct_cut_cell_stencil`) for ALL rows.
+   The boundary rows should be polynomial after `cancel()` (verified by 27.1a).
+2. Build conservation equations from the TEMO output (existing code).
+3. Solve conservation using a **fraction-clearing + sequential elimination**
+   approach (new `solve_conservation_fraction_free`) that avoids ψ(ψ-1)
+   denominators.
+4. Apply the conservation solution via `xreplace` (existing code).
+
+The result should match the paper's structure: polynomial boundary rows,
+rational near-interior row with nonvanishing denominator, no singularities
+on [0,1].
+
 ---
 
 ## Dependency Graph
 
 ```
 27.1a → 27.1b → 27.1c (decision gate)
-                  ├── boundary rows polynomial after cancel → skip 27.2, go to 27.3a
-                  └── need polynomial ansatz → 27.2a → 27.2b ─┐
-                                                               ├→ 27.3a → 27.3b → 27.4a → 27.4b ─┬→ 27.6a → 27.5a
-                                                               │                                    └→ 27.7a
+                  ├── boundary rows polynomial after cancel → skip 27.2 ─┐
+                  └── need polynomial ansatz → 27.2a → 27.2b ────────────┤
+                                                                         ├→ 27.3a → 27.3b → 27.4a → 27.4b ─┬→ 27.6a → 27.5a
+                                                                         │                                    └→ 27.7a
 ```
+
+### Bilinearity Constraint (cross-cutting)
+
+The conservation equations involve products `w_k * B_l[k, j_tf]` where `B_l[k, j_tf]`
+is linear in alpha symbols. When both `w_k` AND `alpha_m` are solve targets, these
+terms are bilinear (e.g., `w_1 * alpha_1 * f(ψ)`). This rules out treating the
+combined system as a simple linear system. The existing test
+`test_e4_1_conservation_constant_weights_infeasible_r5` (line 1481 of
+`test_e4_cut_cell.py`) already uses the correct technique: theta-linearization
++ fraction clearing + ψ-coefficient extraction. The conservation solve in 27.3a
+must handle bilinearity via sequential elimination (solve alphas first, then
+weights) rather than a single simultaneous solve.
 
 ## Items
 
@@ -224,202 +256,235 @@ From the paper's Table A.4: boundary row entries have degree ≤ 4 in ψ. Since 
   - Test: `cd scripts/stencil_gen && uv run pytest tests/test_e4_cut_cell.py -v -k "TestPolynomialBoundaryRows" --timeout=300`
   - Must come after 27.2a.
 
-### 27.3 — Near-interior row with conservation
+### 27.3 — Fraction-free conservation solve
 
-- [ ] **27.3a** Implement combined Taylor + conservation solve for the near-interior row
-  - File: `scripts/stencil_gen/stencil_gen/temo.py` (new function
-    `solve_near_interior_with_conservation`, add after
-    `solve_temo_row_polynomial` or after `solve_cut_cell_conservation` at
-    ~line 1545)
-  - Signature: `solve_near_interior_with_conservation(boundary_rows: Matrix, B_u, interior, p, q, nu, psi, alpha_syms, zeros) -> tuple[list, list, Expr]`
-    - Returns: `(row_coeffs, weights, denominator_e0)` where row_coeffs are
-      rational in ψ with common denominator e0
-  - **Algorithm:**
-    1. Start with the polynomial boundary rows (from 27.2 or from existing
-       `construct_cut_cell_stencil` if 27.1c found them already polynomial)
-       as a partial R×T matrix (rows 0..r-1 filled, row r unknown).
-    2. For row r (near-interior), prescribe the zeroed column:
-       `α_{r,1}(ψ) = ψ * B_l_1[r,1]` (Category A, same as current code).
-       Reuse `identify_prescribed_entries(r, r, ...)` to get this.
-    3. Set up the Taylor system for row r: `V_r * x_r = rhs_r` where `V_r` is
-       the cut-cell Vandermonde at row r (n_eqs × T with ψ-dependent col 0).
-       Move prescribed column(s) to RHS.
-    4. Set up conservation equations from the polynomial boundary rows:
-       - Use `build_cut_cell_conservation_system` or equivalent with the
-         polynomial boundary rows as input (w_0 = ψ is fixed).
-       - The conservation equations involve: w_syms (weights w_1..w_{R-1}),
-         the unknown row-r entries, and the alpha symbols.
-    5. Combine the Taylor equations (from step 3) and conservation equations
-       (from step 4) into a single linear system. The unknowns are: the free
-       row-r entries + the weight symbols w_1..w_{R-1}.
-    6. Solve the combined system. Because both Taylor and conservation equations
-       are polynomial in ψ (the boundary rows are polynomial, w_0=ψ is
-       polynomial), the solution is rational in ψ.
-    7. Extract the common denominator e0(ψ) from the row-r entries.
-    8. Verify e0(ψ) is nonvanishing on [0,1]: check `e0(0) ≠ 0`, `e0(1) ≠ 0`,
-       and use Sturm's theorem or numerical evaluation to confirm no real
-       roots in (0,1).
-  - **Concrete implementation for steps 3-6 (the combined system):**
-    For E4_1: R=5, T=7, r=4 (row index of near-interior), n_eqs=4 (q+1),
-    row r has 1 prescribed col (col 1, zeroed) → 6 free cols.
-    Conservation gives T-2=5 equations (cols 1..5 of the T-frame).
-    Weight unknowns: w_1..w_4 (4 symbols; w_0=ψ is fixed).
+- [ ] **27.3a** Implement `solve_conservation_fraction_free` function
+  - File: `scripts/stencil_gen/stencil_gen/temo.py` (new function, add after
+    `solve_cut_cell_conservation` at ~line 1545)
+  - Signature: `solve_conservation_fraction_free(equations: list[Expr], solve_for: list[Symbol], psi: Symbol) -> dict[Symbol, Expr]`
+  - **Root cause of current problem:** The current `solve_cut_cell_conservation`
+    passes rational-in-ψ equations directly to SymPy's `solve`, which can
+    introduce ψ(ψ-1) factors in solution denominators through its internal
+    elimination steps. Even though the conservation equations are consistent
+    identities in ψ, SymPy's generic solver may choose an elimination order
+    that creates spurious poles.
+  - **Fix:** Clear ψ-dependent denominators before solving, then use
+    sequential elimination (alphas first, weights second) to sidestep
+    bilinearity (see "Bilinearity Constraint" note in the dependency graph
+    section).
+  - **Algorithm (3 stages):**
+
+    **Stage 0 — Clear fractions:**
     ```python
-    # Step 3: Taylor for row r
-    V_r, rhs_r = build_temo_vandermonde(r, T, q, nu, psi)
-    prescribed_r = identify_prescribed_entries(r, ...)
-    # Move prescribed to RHS
-    taylor_rhs = rhs_r.copy()
-    for j, val in prescribed_r.items():
-        for k in range(n_eqs):
-            taylor_rhs[k, 0] -= V_r[k, j] * val
-    free_cols_r = [j for j in range(T) if j not in prescribed_r]
-    # Taylor unknowns: row_r_free = [x_j for j in free_cols_r]
-
-    # Step 4: Conservation (reuse existing function on partial matrix)
-    # Build partial matrix: rows 0..r-1 = boundary_rows, row r = symbolic
-    row_r_syms = [Symbol(f"xr_{j}") for j in range(T)]
-    for j, val in prescribed_r.items():
-        row_r_syms[j] = val  # prescribed entries are known
-    partial = boundary_rows.copy()
-    partial = partial.row_join(Matrix([row_r_syms]))  # or build R×T
-    # Now build conservation equations using the row_r symbols
-    eqs_cons, w_syms = build_cut_cell_conservation_system(
-        partial_matrix, R, T, p, nu, interior, psi
-    )
-
-    # Step 5: Combine into one system
-    # Taylor: n_eqs equations in free_cols_r unknowns (6 for E4_1)
-    # Conservation: 5 equations in xr_free + w_1..w_4 (6 + 4 = 10)
-    # Total: 9 equations, 10 unknowns → 1 remaining free parameter
-    # Plus alpha_syms are free parameters from boundary rows.
-    all_unknowns = [row_r_syms[j] for j in free_cols_r] + list(w_syms)
-
-    # Step 6: Solve combined system
-    all_eqs = []
-    for k in range(n_eqs):
-        eq = sum(V_r[k, j] * row_r_syms[j] for j in free_cols_r) - taylor_rhs[k, 0]
-        all_eqs.append(eq)
-    all_eqs.extend(eqs_cons)
-    sol = solve(all_eqs, all_unknowns, dict=True)
+    cleared = []
+    for eq in equations:
+        num, den = fraction(cancel(eq))
+        cleared.append(expand(num))
     ```
-    **Dimension check for E4_1:** 4 Taylor eqs + 5 conservation eqs = 9 eqs;
-    6 free row-r entries + 4 weight unknowns = 10 unknowns. This leaves 1
-    free parameter (a weight, which becomes alpha_1 after renaming). Combined
-    with the alpha from boundary rows, we get 2 total free params as expected.
-  - **Key difference from current approach:** Conservation and Taylor for
-    row r are solved SIMULTANEOUSLY, not sequentially. This avoids the
-    ψ*(ψ-1) denominator that arises from sequential conservation substitution.
-    The current code (lines 2266-2312 of temo.py) does:
-    `construct_cut_cell_stencil` (all R rows via QQ(ψ)) →
-    `build_cut_cell_conservation_system` → `solve_cut_cell_conservation` →
-    `xreplace`. The new approach only solves rows 0..r-1 first, then row r
-    simultaneously with conservation.
-  - **Reuse from existing code:**
-    - `build_temo_vandermonde` — reused directly for row r's Taylor system
-    - `identify_prescribed_entries` — reused for row r's prescribed cols
-    - `build_cut_cell_conservation_system` — can be reused if we pass a
-      partial matrix with symbolic row-r entries. Alternatively, build the
-      conservation equations inline (the function is ~30 lines).
-    - `solve_cut_cell_conservation` — NOT reused (it solves conservation
-      alone; we need the combined solve)
-  - **Size estimate:** ~100-130 lines. The current `build_cut_cell_conservation_system`
-    and `solve_cut_cell_conservation` can be partially reused, but the
-    simultaneous solve requires restructuring.
-  - Must come after 27.1c decision. If 27.1c says "boundary rows already
-    polynomial", use existing `construct_cut_cell_stencil` output for rows
-    0..r-1. If 27.1c says "polynomial ansatz needed", must come after 27.2b
-    (boundary rows validated before using them as near-interior input).
+    After clearing, each equation is a polynomial in ψ (and the solve_for
+    symbols + free params). Denominators are discarded because they are
+    nonvanishing on [0,1] (products of Vandermonde factors like (ψ+1)(ψ+2)).
 
-- [ ] **27.3b** Validate the near-interior row
+    **Stage 1 — Solve for alpha unknowns** (treating weights as parameters):
+    ```python
+    # Partition solve_for into alphas and weights
+    alpha_unknowns = [s for s in solve_for if s.name.startswith('alpha')]
+    weight_unknowns = [s for s in solve_for if s.name.startswith('w')]
+    n_alpha = len(alpha_unknowns)  # 2 for E4_1 with zeros
+
+    # Stencil entries are LINEAR in alphas, so this is a linear solve
+    # even though weight symbols appear in the coefficients.
+    # Pick the first n_alpha cleared equations:
+    alpha_sol = solve(cleared[:n_alpha], alpha_unknowns, dict=True)
+    assert len(alpha_sol) == 1
+    alpha_sol = alpha_sol[0]
+    ```
+    Result: `alpha_k = f_k(ψ, w_1..w_4, alpha_2)`. The denominator is a
+    polynomial in ψ (from the n_alpha × n_alpha coefficient determinant)
+    formed from boundary row entries, which are polynomial in ψ. This
+    determinant should NOT contain ψ(ψ-1) factors because it comes from
+    Vandermonde-type boundary structure.
+
+    **Stage 2 — Substitute alphas and solve for weights:**
+    ```python
+    # Substitute alpha solutions into remaining equations
+    remaining = [expand(eq.subs(alpha_sol)) for eq in cleared[n_alpha:]]
+    # Clear any new fractions introduced by substitution
+    remaining_cleared = []
+    for eq in remaining:
+        num, den = fraction(cancel(eq))
+        remaining_cleared.append(expand(num))
+
+    # Now linear in weight_unknowns (bilinear terms eliminated)
+    weight_sol = solve(remaining_cleared, weight_unknowns, dict=True)
+    assert len(weight_sol) == 1
+    weight_sol = weight_sol[0]
+    ```
+
+    **Stage 3 — Combine and simplify:**
+    ```python
+    full_sol = {}
+    for s, expr in alpha_sol.items():
+        full_sol[s] = cancel(expr.subs(weight_sol))
+    full_sol.update(weight_sol)
+
+    # Verify: all original equations evaluate to 0
+    for i, eq in enumerate(equations):
+        residual = cancel(eq.subs(full_sol))
+        assert residual == 0, f"Equation {i}: residual={residual}"
+
+    return full_sol
+    ```
+
+  - **Dimension check for E4_1 with zeros={3,4}:**
+    - 5 conservation equations
+    - solve_for = [alpha_0, alpha_1, w_1, w_2, w_3] (5 unknowns)
+    - Stage 1: 2 equations → alpha_0, alpha_1 as functions of (ψ, w_1..w_4, alpha_2)
+    - Stage 2: 3 remaining equations → w_1, w_2, w_3 as functions of (ψ, w_4, alpha_2)
+    - Free params: alpha_2 (renamed to alpha_0), w_4 (renamed to alpha_1) → 2 free
+  - **Why this avoids ψ(ψ-1) denominators:**
+    - Clearing fractions (Stage 0) removes all existing ψ-dependent
+      denominators from the equations before solving.
+    - Stage 1 inverts an n_alpha × n_alpha system whose coefficient matrix
+      is formed from boundary row ψ-polynomials. The determinant is a
+      product of Vandermonde-family factors (e.g., (ψ+1)(ψ+2)(ψ+3)) —
+      nonvanishing on [0,1].
+    - Stage 2 inverts a weight coefficient matrix that, after alpha
+      substitution, involves only benign ψ-polynomials.
+    - The sequential elimination prevents SymPy from introducing cross-term
+      factors through its generic pivot selection.
+  - **Reuse from existing code:** The existing `build_cut_cell_conservation_system`
+    is reused unchanged. The existing `solve_cut_cell_conservation` is NOT
+    reused (it is the function being replaced). The existing test at line
+    1481 (`test_e4_1_conservation_constant_weights_infeasible_r5`)
+    demonstrates the fraction-clearing technique that this function
+    productionizes.
+  - **Size estimate:** ~40-60 lines of new code.
+  - **Fallback:** If sequential elimination still produces ψ-dependent
+    denominators (detectable by checking `fraction(cancel(sol[s]))[1]` for
+    ψ factors), a more aggressive approach is available: expand each cleared
+    equation as a ψ-polynomial, collect coefficients by ψ powers, and solve
+    the resulting ψ-free algebraic system. This uses the same technique as
+    the existing `test_e4_1_conservation_constant_weights_infeasible_r5`
+    test (lines 1541-1551 of `test_e4_cut_cell.py`). However, this forces
+    the solution to be ψ-independent, which may not match the expected
+    ψ-dependent weights. Use this fallback only if Stage 1/2 produce bad
+    denominators AND the ψ-coefficient system is consistent.
+  - Must come after 27.1c decision. If 27.1c says "boundary rows already
+    polynomial", the approach works directly (TEMO entries have benign
+    denominators). If 27.1c says "polynomial ansatz needed", must come
+    after 27.2b (ensures boundary rows are polynomial before conservation).
+
+- [ ] **27.3b** Validate the fraction-free conservation solve
   - File: `scripts/stencil_gen/tests/test_e4_cut_cell.py` (new test class
-    `TestNearInteriorRow`)
+    `TestFractionFreeConservation`)
   - Tests:
-    1. `test_common_denominator_nonvanishing`: Extract e0(ψ) from the row-r
-       entries. Verify `e0(0) ≠ 0` and `e0(1) ≠ 0`. Use
-       `Poly(e0, psi).all_roots()` or numerical sampling to confirm no roots
-       in [0,1].
-    2. `test_taylor_accuracy`: Row r satisfies q+1=4 Taylor equations as a
-       rational identity in ψ.
-    3. `test_conservation_column_sums`: With the solved weights, weighted
-       column sums equal zero (or -1 for col 0) as polynomial identities in ψ.
-    4. `test_psi_0_limit`: At ψ=0, row-r entries match the degenerate stencil.
-    5. `test_psi_1_limit`: At ψ=1, row-r entries match the uniform limit.
-    6. `test_remaining_free_params`: The result has exactly 2 free parameters
-       (for E4_1 with `zeros={3,4}`): one alpha and one weight.
-  - Test: `cd scripts/stencil_gen && uv run pytest tests/test_e4_cut_cell.py -v -k "TestNearInteriorRow" --timeout=300`
+    1. `test_solution_no_psi_poles`: For each symbol in the conservation
+       solution dict, extract `fraction(cancel(sol[s]))` and verify the
+       denominator has no ψ or (ψ-1) factors. Specifically:
+       ```python
+       for s, expr in sol.items():
+           num, den = fraction(cancel(expr))
+           if psi in den.free_symbols:
+               p = Poly(den, psi)
+               assert p.eval(0) != 0, f"{s}: denominator vanishes at psi=0"
+               assert p.eval(1) != 0, f"{s}: denominator vanishes at psi=1"
+       ```
+    2. `test_matches_current_output`: After xreplace with the fraction-free
+       solution, the stencil entries should be equivalent (symbolically) to
+       the current code's output. For specific alpha/psi values, numerical
+       evaluation should match to machine precision.
+    3. `test_conservation_holds`: Same as existing `test_conservation_holds`
+       in `TestE4CutCellSchemeWithZeros` (line 1076) — verify that weighted
+       column sums satisfy conservation identically in ψ.
+    4. `test_remaining_free_params`: The solution leaves exactly alpha_2 and
+       w_4 as free parameters (2 total for E4_1 with zeros={3,4}).
+    5. `test_sequential_elimination_consistent`: Verify that the Stage 1
+       alpha solution, when substituted into ALL 5 conservation equations
+       (not just the 3 used in Stage 2), is consistent — no residual.
+  - Test: `cd scripts/stencil_gen && uv run pytest tests/test_e4_cut_cell.py -v -k "TestFractionFreeConservation" --timeout=300`
   - Must come after 27.3a.
 
 ### 27.4 — Full E4_1 construction
 
-- [ ] **27.4a** Wire up polynomial boundary rows + simultaneous near-interior solve
+- [ ] **27.4a** Integrate fraction-free conservation into `derive_cut_cell_scheme`
   - File: `scripts/stencil_gen/stencil_gen/temo.py`
-  - Add a new function `construct_cut_cell_stencil_polynomial(B_u, interior, p, q, nu, nextra, psi, zeros) -> CutCellResult`
-    that:
-    1. Computes B_l_1 (uniform limit) and B_d (degenerate) — same as current
-       `construct_cut_cell_stencil` lines 1404-1405
-    2. Solves rows 0..r-1 using either `solve_temo_row_polynomial` (if 27.1c
-       required it) or the existing `solve_temo_row` (if boundary rows are
-       already polynomial after cancel)
-    3. Calls `solve_near_interior_with_conservation` for row r
-    4. Assembles the complete 5×7 stencil matrix
-    5. Handles alpha renaming (maps internal alpha_syms + free weight to
-       final `alpha_0`, `alpha_1`)
-    6. Returns a `CutCellResult` via `assemble_cut_cell_result`
   - **Modify `derive_cut_cell_scheme`** (the `scheme.zeros` branch at lines
-    2267-2312 of temo.py). Replace the current 7-step sequence:
+    2267-2312 of temo.py). Two targeted changes:
+
+    **Change 1:** Add a cancel step after TEMO to simplify stencil entries
+    (boundary rows → polynomial, near-interior → simpler rational). Insert
+    after line 2277 (`floating = floating_result.matrix`):
     ```python
-    # Current (lines 2267-2312):
-    if scheme.zeros:
-        uniform = derive_uniform_boundary_for_temo(scheme, zeros=set(scheme.zeros))
-        floating_result = construct_cut_cell_stencil(...)    # all R rows
-        eqs, w_syms = build_cut_cell_conservation_system(...)
-        solve_for = list(uniform.alpha_symbols[:2]) + list(w_syms[:3])
-        sol = solve_cut_cell_conservation(eqs, solve_for)
-        floating = floating.xreplace(sol)                    # <-- introduces ψ(ψ-1) denoms
-        weights = [psi] + [sol[w] for w in w_syms[:3]] + [w_syms[3]]
-        # ... renaming ...
+    # Cancel each entry to clear Vandermonde denominators
+    R, T = floating.shape
+    for i in range(R):
+        for j in range(T):
+            floating[i, j] = cancel(floating[i, j])
     ```
-    With:
+
+    **Change 2:** Replace the conservation solve call at line 2285:
     ```python
+    # Current:
+    sol = solve_cut_cell_conservation(eqs, solve_for)
     # New:
-    if scheme.zeros:
-        uniform = derive_uniform_boundary_for_temo(scheme, zeros=set(scheme.zeros))
-        return construct_cut_cell_stencil_polynomial(
-            uniform.B_u, uniform.interior,
-            scheme.p, scheme.q, scheme.nu, scheme.nextra, psi,
-            zeros=scheme.zeros, alpha_symbols=alpha_symbols,
-        )
+    sol = solve_conservation_fraction_free(eqs, solve_for, psi)
     ```
-    The new function encapsulates all the conservation logic internally
-    (no external xreplace step).
+
+    The rest of the zeros path (weight extraction at line 2289, alpha
+    renaming at lines 2291-2304, assembly at lines 2308-2312) remains
+    completely unchanged. The `xreplace(sol)` at line 2287 also stays —
+    the difference is that `sol` now contains expressions with benign
+    denominators instead of ψ(ψ-1) factors.
+
   - The non-zeros paths (E2_1, E2_2, generic conservative at lines 2314-2433)
     remain completely unchanged.
-  - **Imports:** Add `construct_cut_cell_stencil_polynomial` to the test
-    file's import block (line 32 of `test_e4_cut_cell.py`).
-  - **Size estimate:** ~60-80 lines for the new function, ~15 lines to
-    simplify the `scheme.zeros` branch in `derive_cut_cell_scheme`.
-  - Must come after 27.3b (near-interior row validated before wiring into
+  - **Imports:** Add `solve_conservation_fraction_free` to the test file's
+    import block (around line 37 of `test_e4_cut_cell.py`).
+  - **Size estimate:** ~10-15 lines changed in `derive_cut_cell_scheme`
+    (the cancel loop + one function call replacement). The bulk of the work
+    is the ~40-60 line new function from 27.3a.
+  - Must come after 27.3b (conservation solve validated before wiring into
     full construction).
 
 - [ ] **27.4b** Validate the full E4_1 stencil
   - File: `scripts/stencil_gen/tests/test_e4_cut_cell.py` (new test class
     `TestPolynomialFullStencil`)
   - Tests:
-    1. `test_all_entries_well_defined`: For all 5 rows × 7 cols, no ψ or
-       (ψ-1) factors in denominators. For rows 0-3, entries should be purely
-       polynomial. For row 4, denominators should be e0(ψ) only.
-    2. `test_taylor_accuracy_all_rows`: All 5 rows satisfy Taylor accuracy.
-    3. `test_conservation_column_sums`: Conservation holds for all columns.
-    4. `test_psi_0_limit`: Correct degenerate limit.
-    5. `test_psi_1_limit`: Correct uniform limit.
+    1. `test_all_entries_well_defined`: For all 5 rows × 7 cols, verify no
+       ψ or (ψ-1) factors in denominators:
+       ```python
+       for i in range(R):
+           for j in range(T):
+               num, den = fraction(cancel(m[i, j]))
+               if psi in den.free_symbols:
+                   p = Poly(den, psi)
+                   assert p.eval(0) != 0, f"[{i},{j}]: pole at psi=0"
+                   assert p.eval(1) != 0, f"[{i},{j}]: pole at psi=1"
+       ```
+       For rows 0-3, entries should be purely polynomial (den is constant).
+       For row 4, denominators should be Vandermonde-family polynomials only
+       (nonvanishing on [0,1]).
+    2. `test_taylor_accuracy_all_rows`: All 5 rows satisfy Taylor accuracy
+       (reuse pattern from `TestE4CutCellSchemeWithZeros.test_taylor_accuracy`
+       at line 1056).
+    3. `test_conservation_column_sums`: Conservation holds for all columns
+       (reuse pattern from `TestE4CutCellSchemeWithZeros.test_conservation_holds`
+       at line 1076).
+    4. `test_psi_0_limit`: At ψ→0, entries approach degenerate stencil values.
+       Substitute ψ=0 and alpha values, verify entries are finite and match.
+    5. `test_psi_1_limit`: At ψ=1, entries match uniform limit B_l(1).
     6. `test_free_parameter_count`: Exactly 2 free parameters after zeros +
-       conservation.
+       conservation (alpha_0, alpha_1 in final naming).
     7. `test_matches_derive_cut_cell_scheme`: Calling `derive_cut_cell_scheme(E4_1, psi)`
-       uses the polynomial path and produces the correct result.
-  - Also update existing tests in `TestE4CutCellSchemeWithZeros` (lines 1022+)
-    and `TestDeriveCutCellScheme` (lines 853+) to verify the new polynomial
-    properties (entries well-defined at ψ=0 and ψ=1, no clamping needed).
+       uses the modified zeros path and produces the correct result.
+    8. `test_weights_well_defined`: All 5 weights have no ψ(ψ-1) denominator
+       factors. `weights[0] = psi`, others are rational with benign
+       denominators.
+  - Also update existing tests in `TestE4CutCellSchemeWithZeros` (lines 1022+):
+    add a `test_no_singularities` method that verifies all floating/dirichlet
+    entries and weights are finite at ψ=0 and ψ=1 (with representative alpha
+    values). This serves as a regression guard against reintroducing poles.
   - Test: `cd scripts/stencil_gen && uv run pytest tests/test_e4_cut_cell.py -v --timeout=300`
   - Must come after 27.4a.
 
@@ -428,16 +493,21 @@ From the paper's Table A.4: boundary row entries have degree ≤ 4 in ψ. Since 
 - [ ] **27.5a** Verify ψ-clamping and alpha guards are absent from regenerated E4_1.cpp
   - **This is a post-27.6a verification step**, not a manual edit. The
     regenerated E4_1.cpp should already be free of singularity guards because
-    the polynomial construction eliminates the root cause.
+    the fraction-free conservation eliminates the root cause.
   - File: `src/stencils/E4_1.cpp` (after 27.6a copies the regenerated file)
   - Verify the following are ABSENT:
-    - `psi_eps` and `std::clamp` (currently lines 98-99)
+    - `psi_eps` and `std::clamp` (currently lines 98-99 and 214-215)
     - `alpha[1] < 197.0 / 288.0` constructor check (currently lines 35-38)
     - The singularity-explanation comment block (currently lines 17-28)
     - Any `1.0/psi` or `1.0/(psi - 1)` patterns in floating/dirichlet methods
-  - **If any guards remain** in the codegen output (e.g., because the codegen
-    template has hardcoded guards), remove them from the codegen template in
-    `scripts/stencil_gen/stencil_gen/codegen.py` and re-run 27.6a.
+    - Division by `t13` where `t13 = psi - 1` (currently line 110)
+    - Division by `psi` in `t17 = t16/psi` (currently line 113)
+  - **Note:** The codegen pipeline (`scripts/stencil_gen/stencil_gen/codegen.py`)
+    does NOT hardcode any guards — the `psi_eps`/`std::clamp` and `alpha[1]`
+    check in the current E4_1.cpp were added manually after code generation.
+    After regeneration, these should NOT reappear. If the regenerated code
+    DOES contain `1.0/psi`-type divisions (from CSE of rational entries), the
+    fix is in the stencil derivation (27.3a/27.4a), not the codegen template.
   - Test: `cmake --build build --target t-E4_1 && ctest --test-dir build -R t-E4_1`
   - Must come after 27.6a (regeneration produces the new file first).
 
