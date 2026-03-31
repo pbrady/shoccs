@@ -359,6 +359,27 @@ With alpha_3=alpha_4=0, `sympy.solve()` produces a clean single-branch solution 
     - `ctest --test-dir build -R t-E4_1` ✓ (16 assertions, all pass)
   - **Done:** Regenerated E4_1.cpp (2-alpha conservative stencil) and E4_1.t.cpp (updated test values, psi=0.9 replaces psi=1.0). Build and test pass. Note: t-E2_1 has a pre-existing floating-point precision failure unrelated to this change.
 
+### 26.6-followup — Address singularities in generated E4_1 stencil
+
+- [ ] **26.6-followup-a** Fix runtime psi=1.0 division-by-zero:
+  - **Problem:** The conservative E4_1 stencil divides by `(psi - 1)` (line 90 in `nbs_floating`, line 214 in `nbs_dirichlet`). The runtime clamp in `src/mesh/object_geometry.cpp:95` is `std::clamp(psi, 1e-12, 1.0)`, which allows psi=1.0 — causing division by zero and NaN/Inf propagation.
+  - **Fix options (choose one):**
+    1. Change the upper clamp bound: `std::clamp(psi, snap_tol, 1.0 - snap_tol)` — simplest but changes behavior for all stencils.
+    2. Add stencil-specific psi guard in `E4_1::nbs_floating`/`nbs_dirichlet` that clamps psi away from 1.0.
+    3. Fall back to non-conservative (uniform) stencil when psi ≈ 1.0 (psi=1 means full cell, where the uniform stencil is exact anyway).
+  - **Test:** Add a C++ test case with psi=1.0 to verify no NaN/Inf is produced after the fix.
+
+- [ ] **26.6-followup-b** Document alpha[1] ≠ 0 constraint:
+  - **Problem:** The generated stencil divides by `alpha[1]` (= renamed w_4, a quadrature weight) in both `nbs_floating` (line 90: `1/(alpha[1]*t13)`) and `nbs_dirichlet` (line 211: `1.0 / (alpha[1])`). A user setting `alpha[1] = 0` gets division by zero. This constraint is mentioned only in a test parenthetical (26.5c) but not in the C++ code or plan's singularity documentation.
+  - **Fix:** Add a comment in `E4_1.cpp` near the alpha declaration documenting that `alpha[1]` must be nonzero. Consider adding a runtime assert or guard. Update the codegen template if this constraint should appear automatically.
+
+- [ ] **26.6-followup-c** Add missing singularity comments to generated E4_1.cpp:
+  - **Problem:** Plan item 26.6a specifies: "The generated E4_1.cpp should include a comment that coefficients diverge at psi=0 and psi=1." This was not done — the generated file has no such comment.
+  - **Fix:** Add a comment block to `E4_1.cpp` (either manually or via the codegen template) documenting:
+    - Coefficients have poles at psi=0 and psi=1 (valid only for psi ∈ (0, 1))
+    - alpha[1] must be nonzero
+    - The denominator `288*alpha[1] + 648*psi + 12*psi³ + 90*psi² - 197` must also be nonzero
+
 ### 26.7 — Update memory and plans
 
 - [ ] **26.7a** Update the stencil derivation memory with conservation resolution:
