@@ -124,7 +124,7 @@ With alpha_3=alpha_4=0, `sympy.solve()` produces a clean single-branch solution 
 
 ### 26.2 — Build zero-constrained cut-cell stencil
 
-- [ ] **26.2a** Build and test E4_1 cut-cell with zero-constrained B_u:
+- [x] **26.2a** Build and test E4_1 cut-cell with zero-constrained B_u:
   - **File:** `scripts/stencil_gen/tests/test_e4_cut_cell.py`
   - Add test class `TestE4ZeroConstrainedCutCell` with fixture:
     ```python

@@ -242,6 +242,66 @@ class TestE4UniformBoundaryWithZeros:
             derive_uniform_boundary_for_temo(E4_1, zeros={3, 4}, conserve=True)
 
 
+class TestE4ZeroConstrainedCutCell:
+    """Tests for E4_1 cut-cell stencil built from zero-constrained B_u (26.2a)."""
+
+    @pytest.fixture(scope="class")
+    def e4_zeroed_cut_cell(self):
+        psi = Symbol("psi")
+        ur = derive_uniform_boundary_for_temo(E4_1, zeros={3, 4})
+        stencil = construct_cut_cell_stencil(
+            ur.B_u, ur.interior, p=2, q=3, nu=1, nextra=0, psi=psi,
+        )
+        return stencil, ur, psi
+
+    def test_shape(self, e4_zeroed_cut_cell):
+        """Cut-cell stencil has shape (5, 7) — R=5, T=7."""
+        stencil, _, _ = e4_zeroed_cut_cell
+        assert stencil.matrix.shape == (5, 7)
+
+    def test_free_symbols(self, e4_zeroed_cut_cell):
+        """Free symbols (excluding psi) are exactly {alpha_0, alpha_1, alpha_2}."""
+        stencil, _, psi = e4_zeroed_cut_cell
+        non_psi = stencil.matrix.free_symbols - {psi}
+        names = {s.name for s in non_psi}
+        assert names == {"alpha_0", "alpha_1", "alpha_2"}, (
+            f"Expected {{alpha_0, alpha_1, alpha_2}}, got {names}"
+        )
+
+    def test_psi_1_limit(self, e4_zeroed_cut_cell):
+        """At psi=1, matches the zero-constrained B_u via solve_uniform_limit."""
+        stencil, ur, psi = e4_zeroed_cut_cell
+        B_l_1 = solve_uniform_limit(ur.B_u, ur.interior, ur.p, ur.q, ur.nu, 0)
+        m1 = stencil.matrix.subs(psi, 1)
+        R, T = m1.shape
+        for i in range(R):
+            for j in range(T):
+                assert cancel(m1[i, j] - B_l_1[i, j]) == 0, (
+                    f"Uniform limit mismatch at [{i},{j}]: "
+                    f"{cancel(m1[i, j])} != {cancel(B_l_1[i, j])}"
+                )
+
+    def test_taylor_accuracy_at_half(self, e4_zeroed_cut_cell):
+        """At psi=1/2, all 5 rows satisfy q+1=4 Taylor equations."""
+        stencil, _, psi = e4_zeroed_cut_cell
+        m = stencil.matrix.subs(psi, Rational(1, 2))
+        R, T = m.shape
+        psi_val = Rational(1, 2)
+        for i in range(R):
+            deltas = build_cut_cell_deltas(i, T, psi_val)
+            row = [m[i, j] for j in range(T)]
+            for k in range(4):  # q+1 = 4
+                moment = sum(row[j] * deltas[j] ** k for j in range(T))
+                if k == 1:
+                    expected = 1
+                else:
+                    expected = 0
+                assert cancel(moment - expected) == 0, (
+                    f"Row {i}, moment k={k} at psi=1/2: "
+                    f"got {cancel(moment)}, expected {expected}"
+                )
+
+
 class TestE4TEMOConstruction:
     """Tests for E4_1 full TEMO pipeline (21.3a)."""
 
