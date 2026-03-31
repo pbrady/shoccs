@@ -883,21 +883,29 @@ class TestDeriveCutCellScheme:
         """derive_cut_cell_scheme(E4_1) equals manual zeros + cut-cell conservation pipeline."""
         psi = Symbol("psi")
 
-        # Manual zeros pipeline
+        # Manual zeros pipeline (polynomial boundary rows + fraction-free conservation)
         ur = derive_uniform_boundary_for_temo(E4_1, zeros={3, 4})
         stencil = construct_cut_cell_stencil(
             ur.B_u, ur.interior, p=2, q=3, nu=1, nextra=0, psi=psi,
+            polynomial_boundary_rows=True,
         )
         floating = stencil.matrix
         R, T = floating.shape
 
-        # Solve cut-cell conservation
+        # Zero out residual c_* polynomial coefficients and cancel near-interior row
+        c_syms = {s for s in floating.free_symbols if s.name.startswith('c_')}
+        if c_syms:
+            floating = floating.xreplace({c: 0 for c in c_syms})
+        for j in range(T):
+            floating[R - 1, j] = cancel(floating[R - 1, j])
+
+        # Solve cut-cell conservation (fraction-free)
         eqs, w_syms = build_cut_cell_conservation_system(
             floating, R, T, p=2, nu=1,
             interior_coeffs=ur.interior, psi=psi,
         )
         solve_for = list(ur.alpha_symbols[:2]) + list(w_syms[:3])
-        sol = solve_cut_cell_conservation(eqs, solve_for)
+        sol = solve_conservation_fraction_free(eqs, solve_for, psi)
 
         # Apply solution and rename free params
         floating = floating.xreplace(sol)

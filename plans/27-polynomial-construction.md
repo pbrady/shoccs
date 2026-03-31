@@ -386,7 +386,7 @@ different purpose (proving infeasibility of constant weights).
 
 ### 27.4 — Full E4_1 construction
 
-- [ ] **27.4a** Integrate polynomial ansatz and fraction-free conservation into `derive_cut_cell_scheme`
+- [x] **27.4a** Integrate polynomial ansatz and fraction-free conservation into `derive_cut_cell_scheme`
   - File: `scripts/stencil_gen/stencil_gen/temo.py`
   - **Modify `construct_cut_cell_stencil`** (line 1353) and
     **`derive_cut_cell_scheme`** (the `scheme.zeros` branch at lines
@@ -462,6 +462,20 @@ different purpose (proving infeasibility of constant weights).
     is the ~20-60 line new function from 27.3a (depending on whether
     fallback A is included inline).
   - Must come after 27.3c (decision gate determines which changes apply).
+  - **Implementation (completed):**
+    - Added `polynomial_boundary_rows: bool = False` parameter to
+      `construct_cut_cell_stencil`. When True, boundary rows (i < R-1) use
+      `solve_temo_row_polynomial`; the near-interior row (i = R-1) uses the
+      existing `solve_temo_row`. Default False preserves behaviour for
+      non-zeros paths (E2_1, E2_2, conservative).
+    - In `derive_cut_cell_scheme` zeros path: pass `polynomial_boundary_rows=True`,
+      zero out residual c_* symbols via `floating.xreplace({c: 0 for c in c_syms})`,
+      cancel near-interior row entries, and use `solve_conservation_fraction_free`
+      instead of `solve_cut_cell_conservation`.
+    - Updated `test_e4_1_matches_manual_pipeline` in test file to use the new
+      pipeline (polynomial boundary rows + fraction-free conservation).
+    - All 240 tests pass (1 xfail expected). No regressions in E2 or E4 tests.
+  - Test: `cd scripts/stencil_gen && uv run pytest tests/test_e4_cut_cell.py tests/test_temo.py -v --timeout=300`
 
 - [ ] **27.4b** Validate the full E4_1 stencil
   - File: `scripts/stencil_gen/tests/test_e4_cut_cell.py` (new test class

@@ -1499,6 +1499,7 @@ def construct_cut_cell_stencil(
     nu: int,
     nextra: int,
     psi: Symbol,
+    polynomial_boundary_rows: bool = False,
 ) -> StencilResult:
     """Construct the psi-parameterized cut-cell stencil B_l(psi).
 
@@ -1526,6 +1527,11 @@ def construct_cut_cell_stencil(
         Extra rows/columns.
     psi : Symbol
         The psi symbol.
+    polynomial_boundary_rows : bool
+        If True, use the polynomial ansatz (``solve_temo_row_polynomial``)
+        for boundary rows (i < R-1), producing entries that are polynomial
+        in psi.  The near-interior row (i = R-1) still uses the QQ(psi)
+        solve.  Default False preserves the original behaviour.
 
     Returns
     -------
@@ -1555,9 +1561,14 @@ def construct_cut_cell_stencil(
         prescribed = identify_prescribed_entries(
             i, r, B_u.cols, nextra, nu, B_u, B_l_1, B_d, psi, n_eqs
         )
-        result = solve_temo_row(
-            i, V, rhs_vec, prescribed, psi, K, alpha_syms, beta_prefix="beta"
-        )
+        if polynomial_boundary_rows and i < R - 1:
+            result = solve_temo_row_polynomial(
+                i, V, rhs_vec, prescribed, psi, alpha_syms
+            )
+        else:
+            result = solve_temo_row(
+                i, V, rhs_vec, prescribed, psi, K, alpha_syms, beta_prefix="beta"
+            )
         rows.append(result.coeffs)
         for col, sym in result.beta_info:
             all_beta_info.append((i, col, sym))
@@ -2472,20 +2483,28 @@ def derive_cut_cell_scheme(
         uniform = derive_uniform_boundary_for_temo(
             scheme, zeros=set(scheme.zeros),
         )
-        # Step 2: TEMO pipeline
+        # Step 2: TEMO pipeline (polynomial ansatz for boundary rows)
         floating_result = construct_cut_cell_stencil(
             uniform.B_u, uniform.interior,
             scheme.p, scheme.q, scheme.nu, scheme.nextra, psi,
+            polynomial_boundary_rows=True,
         )
         floating = floating_result.matrix
         R, T = floating.shape
-        # Step 3: Solve cut-cell conservation
+        # Step 2b: Zero out residual c_* polynomial coefficients and
+        # cancel the near-interior row to simplify rational entries
+        c_syms = {s for s in floating.free_symbols if s.name.startswith('c_')}
+        if c_syms:
+            floating = floating.xreplace({c: 0 for c in c_syms})
+        for j in range(T):
+            floating[R - 1, j] = cancel(floating[R - 1, j])
+        # Step 3: Solve cut-cell conservation (fraction-free)
         eqs, w_syms = build_cut_cell_conservation_system(
             floating, R, T, scheme.p, scheme.nu,
             uniform.interior, psi,
         )
         solve_for = list(uniform.alpha_symbols[:2]) + list(w_syms[:3])
-        sol = solve_cut_cell_conservation(eqs, solve_for)
+        sol = solve_conservation_fraction_free(eqs, solve_for, psi)
         # Step 4: Apply solution to stencil
         floating = floating.xreplace(sol)
         # Step 5: Compute weights (w_0=psi, w_1..w_3 from sol, w_4 free)
