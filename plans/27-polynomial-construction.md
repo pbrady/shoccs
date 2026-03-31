@@ -67,6 +67,16 @@ From the paper's Table A.4: boundary row entries have degree ≤ 4 in ψ. Since 
 
 ---
 
+## Dependency Graph
+
+```
+27.1a → 27.1b → 27.1c (decision gate)
+                  ├── boundary rows polynomial after cancel → skip 27.2, go to 27.3a
+                  └── need polynomial ansatz → 27.2a → 27.2b ─┐
+                                                               ├→ 27.3a → 27.3b → 27.4a → 27.4b ─┬→ 27.6a → 27.5a
+                                                               │                                    └→ 27.7a
+```
+
 ## Items
 
 ### 27.1 — Understand the polynomial structure
@@ -86,6 +96,14 @@ From the paper's Table A.4: boundary row entries have degree ≤ 4 in ψ. Since 
     the polynomial ansatz.
   - File: `scripts/stencil_gen/tests/test_e4_cut_cell.py` (new test class
     `TestPolynomialStructure` near the end)
+  - **Implementation detail:** Use the existing fixture pattern from the file.
+    Call `derive_uniform_boundary_for_temo(E4_1, zeros=set(E4_1.zeros))` to
+    get the uniform result, then `construct_cut_cell_stencil(uniform.B_u,
+    uniform.interior, 2, 3, 1, 0, psi)`. For each entry in rows 0-3, do:
+    ```python
+    num, den = fraction(cancel(entry))
+    assert not den.has(psi), f"Row {i} col {j} has psi-dependent denominator"
+    ```
   - Test: `cd scripts/stencil_gen && uv run pytest tests/test_e4_cut_cell.py -v -k "TestPolynomialStructure" --timeout=300`
 
 - [ ] **27.1b** Verify degree bound for polynomial entries
@@ -99,9 +117,23 @@ From the paper's Table A.4: boundary row entries have degree ≤ 4 in ψ. Since 
     each alpha_k) by using `Poly(entry, alpha_k).degree()` for each alpha
   - File: same test class as 27.1a
 
+- [ ] **27.1c** Decision gate: polynomial ansatz needed?
+  - **After 27.1a/27.1b pass or fail**, record the outcome as a comment in
+    this plan file under this item.
+  - **If boundary rows ARE polynomial after cancel:** The existing `solve_temo_row`
+    with QQ(ψ) produces correct polynomial entries. Skip 27.2a entirely —
+    proceed directly to 27.3a (the conservation approach is the actual problem).
+    In this case, 27.3a should use the existing `construct_cut_cell_stencil`
+    output for boundary rows and only restructure the near-interior solve.
+  - **If boundary rows are NOT polynomial after cancel:** The polynomial ansatz
+    (27.2a) is required. Proceed with 27.2a.
+  - **Decision outcome:** _(to be filled in after 27.1a/27.1b run)_
+
 ### 27.2 — Implement polynomial boundary row solve
 
 - [ ] **27.2a** Add `solve_temo_row_polynomial` function
+  - **Conditional:** Only needed if 27.1c determines polynomial ansatz is required.
+    If boundary rows from QQ(ψ) solve already simplify to polynomials, skip this.
   - File: `scripts/stencil_gen/stencil_gen/temo.py` (add after `solve_temo_row`
     at ~line 1350)
   - Signature: `solve_temo_row_polynomial(i, V, rhs, prescribed, psi, alpha_syms) -> RowSolveResult`
@@ -125,8 +157,50 @@ From the paper's Table A.4: boundary row entries have degree ≤ 4 in ψ. Since 
        alpha symbols.
     7. Reconstruct each entry as `sum(c_{j,k} * ψ^k for k in range(d_max+1))`.
     8. Return a `RowSolveResult` with these polynomial entries.
+  - **Concrete SymPy implementation for steps 3-6:**
+    ```python
+    # Step 2: Create polynomial unknowns for each free column
+    c_syms = {}  # {col_j: [c_j_0, c_j_1, ..., c_j_dmax]}
+    all_c = []
+    for j in free_cols:
+        c_j = [Symbol(f"c_{i}_{j}_{k}") for k in range(d_max + 1)]
+        c_syms[j] = c_j
+        all_c.extend(c_j)
+
+    # Build polynomial expressions for free columns
+    poly_unknowns = {}
+    for j, c_j in c_syms.items():
+        poly_unknowns[j] = sum(c_j[k] * psi**k for k in range(d_max + 1))
+
+    # Step 3: Form residuals  V * x - rhs  as polynomials in psi
+    residuals = []
+    for eq_idx in range(n_eqs):
+        expr = -rhs[eq_idx, 0]
+        for j in range(T):
+            if j in prescribed:
+                expr += V[eq_idx, j] * prescribed[j]
+            else:
+                expr += V[eq_idx, j] * poly_unknowns[j]
+        residuals.append(expand(expr))
+
+    # Step 4-5: Collect by psi powers -> coefficient equations
+    equations = []
+    for res in residuals:
+        p_res = Poly(res, psi)
+        for coeff in p_res.all_coeffs():
+            equations.append(coeff)  # each must be zero
+
+    # Step 6: Solve for c_{j,k} symbols (treating alpha_syms as parameters)
+    sol = solve(equations, all_c, dict=True)
+    ```
+    Note: `V[eq_idx, j]` contains `(-(psi+i))^k / k!` in col 0, so the
+    product `V[eq_idx, j] * poly_unknowns[j]` is a polynomial in ψ of
+    degree up to `q + d_max`. After `expand`, each residual is a polynomial
+    in ψ whose coefficients are linear in `c_{j,k}` and `alpha_syms`.
   - **Key difference from `solve_temo_row`:** No QQ(ψ) fraction field. The ψ
     variable is expanded out, and we solve a larger but purely rational system.
+    For E4_1 row 0: n_eqs=4, T=7, 1 prescribed col → 5 free cols × (d_max+1)=5
+    coefficients = 25 unknowns from ~4×(4+4+1)≈36 coefficient equations.
   - **Size estimate:** ~80-100 lines of new code. No new files needed.
   - Must come before 27.2b.
 
@@ -155,15 +229,18 @@ From the paper's Table A.4: boundary row entries have degree ≤ 4 in ψ. Since 
 - [ ] **27.3a** Implement combined Taylor + conservation solve for the near-interior row
   - File: `scripts/stencil_gen/stencil_gen/temo.py` (new function
     `solve_near_interior_with_conservation`, add after
-    `solve_temo_row_polynomial`)
+    `solve_temo_row_polynomial` or after `solve_cut_cell_conservation` at
+    ~line 1545)
   - Signature: `solve_near_interior_with_conservation(boundary_rows: Matrix, B_u, interior, p, q, nu, psi, alpha_syms, zeros) -> tuple[list, list, Expr]`
     - Returns: `(row_coeffs, weights, denominator_e0)` where row_coeffs are
       rational in ψ with common denominator e0
   - **Algorithm:**
-    1. Start with the polynomial boundary rows (from 27.2) as a partial R×T
-       matrix (rows 0..r-1 filled, row r unknown).
+    1. Start with the polynomial boundary rows (from 27.2 or from existing
+       `construct_cut_cell_stencil` if 27.1c found them already polynomial)
+       as a partial R×T matrix (rows 0..r-1 filled, row r unknown).
     2. For row r (near-interior), prescribe the zeroed column:
        `α_{r,1}(ψ) = ψ * B_l_1[r,1]` (Category A, same as current code).
+       Reuse `identify_prescribed_entries(r, r, ...)` to get this.
     3. Set up the Taylor system for row r: `V_r * x_r = rhs_r` where `V_r` is
        the cut-cell Vandermonde at row r (n_eqs × T with ψ-dependent col 0).
        Move prescribed column(s) to RHS.
@@ -182,13 +259,76 @@ From the paper's Table A.4: boundary row entries have degree ≤ 4 in ψ. Since 
     8. Verify e0(ψ) is nonvanishing on [0,1]: check `e0(0) ≠ 0`, `e0(1) ≠ 0`,
        and use Sturm's theorem or numerical evaluation to confirm no real
        roots in (0,1).
+  - **Concrete implementation for steps 3-6 (the combined system):**
+    For E4_1: R=5, T=7, r=4 (row index of near-interior), n_eqs=4 (q+1),
+    row r has 1 prescribed col (col 1, zeroed) → 6 free cols.
+    Conservation gives T-2=5 equations (cols 1..5 of the T-frame).
+    Weight unknowns: w_1..w_4 (4 symbols; w_0=ψ is fixed).
+    ```python
+    # Step 3: Taylor for row r
+    V_r, rhs_r = build_temo_vandermonde(r, T, q, nu, psi)
+    prescribed_r = identify_prescribed_entries(r, ...)
+    # Move prescribed to RHS
+    taylor_rhs = rhs_r.copy()
+    for j, val in prescribed_r.items():
+        for k in range(n_eqs):
+            taylor_rhs[k, 0] -= V_r[k, j] * val
+    free_cols_r = [j for j in range(T) if j not in prescribed_r]
+    # Taylor unknowns: row_r_free = [x_j for j in free_cols_r]
+
+    # Step 4: Conservation (reuse existing function on partial matrix)
+    # Build partial matrix: rows 0..r-1 = boundary_rows, row r = symbolic
+    row_r_syms = [Symbol(f"xr_{j}") for j in range(T)]
+    for j, val in prescribed_r.items():
+        row_r_syms[j] = val  # prescribed entries are known
+    partial = boundary_rows.copy()
+    partial = partial.row_join(Matrix([row_r_syms]))  # or build R×T
+    # Now build conservation equations using the row_r symbols
+    eqs_cons, w_syms = build_cut_cell_conservation_system(
+        partial_matrix, R, T, p, nu, interior, psi
+    )
+
+    # Step 5: Combine into one system
+    # Taylor: n_eqs equations in free_cols_r unknowns (6 for E4_1)
+    # Conservation: 5 equations in xr_free + w_1..w_4 (6 + 4 = 10)
+    # Total: 9 equations, 10 unknowns → 1 remaining free parameter
+    # Plus alpha_syms are free parameters from boundary rows.
+    all_unknowns = [row_r_syms[j] for j in free_cols_r] + list(w_syms)
+
+    # Step 6: Solve combined system
+    all_eqs = []
+    for k in range(n_eqs):
+        eq = sum(V_r[k, j] * row_r_syms[j] for j in free_cols_r) - taylor_rhs[k, 0]
+        all_eqs.append(eq)
+    all_eqs.extend(eqs_cons)
+    sol = solve(all_eqs, all_unknowns, dict=True)
+    ```
+    **Dimension check for E4_1:** 4 Taylor eqs + 5 conservation eqs = 9 eqs;
+    6 free row-r entries + 4 weight unknowns = 10 unknowns. This leaves 1
+    free parameter (a weight, which becomes alpha_1 after renaming). Combined
+    with the alpha from boundary rows, we get 2 total free params as expected.
   - **Key difference from current approach:** Conservation and Taylor for
     row r are solved SIMULTANEOUSLY, not sequentially. This avoids the
     ψ*(ψ-1) denominator that arises from sequential conservation substitution.
+    The current code (lines 2266-2312 of temo.py) does:
+    `construct_cut_cell_stencil` (all R rows via QQ(ψ)) →
+    `build_cut_cell_conservation_system` → `solve_cut_cell_conservation` →
+    `xreplace`. The new approach only solves rows 0..r-1 first, then row r
+    simultaneously with conservation.
+  - **Reuse from existing code:**
+    - `build_temo_vandermonde` — reused directly for row r's Taylor system
+    - `identify_prescribed_entries` — reused for row r's prescribed cols
+    - `build_cut_cell_conservation_system` — can be reused if we pass a
+      partial matrix with symbolic row-r entries. Alternatively, build the
+      conservation equations inline (the function is ~30 lines).
+    - `solve_cut_cell_conservation` — NOT reused (it solves conservation
+      alone; we need the combined solve)
   - **Size estimate:** ~100-130 lines. The current `build_cut_cell_conservation_system`
     and `solve_cut_cell_conservation` can be partially reused, but the
     simultaneous solve requires restructuring.
-  - Must come after 27.2a (needs polynomial boundary rows as input).
+  - Must come after 27.1c decision. If 27.1c says "boundary rows already
+    polynomial", use existing `construct_cut_cell_stencil` output for rows
+    0..r-1. If 27.1c says "polynomial ansatz needed", must come after 27.2a.
 
 - [ ] **27.3b** Validate the near-interior row
   - File: `scripts/stencil_gen/tests/test_e4_cut_cell.py` (new test class
@@ -213,26 +353,51 @@ From the paper's Table A.4: boundary row entries have degree ≤ 4 in ψ. Since 
 
 - [ ] **27.4a** Wire up polynomial boundary rows + simultaneous near-interior solve
   - File: `scripts/stencil_gen/stencil_gen/temo.py`
-  - Add a new function `construct_cut_cell_stencil_polynomial(B_u, interior, p, q, nu, nextra, psi, zeros) -> StencilResult`
+  - Add a new function `construct_cut_cell_stencil_polynomial(B_u, interior, p, q, nu, nextra, psi, zeros) -> CutCellResult`
     that:
-    1. Calls `solve_temo_row_polynomial` for rows 0..r-1 (boundary rows)
-    2. Calls `solve_near_interior_with_conservation` for row r
-    3. Returns the complete 5×7 stencil with polynomial/rational entries
-    4. Returns the solved weights and remaining free parameters
-  - Update `derive_cut_cell_scheme` to use `construct_cut_cell_stencil_polynomial`
-    when `scheme.zeros` is set (the E4_1 path). The `zeros` path in
-    `derive_cut_cell_scheme` (lines 2267-2312) currently does:
+    1. Computes B_l_1 (uniform limit) and B_d (degenerate) — same as current
+       `construct_cut_cell_stencil` lines 1404-1405
+    2. Solves rows 0..r-1 using either `solve_temo_row_polynomial` (if 27.1c
+       required it) or the existing `solve_temo_row` (if boundary rows are
+       already polynomial after cancel)
+    3. Calls `solve_near_interior_with_conservation` for row r
+    4. Assembles the complete 5×7 stencil matrix
+    5. Handles alpha renaming (maps internal alpha_syms + free weight to
+       final `alpha_0`, `alpha_1`)
+    6. Returns a `CutCellResult` via `assemble_cut_cell_result`
+  - **Modify `derive_cut_cell_scheme`** (the `scheme.zeros` branch at lines
+    2267-2312 of temo.py). Replace the current 7-step sequence:
+    ```python
+    # Current (lines 2267-2312):
+    if scheme.zeros:
+        uniform = derive_uniform_boundary_for_temo(scheme, zeros=set(scheme.zeros))
+        floating_result = construct_cut_cell_stencil(...)    # all R rows
+        eqs, w_syms = build_cut_cell_conservation_system(...)
+        solve_for = list(uniform.alpha_symbols[:2]) + list(w_syms[:3])
+        sol = solve_cut_cell_conservation(eqs, solve_for)
+        floating = floating.xreplace(sol)                    # <-- introduces ψ(ψ-1) denoms
+        weights = [psi] + [sol[w] for w in w_syms[:3]] + [w_syms[3]]
+        # ... renaming ...
     ```
-    uniform → construct_cut_cell_stencil → build_cut_cell_conservation_system
-      → solve_cut_cell_conservation → xreplace
+    With:
+    ```python
+    # New:
+    if scheme.zeros:
+        uniform = derive_uniform_boundary_for_temo(scheme, zeros=set(scheme.zeros))
+        return construct_cut_cell_stencil_polynomial(
+            uniform.B_u, uniform.interior,
+            scheme.p, scheme.q, scheme.nu, scheme.nextra, psi,
+            zeros=scheme.zeros, alpha_symbols=alpha_symbols,
+        )
     ```
-    Replace this with:
-    ```
-    uniform → construct_cut_cell_stencil_polynomial (does everything in one step)
-    ```
-  - The non-zeros paths (E2_1, E2_2, generic conservative) remain unchanged.
-  - **Size estimate:** ~60-80 lines for the new function, ~20-30 lines to
-    modify `derive_cut_cell_scheme`.
+    The new function encapsulates all the conservation logic internally
+    (no external xreplace step).
+  - The non-zeros paths (E2_1, E2_2, generic conservative at lines 2314-2433)
+    remain completely unchanged.
+  - **Imports:** Add `construct_cut_cell_stencil_polynomial` to the test
+    file's import block (line 32 of `test_e4_cut_cell.py`).
+  - **Size estimate:** ~60-80 lines for the new function, ~15 lines to
+    simplify the `scheme.zeros` branch in `derive_cut_cell_scheme`.
   - Must come after 27.3a.
 
 - [ ] **27.4b** Validate the full E4_1 stencil
@@ -258,18 +423,19 @@ From the paper's Table A.4: boundary row entries have degree ≤ 4 in ψ. Since 
 
 ### 27.5 — Remove clamping and singularity guards
 
-- [ ] **27.5a** Remove ψ-clamping from E4_1.cpp
-  - File: `src/stencils/E4_1.cpp`
-  - Remove the psi clamping on line 99:
-    `psi = std::clamp(psi, psi_eps, 1.0 - psi_eps);`
-    and the `constexpr real psi_eps = 1e-4;` on line 98.
-  - Remove the alpha[1] lower-bound check in the constructor (lines 35-38):
-    `if (alpha[1] < 197.0 / 288.0) throw ...`
-  - Remove the comment block explaining the singularity constraints (lines 17-28).
-  - **Note:** This item is a verification/cleanup step AFTER 27.6a regenerates
-    E4_1.cpp. If the regenerated file is already clean (no clamping or alpha
-    guards), this reduces to a verification check. If any guards remain in
-    the generated file, remove them manually.
+- [ ] **27.5a** Verify ψ-clamping and alpha guards are absent from regenerated E4_1.cpp
+  - **This is a post-27.6a verification step**, not a manual edit. The
+    regenerated E4_1.cpp should already be free of singularity guards because
+    the polynomial construction eliminates the root cause.
+  - File: `src/stencils/E4_1.cpp` (after 27.6a copies the regenerated file)
+  - Verify the following are ABSENT:
+    - `psi_eps` and `std::clamp` (currently lines 98-99)
+    - `alpha[1] < 197.0 / 288.0` constructor check (currently lines 35-38)
+    - The singularity-explanation comment block (currently lines 17-28)
+    - Any `1.0/psi` or `1.0/(psi - 1)` patterns in floating/dirichlet methods
+  - **If any guards remain** in the codegen output (e.g., because the codegen
+    template has hardcoded guards), remove them from the codegen template in
+    `scripts/stencil_gen/stencil_gen/codegen.py` and re-run 27.6a.
   - Test: `cmake --build build --target t-E4_1 && ctest --test-dir build -R t-E4_1`
   - Must come after 27.6a (regeneration produces the new file first).
 
@@ -290,6 +456,22 @@ From the paper's Table A.4: boundary row entries have degree ≤ 4 in ψ. Since 
     4. Verify the generated E4_1.cpp contains polynomial expressions for rows
        0-3 (no `1.0/psi` or `1.0/(psi - 1)` divisions) and rational
        expressions for row 4 with a common denominator.
+  - **Concrete verification of the generated code:** Compare the current
+    E4_1.cpp (277 lines) against the regenerated version:
+    - Current code has `1.0 / (t40)` where `t40 = psi + 3` (line 137),
+      `1.0 / (t32)` where `t32 = psi + 2` (line 129), `1/(alpha[1]*t13)`
+      where `t13 = psi - 1` (line 110), and `t17 = t16/psi` (line 113).
+      These are the Vandermonde-type and conservation-induced denominators.
+    - After regeneration, rows 0-3 should only use polynomial arithmetic
+      (`psi * ...`, `psi*psi * ...`, etc.) with no division by psi-dependent
+      expressions. Row 4 should have ONE common denominator (an 8th-degree
+      polynomial in ψ), not multiple separate denominators.
+    - The constructor should NOT have the `alpha[1] < 197.0 / 288.0` check.
+    - The `psi_eps` / `std::clamp` lines (current lines 98-99) should be absent.
+  - **Note on codegen:** The `generate_stencil_cpp` function (in
+    `scripts/stencil_gen/stencil_gen/codegen.py`) uses SymPy's `cse()` to
+    produce CSE temporaries. The polynomial structure should produce simpler
+    CSE trees (fewer divisions), so the generated code may be shorter.
   - Build and test: `cmake --build build --target t-E4_1 && ctest --test-dir build -R t-E4_1`
   - Also run the full C++ test suite to check for regressions:
     `cmake --build build && ctest --test-dir build`
