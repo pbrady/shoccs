@@ -113,7 +113,7 @@ With alpha_3=alpha_4=0, `sympy.solve()` produces a clean single-branch solution 
     - `test_three_alpha_symbols`: 3 free symbols (alpha_0, alpha_1, alpha_2)
     - `test_last_row_zeroed`: `B_u[3, 4] == 0` and `B_u[3, 5] == 0`
     - `test_early_row_col5_still_zero`: `B_u[0, 5] == B_u[1, 5] == B_u[2, 5] == 0`
-    - `test_taylor_accuracy`: All 4 rows satisfy `max(q+1, nu+1)=4` Taylor equations (use `_build_uniform_vandermonde`)
+    - `test_taylor_accuracy`: All 4 rows satisfy `max(q+1, nu+1)=4` Taylor equations (import `_build_uniform_vandermonde` from `stencil_gen.temo`)
     - `test_zeros_conserve_mutual_exclusion`: `derive_uniform_boundary_for_temo(E4_1, zeros={3,4}, conserve=True)` raises ValueError
   - **Test:** `cd scripts/stencil_gen && uv run pytest tests/test_e4_cut_cell.py -v -k "WithZeros" --timeout=60`
 
@@ -146,29 +146,21 @@ With alpha_3=alpha_4=0, `sympy.solve()` produces a clean single-branch solution 
   - **Signature:**
     ```python
     def solve_cut_cell_conservation(
-        B_l: Matrix,
-        R: int,
-        T: int,
-        p: int,
-        nu: int,
-        interior_coeffs: list,
-        psi: Symbol,
-        alpha_symbols: list[Symbol],
+        equations: list[Expr],
         solve_for: list[Symbol],
     ) -> dict[Symbol, Expr]:
-        """Solve the cut-cell conservation system for the given unknowns.
+        """Solve pre-built cut-cell conservation equations.
 
-        Assumes zeros have been applied to the uniform boundary before TEMO,
-        making the system solvable.  Treats any symbol in the conservation
-        system that is NOT in ``solve_for`` as a free parameter.
+        The caller is responsible for building the equations via
+        ``build_cut_cell_conservation_system`` and choosing which symbols
+        to solve for.  Any symbol in the equations that is NOT in
+        ``solve_for`` is treated as a free parameter.
 
         Parameters
         ----------
-        B_l : Matrix
-            R x T cut-cell stencil from TEMO (with zero-constrained alphas).
-        R, T, p, nu, interior_coeffs, psi : same as build_cut_cell_conservation_system.
-        alpha_symbols : list[Symbol]
-            The remaining alpha symbols (post-zeros, e.g. [alpha_0, alpha_1, alpha_2]).
+        equations : list[Expr]
+            Conservation equations (each must equal zero), as returned
+            by ``build_cut_cell_conservation_system``.
         solve_for : list[Symbol]
             Symbols to solve for (e.g. [alpha_0, alpha_1, w_1, w_2, w_3]).
 
@@ -176,15 +168,14 @@ With alpha_3=alpha_4=0, `sympy.solve()` produces a clean single-branch solution 
         -------
         dict[Symbol, Expr]
             Maps each solved symbol to its expression in (psi, free_params).
-            Free params are everything in {alpha_symbols + w_syms} \\ solve_for.
         """
     ```
   - **Implementation:**
-    1. Call `build_cut_cell_conservation_system(B_l, R, T, p, nu, interior_coeffs, psi)` → `(eqs, w_syms)` where `w_syms = [w_1, w_2, w_3, w_4]`
-    2. `solution = sympy.solve(eqs, solve_for, dict=True)` — expected: single-branch solution
-    3. Assert `len(solution) == 1`, extract `sol = solution[0]`
-    4. Verify: all 5 equations evaluate to 0 after substitution (use `cancel(eq.subs(sol)) == 0`)
-    5. Return `sol`
+    1. `solution = sympy.solve(equations, solve_for, dict=True)` — expected: single-branch solution
+    2. Assert `len(solution) == 1`, extract `sol = solution[0]`
+    3. Verify: all equations evaluate to 0 after substitution (use `cancel(eq.subs(sol)) == 0`)
+    4. Return `sol`
+  - **Design note:** The function takes pre-built equations (not raw stencil params) so the caller can reuse the `w_syms` from `build_cut_cell_conservation_system` for weight assembly without redundant computation.
   - **Expected solve_for for E4_1:** `[alpha_0, alpha_1, w_1, w_2, w_3]` (5 unknowns for 5 equations)
   - **Expected free params:** `[alpha_2, w_4]` (2 free for optimization)
   - **Test:** `cd scripts/stencil_gen && uv run pytest tests/test_e4_cut_cell.py -v -k "solve_cut_cell" --timeout=300`
@@ -259,10 +250,7 @@ With alpha_3=alpha_4=0, `sympy.solve()` produces a clean single-branch solution 
             uniform.interior, psi,
         )
         solve_for = uniform.alpha_symbols[:2] + w_syms[:3]  # alpha_0, alpha_1, w_1..w_3
-        sol = solve_cut_cell_conservation(
-            floating, dims.R, dims.T, scheme.p, scheme.nu,
-            uniform.interior, psi, uniform.alpha_symbols, solve_for,
-        )
+        sol = solve_cut_cell_conservation(eqs, solve_for)
         # Step 4: Apply solution to stencil
         floating = floating.xreplace(sol)
         # Step 5: Compute weights (w_0=psi, w_1..w_3 from sol, w_4 free)
