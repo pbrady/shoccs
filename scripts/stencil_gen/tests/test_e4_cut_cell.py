@@ -34,6 +34,7 @@ from stencil_gen.temo import (
     derive_e2_uniform_boundary,
     derive_uniform_boundary_for_temo,
     make_psi_field,
+    solve_cut_cell_conservation,
     solve_temo_row,
     solve_uniform_limit,
 )
@@ -300,6 +301,92 @@ class TestE4ZeroConstrainedCutCell:
                     f"Row {i}, moment k={k} at psi=1/2: "
                     f"got {cancel(moment)}, expected {expected}"
                 )
+
+
+class TestE4CutCellConservationSolution:
+    """Tests for solve_cut_cell_conservation with E4_1 zero-constrained stencil (26.3b)."""
+
+    @pytest.fixture(scope="class")
+    def conservation_solution(self):
+        """Build zero-constrained cut-cell stencil and solve conservation."""
+        psi = Symbol("psi")
+        ur = derive_uniform_boundary_for_temo(E4_1, zeros={3, 4})
+        stencil = construct_cut_cell_stencil(
+            ur.B_u, ur.interior, p=2, q=3, nu=1, nextra=0, psi=psi,
+        )
+        R, T = stencil.matrix.shape
+        eqs, w_syms = build_cut_cell_conservation_system(
+            stencil.matrix, R, T, p=E4_1.p, nu=E4_1.nu,
+            interior_coeffs=ur.interior, psi=psi,
+        )
+        # solve_for: alpha_0, alpha_1, w_1, w_2, w_3
+        alpha_syms = sorted(
+            stencil.matrix.free_symbols - {psi}, key=lambda s: s.name,
+        )
+        solve_for = alpha_syms[:2] + w_syms[:3]
+        sol = solve_cut_cell_conservation(eqs, solve_for)
+        return sol, eqs, w_syms, stencil, ur, psi, alpha_syms
+
+    def test_solution_exists(self, conservation_solution):
+        """Solution dict has 5 entries."""
+        sol = conservation_solution[0]
+        assert len(sol) == 5
+
+    def test_all_equations_satisfied(self, conservation_solution):
+        """All 5 conservation equations evaluate to 0 after substitution."""
+        sol, eqs, _, _, _, _, _ = conservation_solution
+        for i, eq in enumerate(eqs):
+            residual = cancel(eq.subs(sol))
+            assert residual == 0, f"Equation {i} residual: {residual}"
+
+    def test_free_symbols_in_solution(self, conservation_solution):
+        """Each solved expression involves only {psi, alpha_2, w_4}."""
+        sol, _, w_syms, _, _, psi, alpha_syms = conservation_solution
+        alpha_2 = alpha_syms[2]
+        w_4 = w_syms[3]
+        allowed = {psi, alpha_2, w_4}
+        for sym, expr in sol.items():
+            extra = expr.free_symbols - allowed
+            assert extra == set(), (
+                f"Solution for {sym} has unexpected symbols: {extra}"
+            )
+
+    def test_stencil_after_substitution(self, conservation_solution):
+        """After applying solution, stencil free symbols are subset of {psi, alpha_2, w_4}."""
+        sol, _, w_syms, stencil, _, psi, alpha_syms = conservation_solution
+        alpha_2 = alpha_syms[2]
+        w_4 = w_syms[3]
+        B_l_sub = stencil.matrix.xreplace(sol)
+        allowed = {psi, alpha_2, w_4}
+        extra = B_l_sub.free_symbols - allowed
+        assert extra == set(), f"Unexpected symbols in stencil: {extra}"
+
+    def test_conservation_column_sums(self, conservation_solution):
+        """Weighted column sums using solved weights verify conservation."""
+        sol, _, w_syms, stencil, ur, psi, _ = conservation_solution
+        B_l_sub = stencil.matrix.xreplace(sol)
+        R, T = B_l_sub.shape
+        # Weights: w_0=psi, w_1..w_3 from sol, w_4 free
+        weights = [psi]
+        for w in w_syms[:3]:
+            weights.append(sol[w])
+        weights.append(w_syms[3])
+
+        interior = ur.interior
+        p = E4_1.p
+        for j_tf in range(1, T - 1):
+            g = j_tf - 1
+            col_sum = sum(weights[i] * B_l_sub[i, j_tf] for i in range(R))
+            ic = _interior_contribution(g, R, p, interior)
+            col_sum += ic
+            if g == 0 and E4_1.nu == 1:
+                target = S.NegativeOne
+            else:
+                target = S.Zero
+            residual = cancel(col_sum - target)
+            assert residual == 0, (
+                f"Column j_tf={j_tf} (g={g}) conservation residual: {residual}"
+            )
 
 
 class TestE4TEMOConstruction:

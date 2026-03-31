@@ -17,6 +17,7 @@ from sympy import (
     Symbol,
     cancel,
     factorial,
+    solve,
     symbols as _symbols,
 )
 
@@ -1501,6 +1502,46 @@ def build_cut_cell_conservation_system(
         equations.append(col_sum - target)
 
     return equations, w_syms
+
+
+def solve_cut_cell_conservation(
+    equations: list[Expr],
+    solve_for: list[Symbol],
+) -> dict[Symbol, Expr]:
+    """Solve pre-built cut-cell conservation equations.
+
+    The caller is responsible for building the equations via
+    ``build_cut_cell_conservation_system`` and choosing which symbols
+    to solve for.  Any symbol in the equations that is NOT in
+    ``solve_for`` is treated as a free parameter.
+
+    Parameters
+    ----------
+    equations : list[Expr]
+        Conservation equations (each must equal zero), as returned
+        by ``build_cut_cell_conservation_system``.
+    solve_for : list[Symbol]
+        Symbols to solve for (e.g. [alpha_0, alpha_1, w_1, w_2, w_3]).
+
+    Returns
+    -------
+    dict[Symbol, Expr]
+        Maps each solved symbol to its expression in (psi, free_params).
+    """
+    solution = solve(equations, solve_for, dict=True)
+    assert len(solution) == 1, (
+        f"Expected unique solution, got {len(solution)} branches"
+    )
+    sol = solution[0]
+
+    # Verify: all equations evaluate to 0 after substitution
+    for i, eq in enumerate(equations):
+        residual = cancel(eq.subs(sol))
+        assert residual == 0, (
+            f"Equation {i} has non-zero residual after substitution: {residual}"
+        )
+
+    return sol
 
 
 # ---------------------------------------------------------------------------

@@ -146,7 +146,7 @@ With alpha_3=alpha_4=0, `sympy.solve()` produces a clean single-branch solution 
 
 ### 26.3 — Solve cut-cell conservation
 
-- [ ] **26.3a** Add `solve_cut_cell_conservation` function:
+- [x] **26.3a** Add `solve_cut_cell_conservation` function:
   - **File:** `scripts/stencil_gen/stencil_gen/temo.py` (insert after `build_cut_cell_conservation_system`, ~line 1487)
   - **Signature:**
     ```python
@@ -185,7 +185,7 @@ With alpha_3=alpha_4=0, `sympy.solve()` produces a clean single-branch solution 
   - **Expected free params:** `[alpha_2, w_4]` (2 free for optimization)
   - **Test:** `cd scripts/stencil_gen && uv run pytest tests/test_e4_cut_cell.py -v -k "solve_cut_cell" --timeout=300`
 
-- [ ] **26.3b** Test conservation solution and apply to stencil:
+- [x] **26.3b** Test conservation solution and apply to stencil:
   - **File:** `scripts/stencil_gen/tests/test_e4_cut_cell.py`
   - Add test class `TestE4CutCellConservationSolution`:
     - Build zero-constrained cut-cell stencil (as in 26.2a)
