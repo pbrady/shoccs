@@ -13,6 +13,9 @@ struct E4_1 {
     static constexpr int T = 7;
     static constexpr int X = 0;
 
+    // alpha[0]: boundary shape parameter (free)
+    // alpha[1]: quadrature weight parameter — MUST be nonzero (denominators
+    //           in nbs_floating and nbs_dirichlet divide by alpha[1])
     std::array<real, 2> alpha;
 
     E4_1() = default;

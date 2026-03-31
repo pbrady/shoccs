@@ -367,9 +367,10 @@ With alpha_3=alpha_4=0, `sympy.solve()` produces a clean single-branch solution 
   - **Test:** Added two Catch2 sections in `E4_1.t.cpp` testing Floating and Dirichlet with `psi = 1.0 - 1e-12`, verifying all coefficients are `std::isfinite`. 95 assertions pass (was 16).
   - **Additional validation:** mesh tests (4/4) and simulation tests (1/1) pass with the clamp change.
 
-- [ ] **26.6-followup-b** Document alpha[1] ≠ 0 constraint:
+- [x] **26.6-followup-b** Document alpha[1] ≠ 0 constraint:
   - **Problem:** The generated stencil divides by `alpha[1]` (= renamed w_4, a quadrature weight) in both `nbs_floating` (line 90: `1/(alpha[1]*t13)`) and `nbs_dirichlet` (line 211: `1.0 / (alpha[1])`). A user setting `alpha[1] = 0` gets division by zero. This constraint is mentioned only in a test parenthetical (26.5c) but not in the C++ code or plan's singularity documentation.
   - **Fix:** Add a comment in `E4_1.cpp` near the alpha declaration documenting that `alpha[1]` must be nonzero. Consider adding a runtime assert or guard. Update the codegen template if this constraint should appear automatically.
+  - **Done:** Added comment block near alpha declaration in `E4_1.cpp` documenting alpha[0] (free) and alpha[1] (must be nonzero, used as denominator). No runtime assert added — a comment is sufficient since alpha values come from Lua config and division-by-zero would be immediately obvious from NaN/Inf output. Codegen template not updated (YAGNI — only E4_1 has this constraint).
 
 - [ ] **26.6-followup-c** Add missing singularity comments to generated E4_1.cpp:
   - **Problem:** Plan item 26.6a specifies: "The generated E4_1.cpp should include a comment that coefficients diverge at psi=0 and psi=1." This was not done — the generated file has no such comment.
