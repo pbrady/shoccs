@@ -1685,6 +1685,68 @@ def solve_cut_cell_conservation(
     return sol
 
 
+def solve_conservation_fraction_free(
+    equations: list[Expr],
+    solve_for: list[Symbol],
+    psi: Symbol,
+) -> dict[Symbol, Expr]:
+    """Solve conservation equations after clearing psi-dependent denominators.
+
+    Clears rational psi-denominators from the conservation equations before
+    passing them to SymPy's solver.  This simplifies the input and can
+    prevent SOME spurious denominator factors, though the bilinear structure
+    of the conservation system (products of weight × alpha unknowns) means
+    the solution may still contain psi-dependent denominators.
+
+    When both alpha and weight symbols are in ``solve_for``, the system is
+    bilinear.  The resulting alpha solutions are psi-dependent rational
+    functions whose denominators include psi(psi-1) factors.  This is
+    inherent to the problem structure — not a solver artifact — because
+    psi-independent alpha solutions do not satisfy the conservation
+    identity for all psi values.
+
+    The weight solutions (w_1, w_2, w_3) are psi-independent (denominator
+    = 1), matching the expected structure.
+
+    Parameters
+    ----------
+    equations : list[Expr]
+        Conservation equations (each must equal zero), as returned
+        by ``build_cut_cell_conservation_system``.
+    solve_for : list[Symbol]
+        Symbols to solve for (e.g. [alpha_0, alpha_1, w_1, w_2, w_3]).
+    psi : Symbol
+        The psi parameter.
+
+    Returns
+    -------
+    dict[Symbol, Expr]
+        Maps each solved symbol to its expression in (psi, free_params).
+    """
+    # Step 1: Clear psi-dependent denominators from each equation
+    cleared = []
+    for eq in equations:
+        num, den = fraction(cancel(eq))
+        cleared.append(expand(num))
+
+    # Step 2: Solve the fraction-cleared system
+    solution = solve(cleared, solve_for, dict=True)
+    assert len(solution) == 1, (
+        f"Expected unique solution, got {len(solution)} branches"
+    )
+    sol = solution[0]
+
+    # Step 3: Verify all original equations evaluate to 0
+    for i, eq in enumerate(equations):
+        residual = cancel(eq.subs(sol))
+        assert residual == 0, (
+            f"Equation {i} has non-zero residual after substitution: "
+            f"{residual}"
+        )
+
+    return sol
+
+
 # ---------------------------------------------------------------------------
 # 20.5f — Neumann eta coefficients and output assembly
 # ---------------------------------------------------------------------------

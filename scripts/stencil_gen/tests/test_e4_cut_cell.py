@@ -35,6 +35,7 @@ from stencil_gen.temo import (
     derive_e2_uniform_boundary,
     derive_uniform_boundary_for_temo,
     make_psi_field,
+    solve_conservation_fraction_free,
     solve_cut_cell_conservation,
     solve_temo_row,
     solve_temo_row_polynomial,
@@ -2048,4 +2049,111 @@ class TestPolynomialBoundaryRows:
                     assert p.degree() <= 1, (
                         f"Row {i} col {j}: degree {p.degree()} > 1 in {alpha}"
                     )
+
+
+class TestFractionFreeConservation:
+    """Tests for solve_conservation_fraction_free with E4_1 (27.3b)."""
+
+    @pytest.fixture(scope="class")
+    def fraction_free_solution(self):
+        """Build zero-constrained cut-cell stencil and solve conservation fraction-free."""
+        psi = Symbol("psi")
+        ur = derive_uniform_boundary_for_temo(E4_1, zeros={3, 4})
+        stencil = construct_cut_cell_stencil(
+            ur.B_u, ur.interior, p=2, q=3, nu=1, nextra=0, psi=psi,
+        )
+        R, T = stencil.matrix.shape
+        eqs, w_syms = build_cut_cell_conservation_system(
+            stencil.matrix, R, T, p=E4_1.p, nu=E4_1.nu,
+            interior_coeffs=ur.interior, psi=psi,
+        )
+        alpha_syms = sorted(
+            stencil.matrix.free_symbols - {psi}, key=lambda s: s.name,
+        )
+        solve_for = alpha_syms[:2] + w_syms[:3]
+        sol = solve_conservation_fraction_free(eqs, solve_for, psi)
+        return sol, eqs, w_syms, stencil, ur, psi, alpha_syms, solve_for
+
+    def test_weight_denominators_benign(self, fraction_free_solution):
+        """Weight solutions (w_1, w_2, w_3) are psi-independent (constant denominator).
+
+        The bilinear solve produces psi(psi-1) denominators for the alpha
+        solutions, but the weight solutions should be psi-independent
+        (denominator = 1).  This is inherent to the problem structure.
+        """
+        sol, _, w_syms, _, _, psi, _, _ = fraction_free_solution
+        for w in w_syms[:3]:
+            if w in sol:
+                num, den = fraction(cancel(sol[w]))
+                assert psi not in den.free_symbols, (
+                    f"{w}: expected psi-free denominator, got {den}"
+                )
+
+    def test_alpha_denominators_documented(self, fraction_free_solution):
+        """Alpha solutions have psi(psi-1) denominators (known limitation).
+
+        This test documents the current behavior: the bilinear conservation
+        system inherently produces psi-dependent alpha solutions with
+        psi(psi-1) denominator factors.  A restructured approach (not
+        solving for alphas in conservation) would be needed to eliminate
+        these — see plan 27.3a notes.
+        """
+        sol, _, _, _, _, psi, alpha_syms, _ = fraction_free_solution
+        for a in alpha_syms[:2]:
+            if a in sol:
+                num, den = fraction(cancel(sol[a]))
+                # Alpha denominators contain psi factors
+                if psi in den.free_symbols:
+                    p = Poly(den, psi)
+                    # They vanish at psi=0 or psi=1 (known limitation)
+                    has_psi_pole = (p.eval(0) == 0 or p.eval(1) == 0)
+                    assert has_psi_pole, (
+                        f"{a}: expected psi/psi-1 denominator factor, "
+                        f"but den is benign: {den}"
+                    )
+
+    def test_matches_old_solver(self, fraction_free_solution):
+        """Fraction-free solution matches the old solver numerically."""
+        sol_ff, eqs, w_syms, _, _, psi, alpha_syms, solve_for = fraction_free_solution
+        sol_old = solve_cut_cell_conservation(eqs, solve_for)
+        alpha_2 = alpha_syms[2]
+        w_4 = w_syms[3]
+        test_vals = [
+            {psi: Rational(1, 4), alpha_2: Rational(1, 3), w_4: Rational(1, 2)},
+            {psi: Rational(1, 2), alpha_2: Rational(1, 5), w_4: Rational(2, 3)},
+            {psi: Rational(3, 4), alpha_2: Rational(0), w_4: Rational(1)},
+        ]
+        for s in solve_for:
+            for vals in test_vals:
+                val_ff = sol_ff[s].subs(vals)
+                val_old = sol_old[s].subs(vals)
+                assert cancel(val_ff - val_old) == 0, (
+                    f"{s} at {vals}: fraction-free={val_ff}, old={val_old}"
+                )
+
+    def test_conservation_holds(self, fraction_free_solution):
+        """All 5 conservation equations evaluate to 0 after substitution."""
+        sol, eqs, _, _, _, _, _, _ = fraction_free_solution
+        for i, eq in enumerate(eqs):
+            residual = cancel(eq.subs(sol))
+            assert residual == 0, f"Equation {i} residual: {residual}"
+
+    def test_remaining_free_params(self, fraction_free_solution):
+        """Solution leaves exactly alpha_2 and w_4 as free parameters."""
+        sol, _, w_syms, _, _, psi, alpha_syms, _ = fraction_free_solution
+        alpha_2 = alpha_syms[2]
+        w_4 = w_syms[3]
+        allowed = {psi, alpha_2, w_4}
+        for sym, expr in sol.items():
+            extra = expr.free_symbols - allowed
+            assert extra == set(), (
+                f"Solution for {sym} has unexpected symbols: {extra}"
+            )
+
+    def test_solve_for_completeness(self, fraction_free_solution):
+        """Solution dict contains all 5 solve_for symbols."""
+        sol, eqs, _, _, _, _, _, solve_for = fraction_free_solution
+        for s in solve_for:
+            assert s in sol, f"Missing {s} from solution"
+        assert len(sol) == 5
 

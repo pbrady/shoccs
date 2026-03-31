@@ -207,153 +207,80 @@ different purpose (proving infeasibility of constant weights).
 
 ### 27.3 — Fraction-free conservation solve
 
-- [ ] **27.3a** Implement `solve_conservation_fraction_free` function
-  - File: `scripts/stencil_gen/stencil_gen/temo.py` (new function, add after
-    `solve_cut_cell_conservation` at ~line 1507)
+- [x] **27.3a** Implement `solve_conservation_fraction_free` function
+  - File: `scripts/stencil_gen/stencil_gen/temo.py` (added after
+    `solve_cut_cell_conservation` at ~line 1688)
   - Signature: `solve_conservation_fraction_free(equations: list[Expr], solve_for: list[Symbol], psi: Symbol) -> dict[Symbol, Expr]`
-  - **Root cause of current problem:** The current `solve_cut_cell_conservation`
-    (line 1507) passes rational-in-ψ equations directly to SymPy's `solve`,
-    which can introduce ψ(ψ-1) factors in solution denominators through its
-    internal elimination steps. Even though the conservation equations are
-    consistent identities in ψ, SymPy's generic solver may choose an
-    elimination order that creates spurious poles.
-  - **Fix:** Clear ψ-dependent denominators before solving. The fraction-
-    clearing is the key improvement — it converts rational-in-ψ equations
-    to polynomial-in-ψ equations, preventing SymPy from introducing bad
-    denominators during elimination.
-  - **Algorithm (primary approach — fraction-clear + full solve):**
+  - **Implementation:** Clears ψ-dependent denominators from the
+    conservation equations before passing to SymPy's `solve`.
+  - **Key finding:** Fraction-clearing alone does NOT eliminate ψ(ψ-1)
+    denominators from the alpha solutions. The ψ(ψ-1) factors are
+    **inherent to the bilinear system structure**, not a solver artifact.
+    Detailed investigation (see below) confirmed this.
+  - **What was tried and why it failed:**
+    1. **Primary approach (fraction-clear + full solve):** Works
+       correctly — produces the same results as the old solver. But the
+       alpha solutions still have `psi*w_4*(psi-1)` and
+       `w_4*(psi-1)*(...)` denominators. These are NOT spurious — they
+       are the unique solution to the bilinear system.
+    2. **Fallback A (sequential elimination):** Solving for alphas first
+       (linear in alpha, treating w as params) fails with 0 solutions
+       because SymPy's `solve` doesn't detect the linear-in-alpha
+       structure through the bilinear products. Using
+       `linear_eq_to_matrix` to extract the linear system gives an
+       overdetermined 5×2 system that is inconsistent for generic w.
+       Picking 2 equations gives Cramer's-rule denominators with
+       `psi*w_4*(psi-1)` — same issue.
+    3. **Weights-first approach:** Solving for weights only (linear
+       system) + compatibility conditions for alpha. The weight solutions
+       have psi in denominator but NOT (psi-1). The compatibility
+       conditions, after ψ-coefficient extraction, yield 11 constraints
+       for 2 alpha unknowns — INCONSISTENT. This proves ψ-independent
+       alpha solutions DO NOT EXIST for E4_1 with zeros={3,4}.
+    4. **Evaluation check:** The old solver's alpha_0 genuinely varies
+       with psi (e.g., alpha_0 ranges from ~51 at psi=0.1 to ~305 at
+       psi=0.9 for specific parameter values). The psi-dependence is
+       real, not removable.
+  - **Structure of the solution (factored denominators):**
+    - `alpha_0 den = 12*psi*w_4*(psi - 1)` — poles at psi=0 and psi=1
+    - `alpha_1 den = w_4*(psi-1)*(12*psi^3 + 90*psi^2 + 648*psi + 288*w_4 - 197)` — pole at psi=1
+    - `w_1, w_2, w_3 den = 1` — no poles (psi-independent!)
+  - **Conclusion:** The conservation solve with zeros={3,4} and the
+    current solve_for=[alpha_0, alpha_1, w_1, w_2, w_3] inherently
+    produces psi-dependent alpha solutions with psi(psi-1) denominators.
+    Eliminating these singularities requires changing the PROBLEM
+    STRUCTURE, not the solver. Potential approaches for future work:
+    - Use a different parameterization that avoids solving for alphas
+      in conservation (match the paper's approach where α^u are
+      user-specified constants, not solve targets)
+    - Change the zeros configuration or nextra to allow constant-alpha
+      solutions
+    - Use a norm formulation with psi-dependent weights that absorbs
+      the singularity
+  - All 111 existing tests pass (1 xfail expected). No regressions.
+  - Test: `cd scripts/stencil_gen && uv run pytest tests/test_e4_cut_cell.py -v -k "TestFractionFreeConservation" --timeout=300`
 
-    **Step 1 — Clear fractions:**
-    ```python
-    cleared = []
-    for eq in equations:
-        num, den = fraction(cancel(eq))
-        cleared.append(expand(num))
-    ```
-    After clearing, each equation is a polynomial in ψ (and the solve_for
-    symbols + free params). Denominators are discarded because they are
-    nonvanishing on [0,1] (products of Vandermonde factors like (ψ+1)(ψ+2)).
-
-    **Step 2 — Solve the full system:**
-    ```python
-    sol = solve(cleared, solve_for, dict=True)
-    assert len(sol) == 1
-    sol = sol[0]
-    ```
-    SymPy's `solve` on polynomial inputs uses Gröbner basis methods, which
-    tend to produce solutions with minimal denominators. Since the input
-    polynomials have no ψ-dependent denominators to begin with, the solver
-    cannot introduce ψ(ψ-1) factors through cross-multiplication.
-
-    **Step 3 — Verify and return:**
-    ```python
-    # Verify: all original equations evaluate to 0
-    for i, eq in enumerate(equations):
-        residual = cancel(eq.subs(sol))
-        assert residual == 0, f"Equation {i}: residual={residual}"
-
-    return sol
-    ```
-
-  - **Bilinearity note:** The conservation equations contain bilinear
-    terms `w_k * alpha_j` (see "Bilinearity Constraint" section above).
-    For E4_1 with zeros={3,4}, the bilinear unknown×unknown products are
-    `w_1 * alpha_1` (from row 1) — both are in `solve_for`. SymPy's
-    `solve` can handle small bilinear polynomial systems (5 equations in
-    5 unknowns) directly. The primary approach lets SymPy manage the
-    bilinearity internally after fraction-clearing removes the rational
-    structure that caused the original problem.
-
-  - **Dimension check for E4_1 with zeros={3,4}:**
-    - 5 conservation equations (one per grid column 1..5 in the T-frame)
-    - solve_for = [alpha_0, alpha_1, w_1, w_2, w_3] (5 unknowns)
-    - Free params: alpha_2, w_4 (not in solve_for)
-    - After solve: alpha_2 renamed to alpha_0, w_4 renamed to alpha_1 → 2 free
-
-  - **Why this avoids ψ(ψ-1) denominators:**
-    - Clearing fractions (Step 1) removes all existing ψ-dependent
-      denominators from the equations before solving.
-    - The cleared equations are polynomials in (ψ, alpha, w), so the
-      solver operates entirely in polynomial arithmetic.
-    - Solution denominators can only arise from the Gröbner basis
-      elimination, which produces factors of the polynomial coefficients
-      — these are Vandermonde-family factors (nonvanishing on [0,1]),
-      not ψ(ψ-1).
-
-  - **Fallback A — Sequential elimination:** If the primary approach
-    produces bad denominators or is too slow (timeout), split the solve
-    into two stages:
-    ```python
-    alpha_unknowns = [s for s in solve_for if s.name.startswith('alpha')]
-    weight_unknowns = [s for s in solve_for if s.name.startswith('w')]
-    # Stage 1: linear in alpha (treating w as parameters)
-    alpha_sol = solve(cleared, alpha_unknowns, dict=True)[0]
-    # Stage 2: substitute alphas, clear new fractions, solve for w
-    remaining = [expand(eq.subs(alpha_sol)) for eq in cleared]
-    remaining_cleared = [expand(fraction(cancel(eq))[0]) for eq in remaining]
-    weight_sol = solve(remaining_cleared, weight_unknowns, dict=True)[0]
-    # Combine
-    full_sol = {s: cancel(e.subs(weight_sol)) for s, e in alpha_sol.items()}
-    full_sol.update(weight_sol)
-    ```
-    **Important caveat:** Stage 2 is NOT linear in weights. The alpha
-    solutions from Stage 1 are rational in w (from Cramer's rule on the
-    bilinear system), so after substitution and fraction-clearing, the
-    remaining equations are polynomial of degree ≤ 3 in w. SymPy's
-    `solve` handles this via Gröbner bases, but it may be slower than
-    the primary approach. Use all 5 cleared equations (not just remaining)
-    to give `solve` maximum information for elimination.
-
-  - **Fallback B — ψ-coefficient extraction:** If both primary and
-    Fallback A still produce bad denominators, expand each cleared equation
-    as a ψ-polynomial, collect coefficients by ψ powers, and solve the
-    resulting ψ-free algebraic system. This uses the technique from the
-    existing `test_e4_1_conservation_constant_weights_infeasible_r5` test
-    (lines 1541-1551 of `test_e4_cut_cell.py`). However, this forces the
-    solution to be ψ-independent, which may not match the expected
-    ψ-dependent weights. Use only if the ψ-coefficient system is consistent.
-
-  - **Reuse from existing code:** The existing `build_cut_cell_conservation_system`
-    (line 1431) is reused unchanged. The existing `solve_cut_cell_conservation`
-    (line 1507) is NOT reused (it is the function being replaced). The
-    existing test at line 1481
-    (`test_e4_1_conservation_constant_weights_infeasible_r5`) demonstrates
-    the fraction-clearing technique that this function productionizes.
-  - **Size estimate:** ~20-30 lines for primary approach, ~40-60 if
-    fallback A is also implemented inline.
-  - Must come after 27.1c decision. If 27.1c says "boundary rows already
-    polynomial", the approach works directly (TEMO entries have benign
-    denominators). If 27.1c says "polynomial ansatz needed", must come
-    after 27.2b (ensures boundary rows are polynomial before conservation).
-
-- [ ] **27.3b** Validate the fraction-free conservation solve
+- [x] **27.3b** Validate the fraction-free conservation solve
   - File: `scripts/stencil_gen/tests/test_e4_cut_cell.py` (new test class
     `TestFractionFreeConservation`)
-  - Tests:
-    1. `test_solution_no_psi_poles`: For each symbol in the conservation
-       solution dict, extract `fraction(cancel(sol[s]))` and verify the
-       denominator has no ψ or (ψ-1) factors. Specifically:
-       ```python
-       for s, expr in sol.items():
-           num, den = fraction(cancel(expr))
-           if psi in den.free_symbols:
-               p = Poly(den, psi)
-               assert p.eval(0) != 0, f"{s}: denominator vanishes at psi=0"
-               assert p.eval(1) != 0, f"{s}: denominator vanishes at psi=1"
-       ```
-    2. `test_matches_current_output`: After xreplace with the fraction-free
-       solution, the stencil entries should be equivalent (symbolically) to
-       the current code's output. For specific alpha/psi values, numerical
-       evaluation should match to machine precision.
-    3. `test_conservation_holds`: Same as existing `test_conservation_holds`
-       in `TestE4CutCellSchemeWithZeros` (line 1076) — verify that weighted
-       column sums satisfy conservation identically in ψ.
-    4. `test_remaining_free_params`: The solution leaves exactly alpha_2 and
-       w_4 as free parameters (2 total for E4_1 with zeros={3,4}).
-    5. `test_solve_for_completeness`: Verify that the solution dict contains
-       all 5 solve_for symbols (alpha_0, alpha_1, w_1, w_2, w_3) and that
-       substituting the solution into ALL 5 conservation equations gives
-       zero residual (not just a subset).
+  - Tests written (all 6 PASS):
+    1. `test_weight_denominators_benign`: Weight solutions (w_1, w_2, w_3)
+       have psi-free denominators (= 1). Weights are psi-independent.
+    2. `test_alpha_denominators_documented`: Documents that alpha solutions
+       have psi(psi-1) denominator factors — inherent to the bilinear
+       structure, not a solver deficiency.
+    3. `test_matches_old_solver`: Fraction-free solution matches the old
+       `solve_cut_cell_conservation` numerically at several (psi, alpha_2,
+       w_4) evaluation points.
+    4. `test_conservation_holds`: All 5 conservation equations evaluate
+       to 0 after substitution.
+    5. `test_remaining_free_params`: Solution leaves exactly {psi, alpha_2,
+       w_4} as free symbols in each solved expression.
+    6. `test_solve_for_completeness`: Solution dict contains all 5
+       solve_for symbols.
+  - Also added `solve_conservation_fraction_free` to the test file's
+    top-level imports.
+  - All 111 existing tests pass (1 xfail expected). No regressions.
   - Test: `cd scripts/stencil_gen && uv run pytest tests/test_e4_cut_cell.py -v -k "TestFractionFreeConservation" --timeout=300`
   - Must come after 27.3a.
 
