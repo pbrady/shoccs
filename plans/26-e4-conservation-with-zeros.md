@@ -280,24 +280,26 @@ With alpha_3=alpha_4=0, `sympy.solve()` produces a clean single-branch solution 
   - **Test:** `cd scripts/stencil_gen && uv run pytest tests/test_e4_cut_cell.py -v -k "SchemeWithZeros" --timeout=300`
   - **Done:** Implemented zeros path before the `if not conserve:` check. The path builds zero-constrained B_u, runs TEMO, solves cut-cell conservation for [alpha_0, alpha_1, w_1, w_2, w_3], renames {alpha_2 → alpha_0, w_4 → alpha_1}, and returns 2-alpha result. All existing tests pass (88 passed, 1 xfail).
 
-- [ ] **26.5b** E2_1 regression test:
+- [x] **26.5b** E2_1 regression test:
   - **File:** `scripts/stencil_gen/tests/test_temo.py`
   - E2_1 has `zeros=()` — its conservation is handled by the nextra=1 mechanism
   - Verify: `derive_cut_cell_scheme(E2_1, psi)` results are unchanged:
     - Shape, alpha count, Taylor accuracy, psi limits all match pre-Phase-26 behavior
   - **Test:** `cd scripts/stencil_gen && uv run pytest tests/test_temo.py -v -k "E2" --timeout=120`
+  - **Done:** Added `TestE2_1DeriveCutCellSchemeRegression` class with 6 tests: shape, alpha_count, dims, floating_matches_manual, taylor_accuracy, psi_limits. All 96 E2 tests pass.
 
-- [ ] **26.5c** E4_1 `derive_cut_cell_scheme` integration tests:
+- [x] **26.5c** E4_1 `derive_cut_cell_scheme` integration tests:
   - **File:** `scripts/stencil_gen/tests/test_e4_cut_cell.py`
   - Add test class `TestE4CutCellSchemeWithZeros`:
     - `test_alpha_count`: 2 free alpha symbols
     - `test_shape`: floating (5,7), dirichlet (4,7)
     - `test_free_symbols`: floating matrix free_symbols ⊆ {psi, alpha_0, alpha_1}
     - `test_weights_present`: weights is not None, length 5 (R=5), psi-dependent
-    - `test_taylor_accuracy`: at psi=1/2, all rows satisfy 4 Taylor equations
+    - `test_taylor_accuracy`: at psi=1/2, all rows satisfy 4 Taylor equations (uses non-zero alpha values since alpha_1=w_4=0 causes divergence)
     - `test_conservation_holds`: weighted column sums using result.weights are zero
     - `test_custom_alphas`: accepts `alpha_symbols=[Symbol("a"), Symbol("b")]`
   - **Test:** `cd scripts/stencil_gen && uv run pytest tests/test_e4_cut_cell.py -v -k "SchemeWithZeros" --timeout=300`
+  - **Done:** All 7 tests pass.
 
 - [x] **26.5d** Update existing E4_1 tests broken by the zeros path:
   - **File:** `scripts/stencil_gen/tests/test_e4_cut_cell.py`

@@ -1019,6 +1019,86 @@ class TestDeriveCutCellScheme:
             )
 
 
+class TestE4CutCellSchemeWithZeros:
+    """Integration tests for derive_cut_cell_scheme(E4_1) with zeros path (26.5c)."""
+
+    @pytest.fixture(scope="class")
+    def e4_result(self):
+        psi = Symbol("psi")
+        return derive_cut_cell_scheme(E4_1, psi), psi
+
+    def test_alpha_count(self, e4_result):
+        result, _ = e4_result
+        assert len(result.alpha_symbols) == 2
+
+    def test_shape(self, e4_result):
+        result, _ = e4_result
+        assert result.floating.shape == (5, 7)
+        assert result.dirichlet.shape == (4, 7)
+
+    def test_free_symbols(self, e4_result):
+        result, psi = e4_result
+        expected = {psi} | set(result.alpha_symbols)
+        assert result.floating.free_symbols <= expected, (
+            f"Unexpected symbols: {result.floating.free_symbols - expected}"
+        )
+
+    def test_weights_present(self, e4_result):
+        result, psi = e4_result
+        assert result.weights is not None
+        assert len(result.weights) == 5  # R=5
+        # At least one weight should depend on psi
+        assert any(
+            hasattr(w, 'free_symbols') and psi in w.free_symbols
+            for w in result.weights
+        )
+
+    def test_taylor_accuracy(self, e4_result):
+        """All rows satisfy q+1=4 Taylor equations at psi=1/2."""
+        result, psi = e4_result
+        m = result.floating
+        R, T = m.shape
+        # Use non-zero alpha values (alpha_1 maps to w_4 quadrature weight)
+        alpha_vals = dict(zip(result.alpha_symbols,
+                              [Rational(1, 10), Rational(1, 1)]))
+        psi_val = Rational(1, 2)
+        subs = {psi: psi_val, **alpha_vals}
+        for i in range(R):
+            deltas = build_cut_cell_deltas(i, T, psi_val)
+            row = [m[i, j].subs(subs) for j in range(T)]
+            for k in range(4):
+                moment = sum(row[j] * deltas[j] ** k for j in range(T))
+                expected = 1 if k == 1 else 0
+                assert cancel(moment - expected) == 0, (
+                    f"Row {i}, moment k={k}: got {cancel(moment)}"
+                )
+
+    def test_conservation_holds(self, e4_result):
+        """Weighted column sums using result.weights satisfy conservation."""
+        result, psi = e4_result
+        m = result.floating
+        R, T = m.shape
+        weights = result.weights
+        interior = derive_uniform_boundary_for_temo(E4_1, zeros={3, 4}).interior
+        for j_tf in range(1, T - 1):
+            g = j_tf - 1
+            col_sum = sum(weights[i] * m[i, j_tf] for i in range(R))
+            ic = _interior_contribution(g, R, E4_1.p, interior)
+            col_sum += ic
+            target = S.NegativeOne if (g == 0 and E4_1.nu == 1) else S.Zero
+            residual = cancel(col_sum - target)
+            assert residual == 0, (
+                f"Conservation violated at grid point {g}: residual={residual}"
+            )
+
+    def test_custom_alphas(self, e4_result):
+        _, psi = e4_result
+        syms = [Symbol("a"), Symbol("b")]
+        result = derive_cut_cell_scheme(E4_1, psi, alpha_symbols=syms)
+        assert result.alpha_symbols == syms
+        assert result.floating.free_symbols <= {psi} | set(syms)
+
+
 @pytest.mark.xfail(reason=(
     "E4_1 cut-cell conservation is structurally infeasible at R=5, T=7, nextra=0 "
     "WITHOUT zero constraints. Proven via Groebner basis in "

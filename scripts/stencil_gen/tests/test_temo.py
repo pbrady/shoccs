@@ -21,6 +21,7 @@ from stencil_gen.temo import (
     construct_cut_cell_stencil,
     construct_neumann_stencil,
     decompose_alpha_terms,
+    derive_cut_cell_scheme,
     derive_e2_uniform_boundary,
     derive_uniform_boundary_for_temo,
     derive_uniform_neumann,
@@ -1794,3 +1795,84 @@ class TestE2_2Integration:
                 assert abs(result_val - 2) < 1e-12, (
                     f"Poly exactness: row {i}, psi={psi_val}: got {result_val}"
                 )
+
+
+# ---------------------------------------------------------------------------
+# 26.5b — E2_1 regression: derive_cut_cell_scheme is unaffected by zeros path
+# ---------------------------------------------------------------------------
+
+
+class TestE2_1DeriveCutCellSchemeRegression:
+    """E2_1 has zeros=() — derive_cut_cell_scheme must match the manual pipeline."""
+
+    @pytest.fixture(scope="class")
+    def e2_1_scheme(self):
+        psi = Symbol("psi")
+        return derive_cut_cell_scheme(E2_1, psi), psi
+
+    @pytest.fixture(scope="class")
+    def e2_1_manual(self):
+        """Manual E2_1 pipeline (pre-Phase-26 reference)."""
+        psi = Symbol("psi")
+        ur = derive_e2_uniform_boundary(nu=1)
+        stencil = construct_cut_cell_stencil(
+            ur.B_u, ur.interior, p=1, q=1, nu=1, nextra=1, psi=psi,
+        )
+        dims = compute_dimensions(1, 1, 0, 1, 1)
+        manual = assemble_cut_cell_result(
+            stencil.matrix, None, None, dims, ur.alpha_symbols,
+        )
+        return manual, psi
+
+    def test_shape(self, e2_1_scheme):
+        result, _ = e2_1_scheme
+        assert result.floating.shape == (4, 5)
+        assert result.dirichlet.shape == (3, 5)
+
+    def test_alpha_count(self, e2_1_scheme):
+        result, _ = e2_1_scheme
+        assert len(result.alpha_symbols) == 4
+
+    def test_dims(self, e2_1_scheme):
+        result, _ = e2_1_scheme
+        assert result.dims == Dimensions(r=3, t=4, R=4, T=5, X=0)
+
+    def test_floating_matches_manual(self, e2_1_scheme, e2_1_manual):
+        auto, _ = e2_1_scheme
+        manual, _ = e2_1_manual
+        R, T = auto.floating.shape
+        for i in range(R):
+            for j in range(T):
+                assert cancel(auto.floating[i, j] - manual.floating[i, j]) == 0, (
+                    f"E2_1 floating mismatch at [{i},{j}]"
+                )
+
+    def test_taylor_accuracy(self, e2_1_scheme):
+        """All rows satisfy q+1=2 Taylor equations at psi=0.3, 0.5, 0.7."""
+        result, psi = e2_1_scheme
+        m = result.floating
+        alpha_vals = {s: 0 for s in result.alpha_symbols}
+        for psi_val in [Rational(3, 10), Rational(1, 2), Rational(7, 10)]:
+            subs = {psi: psi_val, **alpha_vals}
+            for i in range(4):
+                deltas = build_cut_cell_deltas(i, 5, psi_val)
+                row = [float(m[i, j].subs(subs)) for j in range(5)]
+                # k=0: sum = 0
+                assert abs(sum(row)) < 1e-14, f"k=0 row {i} psi={psi_val}"
+                # k=1: weighted sum = 1
+                s1 = sum(row[j] * float(deltas[j]) for j in range(5))
+                assert abs(s1 - 1) < 1e-14, f"k=1 row {i} psi={psi_val}"
+
+    def test_psi_limits(self, e2_1_scheme):
+        """Stencil is finite at psi=0 and psi=1."""
+        result, psi = e2_1_scheme
+        m = result.floating
+        alpha_vals = {s: 0 for s in result.alpha_symbols}
+        for psi_val in [0, 1]:
+            subs = {psi: psi_val, **alpha_vals}
+            for i in range(4):
+                for j in range(5):
+                    val = float(m[i, j].subs(subs))
+                    assert abs(val) < 1e6, (
+                        f"Divergent entry [{i},{j}] at psi={psi_val}: {val}"
+                    )
