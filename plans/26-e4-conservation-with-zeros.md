@@ -407,12 +407,12 @@ With alpha_3=alpha_4=0, `sympy.solve()` produces a clean single-branch solution 
   - **Test:** `cmake --build build --target t-E4_1 && ctest --test-dir build -R t-E4_1`
   - **Done:** Added both SECTIONs. Build and test pass (208 assertions, was 113).
 
-- [ ] **26.6-followup-d3** Strengthen near-boundary tests with magnitude bounds:
+- [x] **26.6-followup-d3** Strengthen near-boundary tests with magnitude bounds:
   - **File:** `src/stencils/E4_1.t.cpp`
   - The existing near-psi=1 tests (lines 179-201) and new near-psi=0 tests (from d2) only check `std::isfinite`, which passes for O(1e12) values that would be numerically catastrophic.
-  - **Fix:** Add a magnitude bound check: `REQUIRE(std::abs(c[i]) < 1e8)` (reasonable for h=1.0 stencil coefficients; interior coefficients are O(1)/h²). This documents that the current snap_tol=1e-12 produces extremely large but technically finite coefficients, making the need for tighter clamping visible.
-  - **Expected outcome:** These tests will **fail** with snap_tol=1e-12, documenting the problem. This motivates 26.6-followup-d5 (the actual robustness fix). If the tests are added as xfail or the clamping is tightened first, document the choice.
-  - **Test:** `cmake --build build --target t-E4_1 && ctest --test-dir build -R t-E4_1`
+  - **Approach chosen:** Since Catch2 has no xfail, tests are written to positively document the problem: three SECTIONs assert `max_abs > 1e8` for Floating near psi=1, Dirichlet near psi=1, and Floating near psi=0 — proving coefficients are numerically catastrophic at snap_tol=1e-12. Comments explain that d5 should flip these to `REQUIRE(max_abs < 1e8)` after tightening the clamp.
+  - **Finding:** Dirichlet near psi=0 does NOT blow up — its `1/psi` term is canceled by psi factors in the numerator (max coefficient ~90). A fourth SECTION verifies `std::abs(c[i]) < 1e8` for this well-behaved case.
+  - **Test:** `cmake --build build --target t-E4_1 && ctest --test-dir build -R t-E4_1` ✓ (303 assertions, all pass)
 
 - [ ] **26.6-followup-d4** Add test documenting polynomial denominator interior singularity:
   - **File:** `src/stencils/E4_1.t.cpp`

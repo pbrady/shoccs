@@ -224,6 +224,70 @@ TEST_CASE("E4_1")
         }
     }
 
+    SECTION("Floating near psi=1: magnitude exceeds safe bound")
+    {
+        // Documents that snap_tol=1e-12 produces coefficients of O(1/snap_tol),
+        // far exceeding the O(1)/h^2 expected for a second-derivative stencil.
+        // When 26.6-followup-d5 tightens psi clamping, flip this to:
+        //   REQUIRE(max_abs < 1e8);
+        auto [p, r, t, x] = st.query(bcs::Floating);
+        T c(r * t);
+        T ex{};
+
+        st.nbs(1.0, bcs::Floating, 1.0 - 1e-12, false, c, ex);
+        real max_abs = 0.0;
+        for (std::size_t i = 0; i < c.size(); ++i) {
+            max_abs = std::max(max_abs, std::abs(c[i]));
+        }
+        REQUIRE(max_abs > 1e8);
+    }
+
+    SECTION("Dirichlet near psi=1: magnitude exceeds safe bound")
+    {
+        // See Floating counterpart above for context.
+        auto [p, r, t, x] = st.query(bcs::Dirichlet);
+        T c(r * t);
+        T ex{};
+
+        st.nbs(1.0, bcs::Dirichlet, 1.0 - 1e-12, false, c, ex);
+        real max_abs = 0.0;
+        for (std::size_t i = 0; i < c.size(); ++i) {
+            max_abs = std::max(max_abs, std::abs(c[i]));
+        }
+        REQUIRE(max_abs > 1e8);
+    }
+
+    SECTION("Floating near psi=0: magnitude exceeds safe bound")
+    {
+        // Documents that snap_tol=1e-12 produces coefficients of O(1/snap_tol).
+        // When 26.6-followup-d5 tightens psi clamping, flip this to:
+        //   REQUIRE(max_abs < 1e8);
+        auto [p, r, t, x] = st.query(bcs::Floating);
+        T c(r * t);
+        T ex{};
+
+        st.nbs(1.0, bcs::Floating, 1e-12, false, c, ex);
+        real max_abs = 0.0;
+        for (std::size_t i = 0; i < c.size(); ++i) {
+            max_abs = std::max(max_abs, std::abs(c[i]));
+        }
+        REQUIRE(max_abs > 1e8);
+    }
+
+    SECTION("Dirichlet near psi=0: magnitude within safe bound")
+    {
+        // Unlike Floating, Dirichlet's 1/psi term is canceled by psi factors
+        // in the numerator, so coefficients remain O(1) near psi=0.
+        auto [p, r, t, x] = st.query(bcs::Dirichlet);
+        T c(r * t);
+        T ex{};
+
+        st.nbs(1.0, bcs::Dirichlet, 1e-12, false, c, ex);
+        for (std::size_t i = 0; i < c.size(); ++i) {
+            REQUIRE(std::abs(c[i]) < 1e8);
+        }
+    }
+
     SECTION("alpha[1]=0 throws")
     {
         std::array<real, 1> short_alpha{0.1};
