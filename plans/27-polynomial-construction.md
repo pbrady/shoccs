@@ -76,9 +76,9 @@ in weight × row-entry products — see "Bilinearity Constraint" below), we:
 1. Use the existing TEMO pipeline (`construct_cut_cell_stencil`) for ALL rows.
    The boundary rows should be polynomial after `cancel()` (verified by 27.1a).
 2. Build conservation equations from the TEMO output (existing code).
-3. Solve conservation using a **fraction-clearing + sequential elimination**
-   approach (new `solve_conservation_fraction_free`) that avoids ψ(ψ-1)
-   denominators.
+3. Solve conservation using a **fraction-clearing** approach (new
+   `solve_conservation_fraction_free`) that converts rational equations
+   to polynomial form before solving, avoiding ψ(ψ-1) denominators.
 4. Apply the conservation solution via `xreplace` (existing code).
 
 The result should match the paper's structure: polynomial boundary rows,
@@ -101,13 +101,25 @@ on [0,1].
 
 The conservation equations involve products `w_k * B_l[k, j_tf]` where `B_l[k, j_tf]`
 is linear in alpha symbols. When both `w_k` AND `alpha_m` are solve targets, these
-terms are bilinear (e.g., `w_1 * alpha_1 * f(ψ)`). This rules out treating the
-combined system as a simple linear system. The existing test
-`test_e4_1_conservation_constant_weights_infeasible_r5` (line 1481 of
-`test_e4_cut_cell.py`) already uses the correct technique: theta-linearization
-+ fraction clearing + ψ-coefficient extraction. The conservation solve in 27.3a
-must handle bilinearity via sequential elimination (solve alphas first, then
-weights) rather than a single simultaneous solve.
+terms are bilinear (e.g., `w_1 * alpha_1 * f(ψ)`). For E4_1 with zeros={3,4},
+the bilinear unknown×unknown product is `w_1 * alpha_1` (row 1's stencil entries
+depend on alpha_1, and w_1 weights that row). This rules out treating the combined
+system as a simple linear system.
+
+The primary approach in 27.3a handles bilinearity by fraction-clearing the
+equations (converting from rational to polynomial form) and then letting SymPy's
+`solve` use Gröbner basis methods on the 5-equation, 5-unknown polynomial system.
+This is feasible because the system is small. If this proves too slow, Fallback A
+in 27.3a uses sequential elimination (solve alphas first as a linear sub-problem,
+then solve the resulting nonlinear-in-w system). Note: the sequential approach does
+NOT linearize the weight solve — after alpha substitution and fraction-clearing,
+the weight equations are polynomial of degree ≤ 3 in w (not linear), because the
+alpha solutions are rational in w.
+
+The existing test `test_e4_1_conservation_constant_weights_infeasible_r5` (line
+1481 of `test_e4_cut_cell.py`) demonstrates a related technique
+(theta-linearization + fraction clearing + ψ-coefficient extraction) for a
+different purpose (proving infeasibility of constant weights).
 
 ## Items
 
@@ -167,7 +179,7 @@ weights) rather than a single simultaneous solve.
   - **Conditional:** Only needed if 27.1c determines polynomial ansatz is required.
     If boundary rows from QQ(ψ) solve already simplify to polynomials, skip this.
   - File: `scripts/stencil_gen/stencil_gen/temo.py` (add after `solve_temo_row`
-    at ~line 1350)
+    at ~line 1349, before `construct_cut_cell_stencil` at line 1353)
   - Signature: `solve_temo_row_polynomial(i, V, rhs, prescribed, psi, alpha_syms) -> RowSolveResult`
   - **Algorithm (polynomial ansatz approach):**
     1. Determine the maximum ψ-degree `d_max` for the solved entries. For E4_1:
@@ -260,21 +272,21 @@ weights) rather than a single simultaneous solve.
 
 - [ ] **27.3a** Implement `solve_conservation_fraction_free` function
   - File: `scripts/stencil_gen/stencil_gen/temo.py` (new function, add after
-    `solve_cut_cell_conservation` at ~line 1545)
+    `solve_cut_cell_conservation` at ~line 1507)
   - Signature: `solve_conservation_fraction_free(equations: list[Expr], solve_for: list[Symbol], psi: Symbol) -> dict[Symbol, Expr]`
   - **Root cause of current problem:** The current `solve_cut_cell_conservation`
-    passes rational-in-ψ equations directly to SymPy's `solve`, which can
-    introduce ψ(ψ-1) factors in solution denominators through its internal
-    elimination steps. Even though the conservation equations are consistent
-    identities in ψ, SymPy's generic solver may choose an elimination order
-    that creates spurious poles.
-  - **Fix:** Clear ψ-dependent denominators before solving, then use
-    sequential elimination (alphas first, weights second) to sidestep
-    bilinearity (see "Bilinearity Constraint" note in the dependency graph
-    section).
-  - **Algorithm (3 stages):**
+    (line 1507) passes rational-in-ψ equations directly to SymPy's `solve`,
+    which can introduce ψ(ψ-1) factors in solution denominators through its
+    internal elimination steps. Even though the conservation equations are
+    consistent identities in ψ, SymPy's generic solver may choose an
+    elimination order that creates spurious poles.
+  - **Fix:** Clear ψ-dependent denominators before solving. The fraction-
+    clearing is the key improvement — it converts rational-in-ψ equations
+    to polynomial-in-ψ equations, preventing SymPy from introducing bad
+    denominators during elimination.
+  - **Algorithm (primary approach — fraction-clear + full solve):**
 
-    **Stage 0 — Clear fractions:**
+    **Step 1 — Clear fractions:**
     ```python
     cleared = []
     for eq in equations:
@@ -285,91 +297,93 @@ weights) rather than a single simultaneous solve.
     symbols + free params). Denominators are discarded because they are
     nonvanishing on [0,1] (products of Vandermonde factors like (ψ+1)(ψ+2)).
 
-    **Stage 1 — Solve for alpha unknowns** (treating weights as parameters):
+    **Step 2 — Solve the full system:**
     ```python
-    # Partition solve_for into alphas and weights
-    alpha_unknowns = [s for s in solve_for if s.name.startswith('alpha')]
-    weight_unknowns = [s for s in solve_for if s.name.startswith('w')]
-    n_alpha = len(alpha_unknowns)  # 2 for E4_1 with zeros
-
-    # Stencil entries are LINEAR in alphas, so this is a linear solve
-    # even though weight symbols appear in the coefficients.
-    # Pick the first n_alpha cleared equations:
-    alpha_sol = solve(cleared[:n_alpha], alpha_unknowns, dict=True)
-    assert len(alpha_sol) == 1
-    alpha_sol = alpha_sol[0]
+    sol = solve(cleared, solve_for, dict=True)
+    assert len(sol) == 1
+    sol = sol[0]
     ```
-    Result: `alpha_k = f_k(ψ, w_1..w_4, alpha_2)`. The denominator is a
-    polynomial in ψ (from the n_alpha × n_alpha coefficient determinant)
-    formed from boundary row entries, which are polynomial in ψ. This
-    determinant should NOT contain ψ(ψ-1) factors because it comes from
-    Vandermonde-type boundary structure.
+    SymPy's `solve` on polynomial inputs uses Gröbner basis methods, which
+    tend to produce solutions with minimal denominators. Since the input
+    polynomials have no ψ-dependent denominators to begin with, the solver
+    cannot introduce ψ(ψ-1) factors through cross-multiplication.
 
-    **Stage 2 — Substitute alphas and solve for weights:**
+    **Step 3 — Verify and return:**
     ```python
-    # Substitute alpha solutions into remaining equations
-    remaining = [expand(eq.subs(alpha_sol)) for eq in cleared[n_alpha:]]
-    # Clear any new fractions introduced by substitution
-    remaining_cleared = []
-    for eq in remaining:
-        num, den = fraction(cancel(eq))
-        remaining_cleared.append(expand(num))
-
-    # Now linear in weight_unknowns (bilinear terms eliminated)
-    weight_sol = solve(remaining_cleared, weight_unknowns, dict=True)
-    assert len(weight_sol) == 1
-    weight_sol = weight_sol[0]
-    ```
-
-    **Stage 3 — Combine and simplify:**
-    ```python
-    full_sol = {}
-    for s, expr in alpha_sol.items():
-        full_sol[s] = cancel(expr.subs(weight_sol))
-    full_sol.update(weight_sol)
-
     # Verify: all original equations evaluate to 0
     for i, eq in enumerate(equations):
-        residual = cancel(eq.subs(full_sol))
+        residual = cancel(eq.subs(sol))
         assert residual == 0, f"Equation {i}: residual={residual}"
 
-    return full_sol
+    return sol
     ```
 
+  - **Bilinearity note:** The conservation equations contain bilinear
+    terms `w_k * alpha_j` (see "Bilinearity Constraint" section above).
+    For E4_1 with zeros={3,4}, the bilinear unknown×unknown products are
+    `w_1 * alpha_1` (from row 1) — both are in `solve_for`. SymPy's
+    `solve` can handle small bilinear polynomial systems (5 equations in
+    5 unknowns) directly. The primary approach lets SymPy manage the
+    bilinearity internally after fraction-clearing removes the rational
+    structure that caused the original problem.
+
   - **Dimension check for E4_1 with zeros={3,4}:**
-    - 5 conservation equations
+    - 5 conservation equations (one per grid column 1..5 in the T-frame)
     - solve_for = [alpha_0, alpha_1, w_1, w_2, w_3] (5 unknowns)
-    - Stage 1: 2 equations → alpha_0, alpha_1 as functions of (ψ, w_1..w_4, alpha_2)
-    - Stage 2: 3 remaining equations → w_1, w_2, w_3 as functions of (ψ, w_4, alpha_2)
-    - Free params: alpha_2 (renamed to alpha_0), w_4 (renamed to alpha_1) → 2 free
+    - Free params: alpha_2, w_4 (not in solve_for)
+    - After solve: alpha_2 renamed to alpha_0, w_4 renamed to alpha_1 → 2 free
+
   - **Why this avoids ψ(ψ-1) denominators:**
-    - Clearing fractions (Stage 0) removes all existing ψ-dependent
+    - Clearing fractions (Step 1) removes all existing ψ-dependent
       denominators from the equations before solving.
-    - Stage 1 inverts an n_alpha × n_alpha system whose coefficient matrix
-      is formed from boundary row ψ-polynomials. The determinant is a
-      product of Vandermonde-family factors (e.g., (ψ+1)(ψ+2)(ψ+3)) —
-      nonvanishing on [0,1].
-    - Stage 2 inverts a weight coefficient matrix that, after alpha
-      substitution, involves only benign ψ-polynomials.
-    - The sequential elimination prevents SymPy from introducing cross-term
-      factors through its generic pivot selection.
+    - The cleared equations are polynomials in (ψ, alpha, w), so the
+      solver operates entirely in polynomial arithmetic.
+    - Solution denominators can only arise from the Gröbner basis
+      elimination, which produces factors of the polynomial coefficients
+      — these are Vandermonde-family factors (nonvanishing on [0,1]),
+      not ψ(ψ-1).
+
+  - **Fallback A — Sequential elimination:** If the primary approach
+    produces bad denominators or is too slow (timeout), split the solve
+    into two stages:
+    ```python
+    alpha_unknowns = [s for s in solve_for if s.name.startswith('alpha')]
+    weight_unknowns = [s for s in solve_for if s.name.startswith('w')]
+    # Stage 1: linear in alpha (treating w as parameters)
+    alpha_sol = solve(cleared, alpha_unknowns, dict=True)[0]
+    # Stage 2: substitute alphas, clear new fractions, solve for w
+    remaining = [expand(eq.subs(alpha_sol)) for eq in cleared]
+    remaining_cleared = [expand(fraction(cancel(eq))[0]) for eq in remaining]
+    weight_sol = solve(remaining_cleared, weight_unknowns, dict=True)[0]
+    # Combine
+    full_sol = {s: cancel(e.subs(weight_sol)) for s, e in alpha_sol.items()}
+    full_sol.update(weight_sol)
+    ```
+    **Important caveat:** Stage 2 is NOT linear in weights. The alpha
+    solutions from Stage 1 are rational in w (from Cramer's rule on the
+    bilinear system), so after substitution and fraction-clearing, the
+    remaining equations are polynomial of degree ≤ 3 in w. SymPy's
+    `solve` handles this via Gröbner bases, but it may be slower than
+    the primary approach. Use all 5 cleared equations (not just remaining)
+    to give `solve` maximum information for elimination.
+
+  - **Fallback B — ψ-coefficient extraction:** If both primary and
+    Fallback A still produce bad denominators, expand each cleared equation
+    as a ψ-polynomial, collect coefficients by ψ powers, and solve the
+    resulting ψ-free algebraic system. This uses the technique from the
+    existing `test_e4_1_conservation_constant_weights_infeasible_r5` test
+    (lines 1541-1551 of `test_e4_cut_cell.py`). However, this forces the
+    solution to be ψ-independent, which may not match the expected
+    ψ-dependent weights. Use only if the ψ-coefficient system is consistent.
+
   - **Reuse from existing code:** The existing `build_cut_cell_conservation_system`
-    is reused unchanged. The existing `solve_cut_cell_conservation` is NOT
-    reused (it is the function being replaced). The existing test at line
-    1481 (`test_e4_1_conservation_constant_weights_infeasible_r5`)
-    demonstrates the fraction-clearing technique that this function
-    productionizes.
-  - **Size estimate:** ~40-60 lines of new code.
-  - **Fallback:** If sequential elimination still produces ψ-dependent
-    denominators (detectable by checking `fraction(cancel(sol[s]))[1]` for
-    ψ factors), a more aggressive approach is available: expand each cleared
-    equation as a ψ-polynomial, collect coefficients by ψ powers, and solve
-    the resulting ψ-free algebraic system. This uses the same technique as
-    the existing `test_e4_1_conservation_constant_weights_infeasible_r5`
-    test (lines 1541-1551 of `test_e4_cut_cell.py`). However, this forces
-    the solution to be ψ-independent, which may not match the expected
-    ψ-dependent weights. Use this fallback only if Stage 1/2 produce bad
-    denominators AND the ψ-coefficient system is consistent.
+    (line 1431) is reused unchanged. The existing `solve_cut_cell_conservation`
+    (line 1507) is NOT reused (it is the function being replaced). The
+    existing test at line 1481
+    (`test_e4_1_conservation_constant_weights_infeasible_r5`) demonstrates
+    the fraction-clearing technique that this function productionizes.
+  - **Size estimate:** ~20-30 lines for primary approach, ~40-60 if
+    fallback A is also implemented inline.
   - Must come after 27.1c decision. If 27.1c says "boundary rows already
     polynomial", the approach works directly (TEMO entries have benign
     denominators). If 27.1c says "polynomial ansatz needed", must come
@@ -399,9 +413,10 @@ weights) rather than a single simultaneous solve.
        column sums satisfy conservation identically in ψ.
     4. `test_remaining_free_params`: The solution leaves exactly alpha_2 and
        w_4 as free parameters (2 total for E4_1 with zeros={3,4}).
-    5. `test_sequential_elimination_consistent`: Verify that the Stage 1
-       alpha solution, when substituted into ALL 5 conservation equations
-       (not just the 3 used in Stage 2), is consistent — no residual.
+    5. `test_solve_for_completeness`: Verify that the solution dict contains
+       all 5 solve_for symbols (alpha_0, alpha_1, w_1, w_2, w_3) and that
+       substituting the solution into ALL 5 conservation equations gives
+       zero residual (not just a subset).
   - Test: `cd scripts/stencil_gen && uv run pytest tests/test_e4_cut_cell.py -v -k "TestFractionFreeConservation" --timeout=300`
   - Must come after 27.3a.
 
@@ -414,10 +429,10 @@ weights) rather than a single simultaneous solve.
 
     **Change 1:** Add a cancel step after TEMO to simplify stencil entries
     (boundary rows → polynomial, near-interior → simpler rational). Insert
-    after line 2277 (`floating = floating_result.matrix`):
+    after line 2278 (`R, T = floating.shape`), before the conservation
+    build at line 2280. Reuse the existing `R, T` variables:
     ```python
     # Cancel each entry to clear Vandermonde denominators
-    R, T = floating.shape
     for i in range(R):
         for j in range(T):
             floating[i, j] = cancel(floating[i, j])
@@ -439,11 +454,15 @@ weights) rather than a single simultaneous solve.
 
   - The non-zeros paths (E2_1, E2_2, generic conservative at lines 2314-2433)
     remain completely unchanged.
-  - **Imports:** Add `solve_conservation_fraction_free` to the test file's
-    import block (around line 37 of `test_e4_cut_cell.py`).
+  - **Imports:** No new import needed in `temo.py` (the new function is
+    defined in the same file as `derive_cut_cell_scheme`). The test file
+    `test_e4_cut_cell.py` only needs the import if 27.3b tests call the
+    function directly — add it to the import block (around line 37) in
+    that case.
   - **Size estimate:** ~10-15 lines changed in `derive_cut_cell_scheme`
     (the cancel loop + one function call replacement). The bulk of the work
-    is the ~40-60 line new function from 27.3a.
+    is the ~20-60 line new function from 27.3a (depending on whether
+    fallback A is included inline).
   - Must come after 27.3b (conservation solve validated before wiring into
     full construction).
 
