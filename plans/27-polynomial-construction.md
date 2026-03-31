@@ -93,8 +93,8 @@ on [0,1].
 27.1a → 27.1b → 27.1c (decision gate)
                   ├── boundary rows polynomial after cancel → skip 27.2 ─┐
                   └── need polynomial ansatz → 27.2a → 27.2b ────────────┤
-                                                                         ├→ 27.3a → 27.3b → 27.4a → 27.4b ─┬→ 27.6a → 27.5a
-                                                                         │                                    └→ 27.7a
+                                                                         ├→ 27.3a → 27.3b → 27.4a ─┬→ 27.4b → 27.6a → 27.5a
+                                                                         │                           └→ 27.7a
 ```
 
 ### Bilinearity Constraint (cross-cutting)
