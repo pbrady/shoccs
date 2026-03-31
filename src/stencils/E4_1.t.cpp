@@ -288,6 +288,64 @@ TEST_CASE("E4_1")
         }
     }
 
+    SECTION("Interior polynomial denominator singularity")
+    {
+        // The denominator D(psi) = 288*alpha[1] + 648*psi + 12*psi^3 + 90*psi^2 - 197
+        // has a real zero inside (0,1) for alpha[1] < 197/288 ≈ 0.684.
+        // With the test default alpha[1]=-0.05, the zero is near psi ≈ 0.312.
+        // This singularity cannot be fixed by psi clamping — it requires
+        // constraining alpha[1] or adding a runtime denominator check (see d5).
+        constexpr real alpha1 = -0.05;
+        auto D = [](real psi) {
+            return 288 * alpha1 + 648 * psi + 12 * psi * psi * psi +
+                   90 * psi * psi - 197;
+        };
+
+        // Verify the denominator changes sign — proving a root exists in (0.3, 0.32)
+        REQUIRE(D(0.3) < 0.0);
+        REQUIRE(D(0.32) > 0.0);
+
+        // Bisect to find the root within 1e-8
+        real lo = 0.3, hi = 0.32;
+        while (hi - lo > 1e-8) {
+            real mid = (lo + hi) / 2;
+            if (D(mid) < 0)
+                lo = mid;
+            else
+                hi = mid;
+        }
+        real psi_pole = (lo + hi) / 2;
+
+        // Evaluate Floating stencil just past the pole — coefficients blow up
+        {
+            auto [p, r, t, x] = st.query(bcs::Floating);
+            T c(r * t);
+            T ex{};
+
+            st.nbs(1.0, bcs::Floating, psi_pole + 1e-6, false, c, ex);
+            real max_abs = 0.0;
+            for (std::size_t i = 0; i < c.size(); ++i) {
+                max_abs = std::max(max_abs, std::abs(c[i]));
+            }
+            // Near the interior pole, coefficients are O(1/epsilon)
+            REQUIRE(max_abs > 1e4);
+        }
+
+        // Evaluate Dirichlet stencil just past the pole — same denominator
+        {
+            auto [p, r, t, x] = st.query(bcs::Dirichlet);
+            T c(r * t);
+            T ex{};
+
+            st.nbs(1.0, bcs::Dirichlet, psi_pole + 1e-6, false, c, ex);
+            real max_abs = 0.0;
+            for (std::size_t i = 0; i < c.size(); ++i) {
+                max_abs = std::max(max_abs, std::abs(c[i]));
+            }
+            REQUIRE(max_abs > 1e4);
+        }
+    }
+
     SECTION("alpha[1]=0 throws")
     {
         std::array<real, 1> short_alpha{0.1};

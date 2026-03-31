@@ -414,12 +414,13 @@ With alpha_3=alpha_4=0, `sympy.solve()` produces a clean single-branch solution 
   - **Finding:** Dirichlet near psi=0 does NOT blow up — its `1/psi` term is canceled by psi factors in the numerator (max coefficient ~90). A fourth SECTION verifies `std::abs(c[i]) < 1e8` for this well-behaved case.
   - **Test:** `cmake --build build --target t-E4_1 && ctest --test-dir build -R t-E4_1` ✓ (303 assertions, all pass)
 
-- [ ] **26.6-followup-d4** Add test documenting polynomial denominator interior singularity:
+- [x] **26.6-followup-d4** Add test documenting polynomial denominator interior singularity:
   - **File:** `src/stencils/E4_1.t.cpp`
   - With the test default alpha[1]=-0.05, D(psi)=0 at psi≈0.312 — well inside (0,1). Evaluating the stencil there produces Inf/NaN.
   - Add a SECTION that constructs an E4_1 with alpha={0.1, -0.05}, evaluates at psi=0.31 (near the pole), and documents the behavior (either the output is guarded, or the coefficients are non-finite/extremely large).
   - This test documents the interior singularity so future robustness work (d5) has a clear regression target.
   - **Test:** `cmake --build build --target t-E4_1 && ctest --test-dir build -R t-E4_1`
+  - **Done:** Added SECTION "Interior polynomial denominator singularity" that verifies D(psi) changes sign in (0.3, 0.32), bisects to find the root within 1e-8, then evaluates both Floating and Dirichlet stencils at psi_pole+1e-6, confirming coefficients exceed 1e4. 323 assertions, all pass.
 
 - [ ] **26.6-followup-d5** Implement numerical robustness fix (design decision required):
   - **Fix options (choose one or combine):**
