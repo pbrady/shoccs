@@ -118,6 +118,10 @@ With alpha_3=alpha_4=0, `sympy.solve()` produces a clean single-branch solution 
     - `test_zeros_conserve_mutual_exclusion`: `derive_uniform_boundary_for_temo(E4_1, zeros={3,4}, conserve=True)` raises ValueError
   - **Test:** `cd scripts/stencil_gen && uv run pytest tests/test_e4_cut_cell.py -v -k "WithZeros" --timeout=60`
 
+### 26.1-followup — Fix `--timeout` in test commands
+
+- [ ] **26.1-followup** All test commands in this plan use `--timeout=N`, which requires `pytest-timeout`. That package is not in `scripts/stencil_gen/pyproject.toml` dependencies and is not installed. Every test command will fail with `unrecognized arguments: --timeout=...`. Fix: add `"pytest-timeout>=2.0"` to the `dependencies` list in `scripts/stencil_gen/pyproject.toml`, then run `uv sync` to install it.
+
 ### 26.2 — Build zero-constrained cut-cell stencil
 
 - [ ] **26.2a** Build and test E4_1 cut-cell with zero-constrained B_u:
