@@ -22,6 +22,7 @@ from stencil_gen.temo import (
     E4_1,
     SchemeParams,
     UniformResult,
+    _build_uniform_vandermonde,
     assemble_cut_cell_result,
     build_cut_cell_conservation_system,
     build_cut_cell_deltas,
@@ -190,6 +191,55 @@ class TestE4UniformBoundary:
         """Wrong number of alpha symbols raises ValueError."""
         with pytest.raises(ValueError, match="alpha symbols"):
             derive_uniform_boundary_for_temo(E4_1, alpha_symbols=[Symbol("a")])
+
+
+class TestE4UniformBoundaryWithZeros:
+    """Tests for derive_uniform_boundary_for_temo with E4_1 and zeros={3,4} (26.1b)."""
+
+    @pytest.fixture(scope="class")
+    def e4_zeroed(self):
+        return derive_uniform_boundary_for_temo(E4_1, zeros={3, 4})
+
+    def test_shape(self, e4_zeroed):
+        """B_u shape is (4, 6)."""
+        assert e4_zeroed.B_u.shape == (4, 6)
+
+    def test_three_alpha_symbols(self, e4_zeroed):
+        """3 free symbols remain after zeroing alpha_3 and alpha_4."""
+        assert len(e4_zeroed.alpha_symbols) == 3
+        for k, sym in enumerate(e4_zeroed.alpha_symbols):
+            assert sym.name == f"alpha_{k}"
+
+    def test_last_row_zeroed(self, e4_zeroed):
+        """B_u[3, 4] == 0 and B_u[3, 5] == 0 after zero constraints."""
+        assert e4_zeroed.B_u[3, 4] == 0
+        assert e4_zeroed.B_u[3, 5] == 0
+
+    def test_early_row_col5_still_zero(self, e4_zeroed):
+        """B_u[0, 5] == B_u[1, 5] == B_u[2, 5] == 0 (unchanged by zeros)."""
+        assert e4_zeroed.B_u[0, 5] == 0
+        assert e4_zeroed.B_u[1, 5] == 0
+        assert e4_zeroed.B_u[2, 5] == 0
+
+    def test_taylor_accuracy(self, e4_zeroed):
+        """All 4 rows satisfy max(q+1, nu+1)=4 Taylor equations."""
+        B_u = e4_zeroed.B_u
+        t = B_u.cols
+        n_eqs = max(3 + 1, 1 + 1)  # q=3, nu=1 → 4
+
+        for i in range(B_u.rows):
+            V, rhs = _build_uniform_vandermonde(i, t, n_eqs, nu=1)
+            row = B_u.row(i)
+            residual = V * row.T - rhs
+            for k in range(n_eqs):
+                assert cancel(residual[k]) == 0, (
+                    f"Row {i}, eq {k}: residual={cancel(residual[k])}"
+                )
+
+    def test_zeros_conserve_mutual_exclusion(self):
+        """zeros and conserve=True raises ValueError."""
+        with pytest.raises(ValueError, match="mutually exclusive"):
+            derive_uniform_boundary_for_temo(E4_1, zeros={3, 4}, conserve=True)
 
 
 class TestE4TEMOConstruction:

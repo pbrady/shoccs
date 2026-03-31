@@ -112,6 +112,7 @@ class SchemeParams:
     s: int
     nextra: int
     nu: int
+    zeros: tuple[int, ...] = ()
 
     def dims(self) -> Dimensions:
         """Compute stencil dimensions for this scheme."""
@@ -121,7 +122,7 @@ class SchemeParams:
 # Pre-defined schemes from Table 1
 E2_1 = SchemeParams(p=1, q=1, s=0, nextra=1, nu=1)
 E2_2 = SchemeParams(p=1, q=1, s=0, nextra=0, nu=2)
-E4_1 = SchemeParams(p=2, q=3, s=0, nextra=0, nu=1)
+E4_1 = SchemeParams(p=2, q=3, s=0, nextra=0, nu=1, zeros=(3, 4))
 E4_2 = SchemeParams(p=2, q=3, s=0, nextra=0, nu=2)
 
 
@@ -316,6 +317,7 @@ def derive_uniform_boundary_for_temo(
     scheme: SchemeParams,
     alpha_symbols: list[Symbol] | None = None,
     conserve: bool = False,
+    zeros: set[int] | None = None,
 ) -> UniformResult:
     """Derive the uniform boundary stencil for any scheme using boundary.py.
 
@@ -333,6 +335,9 @@ def derive_uniform_boundary_for_temo(
         If True, enforce SBP conservation on the uniform boundary.
         This eliminates one alpha per compatibility condition, yielding
         fewer free parameters and SBP-compatible quadrature weights.
+    zeros : set of int, optional
+        Indices into the alpha symbol list to set to zero post-hoc.
+        Mutually exclusive with ``conserve=True``.
 
     Returns
     -------
@@ -346,6 +351,12 @@ def derive_uniform_boundary_for_temo(
     r_eff = dims.r if nu == 1 else dims.r - 1
     n_eqs = max(q + 1, nu + 1)
     n_free_per_row = t - n_eqs
+
+    if zeros and conserve:
+        raise ValueError(
+            "zeros and conserve=True are mutually exclusive; "
+            "use cut-cell conservation instead"
+        )
 
     # --- Count total alpha symbols ---
     # Conservation compatibility conditions reduce the last-row free count.
@@ -434,6 +445,12 @@ def derive_uniform_boundary_for_temo(
         rows.append(row_coeffs)
 
     B_u = Matrix(rows)
+
+    # --- Zero constraints (substitute and reduce alpha list) ---
+    if zeros:
+        zero_subs = {alpha_symbols[k]: S.Zero for k in zeros}
+        B_u = B_u.subs(zero_subs)
+        alpha_symbols = [s for k, s in enumerate(alpha_symbols) if k not in zeros]
 
     # --- Conservation step (nextra > 0 only) ---
     if nextra > 0:

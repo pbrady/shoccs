@@ -65,7 +65,7 @@ With alpha_3=alpha_4=0, `sympy.solve()` produces a clean single-branch solution 
 
 ### 26.1 — Apply zero constraints in `derive_uniform_boundary_for_temo`
 
-- [ ] **26.1a** Add `zeros` field to `SchemeParams` and `zeros` parameter to `derive_uniform_boundary_for_temo`:
+- [x] **26.1a** Add `zeros` field to `SchemeParams` and `zeros` parameter to `derive_uniform_boundary_for_temo`:
   - **Files:** `scripts/stencil_gen/stencil_gen/temo.py`
   - **SchemeParams change (line 92):** Add `zeros: tuple[int, ...] = ()` field to the frozen dataclass. Update E4_1 definition (line 124) to:
     ```python
@@ -101,7 +101,7 @@ With alpha_3=alpha_4=0, `sympy.solve()` produces a clean single-branch solution 
   - **No other logic changes needed:** The nextra>0 and conserve branches are unaffected since E4_1 has nextra=0 and zeros+conserve is forbidden.
   - **Test:** `cd scripts/stencil_gen && uv run pytest tests/test_temo.py -v -k "E2" --timeout=60` (E2 unchanged)
 
-- [ ] **26.1b** Test E4_1 uniform boundary with zeros:
+- [x] **26.1b** Test E4_1 uniform boundary with zeros:
   - **File:** `scripts/stencil_gen/tests/test_e4_cut_cell.py`
   - Add new test class `TestE4UniformBoundaryWithZeros` with fixture:
     ```python
