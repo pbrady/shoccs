@@ -386,20 +386,47 @@ With alpha_3=alpha_4=0, `sympy.solve()` produces a clean single-branch solution 
     - The denominator `288*alpha[1] + 648*psi + 12*psi³ + 90*psi² - 197` must also be nonzero
   - **Done:** Added comprehensive comment block near the alpha declaration in `E4_1.cpp` documenting all three singularity constraints. Build and `ctest -R t-E4_1` pass (113 assertions).
 
-- [ ] **26.6-followup-d** Numerical robustness: tighten psi guard or add stencil-specific fallback:
+**26.6-followup-d** Numerical robustness: tighten psi guard or add stencil-specific fallback.
+
+  **Context (read before working on subitems):**
   - **Problem:** The 26.6-followup-a fix clamps psi to `[snap_tol, 1.0 - snap_tol]` where `snap_tol = 1e-12`. This prevents literal division by zero but allows coefficient magnitudes of O(1/snap_tol) ≈ O(1e12), which is numerically catastrophic for any time integrator. The plan text (26.4c, 26.6a) recommended clamping to `[0.01, 0.99]` or falling back to the uniform stencil for near-full cells.
-  - **Pole inventory in E4_1.cpp:** `1/(psi-1)` (Floating line 104, Dirichlet line 227), `1/psi` (Floating line 108), `1/alpha[1]` (Floating line 105, Dirichlet line 226), `1/(288*alpha[1] + 648*psi + 12*psi³ + 90*psi² - 197)` (Floating line 145 **and** Dirichlet line 230 — both methods, not just Dirichlet).
+  - **Pole inventory in E4_1.cpp:** `1/(psi-1)` (Floating line 104, Dirichlet line 228), `1/psi` (Floating line 108), `1/alpha[1]` (Floating line 105, Dirichlet line 226), `1/(288*alpha[1] + 648*psi + 12*psi³ + 90*psi² - 197)` (Floating line 145 **and** Dirichlet line 230 — both methods, not just Dirichlet).
   - **CRITICAL — Interior singularity from polynomial denominator:** The denominator `D(psi) = 288*alpha[1] + 648*psi + 12*psi³ + 90*psi² - 197` has a real zero **inside** (0,1) for all alpha[1] < 197/288 ≈ 0.684. Concrete examples: alpha[1]=-0.05 → zero at psi≈0.312; alpha[1]=0.1 → zero at psi≈0.251; alpha[1]=0.5 → zero at psi≈0.081. The test default alpha[1]=-0.05 places this singularity at psi≈0.312, well within the normal cut-cell range. **This pole cannot be fixed by psi clamping** — it requires constraining alpha[1] or adding a runtime check on the denominator magnitude.
-  - **Comment fix needed:** The singularity comment block in `E4_1.cpp` (lines 23-24) says "The Dirichlet denominator" but this expression appears in both `nbs_floating` and `nbs_dirichlet`. Update to say "The denominator" (no method qualifier).
+
+- [ ] **26.6-followup-d1** Fix singularity comment in E4_1.cpp:
+  - **File:** `src/stencils/E4_1.cpp`
+  - Lines 23-24 say "The Dirichlet denominator" but the expression `288*alpha[1] + 648*psi + 12*psi^3 + 90*psi^2 - 197` appears in **both** `nbs_floating` (line 145) and `nbs_dirichlet` (line 230).
+  - **Fix:** Change "The Dirichlet denominator" to "The denominator" (no method qualifier).
+  - **Test:** `cmake --build build --target t-E4_1 && ctest --test-dir build -R t-E4_1`
+
+- [ ] **26.6-followup-d2** Add near-psi=0 finiteness tests in E4_1.t.cpp:
+  - **File:** `src/stencils/E4_1.t.cpp`
+  - Both `nbs_floating` and `nbs_dirichlet` divide by `psi`, so near-psi=0 is a boundary pole symmetric with the existing near-psi=1 tests.
+  - Add two new SECTIONs: "Floating near psi=snap_tol produces finite values" and "Dirichlet near psi=snap_tol produces finite values". Use `psi = 1e-12` (the current snap_tol lower bound). Check `std::isfinite(c[i])` for all coefficients.
+  - **Test:** `cmake --build build --target t-E4_1 && ctest --test-dir build -R t-E4_1`
+
+- [ ] **26.6-followup-d3** Strengthen near-boundary tests with magnitude bounds:
+  - **File:** `src/stencils/E4_1.t.cpp`
+  - The existing near-psi=1 tests (lines 179-201) and new near-psi=0 tests (from d2) only check `std::isfinite`, which passes for O(1e12) values that would be numerically catastrophic.
+  - **Fix:** Add a magnitude bound check: `REQUIRE(std::abs(c[i]) < 1e8)` (reasonable for h=1.0 stencil coefficients; interior coefficients are O(1)/h²). This documents that the current snap_tol=1e-12 produces extremely large but technically finite coefficients, making the need for tighter clamping visible.
+  - **Expected outcome:** These tests will **fail** with snap_tol=1e-12, documenting the problem. This motivates 26.6-followup-d5 (the actual robustness fix). If the tests are added as xfail or the clamping is tightened first, document the choice.
+  - **Test:** `cmake --build build --target t-E4_1 && ctest --test-dir build -R t-E4_1`
+
+- [ ] **26.6-followup-d4** Add test documenting polynomial denominator interior singularity:
+  - **File:** `src/stencils/E4_1.t.cpp`
+  - With the test default alpha[1]=-0.05, D(psi)=0 at psi≈0.312 — well inside (0,1). Evaluating the stencil there produces Inf/NaN.
+  - Add a SECTION that constructs an E4_1 with alpha={0.1, -0.05}, evaluates at psi=0.31 (near the pole), and documents the behavior (either the output is guarded, or the coefficients are non-finite/extremely large).
+  - This test documents the interior singularity so future robustness work (d5) has a clear regression target.
+  - **Test:** `cmake --build build --target t-E4_1 && ctest --test-dir build -R t-E4_1`
+
+- [ ] **26.6-followup-d5** Implement numerical robustness fix (design decision required):
   - **Fix options (choose one or combine):**
-    1. Stencil-specific psi clamp: add a guard in `E4_1::nbs_floating`/`nbs_dirichlet` that clamps psi to `[eps, 1-eps]` with `eps` large enough for stability (e.g., `1e-4`). This avoids changing the geometry-level snap tolerance. **Note:** this only addresses the boundary poles at psi=0 and psi=1, not the interior polynomial singularity.
-    2. Uniform stencil fallback: when psi > 1 - eps (near-full cell), use the non-conservative uniform stencil instead (psi=1 means full cell where the uniform stencil is exact).
-    3. Coefficient magnitude analysis: determine the maximum acceptable psi range empirically by running the solver with decreasing psi and finding where CFL-limited time steps become impractical.
-    4. Alpha[1] lower bound: require alpha[1] ≥ 197/288 ≈ 0.684 to eliminate the interior singularity entirely (since `D(0) = 288*alpha[1] - 197 ≥ 0` and `D` is increasing on (0,1)). Update the constructor guard to enforce this. Alternatively, add a runtime check that `|D(psi)| > eps` before evaluating the stencil, with a fallback when it's too small.
-  - **Test improvements needed:**
-    - The existing near-psi=1 tests (lines 178-200 of E4_1.t.cpp) only check `std::isfinite`, which passes for O(1e12) values. Add a magnitude bound check (e.g., `std::abs(c[i]) < 1e6/h²`) to catch numerically unusable coefficients.
-    - Add symmetric near-psi=0 finiteness tests for both Floating and Dirichlet modes (both divide by psi).
-    - Add a test that evaluates the stencil near the polynomial denominator zero (e.g., alpha[1]=-0.05, psi=0.31) and verifies the output is either guarded or clearly fails, documenting the singularity behavior.
+    1. **Stencil-specific psi clamp:** Add a guard in `E4_1::nbs_floating`/`nbs_dirichlet` clamping psi to `[eps, 1-eps]` with `eps` large enough for stability (e.g., `1e-4`). Only addresses boundary poles, not the interior polynomial singularity.
+    2. **Uniform stencil fallback:** When psi > 1 - eps (near-full cell), use the non-conservative uniform stencil instead (psi=1 means full cell where the uniform stencil is exact).
+    3. **Coefficient magnitude analysis:** Determine the maximum acceptable psi range empirically by running the solver with decreasing psi and finding where CFL-limited time steps become impractical.
+    4. **Alpha[1] lower bound:** Require alpha[1] ≥ 197/288 ≈ 0.684 to eliminate the interior singularity entirely (since `D(0) = 288*alpha[1] - 197 ≥ 0` and `D` is increasing on (0,1)). Update constructor guard. Alternatively, add a runtime check that `|D(psi)| > eps` before evaluating.
+  - **Recommendation:** Option 4 (alpha[1] lower bound) is the cleanest — it eliminates the interior pole at construction time. Combine with option 1 (stencil-level boundary clamp with eps=1e-4) for the boundary poles. This avoids changing the geometry-level snap tolerance and provides defense in depth.
+  - After implementing, update tests from d2/d3/d4 to verify the fix (remove xfails, tighten bounds, etc.).
 
 ### 26.7 — Update memory and plans
 
