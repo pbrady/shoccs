@@ -1014,10 +1014,13 @@ class TestDeriveCutCellScheme:
 
 
 @pytest.mark.xfail(reason=(
-    "E4_1 cut-cell conservation is structurally infeasible at R=5, T=7, nextra=0. "
-    "Proven via Groebner basis in test_e4_1_psi_dependent_conservation_infeasible (23.3c-ii)."
+    "E4_1 cut-cell conservation is structurally infeasible at R=5, T=7, nextra=0 "
+    "WITHOUT zero constraints. Proven via Groebner basis in "
+    "test_e4_1_psi_dependent_conservation_infeasible (23.3c-ii). "
+    "Conservation IS feasible with alpha_3=alpha_4=0 — see "
+    "test_e4_1_conservation_with_zeros."
 ))
-def test_e4_1_conservation_fails():
+def test_e4_1_conservation_fails_without_zeros():
     """E4_1 cut-cell stencil violates discrete conservation (SBP property).
 
     Conservation applies to grid-point columns (T-frame cols 1..T-2):
@@ -1055,6 +1058,208 @@ def test_e4_1_conservation_fails():
             f"Conservation violated at grid point {g} (T-frame col {j_tf}): "
             f"residual={residual}"
         )
+
+
+def test_e4_1_conservation_with_zeros():
+    """E4_1 cut-cell conservation IS feasible with alpha_3=alpha_4=0 (26.4a).
+
+    With zero constraints on the last row's free parameters, the conservation
+    system becomes solvable.  This test:
+      1. Builds zero-constrained B_u (zeros={3, 4})
+      2. Runs TEMO -> cut-cell stencil (3 alphas)
+      3. Solves cut-cell conservation for [alpha_0, alpha_1, w_1, w_2, w_3]
+      4. Substitutes solution into stencil
+      5. Verifies weighted column sums symbolically (all interior columns)
+      6. Verifies numerically at psi=0.3, 0.5, 0.7 with alpha_2=0.1, w_4=1.0
+    """
+    psi = Symbol("psi")
+
+    # Step 1-2: Build zero-constrained cut-cell stencil
+    ur = derive_uniform_boundary_for_temo(E4_1, zeros={3, 4})
+    stencil = construct_cut_cell_stencil(
+        ur.B_u, ur.interior, p=2, q=3, nu=1, nextra=0, psi=psi,
+    )
+    B_l = stencil.matrix
+    R, T = B_l.shape
+    assert R == 5 and T == 7
+
+    # Step 3: Build conservation system and solve
+    eqs, w_syms = build_cut_cell_conservation_system(
+        B_l, R, T, p=E4_1.p, nu=E4_1.nu,
+        interior_coeffs=ur.interior, psi=psi,
+    )
+    alpha_syms = sorted(B_l.free_symbols - {psi}, key=lambda s: s.name)
+    assert len(alpha_syms) == 3  # alpha_0, alpha_1, alpha_2
+
+    solve_for = alpha_syms[:2] + w_syms[:3]  # alpha_0, alpha_1, w_1, w_2, w_3
+    sol = solve_cut_cell_conservation(eqs, solve_for)
+    assert len(sol) == 5
+
+    # Step 4: Substitute solution into stencil
+    B_l_sub = B_l.xreplace(sol)
+
+    # Build weights: w_0=psi, w_1..w_3 from solution, w_4 free
+    alpha_2 = alpha_syms[2]
+    w_4 = w_syms[3]
+    weights = [psi] + [sol[w] for w in w_syms[:3]] + [w_4]
+
+    # Step 5: Symbolic verification — weighted column sums for all interior columns
+    interior = ur.interior
+    for j_tf in range(1, T - 1):  # T-frame cols 1..5 (grid points 0..4)
+        g = j_tf - 1
+        col_sum = sum(weights[i] * B_l_sub[i, j_tf] for i in range(R))
+        ic = _interior_contribution(g, R, E4_1.p, interior)
+        col_sum += ic
+        target = S.NegativeOne if (g == 0 and E4_1.nu == 1) else S.Zero
+        residual = cancel(col_sum - target)
+        assert residual == 0, (
+            f"Symbolic conservation violated at grid point {g} "
+            f"(T-frame col {j_tf}): residual={residual}"
+        )
+
+    # Step 6: Numeric verification at specific parameter values
+    for psi_val in [Rational(3, 10), Rational(1, 2), Rational(7, 10)]:
+        subs_num = {psi: psi_val, alpha_2: Rational(1, 10), w_4: S.One}
+        B_num = B_l_sub.xreplace(subs_num)
+        w_num = [cancel(w.xreplace(subs_num)) if hasattr(w, 'xreplace') else w
+                 for w in weights]
+        for j_tf in range(1, T - 1):
+            g = j_tf - 1
+            col_sum = sum(w_num[i] * B_num[i, j_tf] for i in range(R))
+            ic = _interior_contribution(g, R, E4_1.p, interior)
+            col_sum += ic
+            target = -1 if (g == 0 and E4_1.nu == 1) else 0
+            residual = cancel(col_sum - target)
+            assert residual == 0, (
+                f"Numeric conservation violated at psi={psi_val}, g={g}: "
+                f"residual={residual}"
+            )
+
+
+def test_e4_1_conservative_taylor_accuracy():
+    """Conservative E4_1 stencil preserves Taylor accuracy (26.4b).
+
+    After substituting the conservation solution, each row of the cut-cell
+    stencil still satisfies q+1=4 Taylor moment equations at multiple psi values.
+    """
+    psi = Symbol("psi")
+    ur = derive_uniform_boundary_for_temo(E4_1, zeros={3, 4})
+    stencil = construct_cut_cell_stencil(
+        ur.B_u, ur.interior, p=2, q=3, nu=1, nextra=0, psi=psi,
+    )
+    B_l = stencil.matrix
+    R, T = B_l.shape
+
+    # Solve conservation
+    eqs, w_syms = build_cut_cell_conservation_system(
+        B_l, R, T, p=E4_1.p, nu=E4_1.nu,
+        interior_coeffs=ur.interior, psi=psi,
+    )
+    alpha_syms = sorted(B_l.free_symbols - {psi}, key=lambda s: s.name)
+    solve_for = alpha_syms[:2] + w_syms[:3]
+    sol = solve_cut_cell_conservation(eqs, solve_for)
+    B_l_sub = B_l.xreplace(sol)
+
+    # Numeric verification at psi=0.3, 0.5, 0.7 with alpha_2=0.1, w_4=1.0
+    alpha_2 = alpha_syms[2]
+    w_4 = w_syms[3]
+    for psi_val in [Rational(3, 10), Rational(1, 2), Rational(7, 10)]:
+        subs_num = {psi: psi_val, alpha_2: Rational(1, 10), w_4: S.One}
+        B_num = B_l_sub.xreplace(subs_num)
+        for i in range(R):
+            deltas = build_cut_cell_deltas(i, T, psi_val)
+            row = [B_num[i, j] for j in range(T)]
+            for k in range(4):  # q+1 = 4 Taylor equations
+                moment = sum(row[j] * deltas[j] ** k for j in range(T))
+                expected = 1 if k == 1 else 0
+                residual = cancel(moment - expected)
+                assert residual == 0, (
+                    f"Taylor error: psi={psi_val}, row {i}, moment k={k}: "
+                    f"got {cancel(moment)}, expected {expected}"
+                )
+
+
+def test_e4_1_conservative_psi_interior():
+    """Conservative E4_1 stencil is well-defined for psi in (0, 1) (26.4c).
+
+    The conservation solution introduces poles at psi=0 and psi=1 (alpha_0 and
+    alpha_1 diverge at the boundaries). The stencil is valid only for psi
+    strictly between 0 and 1, which is the physically meaningful range for
+    cut cells.
+
+    This test verifies:
+      1. All entries are finite for interior psi values
+      2. Taylor accuracy holds at the boundary-adjacent values psi=0.01 and 0.99
+      3. Conservation holds at boundary-adjacent values
+    """
+    psi = Symbol("psi")
+    ur = derive_uniform_boundary_for_temo(E4_1, zeros={3, 4})
+    stencil = construct_cut_cell_stencil(
+        ur.B_u, ur.interior, p=2, q=3, nu=1, nextra=0, psi=psi,
+    )
+    B_l = stencil.matrix
+    R, T = B_l.shape
+
+    # Solve conservation
+    eqs, w_syms = build_cut_cell_conservation_system(
+        B_l, R, T, p=E4_1.p, nu=E4_1.nu,
+        interior_coeffs=ur.interior, psi=psi,
+    )
+    alpha_syms = sorted(B_l.free_symbols - {psi}, key=lambda s: s.name)
+    solve_for = alpha_syms[:2] + w_syms[:3]
+    sol = solve_cut_cell_conservation(eqs, solve_for)
+    B_l_sub = B_l.xreplace(sol)
+
+    alpha_2 = alpha_syms[2]
+    w_4 = w_syms[3]
+    subs_num = {alpha_2: Rational(1, 10), w_4: S.One}
+
+    # Weights: w_0=psi, w_1..w_3 from solution, w_4 free
+    weights = [psi] + [sol[w] for w in w_syms[:3]] + [w_4]
+    interior = ur.interior
+
+    # Test at interior psi values including near-boundary
+    test_psi_values = [
+        Rational(1, 100), Rational(1, 10), Rational(1, 2),
+        Rational(9, 10), Rational(99, 100),
+    ]
+    for psi_val in test_psi_values:
+        full_subs = {psi: psi_val, **subs_num}
+        B_num = B_l_sub.xreplace(full_subs)
+
+        # 1. All entries are finite
+        for i in range(R):
+            for j in range(T):
+                val = cancel(B_num[i, j])
+                assert val.is_finite, (
+                    f"B[{i},{j}] not finite at psi={psi_val}: {val}"
+                )
+
+        # 2. Taylor accuracy: each row satisfies q+1=4 moment equations
+        for i in range(R):
+            deltas = build_cut_cell_deltas(i, T, psi_val)
+            row = [cancel(B_num[i, j]) for j in range(T)]
+            for k in range(4):
+                moment = sum(row[j] * deltas[j] ** k for j in range(T))
+                expected = 1 if k == 1 else 0
+                residual = cancel(moment - expected)
+                assert residual == 0, (
+                    f"Taylor: psi={psi_val}, row {i}, k={k}: residual={residual}"
+                )
+
+        # 3. Conservation: weighted column sums
+        w_num = [cancel(w.xreplace(full_subs)) if hasattr(w, 'xreplace') else w
+                 for w in weights]
+        for j_tf in range(1, T - 1):
+            g = j_tf - 1
+            col_sum = sum(w_num[i] * cancel(B_num[i, j_tf]) for i in range(R))
+            ic = _interior_contribution(g, R, E4_1.p, interior)
+            col_sum += ic
+            target = -1 if (g == 0 and E4_1.nu == 1) else 0
+            residual = cancel(col_sum - target)
+            assert residual == 0, (
+                f"Conservation: psi={psi_val}, g={g}: residual={residual}"
+            )
 
 
 class TestBuildCutCellConservationSystem:
