@@ -73,13 +73,18 @@ Our implementation differs from the paper's procedure in step 2: instead of
 solving Taylor + conservation simultaneously (which creates a bilinear system
 in weight × row-entry products — see "Bilinearity Constraint" below), we:
 
-1. Use the existing TEMO pipeline (`construct_cut_cell_stencil`) for ALL rows.
-   The boundary rows should be polynomial after `cancel()` (verified by 27.1a).
-2. Build conservation equations from the TEMO output (existing code).
-3. Solve conservation using a **fraction-clearing** approach (new
+1. Use the **polynomial ansatz** (`solve_temo_row_polynomial` from 27.2a) for
+   boundary rows (i=0..R-2). 27.1a confirmed that the existing QQ(ψ) solve
+   produces rational entries with Vandermonde-type denominators that do NOT
+   simplify to polynomials after `cancel()`. The polynomial ansatz eliminates
+   these denominators by construction.
+2. Use the existing `solve_temo_row` (QQ(ψ) solve) for the near-interior row
+   (i=R-1), which is expected to be rational with a benign denominator.
+3. Build conservation equations from the TEMO output (existing code).
+4. Solve conservation using a **fraction-clearing** approach (new
    `solve_conservation_fraction_free`) that converts rational equations
    to polynomial form before solving, avoiding ψ(ψ-1) denominators.
-4. Apply the conservation solution via `xreplace` (existing code).
+5. Apply the conservation solution via `xreplace` (existing code).
 
 The result should match the paper's structure: polynomial boundary rows,
 rational near-interior row with nonvanishing denominator, no singularities
@@ -398,23 +403,44 @@ different purpose (proving infeasibility of constant weights).
 
 ### 27.4 — Full E4_1 construction
 
-- [ ] **27.4a** Integrate fraction-free conservation into `derive_cut_cell_scheme`
+- [ ] **27.4a** Integrate polynomial ansatz and fraction-free conservation into `derive_cut_cell_scheme`
   - File: `scripts/stencil_gen/stencil_gen/temo.py`
-  - **Modify `derive_cut_cell_scheme`** (the `scheme.zeros` branch at lines
-    2267-2312 of temo.py). Two targeted changes:
+  - **Modify `construct_cut_cell_stencil`** (line 1353) and
+    **`derive_cut_cell_scheme`** (the `scheme.zeros` branch at lines
+    2267-2312). Three targeted changes:
 
-    **Change 1:** Add a cancel step after TEMO to simplify stencil entries
-    (boundary rows → polynomial, near-interior → simpler rational). Insert
-    after line 2278 (`R, T = floating.shape`), before the conservation
-    build at line 2280. Reuse the existing `R, T` variables:
+    **Change 1 (critical — wires 27.2a into the pipeline):** In
+    `construct_cut_cell_stencil`, modify the row loop (line 1412) to call
+    `solve_temo_row_polynomial` for boundary rows (i < R-1) and the
+    existing `solve_temo_row` for the near-interior row (i = R-1):
     ```python
-    # Cancel each entry to clear Vandermonde denominators
     for i in range(R):
-        for j in range(T):
-            floating[i, j] = cancel(floating[i, j])
+        V, rhs_vec = build_temo_vandermonde(i, T, q, nu, psi)
+        prescribed = identify_prescribed_entries(...)
+        if i < R - 1:
+            result = solve_temo_row_polynomial(
+                i, V, rhs_vec, prescribed, psi, alpha_syms
+            )
+        else:
+            result = solve_temo_row(
+                i, V, rhs_vec, prescribed, psi, K, alpha_syms
+            )
+        rows.append(result.coeffs)
+    ```
+    Without this change, the polynomial ansatz from 27.2a would never be
+    called and boundary rows would remain rational. This is the key
+    integration point.
+
+    **Change 2:** Add a cancel step after TEMO to simplify the near-interior
+    row (boundary rows are already polynomial from Change 1). Insert after
+    line 2278 (`R, T = floating.shape`), before conservation build:
+    ```python
+    # Cancel near-interior row to simplify rational entries
+    for j in range(T):
+        floating[R - 1, j] = cancel(floating[R - 1, j])
     ```
 
-    **Change 2:** Replace the conservation solve call at line 2285:
+    **Change 3:** Replace the conservation solve call at line 2285:
     ```python
     # Current:
     sol = solve_cut_cell_conservation(eqs, solve_for)
@@ -435,8 +461,7 @@ different purpose (proving infeasibility of constant weights).
     `test_e4_cut_cell.py` only needs the import if 27.3b tests call the
     function directly — add it to the import block (around line 37) in
     that case.
-  - **Size estimate:** ~10-15 lines changed in `derive_cut_cell_scheme`
-    (the cancel loop + one function call replacement). The bulk of the work
+  - **Size estimate:** ~15-25 lines changed across both functions. The bulk
     is the ~20-60 line new function from 27.3a (depending on whether
     fallback A is included inline).
   - Must come after 27.3b (conservation solve validated before wiring into
