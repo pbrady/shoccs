@@ -1,6 +1,7 @@
 #include "stencil.hpp"
 
 #include <algorithm>
+#include <stdexcept>
 
 #include <cmath>
 
@@ -22,6 +23,9 @@ struct E4_1 {
     E4_1(std::span<const real> a)
     {
         copy_zero_padded(a, alpha);
+        if (alpha[1] == 0.0)
+            throw std::invalid_argument(
+                "E4_1: alpha[1] must be nonzero (used as denominator)");
     }
 
     info query_max() const { return {P, R, T, X}; }

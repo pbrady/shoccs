@@ -5,6 +5,7 @@
 #include <catch2/matchers/catch_matchers_vector.hpp>
 
 #include <cmath>
+#include <stdexcept>
 #include <vector>
 
 #include <sol/sol.hpp>
@@ -197,5 +198,14 @@ TEST_CASE("E4_1")
         for (std::size_t i = 0; i < c.size(); ++i) {
             REQUIRE(std::isfinite(c[i]));
         }
+    }
+
+    SECTION("alpha[1]=0 throws")
+    {
+        std::array<real, 1> short_alpha{0.1};
+        REQUIRE_THROWS_AS(stencils::make_E4_1(short_alpha), std::invalid_argument);
+
+        std::array<real, 2> zero_alpha{0.1, 0.0};
+        REQUIRE_THROWS_AS(stencils::make_E4_1(zero_alpha), std::invalid_argument);
     }
 }

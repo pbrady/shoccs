@@ -372,18 +372,11 @@ With alpha_3=alpha_4=0, `sympy.solve()` produces a clean single-branch solution 
   - **Fix:** Add a comment in `E4_1.cpp` near the alpha declaration documenting that `alpha[1]` must be nonzero. Consider adding a runtime assert or guard. Update the codegen template if this constraint should appear automatically.
   - **Done:** Added comment block near alpha declaration in `E4_1.cpp` documenting alpha[0] (free) and alpha[1] (must be nonzero, used as denominator). No runtime assert added — a comment is sufficient since alpha values come from Lua config and division-by-zero would be immediately obvious from NaN/Inf output. Codegen template not updated (YAGNI — only E4_1 has this constraint).
 
-- [ ] **26.6-followup-b2** Add runtime guard for alpha[1] ≠ 0 in E4_1 constructor:
+- [x] **26.6-followup-b2** Add runtime guard for alpha[1] ≠ 0 in E4_1 constructor:
   - **Problem:** The comment added in 26.6-followup-b documents the constraint, but `copy_zero_padded` (`stencil.hpp:40-45`) silently zero-fills alpha[1] if the Lua config provides fewer than 2 alpha values (e.g., `alpha = {0.1}`). This produces division by zero whose root cause is non-obvious from the resulting NaN output. The comment in the C++ source is invisible to users editing Lua configs.
-  - **Fix:** Add a runtime check in the `E4_1` constructor (after `copy_zero_padded`) that throws or asserts if `alpha[1] == 0.0`:
-    ```cpp
-    E4_1(std::span<const real> a)
-    {
-        copy_zero_padded(a, alpha);
-        if (alpha[1] == 0.0)
-            throw std::invalid_argument("E4_1: alpha[1] must be nonzero (used as denominator)");
-    }
-    ```
-  - **Test:** Add a Catch2 `REQUIRE_THROWS` test in `E4_1.t.cpp` constructing E4_1 with a single-element alpha span.
+  - **Fix:** Added `#include <stdexcept>` and a runtime check in the `E4_1` constructor (after `copy_zero_padded`) that throws `std::invalid_argument` if `alpha[1] == 0.0`.
+  - **Test:** Added a Catch2 `REQUIRE_THROWS_AS` section in `E4_1.t.cpp` testing both a single-element alpha span (zero-padded to alpha[1]=0) and an explicit `{0.1, 0.0}` span. Uses `stencils::make_E4_1` since the `E4_1` struct is not exposed in the header.
+  - **Result:** 113 assertions pass (was 95). Build and `ctest -R t-E4_1` pass.
 
 - [ ] **26.6-followup-c** Add missing singularity comments to generated E4_1.cpp:
   - **Problem:** Plan item 26.6a specifies: "The generated E4_1.cpp should include a comment that coefficients diverge at psi=0 and psi=1." This was not done — the generated file has no such comment.
