@@ -16,7 +16,9 @@ from sympy import (
     S,
     Symbol,
     cancel,
+    expand,
     factorial,
+    fraction,
     solve,
     symbols as _symbols,
 )
@@ -1348,6 +1350,145 @@ def solve_temo_row(
         coeffs[bc] = beta_sym
 
     return RowSolveResult(coeffs=coeffs, beta_info=beta_info)
+
+
+def solve_temo_row_polynomial(
+    i: int,
+    V: Matrix,
+    rhs: Matrix,
+    prescribed: dict,
+    psi,
+    symbols: list,
+) -> RowSolveResult:
+    """Solve a single TEMO row using a polynomial ansatz.
+
+    Instead of solving in the QQ(psi) fraction field (which produces
+    rational entries with Vandermonde-type denominators), this function
+    represents each free entry as a polynomial in psi with unknown
+    coefficients and solves for those coefficients.  The result is
+    guaranteed to be polynomial in psi.
+
+    When the prescribed dict contains extra columns (beyond the zeroed
+    column), prescribing them as fixed degree-1 polynomials would make the
+    system square with a unique rational solution — incompatible with
+    polynomial entries.  This function automatically converts extra
+    prescribed columns to endpoint constraints (psi=0 and psi=1 values),
+    allowing the polynomial ansatz to find higher-degree polynomial entries
+    that satisfy both Taylor accuracy and the endpoint limits.
+
+    Parameters
+    ----------
+    i : int
+        Row index.
+    V : Matrix
+        n_eqs x T Vandermonde matrix.
+    rhs : Matrix
+        n_eqs x 1 RHS vector.
+    prescribed : dict[int, Expr]
+        Prescribed column entries ``{col: expr(psi)}``.  The first column
+        (by index) is kept as a true prescription; additional columns are
+        converted to endpoint constraints.
+    psi : Symbol
+        The psi symbol.
+    symbols : list[Symbol]
+        Non-psi symbols (alpha from B_u) that may appear in prescribed values.
+
+    Returns
+    -------
+    RowSolveResult
+        Coefficients are polynomials in psi (no denominators involving psi).
+    """
+    n_eqs = V.rows
+    T = V.cols
+
+    # Split prescribed into truly prescribed (zeroed column) and
+    # limit-constrained (extra columns).  When all prescribed columns
+    # are kept as fixed, the system is square with a unique rational
+    # solution.  Converting extra columns to endpoint constraints makes
+    # the system underdetermined, enabling polynomial solutions.
+    sorted_pcols = sorted(prescribed.keys())
+    truly_prescribed: dict[int, Expr] = {sorted_pcols[0]: prescribed[sorted_pcols[0]]}
+    limit_constraints: dict[int, tuple[Expr, Expr]] = {}
+    for j in sorted_pcols[1:]:
+        val = prescribed[j]
+        limit_constraints[j] = (
+            expand(val.subs(psi, 0)),  # value at psi=0
+            expand(val.subs(psi, 1)),  # value at psi=1
+        )
+
+    # Determine maximum psi-degree for the polynomial unknowns.
+    # d_max = max psi-degree in V + 1.  For E4_1 (q=3): d_max = 4.
+    max_v_degree = 0
+    for k in range(n_eqs):
+        for j in range(T):
+            entry = V[k, j]
+            if entry.has(psi):
+                p = Poly(expand(entry), psi)
+                max_v_degree = max(max_v_degree, p.degree())
+    d_max = max_v_degree + 1
+
+    # Identify free columns (not truly prescribed)
+    free_cols = sorted(j for j in range(T) if j not in truly_prescribed)
+
+    # Create polynomial unknowns for each free column
+    c_syms: dict[int, list[Symbol]] = {}
+    all_c: list[Symbol] = []
+    for j in free_cols:
+        c_j = [Symbol(f"c_{i}_{j}_{k}") for k in range(d_max + 1)]
+        c_syms[j] = c_j
+        all_c.extend(c_j)
+
+    # Build polynomial expressions for free columns
+    poly_unknowns: dict[int, Expr] = {}
+    for j, c_j in c_syms.items():
+        poly_unknowns[j] = sum(c_j[k] * psi**k for k in range(d_max + 1))
+
+    # Form residuals: V * x - rhs as polynomials in psi
+    residuals: list[Expr] = []
+    for eq_idx in range(n_eqs):
+        expr = -rhs[eq_idx, 0]
+        for j in range(T):
+            if j in truly_prescribed:
+                expr += V[eq_idx, j] * truly_prescribed[j]
+            else:
+                expr += V[eq_idx, j] * poly_unknowns[j]
+        residuals.append(expand(expr))
+
+    # Collect by psi powers -> coefficient equations
+    equations: list[Expr] = []
+    for res in residuals:
+        p_res = Poly(res, psi)
+        for coeff in p_res.all_coeffs():
+            equations.append(coeff)
+
+    # Add endpoint constraints for limit-constrained columns.
+    # At psi=0: c_{j,0} = val_at_0.  At psi=1: sum_k c_{j,k} = val_at_1.
+    for j, (val_0, val_1) in limit_constraints.items():
+        c_j = c_syms[j]
+        equations.append(expand(c_j[0] - val_0))
+        equations.append(expand(sum(c_j) - val_1))
+
+    # Solve for c_{j,k} symbols (treating alpha_syms as parameters)
+    sol = solve(equations, all_c, dict=True)
+    if not sol:
+        raise ValueError(
+            f"Polynomial ansatz system for row {i} has no solution "
+            f"(d_max={d_max}, {len(equations)} eqs, {len(all_c)} unknowns)"
+        )
+    sol = sol[0]
+
+    # Reconstruct each entry as a polynomial in psi
+    coeffs: list[Expr] = [Rational(0)] * T
+    for j, val in truly_prescribed.items():
+        coeffs[j] = val
+    for j in free_cols:
+        c_j = c_syms[j]
+        entry = sum(
+            sol.get(c_j[k], c_j[k]) * psi**k for k in range(d_max + 1)
+        )
+        coeffs[j] = expand(entry)
+
+    return RowSolveResult(coeffs=coeffs, beta_info=[])
 
 
 def construct_cut_cell_stencil(

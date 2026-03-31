@@ -156,77 +156,30 @@ different purpose (proving infeasibility of constant weights).
 
 ### 27.2 — Implement polynomial boundary row solve
 
-- [ ] **27.2a** Add `solve_temo_row_polynomial` function
+- [x] **27.2a** Add `solve_temo_row_polynomial` function
   - **Conditional:** Only needed if 27.1c determines polynomial ansatz is required.
     If boundary rows from QQ(ψ) solve already simplify to polynomials, skip this.
-  - File: `scripts/stencil_gen/stencil_gen/temo.py` (add after `solve_temo_row`
-    at ~line 1349, before `construct_cut_cell_stencil` at line 1353)
-  - Signature: `solve_temo_row_polynomial(i, V, rhs, prescribed, psi, alpha_syms) -> RowSolveResult`
-  - **Algorithm (polynomial ansatz approach):**
-    1. Determine the maximum ψ-degree `d_max` for the solved entries. For E4_1:
-       `d_max = q + 1 = 4` (from the q=3 Vandermonde interacting with degree-1
-       prescribed entries). In general: `d_max = max(q, nu) + 1` for the
-       first-derivative case.
-    2. For each free column j (not prescribed), represent the unknown entry as
-       `c_j(ψ) = c_{j,0} + c_{j,1}*ψ + ... + c_{j,d_max}*ψ^d_max` using
-       fresh SymPy symbols `c_{j,k}`.
-    3. Substitute these polynomial unknowns AND the prescribed entries into the
-       Taylor accuracy equations `V * x = rhs`. Each equation becomes a
-       polynomial identity in ψ.
-    4. Expand and collect by powers of ψ: each coefficient of ψ^m must be zero
-       (for matching equations) or match the RHS.
-    5. This gives a purely rational (no-ψ) linear system in the c_{j,k}
-       unknowns and the alpha symbols.
-    6. Solve this system using `sympy.solve` or `linear_eq_to_matrix` +
-       `linsolve`. The solution gives c_{j,k} as rational functions of the
-       alpha symbols.
-    7. Reconstruct each entry as `sum(c_{j,k} * ψ^k for k in range(d_max+1))`.
-    8. Return a `RowSolveResult` with these polynomial entries.
-  - **Concrete SymPy implementation for steps 3-6:**
-    ```python
-    # Step 2: Create polynomial unknowns for each free column
-    c_syms = {}  # {col_j: [c_j_0, c_j_1, ..., c_j_dmax]}
-    all_c = []
-    for j in free_cols:
-        c_j = [Symbol(f"c_{i}_{j}_{k}") for k in range(d_max + 1)]
-        c_syms[j] = c_j
-        all_c.extend(c_j)
-
-    # Build polynomial expressions for free columns
-    poly_unknowns = {}
-    for j, c_j in c_syms.items():
-        poly_unknowns[j] = sum(c_j[k] * psi**k for k in range(d_max + 1))
-
-    # Step 3: Form residuals  V * x - rhs  as polynomials in psi
-    residuals = []
-    for eq_idx in range(n_eqs):
-        expr = -rhs[eq_idx, 0]
-        for j in range(T):
-            if j in prescribed:
-                expr += V[eq_idx, j] * prescribed[j]
-            else:
-                expr += V[eq_idx, j] * poly_unknowns[j]
-        residuals.append(expand(expr))
-
-    # Step 4-5: Collect by psi powers -> coefficient equations
-    equations = []
-    for res in residuals:
-        p_res = Poly(res, psi)
-        for coeff in p_res.all_coeffs():
-            equations.append(coeff)  # each must be zero
-
-    # Step 6: Solve for c_{j,k} symbols (treating alpha_syms as parameters)
-    sol = solve(equations, all_c, dict=True)
-    ```
-    Note: `V[eq_idx, j]` contains `(-(psi+i))^k / k!` in col 0, so the
-    product `V[eq_idx, j] * poly_unknowns[j]` is a polynomial in ψ of
-    degree up to `q + d_max`. After `expand`, each residual is a polynomial
-    in ψ whose coefficients are linear in `c_{j,k}` and `alpha_syms`.
-  - **Key difference from `solve_temo_row`:** No QQ(ψ) fraction field. The ψ
-    variable is expanded out, and we solve a larger but purely rational system.
-    For E4_1 row 0: n_eqs=4, T=7, 1 prescribed col → 5 free cols × (d_max+1)=5
-    coefficients = 25 unknowns from ~4×(4+4+1)≈36 coefficient equations.
-  - **Size estimate:** ~80-100 lines of new code. No new files needed.
+  - File: `scripts/stencil_gen/stencil_gen/temo.py` (added after `solve_temo_row`
+    at ~line 1355)
+  - Signature: `solve_temo_row_polynomial(i, V, rhs, prescribed, psi, symbols) -> RowSolveResult`
+  - **Implementation notes:**
+    - d_max is computed dynamically from the max ψ-degree in V (= q for E4_1),
+      giving d_max = max_v_degree + 1 = 4.
+    - **Key discovery:** When the prescribed dict includes extra columns (beyond
+      the zeroed column) as degree-1 polynomials, the system becomes square with
+      a unique rational solution — no polynomial of degree d_max satisfies it.
+      The function handles this by automatically converting extra prescribed
+      columns to **endpoint constraints**: instead of forcing the entry to a
+      specific degree-1 polynomial, it only constrains the values at ψ=0 and
+      ψ=1. This makes the system underdetermined (30 unknowns, 30 equations
+      for E4_1 with 2 extra cols × 2 endpoints), enabling polynomial solutions.
+    - The first prescribed column (by index, = zeroed column) is kept as a true
+      prescription. All subsequent prescribed columns are converted to limit
+      constraints.
+    - Verified: all 4 boundary rows produce polynomial entries of degree ≤ 4,
+      satisfy Taylor accuracy symbolically, and match B_l_1 at ψ=1 and B_d at ψ=0.
+    - All 98 existing tests pass (1 xfail expected). No regressions.
+    - Added `expand` and `fraction` to the module-level imports in temo.py.
   - Must come before 27.2b.
 
 - [ ] **27.2b** Test polynomial boundary rows for E4_1
