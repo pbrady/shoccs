@@ -388,14 +388,18 @@ With alpha_3=alpha_4=0, `sympy.solve()` produces a clean single-branch solution 
 
 - [ ] **26.6-followup-d** Numerical robustness: tighten psi guard or add stencil-specific fallback:
   - **Problem:** The 26.6-followup-a fix clamps psi to `[snap_tol, 1.0 - snap_tol]` where `snap_tol = 1e-12`. This prevents literal division by zero but allows coefficient magnitudes of O(1/snap_tol) ≈ O(1e12), which is numerically catastrophic for any time integrator. The plan text (26.4c, 26.6a) recommended clamping to `[0.01, 0.99]` or falling back to the uniform stencil for near-full cells.
-  - **Pole inventory in E4_1.cpp:** `1/(psi-1)` (Floating line 90, Dirichlet line 213-214), `1/psi` (Floating line 93, Dirichlet line 247), `1/alpha[1]` (Floating line 90, Dirichlet line 211), `1/(288*alpha[1] + 648*psi + 12*psi³ + 90*psi² - 197)` (Dirichlet line 215).
+  - **Pole inventory in E4_1.cpp:** `1/(psi-1)` (Floating line 104, Dirichlet line 227), `1/psi` (Floating line 108), `1/alpha[1]` (Floating line 105, Dirichlet line 226), `1/(288*alpha[1] + 648*psi + 12*psi³ + 90*psi² - 197)` (Floating line 145 **and** Dirichlet line 230 — both methods, not just Dirichlet).
+  - **CRITICAL — Interior singularity from polynomial denominator:** The denominator `D(psi) = 288*alpha[1] + 648*psi + 12*psi³ + 90*psi² - 197` has a real zero **inside** (0,1) for all alpha[1] < 197/288 ≈ 0.684. Concrete examples: alpha[1]=-0.05 → zero at psi≈0.312; alpha[1]=0.1 → zero at psi≈0.251; alpha[1]=0.5 → zero at psi≈0.081. The test default alpha[1]=-0.05 places this singularity at psi≈0.312, well within the normal cut-cell range. **This pole cannot be fixed by psi clamping** — it requires constraining alpha[1] or adding a runtime check on the denominator magnitude.
+  - **Comment fix needed:** The singularity comment block in `E4_1.cpp` (lines 23-24) says "The Dirichlet denominator" but this expression appears in both `nbs_floating` and `nbs_dirichlet`. Update to say "The denominator" (no method qualifier).
   - **Fix options (choose one or combine):**
-    1. Stencil-specific psi clamp: add a guard in `E4_1::nbs_floating`/`nbs_dirichlet` that clamps psi to `[eps, 1-eps]` with `eps` large enough for stability (e.g., `1e-4`). This avoids changing the geometry-level snap tolerance.
+    1. Stencil-specific psi clamp: add a guard in `E4_1::nbs_floating`/`nbs_dirichlet` that clamps psi to `[eps, 1-eps]` with `eps` large enough for stability (e.g., `1e-4`). This avoids changing the geometry-level snap tolerance. **Note:** this only addresses the boundary poles at psi=0 and psi=1, not the interior polynomial singularity.
     2. Uniform stencil fallback: when psi > 1 - eps (near-full cell), use the non-conservative uniform stencil instead (psi=1 means full cell where the uniform stencil is exact).
     3. Coefficient magnitude analysis: determine the maximum acceptable psi range empirically by running the solver with decreasing psi and finding where CFL-limited time steps become impractical.
+    4. Alpha[1] lower bound: require alpha[1] ≥ 197/288 ≈ 0.684 to eliminate the interior singularity entirely (since `D(0) = 288*alpha[1] - 197 ≥ 0` and `D` is increasing on (0,1)). Update the constructor guard to enforce this. Alternatively, add a runtime check that `|D(psi)| > eps` before evaluating the stencil, with a fallback when it's too small.
   - **Test improvements needed:**
     - The existing near-psi=1 tests (lines 178-200 of E4_1.t.cpp) only check `std::isfinite`, which passes for O(1e12) values. Add a magnitude bound check (e.g., `std::abs(c[i]) < 1e6/h²`) to catch numerically unusable coefficients.
     - Add symmetric near-psi=0 finiteness tests for both Floating and Dirichlet modes (both divide by psi).
+    - Add a test that evaluates the stencil near the polynomial denominator zero (e.g., alpha[1]=-0.05, psi=0.31) and verifies the output is either guarded or clearly fails, documenting the singularity behavior.
 
 ### 26.7 — Update memory and plans
 
