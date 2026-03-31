@@ -92,7 +92,7 @@ static void init_line(std::span<const shape> shapes,
                 // outside [0, 1] because position and coord come from
                 // different arithmetic paths.  Clamp to keep psi consistent
                 // with the snapped cell assignment.
-                psi = std::clamp(psi, snap_tol, 1.0);
+                psi = std::clamp(psi, snap_tol, 1.0 - snap_tol);
 
                 auto id = hit->shape_id;
                 const auto& shp = shapes[id];

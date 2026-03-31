@@ -4,6 +4,7 @@
 #include <catch2/catch_test_macros.hpp>
 #include <catch2/matchers/catch_matchers_vector.hpp>
 
+#include <cmath>
 #include <vector>
 
 #include <sol/sol.hpp>
@@ -172,5 +173,29 @@ TEST_CASE("E4_1")
                               72.5502660398264,
                               0.0})
                          .margin(1.0e-8));
+    }
+
+    SECTION("Floating near psi=1 produces finite values")
+    {
+        auto [p, r, t, x] = st.query(bcs::Floating);
+        T c(r * t);
+        T ex{};
+
+        st.nbs(1.0, bcs::Floating, 1.0 - 1e-12, false, c, ex);
+        for (std::size_t i = 0; i < c.size(); ++i) {
+            REQUIRE(std::isfinite(c[i]));
+        }
+    }
+
+    SECTION("Dirichlet near psi=1 produces finite values")
+    {
+        auto [p, r, t, x] = st.query(bcs::Dirichlet);
+        T c(r * t);
+        T ex{};
+
+        st.nbs(1.0, bcs::Dirichlet, 1.0 - 1e-12, false, c, ex);
+        for (std::size_t i = 0; i < c.size(); ++i) {
+            REQUIRE(std::isfinite(c[i]));
+        }
     }
 }

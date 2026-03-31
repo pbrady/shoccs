@@ -361,13 +361,11 @@ With alpha_3=alpha_4=0, `sympy.solve()` produces a clean single-branch solution 
 
 ### 26.6-followup — Address singularities in generated E4_1 stencil
 
-- [ ] **26.6-followup-a** Fix runtime psi=1.0 division-by-zero:
+- [x] **26.6-followup-a** Fix runtime psi=1.0 division-by-zero:
   - **Problem:** The conservative E4_1 stencil divides by `(psi - 1)` (line 90 in `nbs_floating`, line 214 in `nbs_dirichlet`). The runtime clamp in `src/mesh/object_geometry.cpp:95` is `std::clamp(psi, 1e-12, 1.0)`, which allows psi=1.0 — causing division by zero and NaN/Inf propagation.
-  - **Fix options (choose one):**
-    1. Change the upper clamp bound: `std::clamp(psi, snap_tol, 1.0 - snap_tol)` — simplest but changes behavior for all stencils.
-    2. Add stencil-specific psi guard in `E4_1::nbs_floating`/`nbs_dirichlet` that clamps psi away from 1.0.
-    3. Fall back to non-conservative (uniform) stencil when psi ≈ 1.0 (psi=1 means full cell, where the uniform stencil is exact anyway).
-  - **Test:** Add a C++ test case with psi=1.0 to verify no NaN/Inf is produced after the fix.
+  - **Fix chosen:** Option 1 — changed upper clamp bound to `1.0 - snap_tol` in `object_geometry.cpp:95`. Only E4_1 has a `(psi-1)` denominator among all stencils, so the change is safe for all.
+  - **Test:** Added two Catch2 sections in `E4_1.t.cpp` testing Floating and Dirichlet with `psi = 1.0 - 1e-12`, verifying all coefficients are `std::isfinite`. 95 assertions pass (was 16).
+  - **Additional validation:** mesh tests (4/4) and simulation tests (1/1) pass with the clamp change.
 
 - [ ] **26.6-followup-b** Document alpha[1] ≠ 0 constraint:
   - **Problem:** The generated stencil divides by `alpha[1]` (= renamed w_4, a quadrature weight) in both `nbs_floating` (line 90: `1/(alpha[1]*t13)`) and `nbs_dirichlet` (line 211: `1.0 / (alpha[1])`). A user setting `alpha[1] = 0` gets division by zero. This constraint is mentioned only in a test parenthetical (26.5c) but not in the C++ code or plan's singularity documentation.
