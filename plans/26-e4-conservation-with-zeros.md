@@ -440,7 +440,7 @@ With alpha_3=alpha_4=0, `sympy.solve()` produces a clean single-branch solution 
   - **Main coefficient tests unaffected:** The psi values 0.9, 0.3, 0.7 are within [1e-4, 1-1e-4], so REQUIRE_THAT expected values don't change.
   - **Test:** `cmake --build build --target t-E4_1 && ctest --test-dir build -R t-E4_1` ✓ (323 assertions, all pass)
 
-- [ ] **26.6-followup-d5b** Require alpha[1] >= 197/288 and regenerate C++ files:
+- [x] **26.6-followup-d5b** Require alpha[1] >= 197/288 and regenerate C++ files:
   - **Why:** The polynomial denominator `D(psi) = 288*alpha[1] + 648*psi + 12*psi³ + 90*psi² - 197` has a real zero inside (0,1) whenever alpha[1] < 197/288 ≈ 0.684. Since D'(psi) = 36*psi² + 180*psi + 648 > 0 for all psi, D is strictly increasing. If D(0) = 288*alpha[1] - 197 ≥ 0 (i.e. alpha[1] ≥ 197/288), then D(psi) > 0 for all psi ∈ (0,1), eliminating the interior singularity.
   - **Python changes** (`scripts/stencil_gen/tests/test_e4_cut_cell.py`):
     - Line 671: Change `ALPHA_VALUES = {"alpha": [0.1, -0.05]}` → `{"alpha": [0.1, 0.7]}`
@@ -461,6 +461,7 @@ With alpha_3=alpha_4=0, `sympy.solve()` produces a clean single-branch solution 
     - Alpha throws test: update to test `alpha[1] < 197/288` bound instead of `alpha[1] == 0`
   - **Test:** `cmake --build build --target t-E4_1 && ctest --test-dir build -R t-E4_1`
   - **Python test:** `cd scripts/stencil_gen && uv run pytest tests/test_e4_cut_cell.py -v --timeout=300`
+  - **Done:** Changed test alpha values to `{0.1, 0.7}`, regenerated E4_1.cpp and E4_1.t.cpp, re-applied all manual additions: `#include <stdexcept>`, constructor guard `alpha[1] < 197.0/288.0`, singularity comment block updated to document the `>= 197/288` bound, psi clamp in both nbs methods. Rewrote d4 interior singularity test to verify NO singularity with alpha[1]=0.7 (D(psi) > 0 at all sample points, stencil bounded). Updated alpha throws test to check `< 197/288` bound. C++ build and test pass (340 assertions). Python tests pass (95 passed, 1 xfailed).
 
 ### 26.7 — Update memory and plans
 

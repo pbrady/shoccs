@@ -18,22 +18,24 @@ struct E4_1 {
     //   - psi must be in the open interval (0, 1). Coefficients have poles at
     //     psi=0 (nbs_floating, nbs_dirichlet divide by psi) and psi=1
     //     (nbs_floating, nbs_dirichlet divide by (psi - 1)).
-    //   - alpha[1] must be nonzero (nbs_floating and nbs_dirichlet divide by
-    //     alpha[1]).
-    //   - The denominator 288*alpha[1] + 648*psi + 12*psi^3 +
-    //     90*psi^2 - 197 must be nonzero for the chosen alpha[1] and psi.
+    //   - alpha[1] must be >= 197/288 ≈ 0.684 to avoid an interior singularity
+    //     in the polynomial denominator 288*alpha[1] + 648*psi + 12*psi^3 +
+    //     90*psi^2 - 197. Since D'(psi) > 0 for all psi, D is strictly
+    //     increasing; D(0) = 288*alpha[1] - 197 >= 0 ensures D(psi) > 0
+    //     for all psi in (0, 1).
     //
     // alpha[0]: boundary shape parameter (free)
-    // alpha[1]: quadrature weight parameter (must be nonzero, see above)
+    // alpha[1]: quadrature weight parameter (must be >= 197/288, see above)
     std::array<real, 2> alpha;
 
     E4_1() = default;
     E4_1(std::span<const real> a)
     {
         copy_zero_padded(a, alpha);
-        if (alpha[1] == 0.0)
+        if (alpha[1] < 197.0 / 288.0)
             throw std::invalid_argument(
-                "E4_1: alpha[1] must be nonzero (used as denominator)");
+                "E4_1: alpha[1] must be >= 197/288 ≈ 0.684 to avoid interior "
+                "denominator singularity");
     }
 
     info query_max() const { return {P, R, T, X}; }

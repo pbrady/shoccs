@@ -668,7 +668,7 @@ class TestE4CodeGeneration:
 class TestE4TestFileGeneration:
     """Tests for E4_1 C++ test file generation (21.4c, updated for 2-alpha zeros conservation)."""
 
-    ALPHA_VALUES = {"alpha": [0.1, -0.05]}
+    ALPHA_VALUES = {"alpha": [0.1, 0.7]}
 
     @pytest.fixture(scope="class")
     def e4_spec(self):
@@ -760,7 +760,7 @@ class TestE4TestFileGeneration:
         assert 'TEST_CASE("E4_1")' in code
         assert 'type = "E4"' in code
         assert "order = 1" in code
-        assert "alpha = {0.1, -0.05}" in code
+        assert "alpha = {0.1, 0.7}" in code
         assert "REQUIRE(p == 2)" in code
         assert "REQUIRE(r == 5)" in code
         assert "REQUIRE(t == 7)" in code
