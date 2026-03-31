@@ -557,3 +557,4 @@ weights) rather than a single simultaneous solve.
     takes the conservation path which is unchanged.
   - Test: `cd scripts/stencil_gen && uv run pytest tests/test_temo.py -v -k "E2" --timeout=120`
   - Also verify C++ E2 tests: `ctest --test-dir build -R "t-E2"`
+  - Must come after 27.4a (regression guard runs after code changes are applied).
