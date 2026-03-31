@@ -105,8 +105,9 @@ user-specified constants. See 27.3c decision gate.
 27.1a → 27.1b → 27.1c (decision gate)
                   ├── boundary rows polynomial after cancel → skip 27.2 ─┐
                   └── need polynomial ansatz → 27.2a → 27.2b ────────────┤
-                                                                         ├→ 27.3a → 27.3b → 27.3c (decision gate) → 27.4a ─┬→ 27.4b → 27.6a → 27.5a
-                                                                         │                                                   └→ 27.7a
+                                                                         ├→ 27.3a → 27.3b → 27.3c (decision gate) ─┬→ 27.3d
+                                                                         │                                          └→ 27.4a ─┬→ 27.4b → 27.6a → 27.5a
+                                                                         │                                                     └→ 27.7a
 ```
 
 ### Bilinearity Constraint (cross-cutting)
@@ -362,6 +363,25 @@ different purpose (proving infeasibility of constant weights).
     guards in E4_1.cpp remain necessary.
   - Must come after 27.3b. Must resolve BEFORE 27.4a proceeds.
 
+- [ ] **27.3d** Test 27.3c Finding 2: weights-only conservation is infeasible with polynomial boundary rows
+  - **Rationale:** Finding 2 is the critical result that rules out approach (A)
+    and forces approach (B). It must have an automated regression test so the
+    decision can be validated if the polynomial ansatz or conservation system
+    changes.
+  - File: `scripts/stencil_gen/tests/test_e4_cut_cell.py` (add to
+    `TestFractionFreeConservation` or a new class
+    `TestApproachAInfeasibility`)
+  - Test: build conservation equations from **polynomial** boundary rows
+    (use `solve_temo_row_polynomial` for rows 0..R-2, `solve_temo_row` for
+    row R-1, with c_*=0), then attempt a weights-only solve
+    (`solve_for = w_syms[:3]` or `w_syms`). Verify the linear system is
+    inconsistent: `rank(A) < rank([A|b])` for any representative alpha
+    values (e.g., alpha=0, alpha=(1/10,1/5,1/3)).
+  - This mirrors the existing `test_e4_1_conservation_constant_weights_infeasible_r5`
+    (line 1481) but uses polynomial boundary rows instead of rational ones.
+  - Test: `cd scripts/stencil_gen && uv run pytest tests/test_e4_cut_cell.py -v -k "TestApproachAInfeasibility" --timeout=300`
+  - Must come after 27.3c.
+
 ### 27.4 — Full E4_1 construction
 
 - [ ] **27.4a** Integrate polynomial ansatz and fraction-free conservation into `derive_cut_cell_scheme`
@@ -423,7 +443,11 @@ different purpose (proving infeasibility of constant weights).
     expressions; the polynomial boundary rows need c_*=0 substitution
     before conservation (add `floating = floating.xreplace({c: 0 for c in
     c_syms})` after the row loop, where c_syms are the residual polynomial
-    coefficients).  Runtime `psi_eps`/`std::clamp` guards remain necessary.
+    coefficients).  **Note:** `solve_temo_row_polynomial` does not
+    currently return the unsolved c_* symbols.  Collect them from the
+    matrix via `c_syms = [s for s in floating.free_symbols if
+    s.name.startswith('c_')]`, or modify `RowSolveResult` to carry them.
+    Runtime `psi_eps`/`std::clamp` guards remain necessary.
 
   - The non-zeros paths (E2_1, E2_2, generic conservative at lines 2314-2433)
     remain completely unchanged.
@@ -505,25 +529,29 @@ different purpose (proving infeasibility of constant weights).
        and `cp scripts/stencil_gen/output/E4_1.t.cpp src/stencils/E4_1.t.cpp`
     3. Verify the generated E4_1.cpp does NOT contain `std::clamp`, `psi_eps`,
        or `alpha[1] >= 197` guards.
-    4. Verify the generated E4_1.cpp contains polynomial expressions for rows
-       0-3 (no `1.0/psi` or `1.0/(psi - 1)` divisions) and rational
-       expressions for row 4 with a common denominator.
+    4. **27.3c chose approach (B):** All rows (0-4) will have rational
+       entries with ψ(ψ-1) denominators after alpha substitution from the
+       conservation solve. Verify the generated code compiles and passes
+       tests — do NOT expect polynomial rows 0-3. The Vandermonde-type
+       denominators from the old stencil will be replaced by
+       conservation-induced ψ(ψ-1) denominators from the alpha solutions.
   - **Concrete verification of the generated code:** Compare the current
     E4_1.cpp (323 lines) against the regenerated version:
     - Current code has `1.0 / (t40)` where `t40 = psi + 3` (line 137),
       `1.0 / (t32)` where `t32 = psi + 2` (line 129), `1/(alpha[1]*t13)`
       where `t13 = psi - 1` (line 110), and `t17 = t16/psi` (line 113).
       These are the Vandermonde-type and conservation-induced denominators.
-    - After regeneration, rows 0-3 should only use polynomial arithmetic
-      (`psi * ...`, `psi*psi * ...`, etc.) with no division by psi-dependent
-      expressions. Row 4 should have ONE common denominator (an 8th-degree
-      polynomial in ψ), not multiple separate denominators.
-    - The constructor should NOT have the `alpha[1] < 197.0 / 288.0` check.
-    - The `psi_eps` / `std::clamp` lines (current lines 98-99) should be absent.
+    - After regeneration, the denominator structure will change (polynomial
+      boundary rows eliminate Vandermonde denominators, but conservation
+      alpha substitution re-introduces ψ(ψ-1) factors). Expect divisions
+      by ψ-dependent expressions in ALL rows, not just row 4.
+    - The constructor should NOT have the `alpha[1] < 197.0 / 288.0` check
+      (codegen doesn't emit it — 27.5a re-adds it manually).
+    - The `psi_eps` / `std::clamp` lines should be absent from codegen
+      output (27.5a re-adds them manually).
   - **Note on codegen:** The `generate_stencil_cpp` function (in
     `scripts/stencil_gen/stencil_gen/codegen.py`) uses SymPy's `cse()` to
-    produce CSE temporaries. The polynomial structure should produce simpler
-    CSE trees (fewer divisions), so the generated code may be shorter.
+    produce CSE temporaries.
   - Build and test: `cmake --build build --target t-E4_1 && ctest --test-dir build -R t-E4_1`
   - Also run the full C++ test suite to check for regressions:
     `cmake --build build && ctest --test-dir build`
