@@ -14,9 +14,17 @@ struct E4_1 {
     static constexpr int T = 7;
     static constexpr int X = 0;
 
+    // Singularity constraints for the conservative E4_1 stencil:
+    //   - psi must be in the open interval (0, 1). Coefficients have poles at
+    //     psi=0 (nbs_floating, nbs_dirichlet divide by psi) and psi=1
+    //     (nbs_floating, nbs_dirichlet divide by (psi - 1)).
+    //   - alpha[1] must be nonzero (nbs_floating and nbs_dirichlet divide by
+    //     alpha[1]).
+    //   - The Dirichlet denominator 288*alpha[1] + 648*psi + 12*psi^3 +
+    //     90*psi^2 - 197 must be nonzero for the chosen alpha[1] and psi.
+    //
     // alpha[0]: boundary shape parameter (free)
-    // alpha[1]: quadrature weight parameter — MUST be nonzero (denominators
-    //           in nbs_floating and nbs_dirichlet divide by alpha[1])
+    // alpha[1]: quadrature weight parameter (must be nonzero, see above)
     std::array<real, 2> alpha;
 
     E4_1() = default;

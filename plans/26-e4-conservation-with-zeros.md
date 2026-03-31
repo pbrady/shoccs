@@ -378,12 +378,13 @@ With alpha_3=alpha_4=0, `sympy.solve()` produces a clean single-branch solution 
   - **Test:** Added a Catch2 `REQUIRE_THROWS_AS` section in `E4_1.t.cpp` testing both a single-element alpha span (zero-padded to alpha[1]=0) and an explicit `{0.1, 0.0}` span. Uses `stencils::make_E4_1` since the `E4_1` struct is not exposed in the header.
   - **Result:** 113 assertions pass (was 95). Build and `ctest -R t-E4_1` pass.
 
-- [ ] **26.6-followup-c** Add missing singularity comments to generated E4_1.cpp:
+- [x] **26.6-followup-c** Add missing singularity comments to generated E4_1.cpp:
   - **Problem:** Plan item 26.6a specifies: "The generated E4_1.cpp should include a comment that coefficients diverge at psi=0 and psi=1." This was not done — the generated file has no such comment.
   - **Fix:** Add a comment block to `E4_1.cpp` (either manually or via the codegen template) documenting:
     - Coefficients have poles at psi=0 and psi=1 (valid only for psi ∈ (0, 1))
     - alpha[1] must be nonzero
     - The denominator `288*alpha[1] + 648*psi + 12*psi³ + 90*psi² - 197` must also be nonzero
+  - **Done:** Added comprehensive comment block near the alpha declaration in `E4_1.cpp` documenting all three singularity constraints. Build and `ctest -R t-E4_1` pass (113 assertions).
 
 - [ ] **26.6-followup-d** Numerical robustness: tighten psi guard or add stencil-specific fallback:
   - **Problem:** The 26.6-followup-a fix clamps psi to `[snap_tol, 1.0 - snap_tol]` where `snap_tol = 1e-12`. This prevents literal division by zero but allows coefficient magnitudes of O(1/snap_tol) ≈ O(1e12), which is numerically catastrophic for any time integrator. The plan text (26.4c, 26.6a) recommended clamping to `[0.01, 0.99]` or falling back to the uniform stencil for near-full cells.
