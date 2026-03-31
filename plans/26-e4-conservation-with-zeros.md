@@ -428,21 +428,17 @@ With alpha_3=alpha_4=0, `sympy.solve()` produces a clean single-branch solution 
 
   **Pole inventory in E4_1.cpp:** `1/(psi-1)` (Floating line 104, Dirichlet line 228), `1/psi` (Floating line 108), `1/alpha[1]` (Floating line 105, Dirichlet line 226), `1/(288*alpha[1] + 648*psi + 12*psi³ + 90*psi² - 197)` (Floating line 145 and Dirichlet line 230).
 
-- [ ] **26.6-followup-d5a** Add stencil-level psi boundary clamp (eps=1e-4):
+- [x] **26.6-followup-d5a** Add stencil-level psi boundary clamp (eps=1e-4):
   - **Files:** `src/stencils/E4_1.cpp`, `src/stencils/E4_1.t.cpp`
-  - **E4_1.cpp changes:** In both `nbs_floating` and `nbs_dirichlet`, add at the top (before any computation):
+  - **E4_1.cpp changes:** In both `nbs_floating` and `nbs_dirichlet`, added at the top (before any computation):
     ```cpp
     constexpr real psi_eps = 1e-4;
     psi = std::clamp(psi, psi_eps, 1.0 - psi_eps);
     ```
     This ensures coefficients involving `1/psi` and `1/(psi-1)` remain O(1/psi_eps) = O(1e4), well within numerical stability.
-  - **E4_1.t.cpp changes:** Flip the three d3 "magnitude exceeds safe bound" SECTIONs from `REQUIRE(max_abs > 1e8)` to `REQUIRE(max_abs < 1e8)`:
-    - "Floating near psi=1: magnitude exceeds safe bound" → "Floating near psi=1: magnitude within safe bound"
-    - "Dirichlet near psi=1: magnitude exceeds safe bound" → "Dirichlet near psi=1: magnitude within safe bound"
-    - "Floating near psi=0: magnitude exceeds safe bound" → "Floating near psi=0: magnitude within safe bound"
-    Update comments to note the psi clamp is active. The d2 finiteness tests and d4 interior singularity test are unaffected (psi=0.3 is well within [1e-4, 1-1e-4]).
+  - **E4_1.t.cpp changes:** Flipped the three d3 "magnitude exceeds safe bound" SECTIONs to "magnitude within safe bound" with `REQUIRE(max_abs < 1e8)`. Updated comments to note the psi clamp is active.
   - **Main coefficient tests unaffected:** The psi values 0.9, 0.3, 0.7 are within [1e-4, 1-1e-4], so REQUIRE_THAT expected values don't change.
-  - **Test:** `cmake --build build --target t-E4_1 && ctest --test-dir build -R t-E4_1`
+  - **Test:** `cmake --build build --target t-E4_1 && ctest --test-dir build -R t-E4_1` ✓ (323 assertions, all pass)
 
 - [ ] **26.6-followup-d5b** Require alpha[1] >= 197/288 and regenerate C++ files:
   - **Why:** The polynomial denominator `D(psi) = 288*alpha[1] + 648*psi + 12*psi³ + 90*psi² - 197` has a real zero inside (0,1) whenever alpha[1] < 197/288 ≈ 0.684. Since D'(psi) = 36*psi² + 180*psi + 648 > 0 for all psi, D is strictly increasing. If D(0) = 288*alpha[1] - 197 ≥ 0 (i.e. alpha[1] ≥ 197/288), then D(psi) > 0 for all psi ∈ (0,1), eliminating the interior singularity.

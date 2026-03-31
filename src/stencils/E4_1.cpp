@@ -93,6 +93,9 @@ struct E4_1 {
     {
         c = c.subspan(0, R * T);
 
+        constexpr real psi_eps = 1e-4;
+        psi = std::clamp(psi, psi_eps, 1.0 - psi_eps);
+
         real t5 = 11*psi;
         real t6 = psi * psi * psi;
         real t7 = psi * psi;
@@ -205,6 +208,9 @@ struct E4_1 {
     nbs_dirichlet(real h, real psi, std::span<real> c, bool right) const
     {
         c = c.subspan(0, (R - 1) * T);
+
+        constexpr real psi_eps = 1e-4;
+        psi = std::clamp(psi, psi_eps, 1.0 - psi_eps);
 
         real t5 = 2*psi;
         real t6 = psi * psi * psi;

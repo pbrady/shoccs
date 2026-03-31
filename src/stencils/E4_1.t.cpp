@@ -224,12 +224,10 @@ TEST_CASE("E4_1")
         }
     }
 
-    SECTION("Floating near psi=1: magnitude exceeds safe bound")
+    SECTION("Floating near psi=1: magnitude within safe bound")
     {
-        // Documents that snap_tol=1e-12 produces coefficients of O(1/snap_tol),
-        // far exceeding the O(1)/h^2 expected for a second-derivative stencil.
-        // When 26.6-followup-d5 tightens psi clamping, flip this to:
-        //   REQUIRE(max_abs < 1e8);
+        // With psi_eps=1e-4 clamp in nbs_floating, coefficients remain O(1/psi_eps)
+        // = O(1e4), well within numerical stability.
         auto [p, r, t, x] = st.query(bcs::Floating);
         T c(r * t);
         T ex{};
@@ -239,12 +237,12 @@ TEST_CASE("E4_1")
         for (std::size_t i = 0; i < c.size(); ++i) {
             max_abs = std::max(max_abs, std::abs(c[i]));
         }
-        REQUIRE(max_abs > 1e8);
+        REQUIRE(max_abs < 1e8);
     }
 
-    SECTION("Dirichlet near psi=1: magnitude exceeds safe bound")
+    SECTION("Dirichlet near psi=1: magnitude within safe bound")
     {
-        // See Floating counterpart above for context.
+        // With psi_eps=1e-4 clamp in nbs_dirichlet, coefficients remain bounded.
         auto [p, r, t, x] = st.query(bcs::Dirichlet);
         T c(r * t);
         T ex{};
@@ -254,14 +252,12 @@ TEST_CASE("E4_1")
         for (std::size_t i = 0; i < c.size(); ++i) {
             max_abs = std::max(max_abs, std::abs(c[i]));
         }
-        REQUIRE(max_abs > 1e8);
+        REQUIRE(max_abs < 1e8);
     }
 
-    SECTION("Floating near psi=0: magnitude exceeds safe bound")
+    SECTION("Floating near psi=0: magnitude within safe bound")
     {
-        // Documents that snap_tol=1e-12 produces coefficients of O(1/snap_tol).
-        // When 26.6-followup-d5 tightens psi clamping, flip this to:
-        //   REQUIRE(max_abs < 1e8);
+        // With psi_eps=1e-4 clamp in nbs_floating, coefficients remain bounded.
         auto [p, r, t, x] = st.query(bcs::Floating);
         T c(r * t);
         T ex{};
@@ -271,7 +267,7 @@ TEST_CASE("E4_1")
         for (std::size_t i = 0; i < c.size(); ++i) {
             max_abs = std::max(max_abs, std::abs(c[i]));
         }
-        REQUIRE(max_abs > 1e8);
+        REQUIRE(max_abs < 1e8);
     }
 
     SECTION("Dirichlet near psi=0: magnitude within safe bound")
