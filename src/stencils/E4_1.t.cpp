@@ -4,6 +4,7 @@
 #include <catch2/catch_test_macros.hpp>
 #include <catch2/matchers/catch_matchers_vector.hpp>
 
+#include <cmath>
 #include <vector>
 
 #include <sol/sol.hpp>
@@ -172,5 +173,189 @@ TEST_CASE("E4_1")
                               -79.08612289288797,
                               0.0})
                          .margin(1.0e-8));
+    }
+
+    SECTION("Floating near psi=1 produces finite values")
+    {
+        auto [p, r, t, x] = st.query(bcs::Floating);
+        T c(r * t);
+        T ex{};
+
+        st.nbs(1.0, bcs::Floating, 1.0 - 1e-12, false, c, ex);
+        for (std::size_t i = 0; i < c.size(); ++i) {
+            REQUIRE(std::isfinite(c[i]));
+        }
+    }
+
+    SECTION("Dirichlet near psi=1 produces finite values")
+    {
+        auto [p, r, t, x] = st.query(bcs::Dirichlet);
+        T c(r * t);
+        T ex{};
+
+        st.nbs(1.0, bcs::Dirichlet, 1.0 - 1e-12, false, c, ex);
+        for (std::size_t i = 0; i < c.size(); ++i) {
+            REQUIRE(std::isfinite(c[i]));
+        }
+    }
+
+    SECTION("Floating near psi=snap_tol produces finite values")
+    {
+        auto [p, r, t, x] = st.query(bcs::Floating);
+        T c(r * t);
+        T ex{};
+
+        st.nbs(1.0, bcs::Floating, 1e-12, false, c, ex);
+        for (std::size_t i = 0; i < c.size(); ++i) {
+            REQUIRE(std::isfinite(c[i]));
+        }
+    }
+
+    SECTION("Dirichlet near psi=snap_tol produces finite values")
+    {
+        auto [p, r, t, x] = st.query(bcs::Dirichlet);
+        T c(r * t);
+        T ex{};
+
+        st.nbs(1.0, bcs::Dirichlet, 1e-12, false, c, ex);
+        for (std::size_t i = 0; i < c.size(); ++i) {
+            REQUIRE(std::isfinite(c[i]));
+        }
+    }
+
+    SECTION("Floating near psi=1: magnitude within safe bound")
+    {
+        auto [p, r, t, x] = st.query(bcs::Floating);
+        T c(r * t);
+        T ex{};
+
+        st.nbs(1.0, bcs::Floating, 1.0 - 1e-12, false, c, ex);
+        real max_abs = 0.0;
+        for (std::size_t i = 0; i < c.size(); ++i) {
+            max_abs = std::max(max_abs, std::abs(c[i]));
+        }
+        REQUIRE(max_abs < 1e8);
+    }
+
+    SECTION("Dirichlet near psi=1: magnitude within safe bound")
+    {
+        auto [p, r, t, x] = st.query(bcs::Dirichlet);
+        T c(r * t);
+        T ex{};
+
+        st.nbs(1.0, bcs::Dirichlet, 1.0 - 1e-12, false, c, ex);
+        real max_abs = 0.0;
+        for (std::size_t i = 0; i < c.size(); ++i) {
+            max_abs = std::max(max_abs, std::abs(c[i]));
+        }
+        REQUIRE(max_abs < 1e8);
+    }
+
+    SECTION("Floating near psi=0: magnitude within safe bound")
+    {
+        auto [p, r, t, x] = st.query(bcs::Floating);
+        T c(r * t);
+        T ex{};
+
+        st.nbs(1.0, bcs::Floating, 1e-12, false, c, ex);
+        real max_abs = 0.0;
+        for (std::size_t i = 0; i < c.size(); ++i) {
+            max_abs = std::max(max_abs, std::abs(c[i]));
+        }
+        REQUIRE(max_abs < 1e8);
+    }
+
+    SECTION("Dirichlet near psi=0: magnitude within safe bound")
+    {
+        auto [p, r, t, x] = st.query(bcs::Dirichlet);
+        T c(r * t);
+        T ex{};
+
+        st.nbs(1.0, bcs::Dirichlet, 1e-12, false, c, ex);
+        for (std::size_t i = 0; i < c.size(); ++i) {
+            REQUIRE(std::abs(c[i]) < 1e8);
+        }
+    }
+
+    SECTION("No interior polynomial denominator singularity with alpha[1] >= 197/288")
+    {
+        // The denominator D(psi) = 1728*alpha[1] + 1584*alpha[1]*psi +
+        //   864*alpha[1]*psi^2 + 144*alpha[1]*psi^3 + 12*psi^6 + 162*psi^5 +
+        //   1464*psi^4 + 5617*psi^3 + 8070*psi^2 + 1721*psi - 1182.
+        // With alpha[1]=0.7 >= 197/288 ~ 0.684, D(0) = 1728*0.7 - 1182 = 27.6 > 0.
+        // D'(psi) > 0 for all psi >= 0 and alpha[1] > 0, so D is strictly
+        // increasing; D(0) >= 0 ensures D(psi) > 0 for all psi in (0, 1).
+        constexpr real alpha1 = 0.7;
+        auto D = [](real psi) {
+            return 1728 * alpha1 + 1584 * alpha1 * psi +
+                   864 * alpha1 * psi * psi +
+                   144 * alpha1 * psi * psi * psi +
+                   12 * std::pow(psi, 6) + 162 * std::pow(psi, 5) +
+                   1464 * std::pow(psi, 4) + 5617 * psi * psi * psi +
+                   8070 * psi * psi + 1721 * psi - 1182;
+        };
+
+        // Verify D(psi) > 0 at several sample points across (0, 1)
+        for (real psi : {0.01, 0.1, 0.25, 0.5, 0.75, 0.9, 0.99}) {
+            REQUIRE(D(psi) > 0.0);
+        }
+
+        // Verify D(0) > 0 -- the critical condition
+        REQUIRE(D(0.0) > 0.0);
+
+        // Evaluate Floating stencil across the range -- all coefficients bounded
+        {
+            auto [p, r, t, x] = st.query(bcs::Floating);
+            T c(r * t);
+            T ex{};
+
+            for (real psi : {0.1, 0.3, 0.5, 0.7, 0.9}) {
+                st.nbs(1.0, bcs::Floating, psi, false, c, ex);
+                real max_abs = 0.0;
+                for (std::size_t i = 0; i < c.size(); ++i) {
+                    max_abs = std::max(max_abs, std::abs(c[i]));
+                }
+                REQUIRE(max_abs < 1e8);
+            }
+        }
+
+        // Evaluate Dirichlet stencil across the range -- all coefficients bounded
+        {
+            auto [p, r, t, x] = st.query(bcs::Dirichlet);
+            T c(r * t);
+            T ex{};
+
+            for (real psi : {0.1, 0.3, 0.5, 0.7, 0.9}) {
+                st.nbs(1.0, bcs::Dirichlet, psi, false, c, ex);
+                real max_abs = 0.0;
+                for (std::size_t i = 0; i < c.size(); ++i) {
+                    max_abs = std::max(max_abs, std::abs(c[i]));
+                }
+                REQUIRE(max_abs < 1e8);
+            }
+        }
+    }
+
+    SECTION("alpha[1] < 197/288 throws")
+    {
+        // Single alpha (zero-padded to alpha[1]=0) should throw
+        std::array<real, 1> short_alpha{0.1};
+        REQUIRE_THROWS_AS(stencils::make_E4_1(short_alpha), std::invalid_argument);
+
+        // Explicit alpha[1]=0 should throw
+        std::array<real, 2> zero_alpha{0.1, 0.0};
+        REQUIRE_THROWS_AS(stencils::make_E4_1(zero_alpha), std::invalid_argument);
+
+        // alpha[1] just below the bound should throw
+        std::array<real, 2> below_bound{0.1, 197.0 / 288.0 - 0.001};
+        REQUIRE_THROWS_AS(stencils::make_E4_1(below_bound), std::invalid_argument);
+
+        // alpha[1] at the bound should NOT throw
+        std::array<real, 2> at_bound{0.1, 197.0 / 288.0};
+        REQUIRE_NOTHROW(stencils::make_E4_1(at_bound));
+
+        // alpha[1]=0.7 (test default, above bound) should NOT throw
+        std::array<real, 2> above_bound{0.1, 0.7};
+        REQUIRE_NOTHROW(stencils::make_E4_1(above_bound));
     }
 }

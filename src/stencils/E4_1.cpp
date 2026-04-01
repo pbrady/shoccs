@@ -16,7 +16,7 @@ struct E4_1 {
 
     // Singularity constraints for the conservative E4_1 stencil:
     //   - psi must be in the open interval (0, 1). Coefficients have poles at
-    //     psi=0 (nbs_floating, nbs_dirichlet divide by psi) and psi=1
+    //     psi=0 (nbs_floating divides by psi) and psi=1
     //     (nbs_floating, nbs_dirichlet divide by (psi - 1)).
     //   - alpha[1] must be >= 197/288 ≈ 0.684 to avoid an interior singularity
     //     in the polynomial denominator 1728*alpha[1] + 1584*alpha[1]*psi +
