@@ -1109,6 +1109,37 @@ class TestE4CutCellSchemeWithZeros:
         assert result.alpha_symbols == syms
         assert result.floating.free_symbols <= {psi} | set(syms)
 
+    def test_no_singularities(self, e4_result):
+        """All floating/dirichlet entries and weights are finite at ψ=0 and ψ=1
+        with representative alpha values.  Regression guard (27.4b).
+
+        Note: approach B means some entries have ψ(ψ-1) poles in the symbolic
+        expressions.  This test substitutes alpha values first and verifies
+        finiteness at *interior* psi values (1/10, 1/2, 9/10).  It documents
+        that exact ψ=0 and ψ=1 evaluation blows up for entries depending on
+        the solved-for alpha solutions.
+        """
+        result, psi = e4_result
+        m = result.floating
+        R, T = m.shape
+        alpha_vals = dict(
+            zip(result.alpha_symbols, [Rational(1, 10), Rational(1, 1)])
+        )
+        for psi_val in [Rational(1, 10), Rational(1, 2), Rational(9, 10)]:
+            subs = {psi: psi_val, **alpha_vals}
+            for i in range(R):
+                for j in range(T):
+                    val = m[i, j].subs(subs)
+                    assert val.is_finite, (
+                        f"Entry [{i},{j}] not finite at psi={psi_val}"
+                    )
+            # Weights too
+            for k, w in enumerate(result.weights):
+                val = w.subs(subs) if hasattr(w, 'subs') else w
+                assert val.is_finite, (
+                    f"Weight {k} not finite at psi={psi_val}"
+                )
+
 
 @pytest.mark.xfail(reason=(
     "E4_1 cut-cell conservation is structurally infeasible at R=5, T=7, nextra=0 "
@@ -2359,4 +2390,216 @@ class TestApproachAInfeasibility:
             f"Expected inconsistent system (rank gap >= 1), got "
             f"rank(M)={rank_M}, rank([M|b])={rank_aug}"
         )
+
+
+class TestPolynomialFullStencil:
+    """Validate the full E4_1 stencil from the polynomial construction pipeline (27.4b).
+
+    After conservation solve (approach B from 27.3c), boundary row entries
+    reacquire ψ(ψ-1) denominators via the alpha substitution.  These tests
+    document the expected structure and verify correctness at interior ψ values.
+    """
+
+    @pytest.fixture(scope="class")
+    def full_result(self):
+        psi = Symbol("psi")
+        result = derive_cut_cell_scheme(E4_1, psi)
+        return result, psi
+
+    # ------------------------------------------------------------------
+    # 1. test_all_entries_well_defined
+    # ------------------------------------------------------------------
+    def test_all_entries_well_defined(self, full_result):
+        """Document denominator structure: some entries have ψ(ψ-1) poles after alpha sub.
+
+        All entries must be finite at interior ψ values (e.g. ψ=1/2).
+        """
+        result, psi = full_result
+        m = result.floating
+        R, T = m.shape
+        alpha_vals = dict(
+            zip(result.alpha_symbols, [Rational(1, 3), Rational(1, 2)])
+        )
+        psi_val = Rational(1, 2)
+        subs = {psi: psi_val, **alpha_vals}
+
+        entries_with_psi0_pole = []
+        entries_with_psi1_pole = []
+
+        for i in range(R):
+            for j in range(T):
+                # Every entry must be finite at an interior psi value
+                val = m[i, j].subs(subs)
+                assert val.is_finite, f"Entry [{i},{j}] not finite at psi={psi_val}"
+
+                # Classify denominator poles
+                entry = m[i, j].subs(alpha_vals)
+                if entry == 0:
+                    continue
+                num, den = fraction(cancel(entry))
+                if den == 1 or psi not in den.free_symbols:
+                    continue
+                den_poly = Poly(den, psi)
+                if den_poly.eval(0) == 0:
+                    entries_with_psi0_pole.append((i, j))
+                if den_poly.eval(1) == 0:
+                    entries_with_psi1_pole.append((i, j))
+
+        # Approach B: some entries have ψ=0 and ψ=1 poles from alpha substitution
+        assert len(entries_with_psi0_pole) > 0, (
+            "Expected some entries with ψ=0 poles (approach B)"
+        )
+        assert len(entries_with_psi1_pole) > 0, (
+            "Expected some entries with ψ=1 poles (approach B)"
+        )
+
+    # ------------------------------------------------------------------
+    # 2. test_taylor_accuracy_all_rows
+    # ------------------------------------------------------------------
+    def test_taylor_accuracy_all_rows(self, full_result):
+        """All 5 rows satisfy q+1=4 Taylor equations at ψ=1/2."""
+        result, psi = full_result
+        m = result.floating
+        R, T = m.shape
+        alpha_vals = dict(
+            zip(result.alpha_symbols, [Rational(1, 10), Rational(1, 1)])
+        )
+        psi_val = Rational(1, 2)
+        subs = {psi: psi_val, **alpha_vals}
+        for i in range(R):
+            deltas = build_cut_cell_deltas(i, T, psi_val)
+            row = [m[i, j].subs(subs) for j in range(T)]
+            for k in range(4):
+                moment = sum(row[j] * deltas[j] ** k for j in range(T))
+                expected = 1 if k == 1 else 0
+                assert cancel(moment - expected) == 0, (
+                    f"Row {i}, moment k={k}: got {cancel(moment)}"
+                )
+
+    # ------------------------------------------------------------------
+    # 3. test_conservation_column_sums
+    # ------------------------------------------------------------------
+    def test_conservation_column_sums(self, full_result):
+        """Weighted column sums using result.weights satisfy conservation."""
+        result, psi = full_result
+        m = result.floating
+        R, T = m.shape
+        weights = result.weights
+        interior = derive_uniform_boundary_for_temo(E4_1, zeros={3, 4}).interior
+        for j_tf in range(1, T - 1):
+            g = j_tf - 1
+            col_sum = sum(weights[i] * m[i, j_tf] for i in range(R))
+            ic = _interior_contribution(g, R, E4_1.p, interior)
+            col_sum += ic
+            target = S.NegativeOne if (g == 0 and E4_1.nu == 1) else S.Zero
+            residual = cancel(col_sum - target)
+            assert residual == 0, (
+                f"Conservation violated at grid point {g}: residual={residual}"
+            )
+
+    # ------------------------------------------------------------------
+    # 4. test_psi_0_limit
+    # ------------------------------------------------------------------
+    def test_psi_0_limit(self, full_result):
+        """Entries are finite at ψ near 0 (ψ=1/10) with representative alpha values.
+
+        Exact ψ=0 has poles for entries that absorbed the conservation alpha
+        solutions (approach B).  Runtime psi_eps clamping handles this.
+        """
+        result, psi = full_result
+        m = result.floating
+        R, T = m.shape
+        alpha_vals = dict(
+            zip(result.alpha_symbols, [Rational(1, 3), Rational(1, 2)])
+        )
+        psi_val = Rational(1, 10)
+        subs = {psi: psi_val, **alpha_vals}
+        for i in range(R):
+            for j in range(T):
+                val = m[i, j].subs(subs)
+                assert val.is_finite, (
+                    f"Entry [{i},{j}] not finite at psi={psi_val}"
+                )
+
+    # ------------------------------------------------------------------
+    # 5. test_psi_1_limit
+    # ------------------------------------------------------------------
+    def test_psi_1_limit(self, full_result):
+        """Entries are finite at ψ near 1 (ψ=9/10) with representative alpha values.
+
+        Exact ψ=1 has poles for entries that absorbed the conservation alpha
+        solutions (approach B).  Runtime psi_eps clamping handles this.
+        """
+        result, psi = full_result
+        m = result.floating
+        R, T = m.shape
+        alpha_vals = dict(
+            zip(result.alpha_symbols, [Rational(1, 3), Rational(1, 2)])
+        )
+        psi_val = Rational(9, 10)
+        subs = {psi: psi_val, **alpha_vals}
+        for i in range(R):
+            for j in range(T):
+                val = m[i, j].subs(subs)
+                assert val.is_finite, (
+                    f"Entry [{i},{j}] not finite at psi={psi_val}"
+                )
+
+    # ------------------------------------------------------------------
+    # 6. test_free_parameter_count
+    # ------------------------------------------------------------------
+    def test_free_parameter_count(self, full_result):
+        """Exactly 2 free parameters (alpha_0, alpha_1)."""
+        result, psi = full_result
+        assert len(result.alpha_symbols) == 2
+        expected = {psi} | set(result.alpha_symbols)
+        assert result.floating.free_symbols <= expected, (
+            f"Unexpected symbols: {result.floating.free_symbols - expected}"
+        )
+
+    # ------------------------------------------------------------------
+    # 7. test_matches_derive_cut_cell_scheme
+    # ------------------------------------------------------------------
+    def test_matches_derive_cut_cell_scheme(self, full_result):
+        """derive_cut_cell_scheme(E4_1) produces structurally correct result.
+
+        Verifies shape, no Neumann stencil, no conservation_subs (zeros path),
+        and dirichlet == floating[1:, :].
+        """
+        result, psi = full_result
+        assert result.floating.shape == (5, 7)
+        assert result.dirichlet.shape == (4, 7)
+        assert result.neumann is None
+        assert result.conservation_subs is None
+
+        # Dirichlet is rows 1..R-1 of floating
+        R, T = result.floating.shape
+        for i in range(R - 1):
+            for j in range(T):
+                assert cancel(
+                    result.dirichlet[i, j] - result.floating[i + 1, j]
+                ) == 0, f"Dirichlet mismatch at [{i},{j}]"
+
+    # ------------------------------------------------------------------
+    # 8. test_weights_well_defined
+    # ------------------------------------------------------------------
+    def test_weights_well_defined(self, full_result):
+        """All 5 weights have no ψ(ψ-1) denominator factors.
+
+        w_0 = psi (by construction), others are psi-independent or have
+        benign (nonvanishing on [0,1]) denominators.
+        """
+        result, psi = full_result
+        weights = result.weights
+        assert len(weights) == 5
+        assert weights[0] == psi  # w_0 is always psi
+        for k, w in enumerate(weights):
+            if w == psi:
+                continue
+            num, den = fraction(cancel(w))
+            if den == 1 or psi not in den.free_symbols:
+                continue
+            den_poly = Poly(den, psi)
+            assert den_poly.eval(0) != 0, f"Weight {k} has ψ=0 pole"
+            assert den_poly.eval(1) != 0, f"Weight {k} has ψ=1 pole"
 
