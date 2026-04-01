@@ -615,3 +615,50 @@ different purpose (proving infeasibility of constant weights).
   - Test: `cd scripts/stencil_gen && uv run pytest tests/test_temo.py -v -k "E2" --timeout=120`
   - Also verify C++ E2 tests: `ctest --test-dir build -R "t-E2"`
   - Must come after 27.4a (regression guard runs after code changes are applied).
+
+### 27.8 — Re-add guard tests to E4_1.t.cpp
+
+- [ ] **27.8a** Re-add singularity guard tests dropped by codegen regeneration
+  - **Context:** The 27.6a regeneration of `E4_1.t.cpp` from the codegen
+    pipeline replaced the entire test file, dropping 10 manually-added test
+    sections that validated the singularity guards re-added in 27.5a. The
+    codegen pipeline only generates numerical regression tests (3
+    REQUIRE_THAT blocks), not guard tests. The guards in `src/stencils/E4_1.cpp`
+    (`psi_eps`/`std::clamp`, `alpha[1] >= 197/288` constructor check) are
+    now untested. Without these tests, a future regeneration could silently
+    drop the guards.
+  - File: `src/stencils/E4_1.t.cpp` (manually append after the codegen-
+    produced tests, same pattern as before 27.6a)
+  - **Tests to re-add** (updated for the new denominator polynomial):
+    1. `Floating near psi=1 produces finite values`: call nbs(Floating,
+       psi=1-1e-12), assert all coefficients `std::isfinite`.
+    2. `Dirichlet near psi=1 produces finite values`: same for Dirichlet.
+    3. `Floating near psi=snap_tol produces finite values`: nbs(Floating,
+       psi=1e-12), assert `std::isfinite`.
+    4. `Dirichlet near psi=snap_tol produces finite values`: same for
+       Dirichlet.
+    5. `Floating near psi=1: magnitude within safe bound`: nbs(Floating,
+       psi=1-1e-12), assert `max |c_i| < 1e8`.
+    6. `Dirichlet near psi=1: magnitude within safe bound`: same for
+       Dirichlet.
+    7. `Floating near psi=0: magnitude within safe bound`: nbs(Floating,
+       psi=1e-12), assert `max |c_i| < 1e8`.
+    8. `Dirichlet near psi=0: magnitude within safe bound`: same for
+       Dirichlet.
+    9. `No interior polynomial denominator singularity with alpha[1] >= 197/288`:
+       Verify the NEW denominator D(psi) = 1728*alpha[1] + 1584*alpha[1]*psi
+       + 864*alpha[1]*psi^2 + 144*alpha[1]*psi^3 + 12*psi^6 + 162*psi^5
+       + 1464*psi^4 + 5617*psi^3 + 8070*psi^2 + 1721*psi - 1182 is
+       positive for alpha[1]=0.7 across psi in (0,1). Also evaluate both
+       Floating and Dirichlet stencils at several interior psi values and
+       assert bounded.
+    10. `alpha[1] < 197/288 throws`: Verify constructor throws
+        `std::invalid_argument` for alpha[1]=0, alpha[1]=197/288-0.001,
+        and single-element alpha span. Verify it does NOT throw at
+        alpha[1]=197/288 and alpha[1]=0.7.
+  - **Note:** `nbs_dirichlet` no longer divides by psi (only by alpha[1],
+    (psi-1), and the degree-6 denominator polynomial). The comment at
+    line 19 of E4_1.cpp ("nbs_dirichlet divide by psi") is inaccurate
+    for the regenerated code. Update the comment when adding tests.
+  - Test: `cmake --build build --target t-E4_1 && ctest --test-dir build -R t-E4_1`
+  - Must come after 27.5a (guards must be in place before testing them).
