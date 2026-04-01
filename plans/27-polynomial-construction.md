@@ -513,7 +513,7 @@ different purpose (proving infeasibility of constant weights).
 
 ### 27.5 — Remove clamping and singularity guards
 
-- [ ] **27.5a** Verify ψ-clamping and alpha guards in regenerated E4_1.cpp
+- [x] **27.5a** Verify ψ-clamping and alpha guards in regenerated E4_1.cpp
   - **This is a post-27.6a verification step**, not a manual edit.
   - **27.3c chose approach (B):** The regenerated E4_1.cpp will STILL need
     `psi_eps`/`std::clamp` guards because ψ(ψ-1) denominators persist.
@@ -527,12 +527,28 @@ different purpose (proving infeasibility of constant weights).
     does NOT hardcode any guards — the `psi_eps`/`std::clamp` and `alpha[1]`
     check in the current E4_1.cpp were added manually after code generation.
     After regeneration, these must be re-added manually.
+  - **Implementation (completed):**
+    - Confirmed the new denominator polynomial `D(psi) = 1728*alpha[1] +
+      1584*alpha[1]*psi + 864*alpha[1]*psi^2 + 144*alpha[1]*psi^3 +
+      12*psi^6 + 162*psi^5 + 1464*psi^4 + 5617*psi^3 + 8070*psi^2 +
+      1721*psi - 1182` has exactly the same constraint: `D(0) = 1728*alpha[1]
+      - 1182 >= 0` ⟹ `alpha[1] >= 197/288 ≈ 0.684`. D'(psi) > 0 for all
+      psi >= 0 and alpha[1] > 0, so D is strictly increasing and the
+      alpha[1] >= 197/288 bound suffices.
+    - Re-added to `src/stencils/E4_1.cpp`:
+      - `#include <stdexcept>`
+      - Singularity comment block documenting the new denominator polynomial
+      - Constructor check: `alpha[1] < 197.0 / 288.0` → `std::invalid_argument`
+      - `constexpr real psi_eps = 1e-4; psi = std::clamp(psi, psi_eps, 1.0 - psi_eps);`
+        in both `nbs_floating` and `nbs_dirichlet`
+    - All 16 assertions in `t-E4_1` pass. No regressions in simulation-level
+      tests (t-heat, t-scalar_wave, t-simulation_cycle all pass).
   - Test: `cmake --build build --target t-E4_1 && ctest --test-dir build -R t-E4_1`
   - Must come after 27.6a (regeneration produces the new file first).
 
 ### 27.6 — Regenerate E4_1 C++ and verify
 
-- [ ] **27.6a** Regenerate E4_1.cpp and E4_1.t.cpp from the polynomial construction
+- [x] **27.6a** Regenerate E4_1.cpp and E4_1.t.cpp from the polynomial construction
   - The codegen pipeline writes to `scripts/stencil_gen/output/E4_1.cpp` and
     `scripts/stencil_gen/output/E4_1.t.cpp` via the test suite (see
     `TestE4CodeGeneration.test_write_output` at line 658 and
@@ -570,14 +586,32 @@ different purpose (proving infeasibility of constant weights).
   - Build and test: `cmake --build build --target t-E4_1 && ctest --test-dir build -R t-E4_1`
   - Also run the full C++ test suite to check for regressions:
     `cmake --build build && ctest --test-dir build`
+  - **Implementation (completed):**
+    - Regenerated output via codegen tests (2 passed).
+    - Copied `scripts/stencil_gen/output/E4_1.{cpp,t.cpp}` to `src/stencils/`.
+    - Verified generated code has NO `std::clamp`, `psi_eps`, or `alpha[1]`
+      guards (as expected — codegen doesn't emit them).
+    - Confirmed new denominator structure: `1.0 / (alpha[1])`, `1.0 / (psi - 1)`,
+      `1.0 / (psi)`, and `1.0 / (1728*alpha[1] + ...)` — Vandermonde-type
+      denominators (`psi+1`, `psi+2`, `psi+3`) are ELIMINATED by the polynomial
+      ansatz. Conservation-induced ψ(ψ-1) denominators remain (approach B).
+    - `t-E4_1`: all 16 assertions pass.
+    - Full C++ suite: 42/45 pass. 3 pre-existing failures (t-csr: Kokkos
+      init, t-E2_1: float precision, t-laplacian: E2 Floating Objects)
+      confirmed by running on pristine main branch — NOT caused by E4_1 changes.
   - Must come after 27.4b (polynomial construction is verified).
 
 ### 27.7 — E2_1 regression
 
-- [ ] **27.7a** Verify E2_1 is unaffected (it already works correctly):
+- [x] **27.7a** Verify E2_1 is unaffected (it already works correctly):
   - The polynomial construction changes only affect the `zeros` path in
     `derive_cut_cell_scheme`. E2_1 uses `nextra=1` with no zeros, so it
     takes the conservation path which is unchanged.
+  - **Implementation (completed):**
+    - Python: all 96 E2 tests pass (`uv run pytest tests/test_temo.py -v -k "E2"`).
+    - C++: `t-E2_1` has a pre-existing float precision failure (1e-16 diff)
+      that exists on main before any changes. `t-E2_2` passes. Confirmed
+      not caused by E4_1 polynomial construction changes.
   - Test: `cd scripts/stencil_gen && uv run pytest tests/test_temo.py -v -k "E2" --timeout=120`
   - Also verify C++ E2 tests: `ctest --test-dir build -R "t-E2"`
   - Must come after 27.4a (regression guard runs after code changes are applied).
