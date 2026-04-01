@@ -1017,6 +1017,691 @@ def _zeroed_col_for_row(i: int, nu: int) -> int:
         raise ValueError(f"Unsupported nu={nu}")
 
 
+# ---------------------------------------------------------------------------
+# Zero pattern variants — matching Mathematica zIndex
+# ---------------------------------------------------------------------------
+
+
+def zeroed_col_default(i: int, r: int, nu: int) -> int:
+    """Mathematica default zIndex: x_0 for early rows, wall for later rows.
+
+    For nu=1 (1st derivative):
+        Rows 0,1 → col 1 (x_0)
+        Rows 2+ → col 0 (wall)
+    For nu=2 (2nd derivative):
+        Row 0 → col 0 (wall)
+        Rows 1+ → col 1 (x_0)
+    """
+    if nu == 1:
+        return 1 if i < 2 else 0
+    elif nu == 2:
+        return 0 if i == 0 else 1
+    else:
+        raise ValueError(f"Unsupported nu={nu}")
+
+
+def zeroed_col_aza(i: int, r: int, nu: int) -> int:
+    """Mathematica 'aza' zIndex: alternating zero pattern.
+
+    For nu=1:
+        Rows 0,2 → col 1 (x_0)
+        Rows 1,3,4,... → col 0 (wall)
+    """
+    if nu == 1:
+        return 1 if (i == 0 or i == 2) else 0
+    elif nu == 2:
+        return 0 if i == 0 else 1
+    else:
+        raise ValueError(f"Unsupported nu={nu}")
+
+
+# ---------------------------------------------------------------------------
+# Mathematica-aligned workflow: uniform conservation + base scheme
+# ---------------------------------------------------------------------------
+
+
+def solve_uniform_conservation_direct(
+    B_u: Matrix,
+    interior_coeffs: list,
+    p: int,
+) -> tuple[dict, list]:
+    """Solve uniform conservation for weights + last-row free params.
+
+    Matches the Mathematica workflow: ``conservationCutCell[e4u, w]`` followed
+    by ``Solve[..., {w[1..r], gamma[r,t-1], gamma[r,t]}]``.
+
+    The uniform stencil at TEMO dimensions has conservation equations that
+    couple quadrature weights with last-row free parameters.  This function
+    solves them simultaneously, expressing all unknowns as functions of the
+    alpha symbols from rows 0..r-2.
+
+    Parameters
+    ----------
+    B_u : Matrix
+        r x t uniform boundary matrix.  Last row may contain free symbols
+        (phi/alpha) that are not in earlier rows.
+    interior_coeffs : list
+        The 2p+1 interior stencil coefficients.
+    p : int
+        Interior half-width.
+
+    Returns
+    -------
+    (solution_dict, weight_expressions)
+        solution_dict : maps each w_i and last-row-free symbol to f(alpha).
+        weight_expressions : ordered list [w_0, ..., w_{r-1}].
+    """
+    r = B_u.rows
+    t = B_u.cols
+
+    # Identify alpha symbols that appear ONLY in the last row (last-row free params)
+    all_syms = B_u.free_symbols
+    early_syms = set()
+    for i in range(r - 1):
+        for j in range(t):
+            early_syms |= B_u[i, j].free_symbols
+    last_row_free = sorted(all_syms - early_syms, key=lambda s: s.name)
+
+    # Weight symbols
+    w_syms = list(_symbols(f"w_0:{r}"))
+
+    # Build conservation equations matching Mathematica conservationCutCell.
+    #
+    # The Mathematica conservationCutCell[scheme, w] builds:
+    #   eq[0]: B_u[0,0]*w_0 + 1 = 0  (simplified first-column equation)
+    #   eq[1..t-1]: full column sums for columns 1..t-1
+    #
+    # The first equation determines w_0 solely from B_u[0,0], matching the
+    # cut-cell convention where only the wall row contributes to column 0.
+    equations = []
+
+    # Equation 0: B_u[0,0]*w_0 + 1 = 0
+    equations.append(expand(B_u[0, 0] * w_syms[0] + 1))
+
+    # Equations 1..t-1: full column sums = 0
+    for j in range(1, t):
+        col_sum = S.Zero
+        for i_row in range(r):
+            col_sum += w_syms[i_row] * B_u[i_row, j]
+
+        # Interior contribution
+        ic = _interior_contribution(j, r, p, interior_coeffs)
+        col_sum += ic
+        equations.append(expand(col_sum))
+
+    # Solve for all weights + last-row free params
+    solve_for = list(w_syms) + list(last_row_free)
+
+    # The system may contain bilinear terms (w_{r-1} * phi_k).
+    # Use the linearization trick: theta_k = w_{r-1} * phi_k.
+    if last_row_free:
+        w_last = w_syms[r - 1]
+        theta_syms = list(_symbols(f"_theta_0:{len(last_row_free)}"))
+        sub_dict = {
+            w_last * phi: theta
+            for phi, theta in zip(last_row_free, theta_syms)
+        }
+        lin_eqs = [expand(eq).subs(sub_dict) for eq in equations]
+        lin_unknowns = list(w_syms) + theta_syms
+
+        from sympy import linear_eq_to_matrix, linsolve
+
+        A, b = linear_eq_to_matrix(lin_eqs, lin_unknowns)
+        sol_set = linsolve((A, b), *lin_unknowns)
+        sol_tuple = list(sol_set)[0]
+        lin_sol = {sym: cancel(val) for sym, val in zip(lin_unknowns, sol_tuple)}
+
+        # Recover phi_k = theta_k / w_{r-1}
+        w_last_val = lin_sol[w_last]
+        solution_dict: dict = {}
+        for w in w_syms:
+            solution_dict[w] = lin_sol[w]
+        for phi, theta in zip(last_row_free, theta_syms):
+            solution_dict[phi] = cancel(lin_sol[theta] / w_last_val)
+    else:
+        from sympy import linear_eq_to_matrix, linsolve
+
+        A, b = linear_eq_to_matrix(equations, w_syms)
+        sol_set = linsolve((A, b), *w_syms)
+        sol_tuple = list(sol_set)[0]
+        solution_dict = {sym: cancel(val) for sym, val in zip(w_syms, sol_tuple)}
+
+    weight_exprs = [solution_dict[w] for w in w_syms]
+    return solution_dict, weight_exprs
+
+
+def build_base_scheme(
+    B_u: Matrix,
+    conservation_solution: dict,
+    interior_coeffs: list,
+    p: int,
+) -> Matrix:
+    """Build the (r+1) x t base scheme by applying conservation and appending interior.
+
+    Matches ``appendInterior[addConstraint[e4u[l], baseSol], 2]`` from the
+    Mathematica notebook.
+
+    Parameters
+    ----------
+    B_u : Matrix
+        r x t uniform boundary matrix (may contain free symbols).
+    conservation_solution : dict
+        Solution from ``solve_uniform_conservation_direct`` mapping
+        w_i and last-row phi symbols to expressions in alpha.
+    interior_coeffs : list
+        The 2p+1 interior stencil coefficients.
+    p : int
+        Interior half-width.
+
+    Returns
+    -------
+    Matrix
+        (r+1) x t matrix with conservation-constrained boundary rows
+        and interior stencil as the last row.
+    """
+    r = B_u.rows
+    t = B_u.cols
+
+    # Apply conservation solution to B_u (substitute phi solutions)
+    B_u_conserved = B_u.applyfunc(lambda e: cancel(e.xreplace(conservation_solution)))
+
+    # Build interior row: embed interior stencil centred at position r
+    # within the t-column frame.
+    # Interior stencil is centred at grid point r with half-width p,
+    # covering grid points r-p..r+p, which are columns r-p..r+p.
+    interior_row = [S.Zero] * t
+    for k, coeff in enumerate(interior_coeffs):
+        col = r - p + k  # grid point index = column index in uniform frame
+        if 0 <= col < t:
+            interior_row[col] = coeff
+
+    # Assemble
+    rows = []
+    for i in range(r):
+        rows.append([B_u_conserved[i, j] for j in range(t)])
+    rows.append(interior_row)
+
+    return Matrix(rows)
+
+
+def construct_cut_cell_with_free_gammas(
+    base_scheme: Matrix,
+    B_u: Matrix,
+    interior_coeffs: list,
+    p: int,
+    q: int,
+    nu: int,
+    nextra: int,
+    psi: Symbol,
+    zero_pattern=None,
+) -> StencilResult:
+    """Construct cut-cell stencil with free gamma symbols for extra columns.
+
+    Matches the Mathematica ``cutCellFromUniform`` function: only the zeroed
+    column is prescribed (as psi * uniform_value); extra columns beyond the
+    Taylor-determined set are left as free gamma symbols.
+
+    Parameters
+    ----------
+    base_scheme : Matrix
+        (r+1) x t base scheme from ``build_base_scheme``.
+    B_u : Matrix
+        r x t uniform boundary (for Category A prescription).
+    interior_coeffs : list
+        The 2p+1 interior stencil coefficients.
+    p : int
+        Interior half-width.
+    q : int
+        Boundary accuracy order.
+    nu : int
+        Derivative order.
+    nextra : int
+        Extra rows/columns.
+    psi : Symbol
+        The psi symbol.
+    zero_pattern : callable, optional
+        ``zero_pattern(i, r, nu) -> int`` returning the zeroed column index.
+        Defaults to ``zeroed_col_default``.
+
+    Returns
+    -------
+    StencilResult
+        With matrix, beta_info (row, col, symbol), beta_symbols.
+    """
+    if zero_pattern is None:
+        zero_pattern = zeroed_col_default
+
+    r = B_u.rows
+    t = B_u.cols
+    R = r + 1
+    T = t + 1
+    n_eqs = max(q + 1, nu + 1)
+
+    K, _ = make_psi_field(psi)
+
+    alpha_syms = sorted(B_u.free_symbols, key=lambda s: s.name)
+
+    all_beta_info: list[tuple[int, int, Symbol]] = []
+    all_beta_symbols: list[Symbol] = []
+    rows: list[list] = []
+
+    for i in range(R):
+        V, rhs_vec = build_temo_vandermonde(i, T, q, nu, psi)
+
+        # Prescribe ONLY the zeroed column
+        zeroed = zero_pattern(i, r, nu)
+        prescribed: dict = {}
+
+        if zeroed == 1:
+            # Zeroing x_0 (col 1 in cut-cell).
+            # Use B_u[i, 0] for boundary rows (polynomial in alpha + phi).
+            # Use base_scheme for the near-interior row.
+            if i < r:
+                prescribed[1] = psi * B_u[i, 0]
+            else:
+                prescribed[1] = psi * base_scheme[i, 0]
+        elif zeroed == 0:
+            # Zeroing wall (col 0 in cut-cell).
+            if i < r:
+                prescribed[0] = psi * B_u[i, 0]
+            else:
+                prescribed[0] = psi * base_scheme[i, 0]
+
+        # All non-psi symbols from B_u (includes alphas and phis)
+        row_symbols = sorted(
+            B_u.free_symbols | set(alpha_syms), key=lambda s: s.name
+        )
+
+        result = solve_temo_row(
+            i, V, rhs_vec, prescribed, psi, K, row_symbols,
+            beta_prefix="gamma",
+        )
+        rows.append(result.coeffs)
+        for col, sym in result.beta_info:
+            all_beta_info.append((i, col, sym))
+            all_beta_symbols.append(sym)
+
+    matrix = Matrix(rows)
+    return StencilResult(
+        matrix=matrix, beta_info=all_beta_info, beta_symbols=all_beta_symbols
+    )
+
+
+def _safe_get(M: Matrix, i: int, j: int) -> Expr:
+    """Get M[i,j] if in bounds, else return 0 (applyOrZero semantics)."""
+    if 0 <= i < M.rows and 0 <= j < M.cols:
+        return M[i, j]
+    return S.Zero
+
+
+def blend_free_gammas(
+    B_l: Matrix,
+    base_scheme: Matrix,
+    free_gamma_info: list[tuple[int, int, Symbol]],
+    conservation_sol: dict,
+    psi: Symbol,
+) -> Matrix:
+    """Replace free gamma symbols with blended uniform values.
+
+    Matches the Mathematica ``blendFreeSkip`` function. For each remaining
+    free gamma at cut-cell position (row i, col j_cc):
+
+    For boundary rows (0-indexed):
+        Row 0: gamma = psi * base[0, base_col] + (1-psi) * base[0, base_col-1]
+        Rows 1..r-1: gamma = psi * base[i, base_col] + (1-psi) * base[i-1, base_col-1]
+
+    where base_col = j_cc - 1 (cut-cell to base-scheme column mapping).
+
+    If the neighbor index is out of bounds, the (1-psi) term contributes 0
+    (matching Mathematica ``applyOrZero`` semantics).
+
+    Parameters
+    ----------
+    B_l : Matrix
+        R x T cut-cell stencil (may contain free gamma symbols and conservation-
+        solved expressions).
+    base_scheme : Matrix
+        (r+1) x t base scheme from ``build_base_scheme``.
+    free_gamma_info : list of (row, col, symbol)
+        Free gamma symbols from ``construct_cut_cell_with_free_gammas``.
+    conservation_sol : dict
+        Conservation solution mapping solved symbols to expressions.
+    psi : Symbol
+        The psi symbol.
+
+    Returns
+    -------
+    Matrix
+        B_l with all free gammas replaced by blend formulas.
+    """
+    R = B_l.rows
+    r = R - 1  # number of uniform boundary rows
+
+    # First, apply the conservation solution
+    result = B_l.applyfunc(lambda e: e.xreplace(conservation_sol))
+
+    # Identify which gammas were NOT solved by conservation (i.e., still free)
+    solved_syms = set(conservation_sol.keys())
+    remaining_gammas = [
+        (row, col, sym) for row, col, sym in free_gamma_info
+        if sym not in solved_syms
+    ]
+
+    # Build blend substitutions
+    blend_subs: dict = {}
+    for row_i, col_cc, sym in remaining_gammas:
+        base_col = col_cc - 1  # cut-cell col → base scheme col
+
+        if base_col < 0:
+            # Wall column (col 0 in cut-cell) → no blend
+            continue
+
+        # Blend formula depends on row
+        psi_term = psi * _safe_get(base_scheme, row_i, base_col)
+
+        if row_i == 0:
+            # Mathematica row-1 special case: blend within same row
+            one_minus_psi_term = (1 - psi) * _safe_get(
+                base_scheme, 0, base_col - 1
+            )
+        elif row_i < r:
+            # General boundary row: blend down
+            one_minus_psi_term = (1 - psi) * _safe_get(
+                base_scheme, row_i - 1, base_col - 1
+            )
+        else:
+            # Near-interior row: blend UP (i+1, j+1)
+            # This case shouldn't normally be reached because near-interior
+            # gammas are solved by conservation, but handle it for safety.
+            one_minus_psi_term = (1 - psi) * _safe_get(
+                base_scheme, row_i + 1, base_col + 1
+            )
+
+        blend_subs[sym] = psi_term + one_minus_psi_term
+
+    result = result.applyfunc(lambda e: cancel(e.xreplace(blend_subs)))
+    return result
+
+
+def build_uniform_for_mathematica(
+    scheme: SchemeParams,
+    alpha_symbols: list[Symbol] | None = None,
+) -> "UniformResult":
+    """Build uniform boundary with the Mathematica alpha distribution.
+
+    The Mathematica convention for E4_1 is:
+    - Rows 0,1: 1 active alpha, 1 zero per row
+    - Row 2 (penultimate): 2 active alphas (both free columns active)
+    - Row 3 (last): 2 free symbols (phi) for conservation to solve
+
+    This differs from ``derive_uniform_boundary_for_temo`` which puts 1 alpha
+    per early row and 2 on the LAST row.
+
+    Parameters
+    ----------
+    scheme : SchemeParams
+        Scheme parameters.
+    alpha_symbols : list of Symbol, optional
+        Free alpha symbols.  Count should match: (r-2)*1 + n_free_per_row
+        for the Mathematica convention.
+    """
+    from stencil_gen.interior import derive_interior, full_gamma_array
+
+    p, q, s, nextra, nu = scheme.p, scheme.q, scheme.s, scheme.nextra, scheme.nu
+    dims = compute_dimensions(p, q, s, nextra, nu)
+    t = dims.t
+    r_eff = dims.r if nu == 1 else dims.r - 1
+    n_eqs = max(q + 1, nu + 1)
+    n_free_per_row = t - n_eqs
+
+    if n_free_per_row <= 0:
+        raise ValueError("Mathematica workflow requires n_free_per_row > 0")
+
+    # Mathematica alpha distribution:
+    # - Rows 0..r-3: 1 active alpha each, rest zero (like Table 1 zeros)
+    # - Row r-2 (penultimate): all n_free_per_row active
+    # - Row r-1 (last): phi placeholders for conservation
+    n_alpha = (r_eff - 2) * 1 + n_free_per_row
+
+    if alpha_symbols is None:
+        alpha_symbols = [Symbol(f"alpha_{k}") for k in range(n_alpha)]
+    if len(alpha_symbols) != n_alpha:
+        raise ValueError(
+            f"Mathematica workflow requires {n_alpha} alpha symbols, got {len(alpha_symbols)}"
+        )
+
+    phi_syms = [Symbol(f"_phi_{k}") for k in range(n_free_per_row)]
+
+    # Build free symbol lists per row
+    free_per_row: list[list] = []
+    alpha_idx = 0
+
+    for i in range(r_eff - 2):
+        # Early rows: 1 active alpha, rest zero
+        free = [alpha_symbols[alpha_idx]] + [S.Zero] * (n_free_per_row - 1)
+        alpha_idx += 1
+        free_per_row.append(free)
+
+    # Penultimate row: all n_free_per_row active
+    penultimate_free = [alpha_symbols[alpha_idx + k] for k in range(n_free_per_row)]
+    alpha_idx += n_free_per_row
+    free_per_row.append(penultimate_free)
+
+    # Last row: phi placeholders
+    free_per_row.append(list(phi_syms))
+
+    # Solve each row's Taylor system
+    rows: list[list] = []
+    for i in range(r_eff):
+        V, rhs = _build_uniform_vandermonde(i, t, n_eqs, nu)
+        free = free_per_row[i]
+        n_free = len(free)
+        n_det = t - n_free
+
+        V_det = V[:, :n_det]
+        V_free = V[:, n_det:]
+
+        if n_free > 0:
+            alpha_vec = Matrix(free)
+            rhs_adj = rhs - V_free * alpha_vec
+        else:
+            rhs_adj = rhs
+
+        gamma_det = V_det.solve(rhs_adj)
+        row_coeffs = [cancel(gamma_det[k]) for k in range(n_det)] + list(free)
+        rows.append(row_coeffs)
+
+    B_u = Matrix(rows)
+
+    # Interior coefficients
+    interior_result = derive_interior(s, p, nu)
+    interior = full_gamma_array(interior_result)
+
+    return UniformResult(
+        B_u=B_u,
+        interior=interior,
+        alpha_symbols=list(alpha_symbols),
+        p=p,
+        q=q,
+        nu=nu,
+    )
+
+
+def derive_cut_cell_mathematica(
+    scheme: SchemeParams,
+    psi: Symbol,
+    alpha_symbols: list[Symbol] | None = None,
+    zero_pattern=None,
+) -> "CutCellResult":
+    """Generate cut-cell stencil using the Mathematica workflow.
+
+    This workflow keeps alpha as free constants throughout, avoiding the
+    psi*(psi-1) singularities produced by the old approach.  It matches
+    the procedure in ``explicitr-E4d1.nb``:
+
+    1. Uniform boundary with zeros
+    2. Uniform conservation → weights + last-row params as f(alpha)
+    3. Base scheme = conservation-constrained uniform + interior
+    4. Cut-cell construction with free gammas (only zeroed col prescribed)
+    5. Cut-cell conservation → weights + near-interior gammas
+    6. Weight constraint: w_1 = psi * uniform_w_1
+    7. Blend remaining free gammas
+    8. Assembly
+
+    Parameters
+    ----------
+    scheme : SchemeParams
+        Scheme parameters (must have ``zeros`` set).
+    psi : Symbol
+        The psi symbol.
+    alpha_symbols : list of Symbol, optional
+        Free alpha symbols to use.
+    zero_pattern : callable, optional
+        ``zero_pattern(i, r, nu) -> int``.  Defaults to ``zeroed_col_default``.
+
+    Returns
+    -------
+    CutCellResult
+    """
+    if zero_pattern is None:
+        zero_pattern = zeroed_col_default
+
+    p, q, nu = scheme.p, scheme.q, scheme.nu
+    dims = scheme.dims()
+    t = dims.t
+
+    # Step 0: Uniform boundary with Mathematica alpha distribution
+    uniform = build_uniform_for_mathematica(scheme, alpha_symbols)
+    B_u = uniform.B_u
+    interior = uniform.interior
+    r = B_u.rows
+    R = r + 1
+    T = t + 1
+
+    # Step 1: Uniform conservation (direct solve for weights + last-row phis)
+    conservation_sol, uniform_weights = solve_uniform_conservation_direct(
+        B_u, interior, p
+    )
+
+    # Step 2: Build base scheme (conservation-constrained uniform + interior)
+    base_scheme = build_base_scheme(B_u, conservation_sol, interior, p)
+
+    # Step 3: Cut-cell with free gammas (only zeroed col prescribed)
+    stencil = construct_cut_cell_with_free_gammas(
+        base_scheme, B_u, interior, p, q, nu, scheme.nextra, psi,
+        zero_pattern=zero_pattern,
+    )
+    B_l = stencil.matrix
+    free_gamma_info = stencil.beta_info
+
+    # Step 3b: Substitute uniform conservation solution (phi → f(alpha))
+    # into B_l, so the cut-cell entries are in terms of alpha + gamma only.
+    B_l = B_l.applyfunc(lambda e: expand(e.xreplace(conservation_sol)))
+
+    # Step 4: Blend boundary-row free gammas FIRST.
+    # This reduces the parameter count from 13 (4 alphas + 8 gammas + psi)
+    # to 5 (4 alphas + psi), making the conservation solve tractable.
+    # Mathematically equivalent to the Mathematica's blend-after-conservation
+    # since conservation is linear in the unknowns.
+    near_int_gammas = [sym for (row, col, sym) in free_gamma_info if row == R - 1]
+    boundary_gammas = [
+        (row, col, sym) for row, col, sym in free_gamma_info if row < R - 1
+    ]
+
+    # Build blend substitutions for boundary-row gammas only
+    blend_subs: dict = {}
+    for row_i, col_cc, sym in boundary_gammas:
+        base_col = col_cc - 1  # cut-cell col → base scheme col
+        if base_col < 0:
+            continue
+        psi_term = psi * _safe_get(base_scheme, row_i, base_col)
+        if row_i == 0:
+            one_minus_psi_term = (1 - psi) * _safe_get(base_scheme, 0, base_col - 1)
+        else:
+            one_minus_psi_term = (1 - psi) * _safe_get(base_scheme, row_i - 1, base_col - 1)
+        blend_subs[sym] = psi_term + one_minus_psi_term
+
+    B_l_blended = B_l.applyfunc(lambda e: expand(e.xreplace(blend_subs)))
+
+    # Step 5: Cut-cell conservation on the blended stencil.
+    # Now entries only depend on (psi, alpha_0..alpha_3, gamma_near_int).
+    from sympy import linear_eq_to_matrix, linsolve
+
+    w_syms = list(_symbols(f"w_1:{R + 1}"))  # w_1..w_R (all R weights)
+
+    cc_equations = []
+    # Eq 0: B_l[0,0]*w_1 + 1 = 0 (special first equation)
+    cc_equations.append(expand(B_l_blended[0, 0] * w_syms[0] + 1))
+    # Eqs 1..T-1: full column sums for T-frame columns 1..T-1
+    for j_tf in range(1, T):
+        col_sum = S.Zero
+        for i in range(R):
+            col_sum += w_syms[i] * B_l_blended[i, j_tf]
+        ic = _interior_contribution(j_tf - 1, R, p, interior)
+        col_sum += ic
+        cc_equations.append(expand(col_sum))
+
+    # Linearize bilinear terms: w_R * gamma_near_int → theta
+    if near_int_gammas:
+        w_last = w_syms[-1]
+        theta_syms = list(_symbols(f"_cc_theta_0:{len(near_int_gammas)}"))
+        lin_sub = {
+            w_last * g: theta
+            for g, theta in zip(near_int_gammas, theta_syms)
+        }
+        lin_eqs = [expand(eq).subs(lin_sub) for eq in cc_equations]
+        lin_unknowns = list(w_syms) + theta_syms
+        A, b = linear_eq_to_matrix(lin_eqs, lin_unknowns)
+        sol_set = linsolve((A, b), *lin_unknowns)
+        sol_tuple = list(sol_set)[0]
+        lin_sol = {sym: cancel(val) for sym, val in zip(lin_unknowns, sol_tuple)}
+
+        w_last_val = lin_sol[w_last]
+        cc_sol: dict = {}
+        for w in w_syms:
+            cc_sol[w] = lin_sol[w]
+        for g, theta in zip(near_int_gammas, theta_syms):
+            cc_sol[g] = cancel(lin_sol[theta] / w_last_val)
+    else:
+        A, b = linear_eq_to_matrix(cc_equations, w_syms)
+        sol_set = linsolve((A, b), *w_syms)
+        sol_tuple = list(sol_set)[0]
+        cc_sol = {sym: cancel(val) for sym, val in zip(w_syms, sol_tuple)}
+
+    # Step 6: Weight constraint: w_1 = psi * uniform_w_1
+    w1_uniform = uniform_weights[0]
+    w1_constrained = psi * w1_uniform
+    w1_sym = w_syms[0]
+    constrained_sol: dict = {}
+    for k, v in cc_sol.items():
+        constrained_sol[k] = cancel(v.subs(w1_sym, w1_constrained))
+    constrained_sol[w1_sym] = w1_constrained
+
+    # Step 7: Apply conservation solution to the blended stencil
+    B_l_final = B_l_blended.applyfunc(
+        lambda e: cancel(e.xreplace(constrained_sol))
+    )
+
+    # Step 8: Compute final weights and assemble
+    final_weights = []
+    for w in w_syms:
+        final_weights.append(cancel(constrained_sol.get(w, w)))
+
+    final_alpha_syms = sorted(B_l_final.free_symbols - {psi}, key=lambda s: s.name)
+    dirichlet = B_l_final[1:, :]
+
+    return CutCellResult(
+        floating=B_l_final,
+        dirichlet=dirichlet,
+        neumann=None,
+        eta=None,
+        dims=dims,
+        alpha_symbols=final_alpha_syms,
+        conservation_subs={},
+        weights=final_weights,
+    )
+
+
 def solve_uniform_limit(
     B_u: Matrix,
     interior: list,

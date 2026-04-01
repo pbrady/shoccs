@@ -2603,3 +2603,116 @@ class TestPolynomialFullStencil:
             assert den_poly.eval(0) != 0, f"Weight {k} has ψ=0 pole"
             assert den_poly.eval(1) != 0, f"Weight {k} has ψ=1 pole"
 
+
+# ---------------------------------------------------------------------------
+# Mathematica-aligned workflow tests
+# ---------------------------------------------------------------------------
+
+
+class TestMathematicaUniformConservation:
+    """Test uniform conservation matches Mathematica page 4 (baseSol)."""
+
+    def test_weights_match_mathematica(self):
+        """Verify w[1..4] match Mathematica baseSol at alpha=(1,1,-1,1)."""
+        from stencil_gen.temo import (
+            build_uniform_for_mathematica,
+            solve_uniform_conservation_direct,
+        )
+
+        uniform = build_uniform_for_mathematica(E4_1)
+        B_u = uniform.B_u
+        _, weights = solve_uniform_conservation_direct(B_u, uniform.interior, E4_1.p)
+
+        a0 = Symbol("alpha_0")
+        # Mathematica page 4 (w[1] = -6/(-11+6*alpha[1]))
+        expected_w0 = cancel(Rational(-6) / (-11 + 6 * a0))
+        assert cancel(weights[0] - expected_w0) == 0
+
+    def test_base_scheme_shape(self):
+        """Base scheme should be (r+1) x t = 5x6 for E4_1."""
+        from stencil_gen.temo import (
+            build_base_scheme,
+            build_uniform_for_mathematica,
+            solve_uniform_conservation_direct,
+        )
+
+        uniform = build_uniform_for_mathematica(E4_1)
+        sol, _ = solve_uniform_conservation_direct(
+            uniform.B_u, uniform.interior, E4_1.p
+        )
+        base = build_base_scheme(uniform.B_u, sol, uniform.interior, E4_1.p)
+        assert base.shape == (5, 6)
+
+    def test_base_scheme_values(self):
+        """Base scheme at alpha=(1,1,-1,1) matches Mathematica page 4."""
+        from stencil_gen.temo import (
+            build_base_scheme,
+            build_uniform_for_mathematica,
+            solve_uniform_conservation_direct,
+        )
+
+        uniform = build_uniform_for_mathematica(E4_1)
+        sol, _ = solve_uniform_conservation_direct(
+            uniform.B_u, uniform.interior, E4_1.p
+        )
+        base = build_base_scheme(uniform.B_u, sol, uniform.interior, E4_1.p)
+
+        a0, a1, a2, a3 = [Symbol(f"alpha_{i}") for i in range(4)]
+        subs = {a0: 1, a1: 1, a2: -1, a3: 1}
+        base_num = base.subs(subs).applyfunc(cancel)
+
+        # Row 0: [-5/6, -1, 9/2, -11/3, 1, 0]
+        assert cancel(base_num[0, 0] - Rational(-5, 6)) == 0
+        assert cancel(base_num[0, 1] - Rational(-1)) == 0
+        assert cancel(base_num[0, 4] - Rational(1)) == 0
+
+        # Row 4 (interior): [0, 0, 1/12, -2/3, 0, 2/3]
+        assert base_num[4, 0] == 0
+        assert base_num[4, 1] == 0
+        assert cancel(base_num[4, 2] - Rational(1, 12)) == 0
+
+
+@pytest.fixture(scope="module")
+def mathematica_result():
+    """Cache the derive_cut_cell_mathematica result for the module."""
+    import os
+    os.environ.setdefault("SYMPY_CACHE_SIZE", "50000")
+    from stencil_gen.temo import derive_cut_cell_mathematica
+
+    psi = Symbol("psi")
+    return derive_cut_cell_mathematica(E4_1, psi)
+
+
+class TestMathematicaWorkflow:
+    """Test the full Mathematica-aligned cut-cell workflow."""
+
+    def test_shape(self, mathematica_result):
+        """Floating stencil should be 5x7."""
+        assert mathematica_result.floating.shape == (5, 7)
+
+    def test_alpha_count(self, mathematica_result):
+        """Should have 4 free alpha symbols."""
+        assert len(mathematica_result.alpha_symbols) == 4
+
+    def test_weight_count(self, mathematica_result):
+        """Should have 5 weights."""
+        assert len(mathematica_result.weights) == 5
+
+    def test_no_psi_poles(self, mathematica_result):
+        """No entries should have poles at psi=0 or psi=1."""
+        psi = Symbol("psi")
+        F = mathematica_result.floating
+        for i in range(F.rows):
+            for j in range(F.cols):
+                entry = cancel(F[i, j])
+                _, denom = fraction(entry)
+                if denom != 1 and psi in denom.free_symbols:
+                    d_at_0 = denom.subs(psi, 0)
+                    d_at_1 = denom.subs(psi, 1)
+                    assert d_at_0 != 0, f"ψ=0 pole at [{i},{j}]"
+                    assert d_at_1 != 0, f"ψ=1 pole at [{i},{j}]"
+
+    def test_dirichlet_shape(self, mathematica_result):
+        """Dirichlet stencil should be 4x7 (drop row 0)."""
+        assert mathematica_result.dirichlet.shape == (4, 7)
+
