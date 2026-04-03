@@ -1324,3 +1324,278 @@ class TestStableEpsilonAlphas:
             # But this depends on which interior rows contribute to column j.
             # For unit-weight conservation: boundary col sum should be 0.
             print(f"    col {j}: boundary sum = {col_sum:12.8f}")
+
+
+# ---------------------------------------------------------------------------
+# 29.7a: Side-by-side comparison table
+# ---------------------------------------------------------------------------
+
+
+class TestComparisonTable:
+    """Side-by-side comparison of PHS k=2, Gaussian RBF, Multiquadric RBF,
+    and mixed-ε configurations for E2_1 and E4_1.
+
+    Metrics: max Re(λ), spectral radius, implied CFL with RK4, conservation deficit.
+    RK4 imaginary stability limit ≈ 2.828 (along pure imaginary axis).
+    """
+
+    # E2_1 parameters
+    E2_P, E2_Q, E2_NEXTRA, E2_NU = 1, 1, 1, 1
+    # E4_1 parameters
+    E4_P, E4_Q, E4_NEXTRA, E4_NU = 2, 3, 0, 1
+
+    # RK4 stability limit along the imaginary axis
+    RK4_IMAG_LIMIT = 2.828
+
+    # ------------------------------------------------------------------ helpers
+
+    def _build_diff_matrix_phs(self, n, p, q, k, nu, nextra):
+        """Build n×n diff matrix with PHS k boundary stencils + classical interior."""
+        from sympy import cancel as sym_cancel
+
+        from stencil_gen.interior import derive_interior, full_gamma_array
+
+        # Dimensions (same formula as build_diff_matrix_rbf)
+        if nu == 1:
+            t = p + q + 1 + nextra
+            r = q + 1 + nextra
+        else:
+            raise NotImplementedError
+
+        interior_coeffs = derive_interior(0, p, nu)
+        interior_w = [float(c) for c in full_gamma_array(interior_coeffs)]
+
+        D = np.zeros((n, n))
+
+        # Left boundary rows: PHS+poly stencil
+        for i in range(r):
+            w_sym = uniform_boundary_weights(i, t, nu, k, q)
+            w = [float(sym_cancel(c)) for c in w_sym]
+            for j in range(t):
+                D[i, j] = w[j]
+
+        # Interior rows
+        for i in range(r, n - r):
+            for k_idx, j in enumerate(range(i - p, i + p + 1)):
+                D[i, j] = interior_w[k_idx]
+
+        # Right boundary (antisymmetric for nu=1)
+        sign = (-1.0) ** nu
+        for i in range(r):
+            w_sym = uniform_boundary_weights(i, t, nu, k, q)
+            w = [float(sym_cancel(c)) for c in w_sym]
+            row = n - 1 - i
+            for j in range(t):
+                D[row, n - 1 - j] = sign * w[j]
+
+        return D
+
+    def _find_best_epsilon(self, p, q, nextra, nu, kernel, n=40):
+        """Find best ε via coarse + fine sweep."""
+        eps_coarse = np.logspace(np.log10(0.01), np.log10(15), 80)
+        best_eps, best_re = None, np.inf
+        for eps in eps_coarse:
+            mr = max_real_eigenvalue(n, p, q, eps, kernel, nu, nextra)
+            if mr < best_re:
+                best_re = mr
+                best_eps = eps
+
+        # Fine sweep around coarse best
+        lo = max(0.001, best_eps / 3)
+        hi = min(50, best_eps * 3)
+        eps_fine = np.linspace(lo, hi, 200)
+        for eps in eps_fine:
+            mr = max_real_eigenvalue(n, p, q, eps, kernel, nu, nextra)
+            if mr < best_re:
+                best_re = mr
+                best_eps = eps
+
+        return best_eps, best_re
+
+    def _find_best_mixed_epsilon(self, p, q, nextra, nu, r, kernel, n=40):
+        """Coordinate descent to find per-row optimal ε (returns list of ε)."""
+        # Start from uniform best
+        best_single, _ = self._find_best_epsilon(p, q, nextra, nu, kernel, n)
+        current = [best_single] * r
+        eps_vals = np.logspace(np.log10(0.3), np.log10(10.0), 40)
+
+        def _max_re(eps_list):
+            D = build_diff_matrix_mixed_epsilon(
+                n, p, q, eps_list, kernel, nu, nextra
+            )
+            return float(np.max(np.real(np.linalg.eigvals(D))))
+
+        current_re = _max_re(current)
+        for _ in range(3):
+            for row in range(r):
+                for eps in eps_vals:
+                    trial = list(current)
+                    trial[row] = eps
+                    mr = _max_re(trial)
+                    if mr < current_re:
+                        current_re = mr
+                        current[row] = eps
+
+        return current, current_re
+
+    def _conservation_deficit(self, D, n, p, r):
+        """Max absolute column-sum deviation in the overlap region.
+
+        For a conservative first-derivative operator, the full matrix column
+        sums should be zero.  The conservation deficit is the max absolute
+        column sum across all columns.
+        """
+        col_sums = np.sum(D, axis=0)
+        return float(np.max(np.abs(col_sums)))
+
+    def _metrics(self, D, n, p, r):
+        """Compute all comparison metrics from a differentiation matrix."""
+        eigvals = np.linalg.eigvals(D)
+        max_re = float(np.max(np.real(eigvals)))
+        spec_rad = float(np.max(np.abs(eigvals)))
+        # CFL = RK4 imaginary limit / spectral_radius
+        cfl = self.RK4_IMAG_LIMIT / spec_rad if spec_rad > 0 else float("inf")
+        cons_deficit = self._conservation_deficit(D, n, p, r)
+        return max_re, spec_rad, cfl, cons_deficit
+
+    # --------------------------------------------------------- E2 comparison
+
+    def test_e2_comparison(self):
+        """Side-by-side comparison for E2_1 (p=1, q=1, nextra=1, nu=1)."""
+        p, q, nextra, nu = self.E2_P, self.E2_Q, self.E2_NEXTRA, self.E2_NU
+        n = 40
+        r = q + 1 + nextra  # = 3
+
+        results = []
+
+        # 1. PHS k=2
+        D_phs = self._build_diff_matrix_phs(n, p, q, k=2, nu=nu, nextra=nextra)
+        m = self._metrics(D_phs, n, p, r)
+        results.append(("PHS k=2", *m))
+
+        # 2. Gaussian RBF (best ε)
+        eps_g, _ = self._find_best_epsilon(p, q, nextra, nu, "gaussian", n)
+        D_gauss = build_diff_matrix_rbf(n, p, q, eps_g, "gaussian", nu, nextra)
+        m = self._metrics(D_gauss, n, p, r)
+        results.append((f"Gaussian ε={eps_g:.3f}", *m))
+
+        # 3. Multiquadric RBF (best ε)
+        eps_m, _ = self._find_best_epsilon(p, q, nextra, nu, "multiquadric", n)
+        D_mq = build_diff_matrix_rbf(n, p, q, eps_m, "multiquadric", nu, nextra)
+        m = self._metrics(D_mq, n, p, r)
+        results.append((f"MQ ε={eps_m:.3f}", *m))
+
+        # Print table
+        print(f"\n{'='*80}")
+        print(f"  E2_1 Comparison Table (n={n}, p={p}, q={q}, nextra={nextra})")
+        print(f"{'='*80}")
+        hdr = f"  {'Method':>22s}  {'max Re(λ)':>14s}  {'|λ|_max':>14s}  {'CFL(RK4)':>10s}  {'cons deficit':>14s}"
+        print(hdr)
+        print(f"  {'-'*22}  {'-'*14}  {'-'*14}  {'-'*10}  {'-'*14}")
+        for name, max_re, sr, cfl, cd in results:
+            print(f"  {name:>22s}  {max_re:14.6e}  {sr:14.6e}  {cfl:10.4f}  {cd:14.6e}")
+
+        # Key assertion: Gaussian RBF should achieve machine-precision stability
+        gauss_re = results[1][1]
+        assert gauss_re < 1e-12, f"E2 Gaussian should be stable, got {gauss_re}"
+
+    # --------------------------------------------------------- E4 comparison
+
+    def test_e4_comparison(self):
+        """Side-by-side comparison for E4_1 (p=2, q=3, nextra=0, nu=1)."""
+        p, q, nextra, nu = self.E4_P, self.E4_Q, self.E4_NEXTRA, self.E4_NU
+        n = 40
+        r = q + 1 + nextra  # = 4
+
+        results = []
+
+        # 1. PHS k=2
+        D_phs = self._build_diff_matrix_phs(n, p, q, k=2, nu=nu, nextra=nextra)
+        m = self._metrics(D_phs, n, p, r)
+        results.append(("PHS k=2", *m))
+
+        # 2. Gaussian RBF (best single ε)
+        eps_g, _ = self._find_best_epsilon(p, q, nextra, nu, "gaussian", n)
+        D_gauss = build_diff_matrix_rbf(n, p, q, eps_g, "gaussian", nu, nextra)
+        m = self._metrics(D_gauss, n, p, r)
+        results.append((f"Gaussian ε={eps_g:.3f}", *m))
+
+        # 3. Multiquadric RBF (best single ε)
+        eps_m, _ = self._find_best_epsilon(p, q, nextra, nu, "multiquadric", n)
+        D_mq = build_diff_matrix_rbf(n, p, q, eps_m, "multiquadric", nu, nextra)
+        m = self._metrics(D_mq, n, p, r)
+        results.append((f"MQ ε={eps_m:.3f}", *m))
+
+        # 4. Mixed-ε Gaussian (per-row coordinate descent)
+        mixed_eps, mixed_re = self._find_best_mixed_epsilon(
+            p, q, nextra, nu, r, "gaussian", n
+        )
+        D_mixed = build_diff_matrix_mixed_epsilon(
+            n, p, q, mixed_eps, "gaussian", nu, nextra
+        )
+        m = self._metrics(D_mixed, n, p, r)
+        eps_str = ",".join(f"{e:.1f}" for e in mixed_eps)
+        results.append((f"Mixed Gauss [{eps_str}]", *m))
+
+        # Print table
+        print(f"\n{'='*80}")
+        print(f"  E4_1 Comparison Table (n={n}, p={p}, q={q}, nextra={nextra})")
+        print(f"{'='*80}")
+        hdr = f"  {'Method':>30s}  {'max Re(λ)':>14s}  {'|λ|_max':>14s}  {'CFL(RK4)':>10s}  {'cons deficit':>14s}"
+        print(hdr)
+        print(f"  {'-'*30}  {'-'*14}  {'-'*14}  {'-'*10}  {'-'*14}")
+        for name, max_re, sr, cfl, cd in results:
+            print(f"  {name:>30s}  {max_re:14.6e}  {sr:14.6e}  {cfl:10.4f}  {cd:14.6e}")
+
+        # Key assertion: PHS k=2 should be better than raw unstable (< 0.01)
+        phs_re = results[0][1]
+        assert phs_re < 0.01, f"E4 PHS k=2 should have small instability, got {phs_re}"
+
+        # Mixed-ε should improve over single Gaussian
+        gauss_re = results[1][1]
+        mixed_re_actual = results[3][1]
+        assert mixed_re_actual <= gauss_re * 1.1, (
+            f"Mixed-ε should not be worse than single: {mixed_re_actual} vs {gauss_re}"
+        )
+
+    # ---------------------------------------------- combined summary
+
+    def test_summary_across_grid_sizes(self):
+        """Grid-convergence summary for best methods at n=20,40,80.
+
+        Checks whether the stability metric improves, holds, or degrades
+        with grid refinement — a key indicator of whether an approach is
+        viable for production use.
+        """
+        print(f"\n{'='*80}")
+        print(f"  Grid-Convergence Summary (best method per scheme)")
+        print(f"{'='*80}")
+
+        for label, p, q, nextra, nu in [
+            ("E2_1", self.E2_P, self.E2_Q, self.E2_NEXTRA, self.E2_NU),
+            ("E4_1", self.E4_P, self.E4_Q, self.E4_NEXTRA, self.E4_NU),
+        ]:
+            # Find best Gaussian ε at n=40 reference
+            eps_g, _ = self._find_best_epsilon(p, q, nextra, nu, "gaussian", n=40)
+
+            print(f"\n  {label} — Gaussian ε*={eps_g:.3f}")
+            print(f"  {'n':>5s}  {'max Re(λ)':>14s}  {'|λ|_max':>14s}  {'CFL(RK4)':>10s}")
+            print(f"  {'-'*5}  {'-'*14}  {'-'*14}  {'-'*10}")
+
+            prev_re = None
+            for n in [20, 40, 80]:
+                D = build_diff_matrix_rbf(n, p, q, eps_g, "gaussian", nu, nextra)
+                eigvals = np.linalg.eigvals(D)
+                max_re = float(np.max(np.real(eigvals)))
+                sr = float(np.max(np.abs(eigvals)))
+                cfl = self.RK4_IMAG_LIMIT / sr if sr > 0 else float("inf")
+                trend = ""
+                if prev_re is not None:
+                    if max_re > prev_re * 10:
+                        trend = " ↑ DEGRADING"
+                    elif max_re < prev_re * 0.1:
+                        trend = " ↓ improving"
+                    else:
+                        trend = " ~ stable"
+                prev_re = max_re
+                print(f"  {n:5d}  {max_re:14.6e}  {sr:14.6e}  {cfl:10.4f}{trend}")
