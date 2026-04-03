@@ -84,7 +84,7 @@ With polynomial augmentation to degree q, the system is non-singular for distinc
 
 ## 30.1 — Tension Spline Kernel Implementation
 
-### 30.1a — Add `_tension_kernel_eval` and `_tension_kernel_deriv` to `phs.py`
+### 30.1a — Add `_tension_kernel_eval` and `_tension_kernel_deriv` to `phs.py` ✅
 
 Implement the tension spline kernel φ(r;σ) and its derivatives D¹φ, D²φ with
 proper numerical handling:
@@ -96,7 +96,11 @@ Add `"tension"` as a new kernel type in `_kernel_eval` and `_kernel_deriv`.
 - File: `scripts/stencil_gen/stencil_gen/phs.py`
 - Test: `φ(r;0)` matches `|r|³` (PHS k=2), `φ(r;σ)` is positive for r>0
 
-### 30.1b — Extend `phs_stencil_weights` to support tension kernel
+**Done:** Implemented `_tension_kernel_eval` (Taylor for z<2, direct for z≥2) and
+`_tension_kernel_deriv` (nu=0,1,2) with 8-term Horner series. Added `"tension"` dispatch
+in `_kernel_eval` and `_kernel_deriv`.
+
+### 30.1b — Extend `phs_stencil_weights` to support tension kernel ✅
 
 The existing function dispatches on `kernel` parameter.  Add the tension case:
 - For `kernel="tension"`: use `_tension_kernel_eval` for Φ matrix entries,
@@ -107,7 +111,10 @@ The existing function dispatches on `kernel` parameter.  Add the tension case:
 - File: `scripts/stencil_gen/stencil_gen/phs.py`
 - Test: tension weights match PHS k=2 when σ→0
 
-### 30.1c — Add convenience wrappers
+**Done:** Added `"tension"` to `phs_stencil_weights` dispatch (routes to `_rbf_weights_numeric`)
+and to `_rbf_weights_numeric` (Phi and dPhi computation via element-wise kernel calls).
+
+### 30.1c — Add convenience wrappers ✅
 
 ```python
 def uniform_boundary_weights_tension(i, t, nu, q, sigma):
@@ -117,7 +124,10 @@ def uniform_boundary_weights_tension(i, t, nu, q, sigma):
 Also `uniform_interior_weights_tension` for verification.
 - File: `scripts/stencil_gen/stencil_gen/phs.py`
 
-### 30.1d — Tests for tension kernel
+**Done:** Added `uniform_boundary_weights_tension` and `uniform_interior_weights_tension`
+(thin wrappers delegating to `_rbf` variants with `kernel="tension"`).
+
+### 30.1d — Tests for tension kernel ✅
 
 Add `TestTensionSpline` class in `test_phs.py`:
 - `test_sigma_zero_matches_phs_k2`: At σ=0 (or very small), tension weights ≈ PHS k=2
@@ -127,6 +137,10 @@ Add `TestTensionSpline` class in `test_phs.py`:
 - `test_interior_matches_classical`: Interior weights match classical FD for all σ
 - `test_numerical_stability_large_sigma`: No overflow for σ up to 50 on unit grid
 - File: `scripts/stencil_gen/tests/test_phs.py`
+
+**Done:** 11 tests in `TestTensionSpline` — all pass. Additional tests beyond spec:
+`test_kernel_positive_for_nonzero_r`, `test_kernel_zero_at_origin`, `test_d1_antisymmetric`,
+`test_d2_symmetric`, `test_taylor_matches_direct`.
 
 ---
 

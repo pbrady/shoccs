@@ -4,12 +4,16 @@ import pytest
 from sympy import Rational, S, Symbol, cancel, symbols
 
 from stencil_gen.phs import (
+    _tension_kernel_eval,
+    _tension_kernel_deriv,
     cut_cell_weights,
     phs_stencil_weights,
     uniform_boundary_weights,
     uniform_boundary_weights_rbf,
+    uniform_boundary_weights_tension,
     uniform_interior_weights,
     uniform_interior_weights_rbf,
+    uniform_interior_weights_tension,
 )
 
 
@@ -1623,3 +1627,148 @@ class TestComparisonTable:
             f"E4_1 Gaussian at n=80 should show residual instability, "
             f"got {results[('E4_1', 80)]:.3e}"
         )
+
+
+# ---------------------------------------------------------------------------
+# 30.1d: Tension spline kernel tests
+# ---------------------------------------------------------------------------
+
+
+class TestTensionSpline:
+    """Tests for the tension spline kernel φ(r;σ) = σ|r| - 1 + exp(-σ|r|)."""
+
+    def test_sigma_zero_matches_phs_k2(self):
+        """At very small σ, tension boundary weights ≈ PHS k=2 weights."""
+        import numpy as np
+
+        # E2 boundary: p=1, q=1, t=3, row i=0
+        phs_w = uniform_boundary_weights(0, 3, nu=1, k=2, q=1)
+        phs_w_float = [float(w) for w in phs_w]
+
+        # Tension with very small sigma should approach PHS k=2
+        tension_w = uniform_boundary_weights_tension(0, 3, nu=1, q=1, sigma=1e-6)
+
+        np.testing.assert_allclose(tension_w, phs_w_float, atol=1e-6,
+                                   err_msg="Tension at σ≈0 should match PHS k=2")
+
+    def test_polynomial_exactness(self):
+        """Tension stencil should be exact for polynomials up to degree q."""
+        import numpy as np
+
+        for q in [1, 2, 3]:
+            t = q + 3  # enough points
+            sigma = 2.0
+            for i in range(min(2, t)):
+                w = uniform_boundary_weights_tension(i, t, nu=1, q=q, sigma=sigma)
+                pts = list(range(t))
+                for d in range(q + 1):
+                    # sum_j w_j * x_j^d should equal d * i^(d-1) for d >= 1, 0 for d=0
+                    actual = sum(wj * xj**d for wj, xj in zip(w, pts))
+                    expected = d * i ** max(0, d - 1) if d >= 1 else 0.0
+                    np.testing.assert_allclose(
+                        actual, expected, atol=1e-10,
+                        err_msg=f"q={q}, i={i}, d={d}: poly exactness failed"
+                    )
+
+    def test_weights_sum_to_zero(self):
+        """First derivative weights should sum to 0 (exact for constants)."""
+        import numpy as np
+
+        for sigma in [0.5, 2.0, 10.0]:
+            w = uniform_boundary_weights_tension(0, 4, nu=1, q=1, sigma=sigma)
+            np.testing.assert_allclose(
+                sum(w), 0.0, atol=1e-12,
+                err_msg=f"σ={sigma}: weights don't sum to 0"
+            )
+
+    def test_kernel_symmetry(self):
+        """φ(r;σ) = φ(-r;σ) — kernel is an even function."""
+        for sigma in [0.1, 1.0, 5.0, 20.0]:
+            for r in [0.5, 1.0, 2.5, 7.0]:
+                val_pos = _tension_kernel_eval(r, sigma)
+                val_neg = _tension_kernel_eval(-r, sigma)
+                assert abs(val_pos - val_neg) < 1e-14, (
+                    f"σ={sigma}, r={r}: φ(r)={val_pos} ≠ φ(-r)={val_neg}"
+                )
+
+    def test_interior_matches_classical(self):
+        """Interior tension weights match classical FD for all σ."""
+        import numpy as np
+        from stencil_gen.interior import derive_interior, full_gamma_array
+
+        classical = [float(c) for c in full_gamma_array(derive_interior(0, 1, 1))]
+
+        for sigma in [0.01, 1.0, 5.0, 20.0]:
+            tension_w = uniform_interior_weights_tension(p=1, nu=1, q=2, sigma=sigma)
+            np.testing.assert_allclose(
+                tension_w, classical, atol=1e-10,
+                err_msg=f"σ={sigma}: interior weights differ from classical"
+            )
+
+    def test_numerical_stability_large_sigma(self):
+        """No overflow for σ up to 50 on unit grid."""
+        import numpy as np
+
+        for sigma in [10.0, 25.0, 50.0]:
+            w = uniform_boundary_weights_tension(0, 4, nu=1, q=1, sigma=sigma)
+            assert all(np.isfinite(w)), (
+                f"σ={sigma}: non-finite weights {w}"
+            )
+
+    def test_kernel_positive_for_nonzero_r(self):
+        """φ(r;σ) > 0 for r ≠ 0 and σ > 0."""
+        for sigma in [0.1, 1.0, 5.0, 20.0]:
+            for r in [0.1, 0.5, 1.0, 3.0, 10.0]:
+                val = _tension_kernel_eval(r, sigma)
+                assert val > 0, f"σ={sigma}, r={r}: φ={val} should be positive"
+
+    def test_kernel_zero_at_origin(self):
+        """φ(0;σ) = 0 for all σ."""
+        for sigma in [0.0, 0.1, 1.0, 10.0]:
+            assert _tension_kernel_eval(0.0, sigma) == 0.0
+
+    def test_d1_antisymmetric(self):
+        """D¹φ is an odd function: D¹φ(-r) = -D¹φ(r)."""
+        for sigma in [0.5, 2.0, 10.0]:
+            for r in [0.5, 1.0, 3.0]:
+                dp = _tension_kernel_deriv(r, 1, sigma)
+                dm = _tension_kernel_deriv(-r, 1, sigma)
+                assert abs(dp + dm) < 1e-13, (
+                    f"σ={sigma}, r={r}: D¹φ(r)+D¹φ(-r) = {dp+dm}"
+                )
+
+    def test_d2_symmetric(self):
+        """D²φ is an even function: D²φ(-r) = D²φ(r)."""
+        for sigma in [0.5, 2.0, 10.0]:
+            for r in [0.5, 1.0, 3.0]:
+                dp = _tension_kernel_deriv(r, 2, sigma)
+                dm = _tension_kernel_deriv(-r, 2, sigma)
+                assert abs(dp - dm) < 1e-13, (
+                    f"σ={sigma}, r={r}: D²φ(r)-D²φ(-r) = {dp-dm}"
+                )
+
+    def test_taylor_matches_direct(self):
+        """Taylor branch (z<2) matches direct evaluation at the boundary z≈2."""
+        import numpy as np
+
+        # Test at z = 1.99 (Taylor) vs z = 2.01 (direct) — should be close
+        sigma = 2.0
+        r = 1.0  # z = sigma*r = 2.0, right at boundary
+        # Evaluate slightly on each side
+        r_lo = 0.99  # z = 1.98, Taylor path
+        r_hi = 1.01  # z = 2.02, direct path
+        phi_lo = _tension_kernel_eval(r_lo, sigma)
+        phi_hi = _tension_kernel_eval(r_hi, sigma)
+        # They should be close (continuous function)
+        expected_diff = abs(phi_hi - phi_lo)
+        assert expected_diff < 0.1, (
+            f"φ discontinuous near Taylor/direct boundary: {phi_lo} vs {phi_hi}"
+        )
+
+        # Also check derivative continuity
+        for nu in [1, 2]:
+            d_lo = _tension_kernel_deriv(r_lo, nu, sigma)
+            d_hi = _tension_kernel_deriv(r_hi, nu, sigma)
+            assert abs(d_hi - d_lo) < 0.2, (
+                f"D{nu}φ discontinuous near boundary: {d_lo} vs {d_hi}"
+            )

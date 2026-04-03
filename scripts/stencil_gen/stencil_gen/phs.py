@@ -143,6 +143,145 @@ def _phs_kernel_1d_deriv(r_expr: Expr, r_sym: Symbol, nu: int, k: int) -> Expr:
         return d_expr.subs(x, r_val)
 
 
+# ---------------------------------------------------------------------------
+# Tension spline kernel: φ(r;σ) = σ|r| - 1 + exp(-σ|r|)
+# ---------------------------------------------------------------------------
+
+
+def _tension_kernel_eval(r_val, sigma: float) -> float:
+    """Evaluate tension spline kernel φ(r;σ) = σ|r| - 1 + exp(-σ|r|).
+
+    Uses Taylor series for small σ|r| to avoid catastrophic cancellation.
+    At σ=0 this reduces to |r|³·σ²/6, but in that limit the caller should
+    use PHS k=2 directly.
+
+    Parameters
+    ----------
+    r_val : float
+        Signed distance.
+    sigma : float
+        Tension parameter (≥ 0).
+
+    Returns
+    -------
+    float
+        Kernel value.
+    """
+    ar = abs(float(r_val))
+    s = float(sigma)
+
+    if ar == 0.0:
+        return 0.0
+
+    z = s * ar  # dimensionless argument
+
+    if z < 2.0:
+        # Taylor: φ = (z² / 6)(1 + z²/20 + z⁴/840 + z⁶/60480 + z⁸/6652800)
+        # times ar (since φ = ar³ σ²/6 * series in z²)
+        # More precisely: φ = σ|r| - 1 + e^{-σ|r|}
+        #   = z - 1 + (1 - z + z²/2 - z³/6 + z⁴/24 - ...)
+        #   = z²/2 - z³/6 + z⁴/24 - z⁵/120 + z⁶/720 - ...
+        #   = z²/2 (1 - z/3 + z²/12 - z³/60 + z⁴/360 - z⁵/2520 + z⁶/20160 - z⁷/181440)
+        z2 = z * z
+        # Horner form for 1 - z/3 + z²/12 - z³/60 + z⁴/360 - z⁵/2520 + z⁶/20160 - z⁷/181440
+        series = 1.0 + z * (
+            -1.0 / 3 + z * (
+                1.0 / 12 + z * (
+                    -1.0 / 60 + z * (
+                        1.0 / 360 + z * (
+                            -1.0 / 2520 + z * (
+                                1.0 / 20160 + z * (-1.0 / 181440)
+                            )
+                        )
+                    )
+                )
+            )
+        )
+        return z2 / 2.0 * series
+    else:
+        # Direct evaluation: σ|r| - 1 + exp(-σ|r|)
+        return z - 1.0 + np.exp(-z)
+
+
+def _tension_kernel_deriv(r_val, nu: int, sigma: float) -> float:
+    """Evaluate D^nu φ(r;σ) at r = r_val for the tension spline kernel.
+
+    Derivatives of φ(r;σ) = σ|r| - 1 + exp(-σ|r|):
+      D¹φ = σ sign(r)(1 - exp(-σ|r|))
+      D²φ = σ² exp(-σ|r|)   [plus a 2σδ(r) term, but r≠0 on our grids]
+
+    For small σ|r|, Taylor series are used.
+
+    Parameters
+    ----------
+    r_val : float
+        Signed distance.
+    nu : int
+        Derivative order (1 or 2).
+    sigma : float
+        Tension parameter.
+
+    Returns
+    -------
+    float
+        D^nu φ evaluated at r_val.
+    """
+    r = float(r_val)
+    s = float(sigma)
+    ar = abs(r)
+    z = s * ar
+
+    if nu == 0:
+        return _tension_kernel_eval(r_val, sigma)
+
+    if nu == 1:
+        if r == 0.0:
+            return 0.0
+        sgn = 1.0 if r > 0 else -1.0
+        if z < 2.0:
+            # D¹φ = σ sign(r)(1 - e^{-z}) = σ sign(r)(z - z²/2 + z³/6 - ...)
+            # = σ sign(r) z (1 - z/2 + z²/6 - z³/24 + z⁴/120 - z⁵/720 + z⁶/5040)
+            series = 1.0 + z * (
+                -1.0 / 2 + z * (
+                    1.0 / 6 + z * (
+                        -1.0 / 24 + z * (
+                            1.0 / 120 + z * (
+                                -1.0 / 720 + z * (1.0 / 5040)
+                            )
+                        )
+                    )
+                )
+            )
+            return sgn * s * z * series
+        else:
+            return sgn * s * (1.0 - np.exp(-z))
+
+    if nu == 2:
+        # D²φ = σ² exp(-σ|r|) for r ≠ 0
+        # At r=0: D²φ = σ² (the limit from either side, ignoring the delta)
+        if z < 2.0:
+            # exp(-z) via Taylor: 1 - z + z²/2 - z³/6 + ...
+            # σ² exp(-z) = σ² (1 - z + z²/2 - z³/6 + z⁴/24 - z⁵/120 + z⁶/720 - z⁷/5040)
+            series = 1.0 + z * (
+                -1.0 + z * (
+                    1.0 / 2 + z * (
+                        -1.0 / 6 + z * (
+                            1.0 / 24 + z * (
+                                -1.0 / 120 + z * (
+                                    1.0 / 720 + z * (-1.0 / 5040)
+                                )
+                            )
+                        )
+                    )
+                )
+            )
+            return s * s * series
+        else:
+            return s * s * np.exp(-z)
+
+    raise NotImplementedError(f"Tension kernel derivative for nu={nu}")
+
+
 def _kernel_eval(r, kernel: str, k: int | None = None, epsilon=None):
     """Evaluate RBF kernel φ(r).
 
@@ -169,6 +308,8 @@ def _kernel_eval(r, kernel: str, k: int | None = None, epsilon=None):
         return sym_exp(-(epsilon**2) * r**2)
     elif kernel == "multiquadric":
         return sym_sqrt(1 + (epsilon**2) * r**2)
+    elif kernel == "tension":
+        return _tension_kernel_eval(r, epsilon)
     else:
         raise ValueError(f"Unknown kernel: {kernel!r}")
 
@@ -183,11 +324,12 @@ def _kernel_deriv(r_val, nu: int, kernel: str, k: int | None = None, epsilon=Non
     nu : int
         Derivative order.
     kernel : str
-        ``"phs"``, ``"gaussian"``, or ``"multiquadric"``.
+        ``"phs"``, ``"gaussian"``, ``"multiquadric"``, or ``"tension"``.
     k : int, optional
         PHS order (required for ``"phs"``).
     epsilon : numeric, optional
-        Shape parameter (required for ``"gaussian"`` and ``"multiquadric"``).
+        Shape parameter (required for ``"gaussian"``, ``"multiquadric"``,
+        and ``"tension"``).
 
     Returns
     -------
@@ -197,6 +339,9 @@ def _kernel_deriv(r_val, nu: int, kernel: str, k: int | None = None, epsilon=Non
     if kernel == "phs":
         m = 2 * k - 1
         return _eval_phs_deriv(r_val, nu, m)
+
+    if kernel == "tension":
+        return _tension_kernel_deriv(r_val, nu, epsilon)
 
     # For Gaussian and Multiquadric, use symbolic differentiation.
     r = Symbol("_rbf_r")
@@ -261,6 +406,11 @@ def _rbf_weights_numeric(
         Phi = np.exp(-(eps**2) * diffs**2)
     elif kernel == "multiquadric":
         Phi = np.sqrt(1 + (eps**2) * diffs**2)
+    elif kernel == "tension":
+        Phi = np.array(
+            [[_tension_kernel_eval(diffs[i, j], eps) for j in range(n)]
+             for i in range(n)]
+        )
     else:
         raise ValueError(f"Unknown kernel for numeric path: {kernel!r}")
 
@@ -276,7 +426,7 @@ def _rbf_weights_numeric(
             dPhi = (4 * eps**4 * r**2 - 2 * eps**2) * base
         else:
             raise NotImplementedError(f"Gaussian derivative for nu={nu}")
-    else:  # multiquadric
+    elif kernel == "multiquadric":
         s2 = 1 + (eps**2) * r**2
         if nu == 0:
             dPhi = np.sqrt(s2)
@@ -286,6 +436,10 @@ def _rbf_weights_numeric(
             dPhi = eps**2 / s2**1.5
         else:
             raise NotImplementedError(f"Multiquadric derivative for nu={nu}")
+    elif kernel == "tension":
+        dPhi = np.array([_tension_kernel_deriv(r[i], nu, eps) for i in range(n)])
+    else:
+        raise NotImplementedError(f"Kernel {kernel!r} derivative for nu={nu}")
 
     # Polynomial matrix P_{ij} = x_j^i, i = 0 .. q
     P = np.zeros((n_poly, n))
@@ -362,7 +516,7 @@ def phs_stencil_weights(
             raise ValueError("k is required for PHS kernel")
         if k < nu:
             raise ValueError(f"PHS order k={k} must be >= nu={nu}")
-    elif kernel in ("gaussian", "multiquadric"):
+    elif kernel in ("gaussian", "multiquadric", "tension"):
         if epsilon is None:
             raise ValueError(f"epsilon is required for {kernel} kernel")
         return _rbf_weights_numeric(points, x_eval, nu, q, kernel, epsilon)
@@ -539,6 +693,28 @@ def uniform_boundary_weights_rbf(
     points = [Rational(j) for j in range(t)]
     x_eval = Rational(i)
     return phs_stencil_weights(points, x_eval, nu, q, kernel=kernel, epsilon=epsilon)
+
+
+def uniform_interior_weights_tension(
+    p: int, nu: int, q: int, sigma: float
+) -> list[float]:
+    """Compute interior FD weights on a uniform grid using tension spline+poly.
+
+    The stencil uses 2p+1 points centered at 0: {-p, ..., -1, 0, 1, ..., p}.
+    """
+    return uniform_interior_weights_rbf(p, nu, q, sigma, kernel="tension")
+
+
+def uniform_boundary_weights_tension(
+    i: int, t: int, nu: int, q: int, sigma: float
+) -> list[float]:
+    """Compute boundary row i FD weights using tension spline+poly.
+
+    The stencil uses t points: {0, 1, ..., t-1}, evaluating D^nu at grid
+    point i.  The tension parameter sigma controls kernel shape (sigma=0
+    gives PHS k=2 limit).
+    """
+    return uniform_boundary_weights_rbf(i, t, nu, q, sigma, kernel="tension")
 
 
 # ---------------------------------------------------------------------------
