@@ -57,51 +57,44 @@ the tension spline to find a stable boundary closure?
 
 ## 31.1 — Generalize Matrix Builder for Arbitrary nextra
 
-### 31.1a — Extend `build_diff_matrix_rbf` to accept `nextra` parameter
+### 31.1a — Extend `build_diff_matrix_rbf` to accept `nextra` parameter ✅
 
-Currently `build_diff_matrix_rbf` computes dimensions using a hardcoded formula.
-Extend it to accept an explicit `nextra` parameter (defaulting to 0 for backward
-compatibility).  The only change is the dimension calculation:
-- `t = p + q + 1 + nextra`
-- `r = q + 1 + nextra`
+Already implemented in Phase 30.  All three matrix builders (`build_diff_matrix_rbf`,
+`build_diff_matrix_mixed_epsilon`, `build_diff_matrix_rbf_penalty`) accept `nextra`
+with correct dimension formulas.
 
-Everything else (boundary row construction, interior stencil, right-side reflection)
-stays the same — the RBF system naturally handles wider stencils on more points.
+### 31.1b — Similarly extend `max_real_eigenvalue` ✅
 
-Also extend `build_diff_matrix_mixed_epsilon` and `build_diff_matrix_rbf_penalty`
-similarly.
-- File: `scripts/stencil_gen/stencil_gen/phs.py`
-- Test: nextra=0 gives identical results to current code (regression)
-- Test: nextra=1 gives a larger matrix with more boundary rows
-
-### 31.1b — Similarly extend `max_real_eigenvalue`
-
-Pass `nextra` through to the matrix builder.
-- File: `scripts/stencil_gen/stencil_gen/phs.py`
-- Test: E2_1 with nextra=1 matches existing Phase 30 results
+Already implemented.  `max_real_eigenvalue` passes `nextra` through to the builder.
 
 ---
 
 ## 31.2 — Nextra Sweep for E4 with Tension Kernel
 
-### 31.2a — Quick diagnostic: E4 tension at nextra=1
+### 31.2a — Quick diagnostic: E4 tension at nextra=1 ✅
 
-Before a full sweep, test the single most important case:
-- E4 with nextra=1, tension kernel, sweep σ ∈ [0, 50]
-- If max Re(λ) < STABILITY_TOL at some σ: the hypothesis is confirmed
-- If not: check whether the instability floor dropped significantly from 3e-5
-- File: `scripts/stencil_gen/tests/test_phs.py`, class `TestFootprintE4Quick`
-- Test: `test_nextra_1_sigma_sweep` — print table and assert the sweep completes
+- Test: `TestFootprintE4Quick::test_nextra_1_sigma_sweep` — PASSED
+- **Result:** nextra=1 did NOT achieve stability.  Instability floor dropped only
+  marginally from 7.7e-5 (nx=0) to 6.7e-5 (nx=1), a 1.15× improvement.
+- The hypothesis that nextra=1 alone would unlock stability is **not confirmed**.
 
-### 31.2b — Full nextra × σ sweep for E4
+### 31.2b — Full nextra × σ sweep for E4 ✅
 
-Sweep nextra ∈ {0, 1, 2, 3} × σ ∈ [0, 50] at n=40:
-- For each (nextra, σ): compute max Re(λ)
-- Report the minimum instability per nextra
-- Key question: does the instability floor decrease monotonically with nextra?
-- File: `scripts/stencil_gen/tests/test_phs.py`, class `TestFootprintSweep`
-- Test: `test_nextra_sweep_e4_tension` — full sweep with printed comparison table
-- Assertion: nextra=1 instability floor < nextra=0 floor (minimal expected improvement)
+- Test: `TestFootprintSweep::test_nextra_sweep_e4_tension` — PASSED
+- **Key result:** the instability floor is **flat at ~5e-5 across all nextra values**.
+
+  | nextra | t | r | extra DOF | best σ | min max Re(λ) | status |
+  |--------|---|---|-----------|--------|---------------|--------|
+  | 0      | 6 | 4 | 8         | 38.6   | 5.5e-5        | unstable |
+  | 1      | 7 | 5 | 15        | 29.8   | 4.9e-5        | unstable |
+  | 2      | 8 | 6 | 24        | 2.9    | 7.2e-5        | unstable |
+  | 3      | 9 | 7 | 35        | 15.0   | 5.0e-5        | unstable |
+
+- The floor does NOT decrease monotonically with nextra.  nextra=1 is marginally
+  better than nextra=0, but nextra=2 is worse, and nextra=3 is about equal.
+- **Conclusion:** The O(1e-5) instability floor is NOT an artifact of insufficient
+  boundary DOF.  It appears to be fundamental to the tension kernel + E4 combination,
+  regardless of footprint size.
 
 ### 31.2c — Nextra sweep for E4 with tension + soft conservation penalty
 
@@ -175,16 +168,16 @@ Summarize findings and determine next steps:
 
 ## Implementation Order
 
-1. **31.1a** — Extend matrix builders for nextra parameter
-2. **31.1b** — Extend max_real_eigenvalue for nextra
-3. **31.2a** — Quick E4 nextra=1 diagnostic (first result!)
-4. **31.2b** — Full nextra × σ sweep (key result: does floor drop?)
+1. ✅ **31.1a** — Extend matrix builders for nextra parameter (already existed)
+2. ✅ **31.1b** — Extend max_real_eigenvalue for nextra (already existed)
+3. ✅ **31.2a** — Quick E4 nextra=1 diagnostic → nextra=1 marginally better, NOT stable
+4. ✅ **31.2b** — Full nextra × σ sweep → floor flat at ~5e-5 across all nextra
 5. **31.2c** — Nextra × σ × γ sweep with penalty
-6. **31.2d** — Extract stencil weights if stable nextra found
+6. **31.2d** — If stable nextra found: extract stencil weights (likely N/A given 31.2b result)
 7. **31.3a** — E2 cross-validation
-8. **31.3b** — E6/E8 if E4 works
-9. **31.4a** — Scaling analysis
-10. **31.4b** — Cost assessment
+8. **31.3b** — E6/E8 if E4 works (likely N/A)
+9. **31.4a** — Scaling analysis (likely N/A)
+10. **31.4b** — Cost assessment (likely N/A)
 11. **31.4c** — Conclusions
 
 ---

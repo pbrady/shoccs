@@ -3966,3 +3966,211 @@ class TestModifiedWavenumber:
                 assert max_err < 10.0, (
                     f"{label} row {i} dispersion error too large: {max_err:.2e}"
                 )
+
+
+# ---------------------------------------------------------------------------
+# 31.2a: Quick diagnostic — E4 tension at nextra=1
+# ---------------------------------------------------------------------------
+
+
+class TestFootprintE4Quick:
+    """Quick diagnostic: does nextra=1 improve E4 tension stability?
+
+    Phase 30 found that E4 (p=2, q=3) with nextra=0 has an instability floor
+    of ~3e-5 with the tension kernel.  The E2 scheme that achieves stability
+    uses nextra=1.  This test checks whether nextra=1 gives E4 enough extra
+    DOF to reach stability.
+
+    E4 with nextra=1: p=2, q=3, nextra=1 → t=7, r=5.
+    Each boundary row has 3 free DOF (vs 2 at nextra=0).
+    """
+
+    P = 2
+    Q = 3
+    NU = 1
+
+    def _sweep(self, n, nextra, sigmas):
+        """Sweep sigma for given nextra, return list of (sigma, max_re)."""
+        rows = []
+        for sigma in sigmas:
+            max_re = max_real_eigenvalue(
+                n, p=self.P, q=self.Q, epsilon=sigma,
+                kernel="tension", nu=self.NU, nextra=nextra,
+            )
+            rows.append((sigma, max_re))
+        return rows
+
+    def test_nextra_1_sigma_sweep(self):
+        """Sweep σ ∈ [0, 50] for E4 tension with nextra=1.
+
+        Key questions:
+        1. Does any σ give max Re(λ) < STABILITY_TOL?
+        2. How much does the instability floor drop vs nextra=0?
+        """
+        n = 40
+        sigmas = np.concatenate([
+            [0.0],
+            np.logspace(np.log10(0.01), np.log10(50), 80),
+        ])
+
+        # nextra=0 baseline
+        results_nx0 = self._sweep(n, nextra=0, sigmas=sigmas)
+        best_nx0 = min(results_nx0, key=lambda r: r[1])
+
+        # nextra=1 test
+        results_nx1 = self._sweep(n, nextra=1, sigmas=sigmas)
+        best_nx1 = min(results_nx1, key=lambda r: r[1])
+
+        # Print comparison
+        print(f"\n{'='*72}")
+        print(f"  Phase 31.2a: E4 Tension — nextra=0 vs nextra=1 (n={n})")
+        print(f"{'='*72}")
+        print(f"\n  nextra=0: t={self.P + self.Q + 1}, r={self.Q + 1}")
+        print(f"  nextra=1: t={self.P + self.Q + 2}, r={self.Q + 2}")
+        print(f"\n  {'sigma':>10s}  {'nx=0 max Re(λ)':>16s}  {'nx=1 max Re(λ)':>16s}")
+        print(f"  {'-'*10}  {'-'*16}  {'-'*16}")
+        for (s0, re0), (s1, re1) in zip(results_nx0, results_nx1):
+            marker = " *" if re1 < STABILITY_TOL else ""
+            print(f"  {s0:10.4f}  {re0:16.6e}  {re1:16.6e}{marker}")
+
+        print(f"\n  --- Summary ---")
+        print(f"  nextra=0: best σ={best_nx0[0]:.4f}, "
+              f"min max Re(λ)={best_nx0[1]:.6e} "
+              f"[{'STABLE' if best_nx0[1] < STABILITY_TOL else 'unstable'}]")
+        print(f"  nextra=1: best σ={best_nx1[0]:.4f}, "
+              f"min max Re(λ)={best_nx1[1]:.6e} "
+              f"[{'STABLE' if best_nx1[1] < STABILITY_TOL else 'unstable'}]")
+
+        if best_nx1[1] < STABILITY_TOL:
+            print(f"\n  *** HYPOTHESIS CONFIRMED: nextra=1 enables E4 stability! ***")
+        elif best_nx1[1] < best_nx0[1] * 0.5:
+            print(f"\n  Instability floor dropped by "
+                  f"{best_nx0[1]/best_nx1[1]:.1f}× with nextra=1")
+        else:
+            print(f"\n  nextra=1 did not significantly improve E4 stability")
+
+        # The sweep must complete without error
+        assert len(results_nx1) == len(sigmas)
+
+        # Record the floor values for the plan update
+        print(f"\n  Instability floors: nx0={best_nx0[1]:.6e}, nx1={best_nx1[1]:.6e}")
+        print(f"  Ratio: {best_nx0[1] / max(best_nx1[1], 1e-16):.2f}×")
+
+
+# ---------------------------------------------------------------------------
+# 31.2b: Full nextra × σ sweep for E4
+# ---------------------------------------------------------------------------
+
+
+class TestFootprintSweep:
+    """Full nextra × σ sweep for E4 with tension kernel.
+
+    Sweep nextra ∈ {0, 1, 2, 3} × σ ∈ [0, 50] at n=40.
+    Key question: does the instability floor decrease monotonically with nextra?
+
+    E4 dimensions per nextra:
+      nx=0: t=6, r=4, extra DOF/row=2, total=8
+      nx=1: t=7, r=5, extra DOF/row=3, total=15
+      nx=2: t=8, r=6, extra DOF/row=4, total=24
+      nx=3: t=9, r=7, extra DOF/row=5, total=35
+    """
+
+    P = 2
+    Q = 3
+    NU = 1
+
+    def test_nextra_sweep_e4_tension(self):
+        """Full nextra × σ sweep with printed comparison table."""
+        n = 40
+        nextra_values = [0, 1, 2, 3]
+        sigmas = np.concatenate([
+            [0.0],
+            np.logspace(np.log10(0.01), np.log10(50), 100),
+        ])
+
+        # Collect results per nextra
+        best_per_nx = {}
+        all_results = {}
+        for nx in nextra_values:
+            r = self.Q + 1 + nx
+            t = self.P + self.Q + 1 + nx
+            # Check grid is large enough
+            if n < 2 * r:
+                print(f"  nextra={nx}: grid too small (n={n} < 2*r={2*r}), skipping")
+                continue
+
+            rows = []
+            for sigma in sigmas:
+                max_re = max_real_eigenvalue(
+                    n, p=self.P, q=self.Q, epsilon=sigma,
+                    kernel="tension", nu=self.NU, nextra=nx,
+                )
+                rows.append((sigma, max_re))
+            all_results[nx] = rows
+            best = min(rows, key=lambda r: r[1])
+            best_per_nx[nx] = best
+
+        # Print detailed comparison
+        print(f"\n{'='*80}")
+        print(f"  Phase 31.2b: E4 Tension — Full nextra × σ Sweep (n={n})")
+        print(f"{'='*80}")
+
+        # Header
+        header = f"  {'sigma':>10s}"
+        for nx in nextra_values:
+            if nx in all_results:
+                header += f"  {'nx=' + str(nx):>16s}"
+        print(header)
+        divider = f"  {'-'*10}"
+        for nx in nextra_values:
+            if nx in all_results:
+                divider += f"  {'-'*16}"
+        print(divider)
+
+        # Print a subset of rows (every 5th) to keep output readable
+        for idx in range(0, len(sigmas), 5):
+            line = f"  {sigmas[idx]:10.4f}"
+            for nx in nextra_values:
+                if nx in all_results:
+                    _, max_re = all_results[nx][idx]
+                    marker = " *" if max_re < STABILITY_TOL else ""
+                    line += f"  {max_re:14.6e}{marker}"
+            print(line)
+
+        # Summary table
+        print(f"\n  {'='*70}")
+        print(f"  Summary: Minimum instability floor per nextra")
+        print(f"  {'='*70}")
+        print(f"  {'nextra':>6s}  {'t':>3s}  {'r':>3s}  "
+              f"{'extra DOF':>9s}  {'best σ':>10s}  {'min max Re(λ)':>16s}  {'status':>10s}")
+        print(f"  {'-'*6}  {'-'*3}  {'-'*3}  "
+              f"{'-'*9}  {'-'*10}  {'-'*16}  {'-'*10}")
+
+        floors = []
+        for nx in nextra_values:
+            if nx not in best_per_nx:
+                continue
+            best_sigma, best_re = best_per_nx[nx]
+            t = self.P + self.Q + 1 + nx
+            r = self.Q + 1 + nx
+            extra_dof = r * (self.P + nx)
+            status = "STABLE" if best_re < STABILITY_TOL else "unstable"
+            print(f"  {nx:6d}  {t:3d}  {r:3d}  "
+                  f"{extra_dof:9d}  {best_sigma:10.4f}  {best_re:16.6e}  {status:>10s}")
+            floors.append((nx, best_re))
+
+        # Check monotonic decrease
+        if len(floors) >= 2:
+            print(f"\n  Floor improvement ratios:")
+            for i in range(1, len(floors)):
+                nx_prev, re_prev = floors[i - 1]
+                nx_curr, re_curr = floors[i]
+                ratio = re_prev / max(re_curr, 1e-16)
+                print(f"    nextra {nx_prev} → {nx_curr}: {ratio:.2f}×")
+
+        # Assertion: nextra=1 floor < nextra=0 floor
+        if 0 in best_per_nx and 1 in best_per_nx:
+            assert best_per_nx[1][1] < best_per_nx[0][1], (
+                f"nextra=1 floor ({best_per_nx[1][1]:.6e}) should be less than "
+                f"nextra=0 floor ({best_per_nx[0][1]:.6e})"
+            )
