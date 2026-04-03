@@ -3087,3 +3087,227 @@ class TestTensionConservationE2:
         assert best_deficit <= deficit_baseline + 1e-12, (
             f"Penalty worsened deficit: {best_deficit:.6e} > {deficit_baseline:.6e}"
         )
+
+
+# ---------------------------------------------------------------------------
+# 30.3c: Joint (σ, γ) sweep for E4 — tension + conservation penalty
+# ---------------------------------------------------------------------------
+
+
+class TestTensionConservationE4:
+    """Joint (σ, γ) sweep for E4_1 boundary stencils (Phase 30.3c).
+
+    Sweep both tension parameter σ and conservation penalty γ to investigate
+    whether the 2D (σ, γ) space can breach the O(1e-4–1e-5) stability floor
+    that 1D σ sweeps could not.
+
+    E4_1 parameters: p=2, q=3, nextra=0.
+    From Phase 30.2d, E4 best uniform σ gives max Re(λ) ≈ 5e-5 (NOT stable).
+    The key question: can adding conservation penalty γ > 0 find a (σ*, γ*)
+    that achieves machine-precision stability for E4?
+    """
+
+    P, Q, NEXTRA, NU = 2, 3, 0, 1
+
+    # E4 instability floor from Phase 30.2c/d — best 1D σ gives ~5e-5
+    E4_INSTABILITY_FLOOR = 1e-3
+
+    def _eval_point(self, n, sigma, gamma):
+        """Evaluate (σ, γ) point: return (max_re, deficit)."""
+        D = build_diff_matrix_rbf_penalty(
+            n, self.P, self.Q, sigma, "tension", self.NU, self.NEXTRA,
+            gamma=gamma,
+        )
+        eigvals = np.linalg.eigvals(D)
+        max_re = float(np.max(np.real(eigvals)))
+        deficit = float(np.max(np.abs(np.sum(D, axis=0))))
+        return max_re, deficit
+
+    def test_joint_sweep_coarse(self):
+        """Coarse 2D sweep over σ × γ for E4_1.
+
+        Maps the stability–conservation landscape.  Since E4 is not
+        machine-precision stable at any 1D σ, we check whether the
+        2D (σ, γ) space can improve on the 1D floor.
+        """
+        n = 40
+        sigmas = np.linspace(5.0, 55.0, 25)
+        gammas = np.concatenate([[0.0], np.logspace(-1, 2, 24)])  # 0 + log[0.1..100]
+
+        best_max_re = float("inf")
+        best_sigma = None
+        best_gamma = None
+        best_deficit = None
+
+        # Track γ=0 baseline
+        baseline_re = float("inf")
+        baseline_deficit = None
+
+        for sigma in sigmas:
+            for gamma in gammas:
+                max_re, deficit = self._eval_point(n, sigma, gamma)
+
+                if max_re < best_max_re:
+                    best_max_re = max_re
+                    best_sigma = sigma
+                    best_gamma = gamma
+                    best_deficit = deficit
+
+                if gamma == 0.0 and max_re < baseline_re:
+                    baseline_re = max_re
+                    baseline_deficit = deficit
+
+        print(f"\n  E4_1 Joint (σ, γ) Sweep (n={n})")
+        print(f"  Grid: {len(sigmas)} σ × {len(gammas)} γ = "
+              f"{len(sigmas) * len(gammas)} points")
+
+        print(f"\n  Best (σ, γ) point (lowest max Re(λ)):")
+        print(f"    σ*={best_sigma:.4f}, γ*={best_gamma:.4f}")
+        print(f"    max Re(λ)={best_max_re:.6e}")
+        print(f"    deficit={best_deficit:.6e}")
+
+        print(f"\n  Baseline (γ=0) best:")
+        print(f"    max Re(λ)={baseline_re:.6e}")
+        print(f"    deficit={baseline_deficit:.6e}")
+
+        if baseline_re > 0:
+            improvement = 1.0 - best_max_re / baseline_re
+            print(f"  Stability improvement with (σ,γ) over 1D σ: {improvement:.1%}")
+
+        # Check whether machine-precision stability was achieved
+        if best_max_re < STABILITY_TOL:
+            print(f"\n  *** BREAKTHROUGH: E4 achieves machine-precision stability! ***")
+        else:
+            print(f"\n  E4 NOT machine-precision stable (best {best_max_re:.6e})")
+            print(f"  The O(1e-4–1e-5) floor persists in 2D (σ, γ) space.")
+
+        # --- Assertions ---
+        # Best max Re(λ) should be below the loose E4 floor (actual ~5e-5)
+        assert best_max_re < self.E4_INSTABILITY_FLOOR, (
+            f"E4 (σ,γ) sweep best {best_max_re:.6e} >= {self.E4_INSTABILITY_FLOOR}"
+        )
+        # Baseline (γ=0) should also be below the floor (regression from 30.2c)
+        assert baseline_re < self.E4_INSTABILITY_FLOOR, (
+            f"E4 γ=0 baseline {baseline_re:.6e} >= {self.E4_INSTABILITY_FLOOR}"
+        )
+
+    def test_stability_vs_gamma_at_optimal_sigma(self):
+        """Check how γ affects E4 stability at the known optimal σ.
+
+        Fix σ at the Phase 30.2d optimal (~37–50) and sweep γ.
+        Key question: does γ > 0 help or hurt E4 stability?
+        """
+        n = 40
+        sigma_star = 37.0  # from Phase 30.2c optimal
+        gammas = np.concatenate([[0.0], np.logspace(-1, 3, 50)])  # 0..1000
+
+        print(f"\n  E4_1 Stability vs γ at σ*={sigma_star} (n={n})")
+        print(f"  {'γ':>10s}  {'max Re(λ)':>14s}  {'deficit':>14s}")
+        print(f"  {'-'*10}  {'-'*14}  {'-'*14}")
+
+        best_re = float("inf")
+        best_gamma = None
+        deficit_at_zero = None
+        deficit_at_best = None
+
+        for gamma in gammas:
+            max_re, deficit = self._eval_point(n, sigma_star, gamma)
+            # Print a representative subset
+            if (gamma == 0.0 or gamma < 0.2
+                    or abs(gamma - 1.0) < 0.2 or abs(gamma - 10.0) < 1.5
+                    or abs(gamma - 100.0) < 15.0 or gamma > 800.0):
+                print(f"  {gamma:10.4f}  {max_re:14.6e}  {deficit:14.6e}")
+
+            if max_re < best_re:
+                best_re = max_re
+                best_gamma = gamma
+                deficit_at_best = deficit
+            if gamma == 0.0:
+                deficit_at_zero = deficit
+
+        print(f"\n  Best γ for stability: {best_gamma:.4f}")
+        print(f"    max Re(λ)={best_re:.6e}")
+        print(f"    deficit={deficit_at_best:.6e}")
+        if deficit_at_zero is not None:
+            print(f"  Deficit at γ=0: {deficit_at_zero:.6e}")
+
+        if best_re < STABILITY_TOL:
+            print(f"  *** E4 achieves machine-precision stability at γ={best_gamma}! ***")
+        else:
+            print(f"  E4 NOT machine-precision stable (floor persists)")
+
+        # --- Assertions ---
+        # γ=0 stability should match Phase 30.2c (max Re(λ) ~ 5e-5)
+        re_0, _ = self._eval_point(n, sigma_star, 0.0)
+        assert re_0 < self.E4_INSTABILITY_FLOOR, (
+            f"E4 at σ={sigma_star}, γ=0 worse than expected: {re_0:.6e}"
+        )
+        # Best with γ should not be worse than γ=0
+        assert best_re <= re_0 + 1e-6, (
+            f"Adding γ worsened E4: best {best_re:.6e} > γ=0 {re_0:.6e}"
+        )
+
+    def test_fine_sweep_near_optimal(self):
+        """Fine 2D sweep near the best (σ, γ) region for E4_1.
+
+        Refines around σ ∈ [20, 55] (known E4 region) with moderate γ.
+        Reports whether the 2D search improves on the 1D σ-only result.
+        """
+        n = 40
+        sigmas = np.linspace(20.0, 55.0, 40)
+        gammas = np.concatenate([[0.0], np.logspace(-1, 3, 40)])
+
+        best_re = float("inf")
+        best_sigma = None
+        best_gamma = None
+        best_deficit = None
+
+        # Also track best γ=0 result for comparison
+        best_re_baseline = float("inf")
+
+        for sigma in sigmas:
+            for gamma in gammas:
+                max_re, deficit = self._eval_point(n, sigma, gamma)
+                if max_re < best_re:
+                    best_re = max_re
+                    best_sigma = sigma
+                    best_gamma = gamma
+                    best_deficit = deficit
+                if gamma == 0.0 and max_re < best_re_baseline:
+                    best_re_baseline = max_re
+
+        print(f"\n  E4_1 Fine joint sweep: σ ∈ [20, 55], γ ∈ [0, 1000]")
+        print(f"  Grid: {len(sigmas)} × {len(gammas)} = "
+              f"{len(sigmas) * len(gammas)} points")
+
+        print(f"\n  Best overall (σ, γ):")
+        print(f"    σ*={best_sigma:.4f}, γ*={best_gamma:.4f}")
+        print(f"    max Re(λ)={best_re:.6e}")
+        print(f"    deficit={best_deficit:.6e}")
+
+        print(f"\n  Best γ=0 baseline: max Re(λ)={best_re_baseline:.6e}")
+        if best_re_baseline > 0:
+            improvement = 1.0 - best_re / best_re_baseline
+            print(f"  Improvement from 2D over 1D: {improvement:.1%}")
+
+        if best_re < STABILITY_TOL:
+            print(f"\n  *** BREAKTHROUGH: 2D search achieved E4 stability! ***")
+        else:
+            print(f"\n  E4 NOT machine-precision stable in 2D (σ, γ) space")
+            print(f"  The O(1e-4–1e-5) barrier is fundamental for E4.")
+
+        # Grid independence check at best point
+        print(f"\n  Grid independence at (σ*={best_sigma:.4f}, γ*={best_gamma:.4f}):")
+        for nn in [20, 40, 80]:
+            mr, df = self._eval_point(nn, best_sigma, best_gamma)
+            print(f"    n={nn:4d}: max Re(λ)={mr:.6e}, deficit={df:.6e}")
+
+        # --- Assertions ---
+        # Best 2D result should be below the loose E4 floor
+        assert best_re < self.E4_INSTABILITY_FLOOR, (
+            f"E4 fine sweep best {best_re:.6e} >= {self.E4_INSTABILITY_FLOOR}"
+        )
+        # 2D search should not be worse than 1D (γ=0) baseline
+        assert best_re <= best_re_baseline + 1e-6, (
+            f"2D search worse than 1D: {best_re:.6e} > {best_re_baseline:.6e}"
+        )

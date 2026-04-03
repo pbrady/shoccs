@@ -478,11 +478,27 @@ strictly less than the γ=0 baseline deficit (actual improvement is ~29%).
   optimizer picks a non-trivial penalty point.
 All 3 tests pass.
 
-### 30.3c — Joint (σ, γ) sweep for E4
+### 30.3c — Joint (σ, γ) sweep for E4 ✅
 
 Same for E4.  This is the key test: can the 2D (σ, γ) space find what the 1D σ
 and 1D ε spaces could not?
 - File: `scripts/stencil_gen/tests/test_phs.py`
+
+**Done:** 3 tests in `TestTensionConservationE4` — all pass. Key findings:
+
+- **NO, the 2D (σ, γ) space does NOT achieve machine-precision stability for E4.**
+  The O(1e-4–1e-5) barrier persists even with conservation penalty.
+- **2D improves over 1D:** Best uniform σ (γ=0) gives max Re(λ) ≈ 8.7e-5;
+  best (σ, γ) = (44.2, 1.7) gives max Re(λ) ≈ 3.3e-5, a ~63% improvement.
+- **Conservation slightly improves:** deficit reduces from 1.71 (γ=0) to 1.65
+  at best (σ, γ) point — modest ~3.5% improvement.
+- **At fixed σ=37 (Phase 30.2c optimal):** best γ≈1.15 gives max Re(λ) ≈ 7.5e-5,
+  slight improvement over γ=0 (1.3e-4), but landscape is noisy/oscillatory.
+- **Grid independence NOT achieved:** best n=40 point gives larger max Re(λ)
+  at n=20 (2.2e-4) and n=80 (1.1e-4).
+- **Conclusion:** the O(1e-5) instability floor for E4 is a fundamental barrier
+  that cannot be breached by 1D σ, 1D ε, mixed per-row, or 2D (σ, γ) searches.
+  This is consistent with Phase 30.2c's conclusion.
 
 ---
 
@@ -536,7 +552,7 @@ Document findings and next steps.
 17. **30.3a** — Soft conservation penalty implementation ✅
 18. **30.3b** — E2 (σ, γ) sweep ✅
 19. **30.3b-review-a** — Assert conservation improvement at γ > 0 ✅
-20. **30.3c** — E4 (σ, γ) sweep
+20. **30.3c** — E4 (σ, γ) sweep ✅
 21. **30.4a** — Comparison table
 22. **30.4b** — Modified wavenumber analysis
 23. **30.4c** — Update plan with conclusions
