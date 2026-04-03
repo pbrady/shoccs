@@ -329,6 +329,113 @@ class TestBuildDiffMatrixRBF:
 
 
 # ---------------------------------------------------------------------------
+# 30.2a: Diff matrix builder with tension kernel
+# ---------------------------------------------------------------------------
+
+
+class TestBuildDiffMatrixTension:
+    """Tests for build_diff_matrix_rbf with kernel='tension'."""
+
+    def test_matrix_shape(self):
+        """Tension diff matrix should be n×n."""
+        for n in [20, 40]:
+            D = build_diff_matrix_rbf(n, p=1, q=1, epsilon=2.0,
+                                      kernel="tension", nextra=1)
+            assert D.shape == (n, n)
+
+    def test_interior_column_sums_zero(self):
+        """Interior rows should sum to 0 (first derivative)."""
+        n = 30
+        D = build_diff_matrix_rbf(n, p=1, q=1, epsilon=3.0,
+                                  kernel="tension", nextra=1)
+        r = 3  # q + 1 + nextra = 1 + 1 + 1
+        for i in range(r, n - r):
+            row_sum = np.sum(D[i, :])
+            assert abs(row_sum) < 1e-14, f"Interior row {i} sum = {row_sum}"
+
+    def test_sigma_zero_matches_phs(self):
+        """At σ=0, tension diff matrix should match PHS k=2."""
+        n = 20
+        D_tension = build_diff_matrix_rbf(n, p=1, q=1, epsilon=0.0,
+                                          kernel="tension", nextra=1)
+        D_phs = build_diff_matrix_rbf(n, p=1, q=1, epsilon=1.0,
+                                      kernel="gaussian", nextra=1)
+        # Build reference PHS k=2 matrix manually
+        from stencil_gen.interior import derive_interior, full_gamma_array
+
+        r = 3  # q + 1 + nextra
+        t = 4  # p + q + 1 + nextra
+        D_ref = np.zeros((n, n))
+        for i in range(r):
+            w = [float(x) for x in phs_stencil_weights(
+                [Rational(j) for j in range(t)], Rational(i), 1, 1, k=2)]
+            for j in range(t):
+                D_ref[i, j] = w[j]
+        interior_w = [float(c) for c in full_gamma_array(derive_interior(0, 1, 1))]
+        for i in range(r, n - r):
+            for k_idx, j in enumerate(range(i - 1, i + 2)):
+                D_ref[i, j] = interior_w[k_idx]
+        for i in range(r):
+            w = [float(x) for x in phs_stencil_weights(
+                [Rational(j) for j in range(t)], Rational(i), 1, 1, k=2)]
+            row = n - 1 - i
+            for j in range(t):
+                D_ref[row, n - 1 - j] = -w[j]
+
+        np.testing.assert_allclose(D_tension, D_ref, atol=1e-13,
+                                   err_msg="Tension at σ=0 matrix ≠ PHS k=2 matrix")
+
+    def test_polynomial_reproduction(self):
+        """D applied to x should give all 1s (exact for linear)."""
+        n = 30
+        D = build_diff_matrix_rbf(n, p=1, q=1, epsilon=5.0,
+                                  kernel="tension", nextra=1)
+        x = np.arange(n, dtype=float)
+        result = D @ x
+        np.testing.assert_allclose(result, 1.0, atol=1e-12)
+
+    def test_antisymmetry_first_deriv(self):
+        """Right boundary should be antisymmetric reflection of left for nu=1."""
+        n = 20
+        D = build_diff_matrix_rbf(n, p=1, q=1, epsilon=3.0,
+                                  kernel="tension", nextra=1)
+        r = 3
+        t = 4
+        for i in range(r):
+            left_row = D[i, :t]
+            right_row = D[n - 1 - i, n - t:][::-1]
+            np.testing.assert_allclose(right_row, -left_row, atol=1e-14)
+
+    def test_nu2_polynomial_reproduction(self):
+        """D (nu=2) applied to x should give all 0s (exact for linear)."""
+        n = 30
+        D = build_diff_matrix_rbf(n, p=1, q=1, epsilon=3.0,
+                                  kernel="tension", nu=2, nextra=0)
+        x = np.arange(n, dtype=float)
+        result = D @ x
+        np.testing.assert_allclose(result, 0.0, atol=1e-10)
+
+    def test_eigenvalue_finite(self):
+        """max_real_eigenvalue should return a finite float for tension kernel."""
+        result = max_real_eigenvalue(20, p=1, q=1, epsilon=2.0,
+                                    kernel="tension", nextra=1)
+        assert np.isfinite(result), f"Non-finite max Re(λ) = {result}"
+
+    def test_mixed_epsilon_tension(self):
+        """build_diff_matrix_mixed_epsilon should work with tension kernel."""
+        n = 20
+        r = 3  # q + 1 + nextra for p=1, q=1, nextra=1
+        sigmas = [1.0, 2.0, 3.0]
+        D = build_diff_matrix_mixed_epsilon(n, p=1, q=1, epsilons=sigmas,
+                                            kernel="tension", nextra=1)
+        assert D.shape == (n, n)
+        # Polynomial reproduction: D @ x = 1
+        x = np.arange(n, dtype=float)
+        result = D @ x
+        np.testing.assert_allclose(result, 1.0, atol=1e-12)
+
+
+# ---------------------------------------------------------------------------
 # 29.6b: Max real eigenvalue diagnostic
 # ---------------------------------------------------------------------------
 

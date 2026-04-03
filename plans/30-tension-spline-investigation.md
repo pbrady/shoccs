@@ -183,12 +183,19 @@ verifying D² polynomial exactness to 1e-10.
 
 ## 30.2 — Sigma Stability Sweep
 
-### 30.2a — Extend `build_diff_matrix_rbf` for tension kernel
+### 30.2a — Extend `build_diff_matrix_rbf` for tension kernel ✅
 
 Ensure the differentiation matrix builder works with `kernel="tension"`.
 May already work if the kernel dispatch in `_rbf_weights_numeric` is correct.
 - File: `scripts/stencil_gen/stencil_gen/phs.py`
 - Test: matrix is n×n, interior column sums are 0, matches PHS at σ=0
+
+**Done:** The existing code path already supports `kernel="tension"` — `build_diff_matrix_rbf`
+passes `kernel` to `uniform_boundary_weights_rbf`, which delegates to `phs_stencil_weights`,
+which dispatches tension to `_rbf_weights_numeric`. Updated docstrings in `build_diff_matrix_rbf`,
+`build_diff_matrix_mixed_epsilon` to mention `"tension"`. Added `TestBuildDiffMatrixTension`
+(8 tests): shape, interior column sums, σ=0 matches PHS k=2, polynomial reproduction,
+antisymmetry, nu=2 reproduction, finite eigenvalues, and mixed-epsilon tension. All pass.
 
 ### 30.2b — Sigma sweep for E2 (p=1, q=1)
 
@@ -289,7 +296,7 @@ Document findings and next steps.
 5. **30.1-review-a** — Add σ=0 guard dispatching to PHS k=2 (blocks 30.2) ✅
 6. **30.1-review-b** — Add D¹φ Taylor 8th term for branch-point accuracy ✅
 7. **30.1-review-c** — Add nu=2 stencil weight test ✅
-8. **30.2a** — Diff matrix builder for tension
+8. **30.2a** — Diff matrix builder for tension ✅
 9. **30.2b** — E2 sigma sweep (first result: does PHS k=2 connect to stability?)
 10. **30.2c** — E4 sigma sweep (key result: does tension beat Gaussian?)
 11. **30.2d** — Fine-grained optimal σ search

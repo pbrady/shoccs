@@ -757,7 +757,8 @@ def build_diff_matrix_rbf(
     epsilon : float
         RBF shape parameter.
     kernel : str
-        RBF kernel type (``"gaussian"`` or ``"multiquadric"``).
+        RBF kernel type: ``"gaussian"``, ``"multiquadric"``, or ``"tension"``.
+        For ``"tension"``, *epsilon* is the tension parameter σ.
     nu : int
         Derivative order (1 or 2).
     nextra : int
@@ -841,7 +842,8 @@ def build_diff_matrix_mixed_epsilon(
         Shape parameter per boundary row.  Length must equal r (the number
         of boundary rows per side).
     kernel : str
-        RBF kernel type.
+        RBF kernel type: ``"gaussian"``, ``"multiquadric"``, or ``"tension"``.
+        For ``"tension"``, each entry of *epsilons* is a tension parameter σ.
     nu : int
         Derivative order (1 or 2).
     nextra : int
