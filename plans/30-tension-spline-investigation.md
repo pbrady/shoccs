@@ -385,7 +385,7 @@ All pass.
 
 ## 30.3 — Soft Conservation Penalty
 
-### 30.3a — Implement penalty-augmented RBF-FD system
+### 30.3a — Implement penalty-augmented RBF-FD system ✅
 
 Add a new function that solves the weighted least-squares problem:
 
@@ -399,6 +399,27 @@ Implementation: form the augmented normal equations or use a constrained least-s
 solver.  The system is still linear; the solution exists for all γ ≥ 0.
 - File: `scripts/stencil_gen/stencil_gen/phs.py`
 - Test: γ=0 recovers standard RBF weights, γ→∞ approaches conservation-enforced weights
+
+**Done:** Added `build_diff_matrix_rbf_penalty` to `phs.py`. Implementation uses
+null-space projection: computes the standard RBF weights b₀, then adjusts via
+b = b₀ + Z α where Z is the block-diagonal null space of the polynomial constraint
+(preserving polynomial exactness as a hard constraint). The α is found by solving
+(I + γ GᵀG) α = γ Gᵀr₀ where G = C Z and r₀ is the conservation deficit at b₀.
+Right boundary is automatically conservative by the antisymmetric reflection.
+
+6 tests in `TestConservationPenalty` — all pass:
+- `test_gamma_zero_matches_standard_e2/e4`: γ=0 gives identical D to standard.
+- `test_conservation_improves_with_gamma_e2/e4`: deficit decreases with γ and
+  converges (E2: 1.22 → 0.85; E4: similar pattern).
+- `test_polynomial_exactness_preserved_e2/e4`: polynomial reproduction < 1e-8
+  at all γ values.
+
+**Key finding:** Full conservation is NOT achievable while maintaining polynomial
+exactness.  The null space of P has dimension t−(q+1) per row, but all rows share
+the same null space, so the effective column-sum freedom is only t−(q+1) dimensions
+vs t conservation equations.  The penalty reduces the deficit to a fundamental limit
+(~30% reduction for E2), not to zero.  This is consistent with the TEMO approach's
+need to sacrifice one boundary row's freedom for conservation.
 
 ### 30.3b — Joint (σ, γ) sweep for E2
 
@@ -463,7 +484,7 @@ Document findings and next steps.
 14. **30.2d** — Fine-grained optimal σ search ✅
 15. **30.2d-review-a** — Assert E2 grid-independence in `test_e2_optimal_sigma` ✅
 16. **30.2d-review-b** — Complete regression assertions in `test_comparison_all_methods` ✅
-17. **30.3a** — Soft conservation penalty implementation
+17. **30.3a** — Soft conservation penalty implementation ✅
 18. **30.3b** — E2 (σ, γ) sweep
 19. **30.3c** — E4 (σ, γ) sweep
 20. **30.4a** — Comparison table

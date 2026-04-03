@@ -928,6 +928,127 @@ def max_real_eigenvalue(
     return float(np.max(np.real(eigvals)))
 
 
+def build_diff_matrix_rbf_penalty(
+    n: int,
+    p: int,
+    q: int,
+    epsilon: float,
+    kernel: str = "tension",
+    nu: int = 1,
+    nextra: int = 0,
+    gamma: float = 0.0,
+) -> np.ndarray:
+    """Build n×n differentiation matrix with soft conservation penalty.
+
+    Same as :func:`build_diff_matrix_rbf` but with an additional penalty
+    that softly enforces conservation (zero column sums).  The boundary
+    weights are adjusted to minimize:
+
+        ‖δ‖² + γ ‖C(b₀ + δ) - target‖²
+        subject to  P δ = 0   (polynomial exactness preserved)
+
+    where b₀ are the standard RBF weights, C computes column sums of the
+    left boundary block, target = −(interior column sums) so that the full
+    matrix has zero column sums, and δ lies in the null space of the
+    polynomial constraint matrix P.
+
+    This distributes conservation across all boundary rows rather than
+    dumping it on a single row (as TEMO does).
+
+    Parameters
+    ----------
+    n, p, q, epsilon, kernel, nu, nextra
+        Passed to :func:`build_diff_matrix_rbf`.
+    gamma : float
+        Conservation penalty weight.  γ=0 gives the standard RBF weights.
+        As γ→∞, boundary weights approach conservation-enforced values
+        while maintaining polynomial exactness.
+
+    Returns
+    -------
+    np.ndarray
+        n×n differentiation matrix.
+    """
+    # Build the standard (γ=0) matrix
+    D_std = build_diff_matrix_rbf(n, p, q, epsilon, kernel, nu, nextra)
+
+    if gamma <= 0:
+        return D_std
+
+    # Compute boundary dimensions (same as build_diff_matrix_rbf)
+    if nu == 1:
+        t = p + q + 1 + nextra
+        r = q + 1 + nextra
+    elif nu == 2:
+        t = p + 2 + nextra
+        r = p + 1 + nextra
+    else:
+        raise NotImplementedError(f"build_diff_matrix_rbf_penalty: nu={nu}")
+
+    # Extract standard left boundary weights: B_std ∈ R^{r×t}
+    B_std = D_std[:r, :t].copy()
+    b_0 = B_std.ravel()  # R^{r*t}, row-major
+
+    # Polynomial matrix P_{d,j} = j^d, d=0..q, j=0..t-1
+    pts = np.arange(t, dtype=float)
+    n_poly = q + 1
+    P_mat = np.zeros((n_poly, t))
+    for d in range(n_poly):
+        P_mat[d, :] = pts**d
+
+    # Null space of P_mat via SVD (orthonormal basis)
+    _, _, Vt = np.linalg.svd(P_mat, full_matrices=True)
+    null_dim = t - n_poly
+    Z_single = Vt[n_poly:, :].T  # t × null_dim
+
+    # Block-diagonal null space for all r rows: Z_block ∈ R^{r*t × r*null_dim}
+    Z_block = np.zeros((r * t, r * null_dim))
+    for i in range(r):
+        Z_block[i * t : (i + 1) * t, i * null_dim : (i + 1) * null_dim] = Z_single
+
+    # Conservation constraint: C ∈ R^{t × r*t}
+    # C[j, i*t + j] = 1  ⟹  (C b)[j] = Σᵢ B[i,j] = left boundary column sum
+    C = np.zeros((t, r * t))
+    for j in range(t):
+        for i in range(r):
+            C[j, i * t + j] = 1.0
+
+    # Interior column sums for columns 0..t-1
+    interior_col_sums = np.sum(D_std[r : n - r, :t], axis=0)
+
+    # Target: left boundary column sums = −interior column sums
+    # so that total column sum = 0 for each column
+    target = -interior_col_sums
+
+    # Conservation deficit at standard solution
+    r_0 = target - C @ b_0
+
+    # Solve via null-space projection:
+    #   b = b₀ + Z α,  minimize ‖Z α‖² + γ ‖C Z α − r₀‖²
+    #   ⟹  (I + γ GᵀG) α = γ Gᵀr₀   where G = C Z_block
+    # Since Z has orthonormal columns, ZᵀZ = I.
+    G = C @ Z_block
+    M = np.eye(r * null_dim) + gamma * (G.T @ G)
+    rhs_vec = gamma * (G.T @ r_0)
+    alpha = np.linalg.solve(M, rhs_vec)
+
+    # Adjusted boundary weights
+    b_new = b_0 + Z_block @ alpha
+    B_new = b_new.reshape(r, t)
+
+    # Assemble D with adjusted left boundary
+    D = D_std.copy()
+    D[:r, :t] = B_new
+
+    # Right boundary: reflected (automatically satisfies conservation by symmetry)
+    sign = (-1.0) ** nu
+    for i in range(r):
+        for j in range(t):
+            D[n - 1 - i, n - 1 - j] = sign * B_new[i, j]
+
+    return D
+
+
 def cut_cell_weights(
     i: int,
     T: int,

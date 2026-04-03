@@ -6,6 +6,7 @@ from sympy import Rational, S, Symbol, cancel, symbols
 from stencil_gen.phs import (
     _tension_kernel_eval,
     _tension_kernel_deriv,
+    build_diff_matrix_rbf_penalty,
     cut_cell_weights,
     phs_stencil_weights,
     uniform_boundary_weights,
@@ -2685,3 +2686,161 @@ class TestTensionOptimalSigma:
         assert e4_tension_re < e4_phs_re, (
             f"E4 Tension ({e4_tension_re:.6e}) not better than PHS k=2 ({e4_phs_re:.6e})"
         )
+
+
+# ---------------------------------------------------------------------------
+# 30.3a: Soft conservation penalty
+# ---------------------------------------------------------------------------
+
+
+class TestConservationPenalty:
+    """Tests for build_diff_matrix_rbf_penalty (Phase 30.3a).
+
+    Verifies that the penalty-augmented RBF-FD system:
+    1. At γ=0, recovers the standard RBF weights exactly.
+    2. As γ→∞, approaches conservation-enforced weights (zero column sums).
+    3. Preserves polynomial exactness at all γ values.
+    """
+
+    # E2_1 parameters
+    E2_P, E2_Q, E2_NEXTRA, E2_NU = 1, 1, 1, 1
+    # E4_1 parameters
+    E4_P, E4_Q, E4_NEXTRA, E4_NU = 2, 3, 0, 1
+
+    def _conservation_deficit(self, D):
+        """Max absolute column sum of D."""
+        return float(np.max(np.abs(np.sum(D, axis=0))))
+
+    def _polynomial_reproduction_error(self, D, n, nu, q):
+        """Max error in D applied to polynomials x^d for d=0..q.
+
+        The differentiation matrix D is built for unit-spacing grid
+        {0, 1, ..., n-1}, so f_j = j^d and (Df)_i should equal
+        d!/(d-nu)! * i^{d-nu}.
+        """
+        x = np.arange(n, dtype=float)
+        max_err = 0.0
+        for d in range(q + 1):
+            f = x**d
+            Df = D @ f
+            if d >= nu:
+                coeff = 1.0
+                for j in range(nu):
+                    coeff *= (d - j)
+                exact = coeff * x ** (d - nu)
+            else:
+                exact = np.zeros(n)
+            err = np.max(np.abs(Df - exact))
+            max_err = max(max_err, err)
+        return max_err
+
+    def test_gamma_zero_matches_standard_e2(self):
+        """γ=0 penalty matrix is identical to standard RBF matrix (E2)."""
+        n, sigma = 40, 6.0
+        p, q, nextra, nu = self.E2_P, self.E2_Q, self.E2_NEXTRA, self.E2_NU
+
+        D_std = build_diff_matrix_rbf(n, p, q, sigma, "tension", nu, nextra)
+        D_pen = build_diff_matrix_rbf_penalty(
+            n, p, q, sigma, "tension", nu, nextra, gamma=0.0
+        )
+
+        np.testing.assert_allclose(D_pen, D_std, atol=1e-15)
+
+    def test_gamma_zero_matches_standard_e4(self):
+        """γ=0 penalty matrix is identical to standard RBF matrix (E4)."""
+        n, sigma = 40, 37.0
+        p, q, nextra, nu = self.E4_P, self.E4_Q, self.E4_NEXTRA, self.E4_NU
+
+        D_std = build_diff_matrix_rbf(n, p, q, sigma, "tension", nu, nextra)
+        D_pen = build_diff_matrix_rbf_penalty(
+            n, p, q, sigma, "tension", nu, nextra, gamma=0.0
+        )
+
+        np.testing.assert_allclose(D_pen, D_std, atol=1e-15)
+
+    def test_conservation_improves_with_gamma_e2(self):
+        """Conservation deficit decreases as γ increases (E2).
+
+        Full conservation is NOT achievable while maintaining polynomial
+        exactness: the null space of P has dimension t-(q+1) per row,
+        but all rows share the same null space, so the effective column-sum
+        freedom is only t-(q+1) dimensions vs t conservation equations.
+        The penalty reduces the deficit to a fundamental limit set by the
+        polynomial-exactness / conservation trade-off.
+        """
+        n, sigma = 40, 6.0
+        p, q, nextra, nu = self.E2_P, self.E2_Q, self.E2_NEXTRA, self.E2_NU
+
+        gammas = [0, 1, 10, 100, 1000, 1e6]
+        deficits = []
+        for g in gammas:
+            D = build_diff_matrix_rbf_penalty(
+                n, p, q, sigma, "tension", nu, nextra, gamma=g
+            )
+            deficits.append(self._conservation_deficit(D))
+
+        print("\n  E2 conservation deficit vs γ:")
+        for g, d in zip(gammas, deficits):
+            print(f"    γ={g:>10.0f}  deficit={d:.6e}")
+
+        # Deficit should decrease overall
+        assert deficits[-1] < deficits[0], (
+            f"Large γ ({deficits[-1]:.6e}) should reduce deficit vs γ=0 ({deficits[0]:.6e})"
+        )
+        # At large γ, deficit converges to a fundamental limit (rank-limited)
+        assert abs(deficits[-1] - deficits[-2]) / deficits[-2] < 0.01, (
+            "Deficit should converge at large γ"
+        )
+
+    def test_conservation_improves_with_gamma_e4(self):
+        """Conservation deficit decreases as γ increases (E4)."""
+        n, sigma = 40, 37.0
+        p, q, nextra, nu = self.E4_P, self.E4_Q, self.E4_NEXTRA, self.E4_NU
+
+        gammas = [0, 1, 10, 100, 1000, 1e6]
+        deficits = []
+        for g in gammas:
+            D = build_diff_matrix_rbf_penalty(
+                n, p, q, sigma, "tension", nu, nextra, gamma=g
+            )
+            deficits.append(self._conservation_deficit(D))
+
+        print("\n  E4 conservation deficit vs γ:")
+        for g, d in zip(gammas, deficits):
+            print(f"    γ={g:>10.0f}  deficit={d:.6e}")
+
+        assert deficits[-1] < deficits[0], (
+            f"Large γ ({deficits[-1]:.6e}) should reduce deficit vs γ=0 ({deficits[0]:.6e})"
+        )
+        # Converges at large γ
+        assert abs(deficits[-1] - deficits[-2]) / deficits[-2] < 0.01, (
+            "Deficit should converge at large γ"
+        )
+
+    def test_polynomial_exactness_preserved_e2(self):
+        """Polynomial exactness is maintained at all γ values (E2)."""
+        n, sigma = 40, 6.0
+        p, q, nextra, nu = self.E2_P, self.E2_Q, self.E2_NEXTRA, self.E2_NU
+
+        for g in [0, 10, 1000, 1e6]:
+            D = build_diff_matrix_rbf_penalty(
+                n, p, q, sigma, "tension", nu, nextra, gamma=g
+            )
+            err = self._polynomial_reproduction_error(D, n, nu, q)
+            assert err < 1e-8, (
+                f"Polynomial exactness lost at γ={g}: error={err:.6e}"
+            )
+
+    def test_polynomial_exactness_preserved_e4(self):
+        """Polynomial exactness is maintained at all γ values (E4)."""
+        n, sigma = 40, 37.0
+        p, q, nextra, nu = self.E4_P, self.E4_Q, self.E4_NEXTRA, self.E4_NU
+
+        for g in [0, 10, 1000, 1e6]:
+            D = build_diff_matrix_rbf_penalty(
+                n, p, q, sigma, "tension", nu, nextra, gamma=g
+            )
+            err = self._polynomial_reproduction_error(D, n, nu, q)
+            assert err < 1e-8, (
+                f"Polynomial exactness lost at γ={g}: error={err:.6e}"
+            )
