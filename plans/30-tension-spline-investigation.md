@@ -281,6 +281,27 @@ Same sweep for E4 boundary stencils.
 - Stability is NOT grid-independent: best σ from n=40 gives larger max Re(λ)
   at n=20 (~2e-4), n=80 (~1.8e-4), n=160 (~2.6e-4).
 
+---
+
+## 30.2c-review — Follow-up items from review of Phase 30.2c
+
+### 30.2c-review-a — Add regression assertions to E4 tension sweep tests
+
+Three of four tests in `TestTensionSweepE4` have zero `assert` statements —
+the same problem fixed for E2 in 30.2-review-a.  Only `test_tension_coarse_sweep`
+has assertions; the other three pass silently if the tension kernel breaks.
+
+Since E4 is NOT machine-precision stable (best ≈ 5e-5), use a loose regression
+threshold (e.g., 1e-3) rather than `STABILITY_TOL`:
+
+- `test_tension_fine_sweep_near_best`: assert fine-sweep best < 1e-3 (actual ~5e-5).
+  Assert that tension improves over PHS k=2 baseline (best < σ=0 value).
+- `test_compare_with_gaussian`: assert both tension and Gaussian bests < 1e-3.
+  Assert tension improves ≥ 10× over PHS k=2 (from ~0.006 to ~5e-5 is ~100×).
+- `test_mixed_tension_two_group`: assert mixed best < 1e-3.
+
+---
+
 ### 30.2d — Fine-grained search near optimal σ
 
 If the sweep finds a minimum in max Re(λ):
@@ -367,13 +388,14 @@ Document findings and next steps.
 10. **30.2-review-a** — Add regression assertions to E2 tension sweep tests ✅
 11. **30.2-review-b** — Use practical stability threshold (blocks 30.2c) ✅
 12. **30.2c** — E4 sigma sweep (key result: does tension beat Gaussian?) ✅
-13. **30.2d** — Fine-grained optimal σ search
-14. **30.3a** — Soft conservation penalty implementation
-15. **30.3b** — E2 (σ, γ) sweep
-16. **30.3c** — E4 (σ, γ) sweep
-17. **30.4a** — Comparison table
-18. **30.4b** — Modified wavenumber analysis
-19. **30.4c** — Update plan with conclusions
+13. **30.2c-review-a** — Add regression assertions to E4 tension sweep tests
+14. **30.2d** — Fine-grained optimal σ search
+15. **30.3a** — Soft conservation penalty implementation
+16. **30.3b** — E2 (σ, γ) sweep
+17. **30.3c** — E4 (σ, γ) sweep
+18. **30.4a** — Comparison table
+19. **30.4b** — Modified wavenumber analysis
+20. **30.4c** — Update plan with conclusions
 
 ---
 
