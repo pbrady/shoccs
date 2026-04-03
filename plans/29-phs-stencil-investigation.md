@@ -128,9 +128,27 @@ Uses numpy for numerical eigenvalue computation.
 and returns `max(Re(eigvals))`.  Tests: periodic interior-only matrix has
 max Re(λ) < 1e-12, return type is float.  All pass.
 
-### 29.6c — Epsilon sweep for E2 (p=1, q=1)
+### 29.6-fix — Fix `build_diff_matrix_rbf` dimension formula for nu=2
+
+`build_diff_matrix_rbf` hardcodes the nu=1 dimension formula
+(`t = p+q+1+nextra`, `r = q+1+nextra`) but the function accepts nu=2.
+For nu=2, `temo.compute_dimensions` uses `t = p+2+nextra`, `r = p+1+nextra`.
+Calling with nu=2 silently produces wrong boundary dimensions.
+
+Either:
+- Gate on nu and use the correct formula per `temo.compute_dimensions`, or
+- Restrict to nu=1 and raise `NotImplementedError` for nu=2.
+
+Also add a test that `build_diff_matrix_rbf` with E2_2 parameters (p=1, q=1,
+nextra=0, nu=2) produces the same dimensions as `temo.compute_dimensions`.
+
+- File: `scripts/stencil_gen/stencil_gen/phs.py`, `build_diff_matrix_rbf`
+
+### 29.6c — Epsilon sweep for E2 (p=1, q=1, nextra=1)
 
 Sweep ε over [0.01, 10] and record max Re(λ) at each ε for n=20,40,80.
+**Important:** E2_1 requires `nextra=1` — pass it explicitly to
+`max_real_eigenvalue` (default is 0, which gives wrong boundary dimensions).
 - Find: is there an ε* where max Re(λ) ≤ 0?
 - If yes: report ε* and the corresponding alpha values
 - If no: report the minimum max Re(λ) achieved and the ε that achieves it
@@ -197,8 +215,9 @@ Each step produces tests that validate before moving on:
 3. **29.5c** — Tests for new kernels
 4. **29.6a** — Differentiation matrix builder
 5. **29.6b** — max_real_eigenvalue diagnostic
-6. **29.6c** — E2 epsilon sweep (first result!)
-7. **29.6d** — E4 epsilon sweep (key result!)
+6. **29.6-fix** — Fix nu=2 dimension formula in build_diff_matrix_rbf
+7. **29.6c** — E2 epsilon sweep (first result!) — remember nextra=1
+8. **29.6d** — E4 epsilon sweep (key result!)
 8. **29.6e** or **29.6f** — Extract alphas or characterize gap
 9. **29.7a** — Comparison table
 10. **29.7b** — Update plan with conclusions
