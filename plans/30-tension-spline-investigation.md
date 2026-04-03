@@ -446,6 +446,31 @@ Sweep both tension parameter σ and conservation penalty γ:
 - **Trade-off:** larger σ tolerates more conservation penalty but the combined
   (σ, γ) point loses grid-independence that the γ=0 result had.
 
+---
+
+## 30.3b-review — Follow-up items from review of Phase 30.3b
+
+### 30.3b-review-a — Assert conservation improvement at γ > 0 in joint tests
+
+The plan's key finding is "deficit reduced 29% (1.20 → 0.85)" — that the
+penalty mechanism improves conservation while maintaining stability.  But none
+of the three 30.3b tests assert that a stable point with γ > 0 has better
+deficit than the γ=0 baseline.  If `build_diff_matrix_rbf_penalty` silently
+stopped applying the penalty (returning γ=0 weights regardless of γ), all
+tests would still pass:
+
+- `test_joint_sweep_coarse`: asserts stable points exist and γ=0 baseline
+  exists, but not that γ > 0 improves deficit.
+- `test_stability_survives_moderate_penalty`: asserts γ > 0 is stable, but
+  not that deficit improves.
+- `test_fine_sweep_near_optimal`: asserts `best_deficit ≤ deficit_baseline`,
+  but `best_gamma` could be 0 (trivially satisfying the assertion).
+
+Fix: in `test_fine_sweep_near_optimal`, assert `best_gamma > 0` (verifying
+the optimizer found a non-trivial penalty point that improves conservation).
+In `test_joint_sweep_coarse`, assert that the best stable deficit at γ > 0 is
+strictly less than the γ=0 baseline deficit (actual improvement is ~29%).
+
 ### 30.3c — Joint (σ, γ) sweep for E4
 
 Same for E4.  This is the key test: can the 2D (σ, γ) space find what the 1D σ
@@ -503,10 +528,11 @@ Document findings and next steps.
 16. **30.2d-review-b** — Complete regression assertions in `test_comparison_all_methods` ✅
 17. **30.3a** — Soft conservation penalty implementation ✅
 18. **30.3b** — E2 (σ, γ) sweep ✅
-19. **30.3c** — E4 (σ, γ) sweep
-20. **30.4a** — Comparison table
-21. **30.4b** — Modified wavenumber analysis
-22. **30.4c** — Update plan with conclusions
+19. **30.3b-review-a** — Assert conservation improvement at γ > 0
+20. **30.3c** — E4 (σ, γ) sweep
+21. **30.4a** — Comparison table
+22. **30.4b** — Modified wavenumber analysis
+23. **30.4c** — Update plan with conclusions
 
 ---
 
