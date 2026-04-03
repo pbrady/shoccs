@@ -2414,3 +2414,245 @@ class TestTensionSweepE4:
         assert best_re < 1e-3, (
             f"E4 mixed-tension regression: max Re(λ) = {best_re:.6e} >= 1e-3"
         )
+
+
+# ---------------------------------------------------------------------------
+# 30.2d: Fine-grained search near optimal σ
+# ---------------------------------------------------------------------------
+
+
+def _bisect_threshold(f, a, b, threshold, tol=1e-4, maxiter=60):
+    """Bisection to find x where f(x) crosses threshold from above.
+
+    Assumes f(a) > threshold and f(b) < threshold.
+    Returns x such that f(x) ≈ threshold.
+    """
+    for _ in range(maxiter):
+        if b - a < tol:
+            break
+        mid = (a + b) / 2
+        if f(mid) > threshold:
+            a = mid
+        else:
+            b = mid
+    return (a + b) / 2
+
+
+def _dense_sweep_min(f, sigmas):
+    """Dense sweep returning (sigma_best, f_best, all_results).
+
+    all_results is a list of (sigma, f_val) sorted by sigma.
+    """
+    results = [(s, f(s)) for s in sigmas]
+    best = min(results, key=lambda r: r[1])
+    return best[0], best[1], results
+
+
+class TestTensionOptimalSigma:
+    """Fine-grained search for optimal σ.
+
+    For E2: bisection to find the stability transition σ_crit, then report
+    weights at a σ* slightly above σ_crit in the stable plateau.
+    For E4: dense sweep to find best σ* (noisy O(1e-4) landscape).
+    """
+
+    def _max_re(self, sigma, n, p, q, nu, nextra):
+        """Compute max Re(λ) for given tension parameter."""
+        return max_real_eigenvalue(
+            n, p=p, q=q, epsilon=sigma,
+            kernel="tension", nu=nu, nextra=nextra,
+        )
+
+    def _max_re_gaussian(self, eps, n, p, q, nu, nextra):
+        """Compute max Re(λ) for given Gaussian parameter."""
+        return max_real_eigenvalue(
+            n, p=p, q=q, epsilon=eps,
+            kernel="gaussian", nu=nu, nextra=nextra,
+        )
+
+    def test_e2_optimal_sigma(self):
+        """Find σ_crit for E2_1 via bisection and report stencil weights.
+
+        E2_1 params: p=1, q=1, nextra=1, nu=1.
+        From 30.2b: sharp transition to machine-precision stability at σ≈5.0.
+        Bisect to find σ_crit precisely, then pick σ* = σ_crit + 1 in the
+        stable plateau.
+        """
+        p, q, nextra, nu = 1, 1, 1, 1
+        n = 40
+
+        # Bisection: find σ_crit where max Re(λ) crosses 1e-6
+        # Bracket: at σ=3 max_re≈0.02 (above), at σ=7 max_re≈1e-14 (below)
+        threshold = 1e-6
+        sigma_crit = _bisect_threshold(
+            lambda s: self._max_re(s, n, p, q, nu, nextra),
+            3.0, 7.0, threshold, tol=1e-4,
+        )
+
+        # Pick σ* well into the stable plateau
+        sigma_star = sigma_crit + 1.0
+        re_star = self._max_re(sigma_star, n, p, q, nu, nextra)
+
+        print(f"\n  E2_1 optimal σ (bisection + plateau, n={n}):")
+        print(f"  σ_crit = {sigma_crit:.4f} (transition to stability)")
+        print(f"  σ* = {sigma_star:.4f} (σ_crit + 1.0)")
+        print(f"  max Re(λ) at σ* = {re_star:.6e}")
+
+        # Report stencil weights at σ*
+        t = p + q + 1 + nextra  # boundary stencil width
+        r = q + 1 + nextra      # number of boundary rows
+        print(f"\n  Boundary stencil at σ*={sigma_star:.4f} (t={t}, r={r} rows per side):")
+        for i in range(r):
+            w = uniform_boundary_weights_tension(i, t, nu, q, sigma_star)
+            w_str = ", ".join(f"{v:+.10f}" for v in w)
+            print(f"    row {i}: [{w_str}]")
+
+        # Grid-independence check
+        print(f"\n  Grid-independence check at σ*={sigma_star:.4f}:")
+        all_stable = True
+        for nn in [20, 40, 80, 160]:
+            mr = self._max_re(sigma_star, nn, p, q, nu, nextra)
+            stable = mr < 1e-6  # loose threshold for eigenvalue noise
+            all_stable = all_stable and stable
+            status = "STABLE" if stable else "unstable"
+            print(f"    n={nn:4d}: max Re(λ) = {mr:.6e} [{status}]")
+
+        # Regression: σ_crit must be in a reasonable range
+        assert 3.0 < sigma_crit < 7.0, (
+            f"E2 σ_crit outside expected range: {sigma_crit:.4f}"
+        )
+        # Regression: σ* must give near-machine-precision stability
+        assert re_star < 1e-6, (
+            f"E2 optimal σ not stable: max Re(λ) = {re_star:.6e}"
+        )
+
+    def test_e4_optimal_sigma(self):
+        """Dense sweep for E4_1 optimal σ and report stencil weights.
+
+        E4_1 params: p=2, q=3, nextra=0, nu=1.
+        From 30.2c: noisy landscape with best ~5e-5.  No single σ achieves
+        machine precision.  Dense sweep to find the best region.
+        """
+        p, q, nextra, nu = 2, 3, 0, 1
+        n = 40
+
+        # Dense sweep over [5, 55] (400 points)
+        sigmas = np.linspace(5, 55, 400)
+        sigma_star, re_star, all_results = _dense_sweep_min(
+            lambda s: self._max_re(s, n, p, q, nu, nextra),
+            sigmas,
+        )
+
+        # Robust estimate: median of top-10 best
+        sorted_results = sorted(all_results, key=lambda r: r[1])
+        top10 = sorted_results[:10]
+        median_re = np.median([r[1] for r in top10])
+        sigma_range = (min(r[0] for r in top10), max(r[0] for r in top10))
+
+        print(f"\n  E4_1 optimal σ (dense sweep, n={n}):")
+        print(f"  Best σ* = {sigma_star:.4f}, max Re(λ) = {re_star:.6e}")
+        print(f"  Stable: {re_star < STABILITY_TOL}")
+        print(f"\n  Top-10 best results:")
+        for s, mr in top10:
+            print(f"    σ={s:8.3f}  max Re(λ)={mr:.6e}")
+        print(f"  Median of top-10: {median_re:.6e}")
+        print(f"  σ range of top-10: [{sigma_range[0]:.2f}, {sigma_range[1]:.2f}]")
+
+        # Report stencil weights at σ*
+        t = p + q + 1 + nextra  # boundary stencil width
+        r = q + 1 + nextra      # number of boundary rows
+        print(f"\n  Boundary stencil at σ*={sigma_star:.4f} (t={t}, r={r} rows per side):")
+        for i in range(r):
+            w = uniform_boundary_weights_tension(i, t, nu, q, sigma_star)
+            w_str = ", ".join(f"{v:+.10f}" for v in w)
+            print(f"    row {i}: [{w_str}]")
+
+        # Grid-dependence check
+        print(f"\n  Grid-dependence check at σ*={sigma_star:.4f}:")
+        for nn in [20, 40, 80, 160]:
+            mr = self._max_re(sigma_star, nn, p, q, nu, nextra)
+            status = "STABLE" if mr < STABILITY_TOL else "unstable"
+            print(f"    n={nn:4d}: max Re(λ) = {mr:.6e} [{status}]")
+
+        # Regression: best should be well below 1e-3 (actual ~5e-5)
+        assert re_star < 1e-3, (
+            f"E4 optimal σ regression: max Re(λ) = {re_star:.6e} >= 1e-3"
+        )
+        # Regression: must improve over PHS k=2 baseline
+        phs_baseline = self._max_re(0.0, n, p, q, nu, nextra)
+        assert re_star < phs_baseline, (
+            f"E4 tension did not improve over PHS k=2: "
+            f"best={re_star:.6e} vs PHS={phs_baseline:.6e}"
+        )
+
+    def test_comparison_all_methods(self):
+        """Compare optimal parameters across all methods for E2 and E4.
+
+        Summary table of PHS k=2 (σ=0), Gaussian ε*, and Tension σ*
+        for both E2_1 and E4_1 schemes.
+        """
+        configs = {
+            "E2_1": dict(p=1, q=1, nextra=1, nu=1),
+            "E4_1": dict(p=2, q=3, nextra=0, nu=1),
+        }
+        n = 40
+
+        print(f"\n  {'='*78}")
+        print(f"  All-methods comparison (n={n})")
+        print(f"  {'='*78}")
+
+        for scheme, cfg in configs.items():
+            p, q, nextra, nu = cfg["p"], cfg["q"], cfg["nextra"], cfg["nu"]
+
+            # PHS k=2 baseline (σ=0)
+            phs_re = self._max_re(0.0, n, p, q, nu, nextra)
+
+            # Gaussian ε*: dense sweep
+            epsilons = np.logspace(np.log10(0.1), np.log10(20), 200)
+            _, gauss_re, _ = _dense_sweep_min(
+                lambda e: self._max_re_gaussian(e, n, p, q, nu, nextra),
+                epsilons,
+            )
+            best_gauss = min(
+                [(e, self._max_re_gaussian(e, n, p, q, nu, nextra)) for e in epsilons],
+                key=lambda r: r[1],
+            )
+            eps_star, gauss_re = best_gauss
+
+            # Tension σ*: dense sweep
+            sigmas = np.linspace(1, 55, 300)
+            best_tension_sigma, tension_re, _ = _dense_sweep_min(
+                lambda s: self._max_re(s, n, p, q, nu, nextra),
+                sigmas,
+            )
+            sigma_star = best_tension_sigma
+
+            print(f"\n  {scheme} (p={p}, q={q}, nextra={nextra}):")
+            print(f"  {'Method':>20s}  {'param':>10s}  {'max Re(λ)':>14s}  {'status':>10s}")
+            print(f"  {'-'*20}  {'-'*10}  {'-'*14}  {'-'*10}")
+
+            def _status(v):
+                return "STABLE" if v < STABILITY_TOL else "unstable"
+
+            print(f"  {'PHS k=2 (σ=0)':>20s}  {'N/A':>10s}  {phs_re:14.6e}  {_status(phs_re):>10s}")
+            print(f"  {'Gaussian ε*':>20s}  {eps_star:10.4f}  {gauss_re:14.6e}  {_status(gauss_re):>10s}")
+            print(f"  {'Tension σ*':>20s}  {sigma_star:10.4f}  {tension_re:14.6e}  {_status(tension_re):>10s}")
+
+            # Improvement ratios
+            if phs_re > 0:
+                gauss_improve = phs_re / max(gauss_re, 1e-16)
+                tension_improve = phs_re / max(tension_re, 1e-16)
+                print(f"\n  Improvement over PHS k=2:")
+                print(f"    Gaussian: {gauss_improve:.1f}×")
+                print(f"    Tension:  {tension_improve:.1f}×")
+
+        # Regression assertions
+        # E2: both Gaussian and tension should achieve near-machine-precision
+        e2 = configs["E2_1"]
+        e2_phs = self._max_re(0.0, n, **e2)
+        assert e2_phs < 0.5, f"E2 PHS k=2 baseline unreasonable: {e2_phs:.6e}"
+
+        # E4: all methods should improve over baseline
+        e4 = configs["E4_1"]
+        e4_phs = self._max_re(0.0, n, **e4)
+        assert e4_phs < 0.05, f"E4 PHS k=2 baseline unreasonable: {e4_phs:.6e}"

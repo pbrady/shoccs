@@ -310,13 +310,36 @@ All 4 E4 sweep tests pass.
 
 ---
 
-### 30.2d — Fine-grained search near optimal σ
+### 30.2d — Fine-grained search near optimal σ ✅
 
 If the sweep finds a minimum in max Re(λ):
 1. Refine with bisection or Brent's method to find σ* precisely
 2. Report the stencil weights at σ*
 3. Compare max Re(λ) with Gaussian ε* and PHS k=2
 - File: `scripts/stencil_gen/tests/test_phs.py`
+
+**Done:** 3 tests in `TestTensionOptimalSigma` — all pass. Key findings:
+
+- **E2_1:** Bisection finds σ_crit ≈ 5.02 (sharp transition to stability).
+  σ* = σ_crit + 1.0 = 6.02 gives max Re(λ) ≈ 1e-14 (machine precision).
+  Grid-independent: all sizes n=20,40,80,160 satisfy max Re(λ) < 1e-6.
+  Boundary stencil weights at σ*=6.02:
+  - row 0: [-0.759, +0.680, -0.082, +0.161]
+  - row 1: [-0.530, -0.007, +0.604, -0.067]
+  - row 2: [+0.067, -0.604, +0.007, +0.530]
+
+- **E4_1:** Dense sweep (400 points over [5,55]) finds noisy/oscillatory
+  landscape.  Best σ*≈50 gives max Re(λ)≈6.8e-5.  Top-10 best results
+  are scattered across σ ∈ [14, 55] with median 7.3e-5.  The O(1e-4)
+  floor is confirmed as a fundamental barrier — no single σ achieves
+  machine precision.  NOT grid-independent.
+
+- **All-methods comparison (n=40):**
+  | Scheme | PHS k=2 (σ=0) | Gaussian ε* | Tension σ* |
+  |--------|----------------|-------------|------------|
+  | E2_1   | 8.7e-2         | 1.3e-15 ✓   | 7.4e-16 ✓  |
+  | E4_1   | 6.4e-3         | 5.7e-5      | 3.8e-5     |
+  Tension improves E4 by 169× over PHS k=2 (vs Gaussian's 112×).
 
 ---
 
@@ -397,7 +420,7 @@ Document findings and next steps.
 11. **30.2-review-b** — Use practical stability threshold (blocks 30.2c) ✅
 12. **30.2c** — E4 sigma sweep (key result: does tension beat Gaussian?) ✅
 13. **30.2c-review-a** — Add regression assertions to E4 tension sweep tests ✅
-14. **30.2d** — Fine-grained optimal σ search
+14. **30.2d** — Fine-grained optimal σ search ✅
 15. **30.3a** — Soft conservation penalty implementation
 16. **30.3b** — E2 (σ, γ) sweep
 17. **30.3c** — E4 (σ, γ) sweep
