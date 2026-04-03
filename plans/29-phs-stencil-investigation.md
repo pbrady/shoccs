@@ -190,12 +190,40 @@ sharper.  The Multiquadric has a wider stable range (~4.4–10+) but requires
 larger ε.  This is a significant improvement over PHS k=2 which had max Re(λ) =
 5.7e-14 — both RBF kernels match or improve on this.
 
-### 29.6d — Epsilon sweep for E4 (p=2, q=3)
+### 29.6d — Epsilon sweep for E4 (p=2, q=3) ✅
 
 Same sweep for E4 boundary stencils.
 - E4 is the primary production target; finding a stable ε here is the key result
 - Record implied alpha values at each ε by comparing against symbolic stencil
 - File: `scripts/stencil_gen/tests/test_phs.py`, class `TestEpsilonSweepE4`
+
+**Completed:** Added `TestEpsilonSweepE4` with 3 tests: `test_gaussian_sweep`,
+`test_multiquadric_sweep`, `test_gaussian_fine_sweep_near_best`.  All 35 tests pass.
+
+**Results — Gaussian kernel:**
+- Best ε varies by grid size: ~1.7 (n=20), ~1.9 (n=40), ~1.2 (n=80)
+- Minimum max Re(λ) ≈ 7.4e-5 (n=20), 1.1e-4 (n=40), 1.1e-4 (n=80)
+- **NOT STABLE** — residual instability O(1e-4), does not reach machine precision
+- Clear instability region at ε ∈ [0.15, 1.1] with peak max Re(λ) ≈ 0.23
+- Large ε (>2.5) converges to a fixed instability ~0.09 (boundary rows → polynomial limit)
+- Fine sweep (n=40): best ε*≈2.13, max Re(λ)=1.3e-4; does NOT improve with grid refinement
+
+**Results — Multiquadric kernel:**
+- Best ε varies: ~5.0 (n=20, max Re(λ)=5.5e-5), ~1.5 (n=40, 7.2e-5), ~5.0 (n=80, 1.4e-4)
+- **NOT STABLE** — similar O(1e-4) residual instability
+- Instability region wider: ε ∈ [0.08, 1.1] with peak max Re(λ) ≈ 0.21
+- No consistent optimal ε across grid sizes (oscillates between ~1.5 and ~5.0)
+
+**Key finding:** For E4_1, neither Gaussian nor Multiquadric RBFs achieve eigenvalue
+stability.  The minimum instability (max Re(λ) ≈ 7e-5 to 1e-4) is significantly
+better than PHS k=2 (0.006) — a ~100× improvement — but not the machine-precision
+stability seen in the E2 case.  The E4 boundary closure has 4 rows (r=4) vs E2's 3
+rows (r=3), and the polynomial augmentation degree q=3 leaves less freedom for the
+RBF to influence stability compared to q=1 in E2.
+
+**Implication:** A single shape parameter ε is insufficient for E4 stability.
+This motivates 29.6f (mixed ε per row) or 29.6e (alpha extraction to see how close
+the best RBF alphas are to the optimizer solution).
 
 ### 29.6e — If stable ε found: extract and validate alpha values
 

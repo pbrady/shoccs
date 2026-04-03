@@ -599,3 +599,144 @@ class TestEpsilonSweepE2:
                     kernel="gaussian", nu=self.NU, nextra=self.NEXTRA,
                 )
                 print(f"    n={nn:4d}: max Re(λ)={mr:.6e}")
+
+
+# ---------------------------------------------------------------------------
+# 29.6d: Epsilon sweep for E4 (p=2, q=3, nextra=0)
+# ---------------------------------------------------------------------------
+
+
+class TestEpsilonSweepE4:
+    """Sweep epsilon for E4_1 boundary stencils and report stability.
+
+    E4_1 parameters: p=2, q=3, nextra=0.
+    This is the primary production target — finding a stable epsilon here
+    is the key result.
+    """
+
+    # E4_1 parameters
+    P = 2
+    Q = 3
+    NEXTRA = 0
+    NU = 1
+
+    def _sweep(self, kernel: str, n_values, epsilons):
+        """Run epsilon sweep, return dict {n: list of (eps, max_re, spec_rad)}."""
+        results = {}
+        for n in n_values:
+            rows = []
+            for eps in epsilons:
+                D = build_diff_matrix_rbf(
+                    n, p=self.P, q=self.Q, epsilon=eps,
+                    kernel=kernel, nu=self.NU, nextra=self.NEXTRA,
+                )
+                eigvals = np.linalg.eigvals(D)
+                max_re = float(np.max(np.real(eigvals)))
+                spec_rad = float(np.max(np.abs(eigvals)))
+                rows.append((eps, max_re, spec_rad))
+            results[n] = rows
+        return results
+
+    def _print_table(self, label, results):
+        """Print formatted sweep table."""
+        print(f"\n{'='*72}")
+        print(f"  {label}")
+        print(f"{'='*72}")
+        for n, rows in sorted(results.items()):
+            print(f"\n  n = {n}")
+            print(f"  {'epsilon':>10s}  {'max Re(λ)':>14s}  {'spec radius':>14s}")
+            print(f"  {'-'*10}  {'-'*14}  {'-'*14}")
+            for eps, max_re, spec_rad in rows:
+                print(f"  {eps:10.4f}  {max_re:14.6e}  {spec_rad:14.6e}")
+
+        # Summary: best epsilon per n
+        print(f"\n  --- Best epsilon (min max Re(λ)) ---")
+        for n, rows in sorted(results.items()):
+            best = min(rows, key=lambda r: r[1])
+            stable = "STABLE" if best[1] <= 0 else "unstable"
+            print(f"  n={n:3d}: eps={best[0]:.4f}, max Re(λ)={best[1]:.6e} [{stable}]")
+
+    def test_gaussian_sweep(self):
+        """Sweep Gaussian kernel epsilon for E4_1."""
+        epsilons = np.logspace(np.log10(0.01), np.log10(10), 60)
+        n_values = [20, 40, 80]
+        results = self._sweep("gaussian", n_values, epsilons)
+        self._print_table("E4_1 Gaussian RBF Epsilon Sweep (p=2, q=3, nextra=0)", results)
+
+        # Find if any epsilon gives stability
+        for n, rows in results.items():
+            best = min(rows, key=lambda r: r[1])
+            if best[1] <= 0:
+                print(f"\n  *** STABLE epsilon found for n={n}: eps={best[0]:.6f} ***")
+
+    def test_multiquadric_sweep(self):
+        """Sweep Multiquadric kernel epsilon for E4_1."""
+        epsilons = np.logspace(np.log10(0.01), np.log10(10), 60)
+        n_values = [20, 40, 80]
+        results = self._sweep("multiquadric", n_values, epsilons)
+        self._print_table("E4_1 Multiquadric RBF Epsilon Sweep (p=2, q=3, nextra=0)", results)
+
+        for n, rows in results.items():
+            best = min(rows, key=lambda r: r[1])
+            if best[1] <= 0:
+                print(f"\n  *** STABLE epsilon found for n={n}: eps={best[0]:.6f} ***")
+
+    def test_gaussian_fine_sweep_near_best(self):
+        """Fine sweep around the best Gaussian epsilon from coarse sweep.
+
+        Uses n=40 for the coarse pass, then refines near the minimum.
+        """
+        n = 40
+        # Coarse sweep
+        epsilons_coarse = np.logspace(np.log10(0.01), np.log10(10), 60)
+        coarse = []
+        for eps in epsilons_coarse:
+            max_re = max_real_eigenvalue(
+                n, p=self.P, q=self.Q, epsilon=eps,
+                kernel="gaussian", nu=self.NU, nextra=self.NEXTRA,
+            )
+            coarse.append((eps, max_re))
+
+        best_coarse = min(coarse, key=lambda r: r[1])
+        eps_best = best_coarse[0]
+
+        # Fine sweep: ±1 decade around best
+        lo = max(0.001, eps_best / 10)
+        hi = min(100, eps_best * 10)
+        epsilons_fine = np.linspace(lo, hi, 200)
+        fine = []
+        for eps in epsilons_fine:
+            max_re = max_real_eigenvalue(
+                n, p=self.P, q=self.Q, epsilon=eps,
+                kernel="gaussian", nu=self.NU, nextra=self.NEXTRA,
+            )
+            fine.append((eps, max_re))
+
+        best_fine = min(fine, key=lambda r: r[1])
+        print(f"\n  E4_1 Gaussian fine sweep (n={n}):")
+        print(f"  Coarse best: eps={best_coarse[0]:.6f}, max Re(λ)={best_coarse[1]:.6e}")
+        print(f"  Fine best:   eps={best_fine[0]:.6f}, max Re(λ)={best_fine[1]:.6e}")
+
+        stable = best_fine[1] <= 0
+        print(f"  Stable: {stable}")
+
+        # Verify at multiple grid sizes
+        if stable or best_fine[1] < 1e-6:
+            eps_star = best_fine[0]
+            print(f"\n  Checking eps*={eps_star:.6f} across grid sizes:")
+            for nn in [20, 40, 80, 160]:
+                mr = max_real_eigenvalue(
+                    nn, p=self.P, q=self.Q, epsilon=eps_star,
+                    kernel="gaussian", nu=self.NU, nextra=self.NEXTRA,
+                )
+                print(f"    n={nn:4d}: max Re(λ)={mr:.6e}")
+        else:
+            # Even if not stable, report best across grid sizes
+            eps_star = best_fine[0]
+            print(f"\n  Best eps={eps_star:.6f} across grid sizes:")
+            for nn in [20, 40, 80, 160]:
+                mr = max_real_eigenvalue(
+                    nn, p=self.P, q=self.Q, epsilon=eps_star,
+                    kernel="gaussian", nu=self.NU, nextra=self.NEXTRA,
+                )
+                print(f"    n={nn:4d}: max Re(λ)={mr:.6e}")
