@@ -1499,6 +1499,14 @@ class TestComparisonTable:
         gauss_re = results[1][1]
         assert gauss_re < 1e-12, f"E2 Gaussian should be stable, got {gauss_re}"
 
+        # PHS k=2 with E2_1 parameters (nextra=1) is NOT stable — O(1e-2).
+        # Note: the original Phase 29 finding of 5.7e-14 was for nextra=0 (t=3, r=2),
+        # a smaller configuration that doesn't match the production E2_1 scheme.
+        phs_re = results[0][1]
+        assert phs_re > 0.01, (
+            f"PHS k=2 E2_1 (nextra=1) should be unstable O(1e-2), got {phs_re}"
+        )
+
     # --------------------------------------------------------- E4 comparison
 
     def test_e4_comparison(self):
@@ -1571,6 +1579,9 @@ class TestComparisonTable:
         print(f"  Grid-Convergence Summary (best method per scheme)")
         print(f"{'='*80}")
 
+        # Collect results keyed by (label, n) for assertions
+        results = {}
+
         for label, p, q, nextra, nu in [
             ("E2_1", self.E2_P, self.E2_Q, self.E2_NEXTRA, self.E2_NU),
             ("E4_1", self.E4_P, self.E4_Q, self.E4_NEXTRA, self.E4_NU),
@@ -1598,4 +1609,17 @@ class TestComparisonTable:
                     else:
                         trend = " ~ stable"
                 prev_re = max_re
+                results[(label, n)] = max_re
                 print(f"  {n:5d}  {max_re:14.6e}  {sr:14.6e}  {cfl:10.4f}{trend}")
+
+        # Regression-protect the key findings:
+        # E2_1 Gaussian achieves machine-precision stability at n=40
+        assert results[("E2_1", 40)] < 1e-12, (
+            f"E2_1 Gaussian at n=40 should be machine-precision stable, "
+            f"got {results[('E2_1', 40)]:.3e}"
+        )
+        # E4_1 Gaussian does NOT achieve stability — instability persists at n=80
+        assert results[("E4_1", 80)] > 1e-5, (
+            f"E4_1 Gaussian at n=80 should show residual instability, "
+            f"got {results[('E4_1', 80)]:.3e}"
+        )

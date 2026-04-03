@@ -28,7 +28,10 @@ cd scripts/stencil_gen && SYMPY_CACHE_SIZE=50000 uv run pytest tests/test_phs.py
 ## Current State
 
 Phase 29 PHS investigation complete (committed).  Key findings:
-- PHS k=2 (cubic spline) gives max Re(λ) = 5.7e-14 for E2, 0.006 for E4
+- PHS k=2 (cubic spline) gives max Re(λ) = 5.7e-14 for E2 with nextra=0 (t=3, r=2)
+  at n=20, but 8.7e-2 with the production E2_1 parameters (nextra=1, t=4, r=3).
+  For E4, max Re(λ) = 0.006.  (Corrected in 29.7a-fix; original 5.7e-14 was from
+  a smaller configuration that doesn't match the production E2_1 scheme.)
 - Higher k → worse instability (anti-Runge effect confirmed)
 - Conservation correction on a single row makes stability worse
 - Cut-cell coefficients grow as O(1/psi), same as polynomial — TEMO still needed
@@ -187,8 +190,9 @@ Sweep ε over [0.01, 10] and record max Re(λ) at each ε for n=20,40,80.
 **Key finding:** Both Gaussian and Multiquadric RBFs achieve eigenvalue stability
 for E2_1.  The Gaussian has a narrower sweet spot (~1.4–2.3) but the minimum is
 sharper.  The Multiquadric has a wider stable range (~4.4–10+) but requires
-larger ε.  This is a significant improvement over PHS k=2 which had max Re(λ) =
-5.7e-14 — both RBF kernels match or improve on this.
+larger ε.  This is a dramatic improvement over PHS k=2 with E2_1 parameters
+(nextra=1), which has max Re(λ) = 8.7e-2.  (The original 5.7e-14 figure was
+for nextra=0, a smaller configuration — see 29.7a-fix.)
 
 ### 29.6d — Epsilon sweep for E4 (p=2, q=3) ✅
 
@@ -388,7 +392,7 @@ For the best RBF configuration found, produce a comparison table:
 - Conservation deficit is nonzero for all RBF methods (none enforce conservation)
 - Mixed-ε does not improve over single ε for E4_1 in this sweep range
 
-### 29.7a-fix — Review follow-ups for comparison table
+### 29.7a-fix — Review follow-ups for comparison table ✅
 
 **Follow-up 1: PHS k=2 E2 result contradicts "Current State".**
 
@@ -399,25 +403,26 @@ table (`test_e2_comparison`) computes PHS k=2 E2_1 at 8.7e-2 using
 was reported in the original commit (99a0b20) but was never regression-tested — no
 eigenvalue test existed until `build_diff_matrix_rbf` was added in 29.6a.
 
-Action:
-1. Run `_build_diff_matrix_phs(n=40, p=1, q=1, k=2, nu=1, nextra=1)` standalone
-   and verify the PHS k=2 E2_1 eigenvalue.  Also check with `nextra=0` (t=3, r=2)
-   to see if the original 5.7e-14 was from a different configuration.
-2. If the 5.7e-14 was from a different configuration (e.g. nextra=0), document
-   which configuration it applies to.  If it was simply wrong, correct it.
-3. Update the "Current State" section (line 31) to match the verified value.
-4. Update the 29.6c results section (line 191) which says "significant improvement
-   over PHS k=2 which had max Re(λ) = 5.7e-14" — if PHS k=2 E2 is actually 8.7e-2,
-   then the Gaussian improvement is ~1e14×, not ~15×, and the narrative changes.
+**Resolved:** The 5.7e-14 was from PHS k=2 with nextra=0 (t=3, r=2) at n=20.
+With the production E2_1 parameters (nextra=1, t=4, r=3), PHS k=2 gives 8.7e-2.
+Verified values:
+- nextra=0: 5.7e-14 (n=20), 1.4e-7 (n=40), 1.6e-7 (n=80) — not grid-convergent
+- nextra=1: 8.7e-2 at all grid sizes (grid-independent instability)
+
+The nextra=0 configuration has only r=2 boundary rows (vs r=3 for E2_1), so the
+original 5.7e-14 does not apply to the production scheme.  Updated "Current State"
+(line 31) and 29.6c results (line 191) to document the correct values.
+
+Added assertion in `test_e2_comparison`: `assert phs_re > 0.01` to regression-protect
+the PHS k=2 E2_1 instability finding.
 
 **Follow-up 2: `test_summary_across_grid_sizes` has no assertions.**
 
-Same pattern as flagged in 29.6e-fix: print-only test with no regression protection.
-Add:
-1. `assert max_re < 1e-12` for E2_1 Gaussian at n=40 (regression-protects
-   machine-precision stability finding, consistent with `test_e2_comparison`).
-2. `assert max_re > 1e-5` for E4_1 Gaussian at n=80 (confirms instability does NOT
-   grid-converge — the key negative finding for E4).
+**Resolved:** Added two assertions:
+1. `assert results[("E2_1", 40)] < 1e-12` — regression-protects machine-precision
+   stability finding for E2_1 Gaussian.
+2. `assert results[("E4_1", 80)] > 1e-5` — confirms E4_1 instability does NOT
+   grid-converge (the key negative finding for E4).
 
 ### 29.7b — Update plan with conclusions and next steps
 
@@ -446,7 +451,7 @@ Each step produces tests that validate before moving on:
 9. **29.6e** ✅ — Extract alphas for E2 (stable but non-conservative)
 9b. **29.6e-fix** ✅ — Add assertions to TestStableEpsilonAlphas (review follow-up)
 10. **29.7a** ✅ — Comparison table
-10b. **29.7a-fix** — Resolve PHS E2 discrepancy + add grid-convergence assertions (review follow-up)
+10b. **29.7a-fix** ✅ — Resolve PHS E2 discrepancy + add grid-convergence assertions (review follow-up)
 11. **29.7b** — Update plan with conclusions
 
 ---
