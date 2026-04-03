@@ -421,13 +421,30 @@ vs t conservation equations.  The penalty reduces the deficit to a fundamental l
 (~30% reduction for E2), not to zero.  This is consistent with the TEMO approach's
 need to sacrifice one boundary row's freedom for conservation.
 
-### 30.3b — Joint (σ, γ) sweep for E2
+### 30.3b — Joint (σ, γ) sweep for E2 ✅
 
 Sweep both tension parameter σ and conservation penalty γ:
 - σ ∈ [0, 10], γ ∈ [0, 100]
 - Find: is there a (σ*, γ*) where both max Re(λ) ≤ 0 AND conservation deficit < threshold?
 - This is a 2D search, but each evaluation is ~1ms (numpy eigenvalue)
-- File: `scripts/stencil_gen/tests/test_phs.py`, class `TestTensionConservation`
+- File: `scripts/stencil_gen/tests/test_phs.py`, class `TestTensionConservationE2`
+
+**Done:** 3 tests in `TestTensionConservationE2` — all pass. Key findings:
+
+- **YES, stable + improved conservation exists** for E2.  Best coarse-sweep
+  point: σ≈9.3, γ=100 achieves max Re(λ) < 1e-10 AND deficit reduced 29%
+  (1.20 → 0.85).
+- **Stability boundary widens with σ:** at σ=6.2, stability holds only up to
+  γ≈0.27; at σ=8.3, up to γ≈37; at σ=9.3, γ=100+ still stable.
+- **At σ=6 (Phase 30.2d optimal):** very tight stability budget — only γ≤0.18,
+  giving ~10.5% deficit improvement (1.22 → 1.09).
+- **Conservation improvement saturates at ~30%:** deficit reduces from ~1.20 to
+  ~0.85, consistent with the fundamental rank-limited null-space constraint
+  from Phase 30.3a.
+- **Grid independence NOT achieved at best combined point:** σ=8, γ=100 is
+  stable at n=40 but unstable at n=20 (2.3e-3) and n=80 (9.0e-4).
+- **Trade-off:** larger σ tolerates more conservation penalty but the combined
+  (σ, γ) point loses grid-independence that the γ=0 result had.
 
 ### 30.3c — Joint (σ, γ) sweep for E4
 
@@ -485,7 +502,7 @@ Document findings and next steps.
 15. **30.2d-review-a** — Assert E2 grid-independence in `test_e2_optimal_sigma` ✅
 16. **30.2d-review-b** — Complete regression assertions in `test_comparison_all_methods` ✅
 17. **30.3a** — Soft conservation penalty implementation ✅
-18. **30.3b** — E2 (σ, γ) sweep
+18. **30.3b** — E2 (σ, γ) sweep ✅
 19. **30.3c** — E4 (σ, γ) sweep
 20. **30.4a** — Comparison table
 21. **30.4b** — Modified wavenumber analysis

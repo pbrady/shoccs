@@ -2844,3 +2844,226 @@ class TestConservationPenalty:
             assert err < 1e-8, (
                 f"Polynomial exactness lost at γ={g}: error={err:.6e}"
             )
+
+
+# ---------------------------------------------------------------------------
+# 30.3b: Joint (σ, γ) sweep for E2 — tension + conservation penalty
+# ---------------------------------------------------------------------------
+
+
+class TestTensionConservationE2:
+    """Joint (σ, γ) sweep for E2_1 boundary stencils (Phase 30.3b).
+
+    Sweep both tension parameter σ and conservation penalty γ to find
+    whether there exists a (σ*, γ*) where both:
+    - max Re(λ) < STABILITY_TOL  (stability)
+    - conservation deficit < some threshold  (conservation)
+
+    E2_1 parameters: p=1, q=1, nextra=1.
+    From Phase 30.2d, E2 achieves machine-precision stability at σ ≈ 5–6
+    with γ=0.  The question is: does adding conservation penalty γ > 0
+    destroy stability, or can both be achieved simultaneously?
+    """
+
+    P, Q, NEXTRA, NU = 1, 1, 1, 1
+
+    def _eval_point(self, n, sigma, gamma):
+        """Evaluate (σ, γ) point: return (max_re, deficit)."""
+        D = build_diff_matrix_rbf_penalty(
+            n, self.P, self.Q, sigma, "tension", self.NU, self.NEXTRA,
+            gamma=gamma,
+        )
+        eigvals = np.linalg.eigvals(D)
+        max_re = float(np.max(np.real(eigvals)))
+        deficit = float(np.max(np.abs(np.sum(D, axis=0))))
+        return max_re, deficit
+
+    def test_joint_sweep_coarse(self):
+        """Coarse 2D sweep over σ × γ for E2_1.
+
+        Maps the stability–conservation landscape to find if a region
+        exists where both are satisfied.
+        """
+        n = 40
+        sigmas = np.linspace(0.0, 10.0, 30)
+        gammas = np.concatenate([[0.0], np.logspace(-1, 2, 29)])  # 0 + log[0.1..100]
+
+        best_stable_deficit = float("inf")
+        best_stable_sigma = None
+        best_stable_gamma = None
+
+        # Track the γ=0 baseline deficit at optimal σ
+        baseline_deficit = None
+
+        n_stable = 0
+        for sigma in sigmas:
+            for gamma in gammas:
+                max_re, deficit = self._eval_point(n, sigma, gamma)
+
+                if max_re < STABILITY_TOL:
+                    n_stable += 1
+                    if deficit < best_stable_deficit:
+                        best_stable_deficit = deficit
+                        best_stable_sigma = sigma
+                        best_stable_gamma = gamma
+
+                    # Record baseline (γ=0)
+                    if gamma == 0.0:
+                        if baseline_deficit is None or deficit < baseline_deficit:
+                            baseline_deficit = deficit
+
+        # Print landscape summary
+        total = len(sigmas) * len(gammas)
+        print(f"\n  E2_1 Joint (σ, γ) Sweep (n={n})")
+        print(f"  Grid: {len(sigmas)} σ × {len(gammas)} γ = {total} points")
+        print(f"  Stable points: {n_stable}/{total}")
+
+        if best_stable_sigma is not None:
+            print(f"\n  Best stable point (lowest deficit):")
+            print(f"    σ*={best_stable_sigma:.4f}, γ*={best_stable_gamma:.4f}")
+            print(f"    deficit={best_stable_deficit:.6e}")
+
+        if baseline_deficit is not None:
+            print(f"\n  Baseline (γ=0) deficit at stable σ: {baseline_deficit:.6e}")
+            if (best_stable_gamma is not None and best_stable_gamma > 0
+                    and baseline_deficit > 0):
+                improvement = 1.0 - best_stable_deficit / baseline_deficit
+                print(f"  Deficit improvement with γ>0: {improvement:.1%}")
+
+        # Print stability boundary: for each σ, largest γ that is still stable
+        print(f"\n  Stability boundary (max γ that is stable, per σ):")
+        for sigma in sigmas[::3]:  # every 3rd σ for brevity
+            max_gamma = -1.0
+            for gamma in gammas:
+                max_re, _ = self._eval_point(n, sigma, gamma)
+                if max_re < STABILITY_TOL:
+                    max_gamma = gamma
+            if max_gamma >= 0:
+                print(f"    σ={sigma:6.2f}: stable up to γ={max_gamma:.2f}")
+            else:
+                print(f"    σ={sigma:6.2f}: unstable at all γ")
+
+        # --- Assertions ---
+        # E2 must have at least one stable point (we know γ=0, σ≈6 is stable)
+        assert n_stable > 0, "No stable (σ, γ) point found for E2"
+
+        # Stability must exist at γ=0 (regression from Phase 30.2)
+        assert baseline_deficit is not None, (
+            "E2 should be stable at γ=0 for some σ in [0, 10]"
+        )
+
+    def test_stability_survives_moderate_penalty(self):
+        """Check that E2 stability at σ* is not destroyed by moderate γ.
+
+        Fix σ at the known optimal (~6.0) and increase γ from 0 to 100.
+        Report the critical γ where stability is lost (if any).
+        """
+        n = 40
+        sigma_star = 6.0
+        gammas = np.concatenate([[0.0], np.logspace(-1, 2, 50)])  # 0..100
+
+        print(f"\n  E2_1 Stability vs γ at σ*={sigma_star} (n={n})")
+        print(f"  {'γ':>10s}  {'max Re(λ)':>14s}  {'deficit':>14s}  {'status':>10s}")
+        print(f"  {'-'*10}  {'-'*14}  {'-'*14}  {'-'*10}")
+
+        max_stable_gamma = -1.0
+        deficit_at_zero = None
+        deficit_at_max_stable = None
+
+        for gamma in gammas:
+            max_re, deficit = self._eval_point(n, sigma_star, gamma)
+            status = "STABLE" if max_re < STABILITY_TOL else "unstable"
+            # Print a representative subset of rows
+            if (gamma == 0.0 or gamma < 0.2
+                    or abs(gamma - 1.0) < 0.2 or abs(gamma - 10.0) < 1.5
+                    or abs(gamma - 50.0) < 5.0 or gamma > 90.0):
+                print(f"  {gamma:10.4f}  {max_re:14.6e}  {deficit:14.6e}  {status:>10s}")
+
+            if max_re < STABILITY_TOL:
+                max_stable_gamma = gamma
+                deficit_at_max_stable = deficit
+            if gamma == 0.0:
+                deficit_at_zero = deficit
+
+        print(f"\n  Max γ with stability: {max_stable_gamma:.4f}")
+        if deficit_at_zero is not None:
+            print(f"  Deficit at γ=0: {deficit_at_zero:.6e}")
+        if deficit_at_max_stable is not None and deficit_at_zero is not None:
+            print(f"  Deficit at max stable γ={max_stable_gamma:.4f}: "
+                  f"{deficit_at_max_stable:.6e}")
+            if deficit_at_zero > 0:
+                improvement = 1.0 - deficit_at_max_stable / deficit_at_zero
+                print(f"  Deficit improvement: {improvement:.1%}")
+
+        # --- Assertions ---
+        # γ=0 must be stable (regression)
+        re_0, _ = self._eval_point(n, sigma_star, 0.0)
+        assert re_0 < STABILITY_TOL, (
+            f"E2 unstable at σ={sigma_star}, γ=0: max Re(λ) = {re_0:.6e}"
+        )
+
+        # Some γ > 0 should also be stable (conservation penalty shouldn't
+        # immediately destroy stability)
+        assert max_stable_gamma > 0, (
+            "Any positive γ destroys E2 stability — penalty approach not viable"
+        )
+
+    def test_fine_sweep_near_optimal(self):
+        """Fine 2D sweep near the best (σ, γ) region for E2_1.
+
+        Refines around σ ∈ [4, 8] (known E2 stable region) with moderate γ.
+        """
+        n = 40
+        sigmas = np.linspace(4.0, 8.0, 40)
+        gammas = np.concatenate([[0.0], np.logspace(-1, 2, 40)])
+
+        best_deficit = float("inf")
+        best_sigma = None
+        best_gamma = None
+        best_re = None
+
+        for sigma in sigmas:
+            for gamma in gammas:
+                max_re, deficit = self._eval_point(n, sigma, gamma)
+                if max_re < STABILITY_TOL and deficit < best_deficit:
+                    best_deficit = deficit
+                    best_sigma = sigma
+                    best_gamma = gamma
+                    best_re = max_re
+
+        print(f"\n  E2_1 Fine joint sweep: σ ∈ [4, 8], γ ∈ [0, 100]")
+        print(f"  Grid: {len(sigmas)} × {len(gammas)} = {len(sigmas) * len(gammas)} points")
+
+        if best_sigma is not None:
+            print(f"\n  Best stable + lowest deficit:")
+            print(f"    σ*={best_sigma:.4f}, γ*={best_gamma:.4f}")
+            print(f"    max Re(λ)={best_re:.6e}")
+            print(f"    deficit={best_deficit:.6e}")
+
+            # Compare with γ=0 baseline
+            re_0, deficit_0 = self._eval_point(n, best_sigma, 0.0)
+            print(f"\n  Baseline at same σ, γ=0:")
+            print(f"    max Re(λ)={re_0:.6e}")
+            print(f"    deficit={deficit_0:.6e}")
+            if deficit_0 > 0:
+                improvement = 1.0 - best_deficit / deficit_0
+                print(f"    Deficit improvement: {improvement:.1%}")
+
+            # Verify grid independence of best point
+            print(f"\n  Grid independence at (σ*={best_sigma:.4f}, γ*={best_gamma:.4f}):")
+            for nn in [20, 40, 80]:
+                mr, df = self._eval_point(nn, best_sigma, best_gamma)
+                status = "STABLE" if mr < STABILITY_TOL else "unstable"
+                print(f"    n={nn:4d}: max Re(λ)={mr:.6e}, deficit={df:.6e} [{status}]")
+        else:
+            print("  No stable point found in fine sweep region.")
+
+        # --- Assertions ---
+        assert best_sigma is not None, (
+            "No stable point found in E2 fine sweep region σ ∈ [4, 8]"
+        )
+        # The best deficit with penalty should not be worse than γ=0
+        _, deficit_baseline = self._eval_point(n, best_sigma, 0.0)
+        assert best_deficit <= deficit_baseline + 1e-12, (
+            f"Penalty worsened deficit: {best_deficit:.6e} > {deficit_baseline:.6e}"
+        )
