@@ -225,24 +225,63 @@ RBF to influence stability compared to q=1 in E2.
 This motivates 29.6f (mixed ε per row) or 29.6e (alpha extraction to see how close
 the best RBF alphas are to the optimizer solution).
 
-### 29.6e — If stable ε found: extract and validate alpha values
+### 29.6e — Extract and validate alpha values for E2 stable ε
 
-If an ε* exists where the scheme is stable:
-1. Extract the FD weights at ε*
+E2_1 has a stable ε* (machine precision, see 29.6c).  E4_1 does NOT (see 29.6d/f).
+This step applies to E2_1 only:
+1. Extract the FD weights at ε* ≈ 2.29 (Gaussian, n=40)
 2. Map them back to alpha values in the `derive_uniform_boundary_for_temo` parameterization
 3. Verify: substitute those alphas into the symbolic stencil and confirm eigenvalue stability
-4. Compare with the optimizer-derived alphas used in `src/stencils/E4_1.cpp`
+4. Compare with the optimizer-derived alphas used in `src/stencils/E2_1.cpp`
 5. Check conservation deficit at those alpha values
 - File: `scripts/stencil_gen/tests/test_phs.py`, class `TestStableEpsilonAlphas`
 
-### 29.6f — If NO stable ε found: characterize the gap
+### 29.6f — If NO stable ε found: characterize the gap ✅
 
-If no single ε produces stability:
-1. Report the minimum instability (min over ε of max Re(λ))
-2. Try mixed approach: different ε per boundary row
-3. Try: Gaussian boundary rows 0..r-2 with one ε, near-interior row from conservation
-4. Summarize findings and update plan with next research direction
-- File: `scripts/stencil_gen/tests/test_phs.py`, class `TestMixedEpsilon`
+Since E4_1 showed O(1e-4) instability with a single ε, investigated mixed-epsilon
+approaches where each boundary row can use a different shape parameter.
+
+**Approaches tested (all at n=40, Gaussian kernel unless noted):**
+
+1. **Single-epsilon baseline:** best ε≈1.74, max Re(λ)=8.1e-5 (confirms 29.6d)
+
+2. **Two-group (outer/inner):** ε_outer for rows 0,1; ε_inner for rows 2,3
+   - Best: ε_outer=1.64, ε_inner=1.46, max Re(λ)=6.3e-5
+   - Modest improvement (~1.3× over single ε)
+   - Not grid-convergent: n=80 gives 2.6e-4
+
+3. **Per-row coordinate descent (4 independent ε):**
+   - Best: [4.08, 2.46, 1.70, 1.70], max Re(λ)=4.0e-5
+   - 3× improvement over uniform ε
+   - **NOT STABLE** — still O(1e-5) residual instability
+   - Not grid-convergent: n=80 gives 1.3e-4, n=160 gives 2.6e-4
+
+4. **Conservation near-interior:** row 3 uses polynomial stencil (ε→∞ limit),
+   rows 0–2 use Gaussian
+   - Best: ε=1.78, max Re(λ)=1.9e-4 (worse than unconstrained)
+   - Variant with separate ε for row 3: best 3.4e-5 (eps_main=1.35, eps_last=0.52)
+
+5. **Multiquadric per-row coordinate descent:**
+   - Best: [7.64, 5.0, 5.0, 5.0], max Re(λ)=7.5e-5
+   - Similar O(1e-5) residual, no stability
+
+**Key findings:**
+- Mixed ε gives ~3× improvement over single ε for E4_1, but does NOT achieve stability
+- The instability is O(1e-5) at best, and gets *worse* with grid refinement (not convergent)
+- The E4 boundary closure (r=4 rows, q=3 polynomial augmentation) has a fundamental
+  stability deficit that cannot be closed by tuning RBF shape parameters alone
+- The polynomial augmentation degree q=3 leaves only 2 extra degrees of freedom
+  per row (t - (q+1) = 6 - 4 = 2), which the RBF fills, but this is insufficient
+  for eigenvalue stability
+- Conservation enforcement (polynomial last row) makes things worse, not better
+
+**Implication:** RBF shape parameter tuning (single or mixed) cannot replace the
+multi-alpha optimizer for E4.  The boundary stencil has a structural stability
+constraint that requires explicit alpha optimization, not implicit RBF regularization.
+This confirms the value of the TEMO approach with multi-alpha optimization.
+
+- File: `scripts/stencil_gen/stencil_gen/phs.py` — added `build_diff_matrix_mixed_epsilon`
+- File: `scripts/stencil_gen/tests/test_phs.py`, class `TestMixedEpsilon` (5 tests, all pass)
 
 ---
 
@@ -279,9 +318,10 @@ Each step produces tests that validate before moving on:
 6. **29.6-fix** — Fix nu=2 dimension formula in build_diff_matrix_rbf
 7. **29.6c** — E2 epsilon sweep (first result!) — remember nextra=1
 8. **29.6d** — E4 epsilon sweep (key result!)
-8. **29.6e** or **29.6f** — Extract alphas or characterize gap
-9. **29.7a** — Comparison table
-10. **29.7b** — Update plan with conclusions
+8. **29.6f** ✅ — Mixed epsilon characterization (E4 not stable even with per-row ε)
+9. **29.6e** — Extract alphas for E2 (stable ε found)
+10. **29.7a** — Comparison table
+11. **29.7b** — Update plan with conclusions
 
 ---
 

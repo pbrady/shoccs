@@ -208,7 +208,11 @@ class TestPHSvsE4Boundary:
 
 import numpy as np
 
-from stencil_gen.phs import build_diff_matrix_rbf, max_real_eigenvalue
+from stencil_gen.phs import (
+    build_diff_matrix_mixed_epsilon,
+    build_diff_matrix_rbf,
+    max_real_eigenvalue,
+)
 
 
 # ---------------------------------------------------------------------------
@@ -740,3 +744,274 @@ class TestEpsilonSweepE4:
                     kernel="gaussian", nu=self.NU, nextra=self.NEXTRA,
                 )
                 print(f"    n={nn:4d}: max Re(λ)={mr:.6e}")
+
+
+# ---------------------------------------------------------------------------
+# 29.6f: Mixed epsilon for E4 — characterize the gap
+# ---------------------------------------------------------------------------
+
+
+class TestMixedEpsilon:
+    """Try mixed epsilon (different per boundary row) for E4_1.
+
+    E4_1 parameters: p=2, q=3, nextra=0 → t=6, r=4 boundary rows per side.
+    Single-epsilon sweeps (29.6d) showed min max Re(λ) ≈ 1e-4, not stable.
+    Here we try different ε for each of the 4 boundary rows.
+    """
+
+    P = 2
+    Q = 3
+    NEXTRA = 0
+    NU = 1
+    R = 4  # q + 1 + nextra = 3 + 1 + 0
+
+    def _max_re_mixed(self, n, epsilons, kernel="gaussian"):
+        """Compute max Re(λ) for a mixed-epsilon configuration."""
+        D = build_diff_matrix_mixed_epsilon(
+            n, p=self.P, q=self.Q, epsilons=list(epsilons),
+            kernel=kernel, nu=self.NU, nextra=self.NEXTRA,
+        )
+        eigvals = np.linalg.eigvals(D)
+        return float(np.max(np.real(eigvals)))
+
+    def test_single_epsilon_baseline(self):
+        """Confirm single-epsilon minimum from 29.6d as baseline.
+
+        With a uniform epsilon across all 4 boundary rows, the best
+        achievable max Re(λ) is ~1e-4 (not machine-precision stable).
+        """
+        n = 40
+        # Coarse sweep to find best single epsilon
+        epsilons_sweep = np.logspace(np.log10(0.1), np.log10(10), 80)
+        best_eps, best_re = None, np.inf
+        for eps in epsilons_sweep:
+            mr = self._max_re_mixed(n, [eps] * self.R)
+            if mr < best_re:
+                best_re = mr
+                best_eps = eps
+
+        print(f"\n  E4_1 single-epsilon baseline (n={n}):")
+        print(f"  Best eps={best_eps:.4f}, max Re(λ)={best_re:.6e}")
+        # Should match 29.6d result: ~1e-4
+        assert best_re < 1e-2, f"Single-epsilon baseline too large: {best_re}"
+
+    def test_two_group_sweep(self):
+        """Sweep two groups: ε_outer (rows 0,1) and ε_inner (rows 2,3).
+
+        The near-interior rows (2, 3) are closest to the interior stencil
+        and may benefit from a different ε than the outermost rows (0, 1).
+        """
+        n = 40
+        eps_range = np.logspace(np.log10(0.3), np.log10(8.0), 30)
+
+        best_combo = None
+        best_re = np.inf
+        results = []
+
+        for eps_outer in eps_range:
+            for eps_inner in eps_range:
+                epsilons = [eps_outer, eps_outer, eps_inner, eps_inner]
+                mr = self._max_re_mixed(n, epsilons)
+                results.append((eps_outer, eps_inner, mr))
+                if mr < best_re:
+                    best_re = mr
+                    best_combo = (eps_outer, eps_inner)
+
+        print(f"\n  E4_1 two-group sweep (n={n}):")
+        print(f"  Best: eps_outer={best_combo[0]:.4f}, eps_inner={best_combo[1]:.4f}")
+        print(f"  max Re(λ)={best_re:.6e}")
+
+        # Check if two-group improves over single epsilon
+        # Single epsilon baseline is ~1e-4
+        single_best = min(
+            (mr for _, _, mr in results),
+        )
+        print(f"  (Minimum from all combos: {single_best:.6e})")
+
+        # Verify at multiple grid sizes
+        print(f"\n  Checking best combo across grid sizes:")
+        for nn in [20, 40, 80]:
+            epsilons = [best_combo[0], best_combo[0], best_combo[1], best_combo[1]]
+            mr = self._max_re_mixed(nn, epsilons)
+            stable = "STABLE" if mr <= 0 else "unstable"
+            print(f"    n={nn:3d}: max Re(λ)={mr:.6e} [{stable}]")
+
+    def test_per_row_optimize(self):
+        """Coordinate descent to find optimal per-row epsilon combination.
+
+        Optimizes over 4 independent epsilon values (one per boundary row)
+        using iterative single-dimension sweeps.
+        """
+        n = 40
+        eps_vals = np.logspace(np.log10(0.3), np.log10(8.0), 40)
+
+        # Start from the best single epsilon (~1.7)
+        current = [1.7] * self.R
+        current_re = self._max_re_mixed(n, current)
+
+        # Coordinate descent: sweep each row's epsilon while fixing others
+        for iteration in range(3):  # 3 full passes
+            for row in range(self.R):
+                best_eps_row = current[row]
+                best_re_row = current_re
+                for eps in eps_vals:
+                    trial = list(current)
+                    trial[row] = eps
+                    mr = self._max_re_mixed(n, trial)
+                    if mr < best_re_row:
+                        best_re_row = mr
+                        best_eps_row = eps
+                current[row] = best_eps_row
+                current_re = best_re_row
+
+        opt_eps = current
+
+        print(f"\n  E4_1 per-row coordinate descent (n={n}):")
+        print(f"  Optimal epsilons: [{', '.join(f'{e:.4f}' for e in opt_eps)}]")
+        print(f"  max Re(λ)={current_re:.6e}")
+
+        # Compare with uniform best
+        uniform_mr = min(
+            self._max_re_mixed(n, [eps] * self.R)
+            for eps in np.logspace(np.log10(0.5), np.log10(5.0), 40)
+        )
+        improvement = uniform_mr / current_re if current_re > 0 else float('inf')
+        print(f"\n  Uniform best: max Re(λ)={uniform_mr:.6e}")
+        print(f"  Mixed improvement factor: {improvement:.1f}x")
+
+        # Check grid convergence
+        print(f"\n  Grid convergence with optimal epsilons:")
+        for nn in [20, 40, 80, 160]:
+            mr = self._max_re_mixed(nn, opt_eps)
+            stable = "STABLE" if mr <= 0 else "unstable"
+            print(f"    n={nn:3d}: max Re(λ)={mr:.6e} [{stable}]")
+
+    def test_conservation_near_interior(self):
+        """Try replacing the near-interior row (r-1) with a conservation row.
+
+        The near-interior row (row r-1 = row 3) is the one closest to the
+        interior.  Replace it with a row whose weights sum to 0 and that
+        conserves the derivative of x^q (the highest polynomial).  This
+        is done by using the interior stencil for that row but shifted.
+
+        Strategy: use RBF for rows 0..r-2, and for row r-1 use the
+        classical one-sided polynomial stencil (no RBF contribution).
+        """
+        from stencil_gen.interior import derive_interior, full_gamma_array
+
+        n = 40
+        # E4_1 dimensions: t=6, r=4
+        t = self.P + self.Q + 1 + self.NEXTRA  # = 6
+        r = self.R  # = 4
+
+        # Get classical interior weights
+        interior_coeffs = derive_interior(0, self.P, self.NU)
+        interior_w = [float(c) for c in full_gamma_array(interior_coeffs)]
+
+        # Sweep epsilon for rows 0..2, with row 3 using a polynomial stencil
+        # Row 3 polynomial stencil: use t points {0,..,t-1}, eval at x=3
+        from stencil_gen.phs import uniform_boundary_weights_rbf
+
+        # Compute the polynomial (lagrange) stencil for row r-1
+        # Use a very large epsilon (→ polynomial limit) for the last row
+        poly_w_last = uniform_boundary_weights_rbf(
+            r - 1, t, self.NU, self.Q, epsilon=100.0, kernel="gaussian"
+        )
+
+        eps_range = np.logspace(np.log10(0.3), np.log10(8.0), 60)
+        best_eps, best_re = None, np.inf
+
+        for eps in eps_range:
+            # Build matrix: rows 0..r-2 use RBF with this eps, row r-1 uses polynomial
+            D = np.zeros((n, n))
+
+            # Left boundary rows 0..r-2: RBF
+            for i in range(r - 1):
+                w = uniform_boundary_weights_rbf(i, t, self.NU, self.Q, eps)
+                for j in range(t):
+                    D[i, j] = w[j]
+
+            # Left boundary row r-1: polynomial stencil
+            for j in range(t):
+                D[r - 1, j] = poly_w_last[j]
+
+            # Interior rows
+            for i in range(r, n - r):
+                for k_idx, jj in enumerate(range(i - self.P, i + self.P + 1)):
+                    D[i, jj] = interior_w[k_idx]
+
+            # Right boundary: reflected
+            sign = (-1.0) ** self.NU
+            for i in range(r - 1):
+                w = uniform_boundary_weights_rbf(i, t, self.NU, self.Q, eps)
+                row = n - 1 - i
+                for j in range(t):
+                    D[row, n - 1 - j] = sign * w[j]
+            # Right row r-1: reflected polynomial
+            row = n - 1 - (r - 1)
+            for j in range(t):
+                D[row, n - 1 - j] = sign * poly_w_last[j]
+
+            eigvals = np.linalg.eigvals(D)
+            mr = float(np.max(np.real(eigvals)))
+            if mr < best_re:
+                best_re = mr
+                best_eps = eps
+
+        print(f"\n  E4_1 conservation near-interior (n={n}):")
+        print(f"  Row {r-1} uses polynomial stencil (eps→∞ limit)")
+        print(f"  Rows 0..{r-2} use Gaussian with swept eps")
+        print(f"  Best eps={best_eps:.4f}, max Re(λ)={best_re:.6e}")
+        stable = "STABLE" if best_re <= 0 else "unstable"
+        print(f"  Status: {stable}")
+
+        # Also try: RBF for rows 0..r-2 with *different* eps for row r-1
+        print(f"\n  Variant: different eps for row {r-1} (2D sweep):")
+        eps_coarse = np.logspace(np.log10(0.3), np.log10(8.0), 25)
+        best2 = (None, None, np.inf)
+
+        for eps_main in eps_coarse:
+            for eps_last in eps_coarse:
+                epsilons = [eps_main] * (r - 1) + [eps_last]
+                mr = self._max_re_mixed(n, epsilons)
+                if mr < best2[2]:
+                    best2 = (eps_main, eps_last, mr)
+
+        print(f"  Best: eps_main={best2[0]:.4f}, eps_last={best2[1]:.4f}")
+        print(f"  max Re(λ)={best2[2]:.6e}")
+
+    def test_multiquadric_mixed(self):
+        """Try mixed epsilon with Multiquadric kernel via coordinate descent."""
+        n = 40
+        eps_vals = np.logspace(np.log10(0.3), np.log10(10.0), 40)
+
+        # Start from single-epsilon best (~5.0 for MQ)
+        current = [5.0] * self.R
+        current_re = self._max_re_mixed(n, current, kernel="multiquadric")
+
+        for iteration in range(3):
+            for row in range(self.R):
+                best_eps_row = current[row]
+                best_re_row = current_re
+                for eps in eps_vals:
+                    trial = list(current)
+                    trial[row] = eps
+                    mr = self._max_re_mixed(n, trial, kernel="multiquadric")
+                    if mr < best_re_row:
+                        best_re_row = mr
+                        best_eps_row = eps
+                current[row] = best_eps_row
+                current_re = best_re_row
+
+        opt_eps = current
+
+        print(f"\n  E4_1 Multiquadric per-row coordinate descent (n={n}):")
+        print(f"  Optimal epsilons: [{', '.join(f'{e:.4f}' for e in opt_eps)}]")
+        print(f"  max Re(λ)={current_re:.6e}")
+
+        # Grid convergence
+        print(f"\n  Grid convergence:")
+        for nn in [20, 40, 80]:
+            mr = self._max_re_mixed(nn, opt_eps, kernel="multiquadric")
+            stable = "STABLE" if mr <= 0 else "unstable"
+            print(f"    n={nn:3d}: max Re(λ)={mr:.6e} [{stable}]")

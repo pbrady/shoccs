@@ -629,6 +629,92 @@ def build_diff_matrix_rbf(
     return D
 
 
+def build_diff_matrix_mixed_epsilon(
+    n: int,
+    p: int,
+    q: int,
+    epsilons: list[float],
+    kernel: str = "gaussian",
+    nu: int = 1,
+    nextra: int = 0,
+) -> np.ndarray:
+    """Build n×n differentiation matrix with per-row RBF shape parameters.
+
+    Like :func:`build_diff_matrix_rbf`, but each boundary row can use a
+    different epsilon value.  This enables searching over mixed-epsilon
+    configurations where a single epsilon is insufficient for stability.
+
+    Parameters
+    ----------
+    n : int
+        Grid size.
+    p : int
+        Interior half-bandwidth.
+    q : int
+        Polynomial degree for boundary RBF augmentation.
+    epsilons : list of float
+        Shape parameter per boundary row.  Length must equal r (the number
+        of boundary rows per side).
+    kernel : str
+        RBF kernel type.
+    nu : int
+        Derivative order (1 or 2).
+    nextra : int
+        Extra boundary rows/columns.
+
+    Returns
+    -------
+    np.ndarray
+        n×n differentiation matrix.
+    """
+    from stencil_gen.interior import derive_interior, full_gamma_array
+
+    # Compute boundary dimensions
+    if nu == 1:
+        t = p + q + 1 + nextra
+        r = q + 1 + nextra
+    elif nu == 2:
+        t = p + 2 + nextra
+        r = p + 1 + nextra
+    else:
+        raise NotImplementedError(f"build_diff_matrix_mixed_epsilon: nu={nu}")
+
+    if len(epsilons) != r:
+        raise ValueError(f"epsilons has length {len(epsilons)}, expected r={r}")
+    if n < 2 * r:
+        raise ValueError(f"Grid too small: n={n} < 2*r={2*r}")
+    if t > n:
+        raise ValueError(f"Boundary stencil wider than grid: t={t} > n={n}")
+
+    # Classical interior weights
+    interior_coeffs = derive_interior(0, p, nu)
+    interior_w = [float(c) for c in full_gamma_array(interior_coeffs)]
+
+    D = np.zeros((n, n))
+
+    # Left boundary rows: each row i uses its own epsilon
+    for i in range(r):
+        w = uniform_boundary_weights_rbf(i, t, nu, q, epsilons[i], kernel=kernel)
+        for j in range(t):
+            D[i, j] = w[j]
+
+    # Interior rows
+    for i in range(r, n - r):
+        for k_idx, j in enumerate(range(i - p, i + p + 1)):
+            D[i, j] = interior_w[k_idx]
+
+    # Right boundary rows: reflected
+    sign = (-1.0) ** nu
+    for i in range(r):
+        w = uniform_boundary_weights_rbf(i, t, nu, q, epsilons[i], kernel=kernel)
+        row = n - 1 - i
+        for j in range(t):
+            col = n - 1 - j
+            D[row, col] = sign * w[j]
+
+    return D
+
+
 def max_real_eigenvalue(
     n: int,
     p: int,
