@@ -2128,3 +2128,257 @@ class TestTensionSweepE2:
         assert best_gaussian[1] < STABILITY_TOL, (
             f"E2 Gaussian best not stable: max Re(λ) = {best_gaussian[1]:.6e}"
         )
+
+
+# ---------------------------------------------------------------------------
+# 30.2c: Sigma sweep for E4 (p=2, q=3) — tension spline
+# ---------------------------------------------------------------------------
+
+
+class TestTensionSweepE4:
+    """Sweep σ for E4_1 boundary stencils using tension spline kernel.
+
+    E4_1 parameters: p=2, q=3, nextra=0.
+    The critical test: does tension do better than Gaussian for E4?
+    Gaussian achieved min max Re(λ) ≈ 1e-4 (NOT stable).
+    PHS k=2 (σ=0 limit) gave max Re(λ) ≈ 0.006.
+    Tension deforms continuously from PHS k=2, so it may find a path to
+    stability that the Gaussian (starting from a different point) missed.
+    """
+
+    # E4_1 parameters
+    P = 2
+    Q = 3
+    NEXTRA = 0
+    NU = 1
+    R = 4  # q + 1 + nextra = 3 + 1 + 0
+
+    def _sweep(self, n_values, sigmas):
+        """Run sigma sweep, return dict {n: list of (sigma, max_re, spec_rad)}."""
+        results = {}
+        for n in n_values:
+            rows = []
+            for sigma in sigmas:
+                D = build_diff_matrix_rbf(
+                    n, p=self.P, q=self.Q, epsilon=sigma,
+                    kernel="tension", nu=self.NU, nextra=self.NEXTRA,
+                )
+                eigvals = np.linalg.eigvals(D)
+                max_re = float(np.max(np.real(eigvals)))
+                spec_rad = float(np.max(np.abs(eigvals)))
+                rows.append((sigma, max_re, spec_rad))
+            results[n] = rows
+        return results
+
+    def _print_table(self, label, results):
+        """Print formatted sweep table."""
+        print(f"\n{'='*72}")
+        print(f"  {label}")
+        print(f"{'='*72}")
+        for n, rows in sorted(results.items()):
+            print(f"\n  n = {n}")
+            print(f"  {'sigma':>10s}  {'max Re(λ)':>14s}  {'spec radius':>14s}")
+            print(f"  {'-'*10}  {'-'*14}  {'-'*14}")
+            for sigma, max_re, spec_rad in rows:
+                print(f"  {sigma:10.4f}  {max_re:14.6e}  {spec_rad:14.6e}")
+
+        # Summary: best sigma per n
+        print(f"\n  --- Best sigma (min max Re(λ)) ---")
+        for n, rows in sorted(results.items()):
+            best = min(rows, key=lambda r: r[1])
+            stable = "STABLE" if best[1] < STABILITY_TOL else "unstable"
+            print(f"  n={n:3d}: σ={best[0]:.4f}, max Re(λ)={best[1]:.6e} [{stable}]")
+
+    def test_tension_coarse_sweep(self):
+        """Coarse sweep of σ over [0, 20] for E4_1 with tension kernel."""
+        # Include σ=0 (PHS k=2 limit) plus logarithmic spacing for σ > 0
+        sigmas = np.concatenate([[0.0], np.logspace(np.log10(0.01), np.log10(20), 60)])
+        n_values = [20, 40, 80]
+        results = self._sweep(n_values, sigmas)
+        self._print_table(
+            "E4_1 Tension Spline Sigma Sweep (p=2, q=3, nextra=0)", results
+        )
+
+        # Find if any sigma gives stability
+        for n, rows in results.items():
+            best = min(rows, key=lambda r: r[1])
+            if best[1] < STABILITY_TOL:
+                print(f"\n  *** STABLE sigma found for n={n}: σ={best[0]:.6f} ***")
+
+        # Regression: PHS k=2 (σ=0) should give max Re(λ) < 0.01 for n=40
+        sigma0_40 = [r for r in results[40] if r[0] == 0.0][0]
+        assert sigma0_40[1] < 0.05, (
+            f"E4 PHS k=2 baseline too large: max Re(λ) = {sigma0_40[1]:.6e}"
+        )
+
+        # Regression: best across sweep should improve over PHS k=2
+        best_40 = min(results[40], key=lambda r: r[1])
+        assert best_40[1] < sigma0_40[1], (
+            f"E4 tension sweep did not improve over PHS k=2: "
+            f"best={best_40[1]:.6e} vs PHS={sigma0_40[1]:.6e}"
+        )
+
+    def test_tension_fine_sweep_near_best(self):
+        """Fine sweep around the best σ from coarse sweep.
+
+        Uses n=40 for the coarse pass, then refines near the minimum.
+        """
+        n = 40
+        # Coarse sweep (include σ=0)
+        sigmas_coarse = np.concatenate(
+            [[0.0], np.logspace(np.log10(0.01), np.log10(20), 60)]
+        )
+        coarse = []
+        for sigma in sigmas_coarse:
+            max_re = max_real_eigenvalue(
+                n, p=self.P, q=self.Q, epsilon=sigma,
+                kernel="tension", nu=self.NU, nextra=self.NEXTRA,
+            )
+            coarse.append((sigma, max_re))
+
+        best_coarse = min(coarse, key=lambda r: r[1])
+        sigma_best = best_coarse[0]
+
+        # Fine sweep: ±factor around best (or [0, 2] if best is near 0)
+        if sigma_best < 0.1:
+            lo, hi = 0.0, 2.0
+        else:
+            lo = max(0.0, sigma_best / 5)
+            hi = sigma_best * 5
+        sigmas_fine = np.linspace(lo, hi, 200)
+        fine = []
+        for sigma in sigmas_fine:
+            max_re = max_real_eigenvalue(
+                n, p=self.P, q=self.Q, epsilon=sigma,
+                kernel="tension", nu=self.NU, nextra=self.NEXTRA,
+            )
+            fine.append((sigma, max_re))
+
+        best_fine = min(fine, key=lambda r: r[1])
+        print(f"\n  E4_1 Tension fine sweep (n={n}):")
+        print(f"  Coarse best: σ={best_coarse[0]:.6f}, max Re(λ)={best_coarse[1]:.6e}")
+        print(f"  Fine best:   σ={best_fine[0]:.6f}, max Re(λ)={best_fine[1]:.6e}")
+
+        stable = best_fine[1] < STABILITY_TOL
+        print(f"  Stable: {stable}")
+
+        # Verify at multiple grid sizes
+        sigma_star = best_fine[0]
+        print(f"\n  Checking σ*={sigma_star:.6f} across grid sizes:")
+        for nn in [20, 40, 80, 160]:
+            mr = max_real_eigenvalue(
+                nn, p=self.P, q=self.Q, epsilon=sigma_star,
+                kernel="tension", nu=self.NU, nextra=self.NEXTRA,
+            )
+            print(f"    n={nn:4d}: max Re(λ)={mr:.6e}")
+
+        # Report: if stable, this is the key result
+        if stable:
+            print(f"\n  *** KEY RESULT: E4_1 tension stencil is STABLE at σ*={sigma_star:.6f} ***")
+        else:
+            print(f"\n  E4_1 tension not machine-precision stable.")
+            print(f"  Best max Re(λ) = {best_fine[1]:.6e}")
+
+    def test_compare_with_gaussian(self):
+        """Compare tension best σ with Gaussian best ε for E4_1.
+
+        The Gaussian sweep found min max Re(λ) ≈ 1e-4 (NOT stable).
+        Does tension do better?
+        """
+        n = 40
+        # Tension sweep
+        sigmas = np.concatenate(
+            [[0.0], np.logspace(np.log10(0.01), np.log10(20), 100)]
+        )
+        tension_results = []
+        for sigma in sigmas:
+            max_re = max_real_eigenvalue(
+                n, p=self.P, q=self.Q, epsilon=sigma,
+                kernel="tension", nu=self.NU, nextra=self.NEXTRA,
+            )
+            tension_results.append((sigma, max_re))
+
+        # Gaussian sweep
+        epsilons = np.logspace(np.log10(0.01), np.log10(20), 100)
+        gaussian_results = []
+        for eps in epsilons:
+            max_re = max_real_eigenvalue(
+                n, p=self.P, q=self.Q, epsilon=eps,
+                kernel="gaussian", nu=self.NU, nextra=self.NEXTRA,
+            )
+            gaussian_results.append((eps, max_re))
+
+        best_tension = min(tension_results, key=lambda r: r[1])
+        best_gaussian = min(gaussian_results, key=lambda r: r[1])
+
+        print(f"\n  E4_1 Comparison (n={n}):")
+        print(f"  {'Method':>15s}  {'param':>10s}  {'max Re(λ)':>14s}  {'status':>10s}")
+        print(f"  {'-'*15}  {'-'*10}  {'-'*14}  {'-'*10}")
+
+        t_stable = "STABLE" if best_tension[1] < STABILITY_TOL else "unstable"
+        g_stable = "STABLE" if best_gaussian[1] < STABILITY_TOL else "unstable"
+        print(f"  {'Tension':>15s}  {best_tension[0]:10.4f}  {best_tension[1]:14.6e}  {t_stable:>10s}")
+        print(f"  {'Gaussian':>15s}  {best_gaussian[0]:10.4f}  {best_gaussian[1]:14.6e}  {g_stable:>10s}")
+
+        # PHS k=2 (σ=0) for reference
+        phs_re = tension_results[0][1]  # σ=0 entry
+        phs_stable = "STABLE" if phs_re < STABILITY_TOL else "unstable"
+        print(f"  {'PHS k=2 (σ=0)':>15s}  {'0.0':>10s}  {phs_re:14.6e}  {phs_stable:>10s}")
+
+        # Report which is better
+        if best_tension[1] < best_gaussian[1]:
+            improvement = best_gaussian[1] / max(best_tension[1], 1e-16)
+            print(f"\n  Tension BEATS Gaussian by factor {improvement:.1f}x")
+        else:
+            ratio = best_tension[1] / max(best_gaussian[1], 1e-16)
+            print(f"\n  Gaussian beats tension by factor {ratio:.1f}x")
+
+    def test_mixed_tension_two_group(self):
+        """Sweep two groups of σ: σ_outer (rows 0,1) and σ_inner (rows 2,3).
+
+        Per-row σ (mixed-tension) may find stability that uniform σ cannot.
+        Uses build_diff_matrix_mixed_epsilon with kernel="tension".
+        """
+        n = 40
+        sigma_range = np.concatenate(
+            [[0.0], np.logspace(np.log10(0.1), np.log10(15.0), 25)]
+        )
+
+        best_combo = None
+        best_re = np.inf
+
+        for s_outer in sigma_range:
+            for s_inner in sigma_range:
+                epsilons = [s_outer, s_outer, s_inner, s_inner]
+                D = build_diff_matrix_mixed_epsilon(
+                    n, p=self.P, q=self.Q, epsilons=epsilons,
+                    kernel="tension", nu=self.NU, nextra=self.NEXTRA,
+                )
+                eigvals = np.linalg.eigvals(D)
+                mr = float(np.max(np.real(eigvals)))
+                if mr < best_re:
+                    best_re = mr
+                    best_combo = (s_outer, s_inner)
+
+        print(f"\n  E4_1 mixed-tension two-group sweep (n={n}):")
+        print(f"  Best: σ_outer={best_combo[0]:.4f}, σ_inner={best_combo[1]:.4f}")
+        print(f"  max Re(λ)={best_re:.6e}")
+
+        stable = best_re < STABILITY_TOL
+        print(f"  Stable: {stable}")
+
+        if stable:
+            print(f"\n  *** MIXED TENSION achieves STABILITY for E4_1 ***")
+
+        # Verify at multiple grid sizes
+        print(f"\n  Checking best combo across grid sizes:")
+        for nn in [20, 40, 80]:
+            epsilons = [best_combo[0], best_combo[0], best_combo[1], best_combo[1]]
+            D = build_diff_matrix_mixed_epsilon(
+                nn, p=self.P, q=self.Q, epsilons=epsilons,
+                kernel="tension", nu=self.NU, nextra=self.NEXTRA,
+            )
+            eigvals = np.linalg.eigvals(D)
+            mr = float(np.max(np.real(eigvals)))
+            status = "STABLE" if mr < STABILITY_TOL else "unstable"
+            print(f"    n={nn:4d}: max Re(λ)={mr:.6e} [{status}]")

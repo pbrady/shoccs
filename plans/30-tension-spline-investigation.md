@@ -259,7 +259,7 @@ All 9 sweep tests pass.
 
 ---
 
-### 30.2c — Sigma sweep for E4 (p=2, q=3)
+### 30.2c — Sigma sweep for E4 (p=2, q=3) ✅
 
 Same sweep for E4 boundary stencils.
 - The critical test: does tension do better than Gaussian for E4?
@@ -268,6 +268,18 @@ Same sweep for E4 boundary stencils.
   (starting from a different point in stencil space) missed.
 - Also try per-row σ (mixed-tension, using `build_diff_matrix_mixed_epsilon`)
 - File: `scripts/stencil_gen/tests/test_phs.py`, class `TestTensionSweepE4`
+
+**Done:** 4 tests in `TestTensionSweepE4` — all pass. Key findings:
+- **E4 tension is NOT machine-precision stable.** Best uniform σ gives
+  max Re(λ) ≈ 5.3e-5 (at σ≈37, n=40), comparable to Gaussian's ~8e-5.
+- Tension significantly improves over PHS k=2 (σ=0): 0.006 → 5e-5, a 100×
+  reduction, but does not reach machine precision.
+- Mixed-tension (two-group, σ_outer/σ_inner): best max Re(λ) ≈ 5.4e-5 at
+  σ_outer≈12.2, σ_inner≈6.5. No improvement over uniform σ.
+- The O(1e-4–1e-5) floor for E4 appears to be a fundamental barrier that
+  neither Gaussian ε nor tension σ (nor mixed per-row) can breach.
+- Stability is NOT grid-independent: best σ from n=40 gives larger max Re(λ)
+  at n=20 (~2e-4), n=80 (~1.8e-4), n=160 (~2.6e-4).
 
 ### 30.2d — Fine-grained search near optimal σ
 
@@ -354,7 +366,7 @@ Document findings and next steps.
 9. **30.2b** — E2 sigma sweep (first result: does PHS k=2 connect to stability?) ✅
 10. **30.2-review-a** — Add regression assertions to E2 tension sweep tests ✅
 11. **30.2-review-b** — Use practical stability threshold (blocks 30.2c) ✅
-12. **30.2c** — E4 sigma sweep (key result: does tension beat Gaussian?)
+12. **30.2c** — E4 sigma sweep (key result: does tension beat Gaussian?) ✅
 13. **30.2d** — Fine-grained optimal σ search
 14. **30.3a** — Soft conservation penalty implementation
 15. **30.3b** — E2 (σ, γ) sweep
