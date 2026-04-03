@@ -1,169 +1,182 @@
-# Plan: Phase 29 — Polyharmonic Spline (PHS) Stencil Investigation
+# Phase 29: Gaussian RBF Stencil Investigation — Shape Parameter Optimization
 
-## Context
+**Goal:** Determine whether Gaussian RBF-FD stencils with a tunable shape parameter ε
+can produce stable boundary stencils, reducing the multi-alpha optimization to a 1D
+search.  Prior PHS investigation (committed) showed PHS k=2 eliminates 99.9% of
+boundary instability but isn't quite stable (max Re(λ) = 0.006 for E4).  The Gaussian
+RBF adds a continuous shape parameter that may close the gap.
 
-The stencil pipeline uses expensive numerical optimization to choose free parameters
-(alphas) in boundary stencils. Literature research reveals that polyharmonic spline
-interpolation (PHS+poly) provides a closed-form, no-optimization procedure for computing
-FD weights — including boundary stencils — by minimizing smoothness functionals subject
-to polynomial accuracy constraints. Each free alpha in our stencils corresponds to one
-interior knot in an equivalent spline space.
+**Depends on:** Phase 29 PHS engine (committed: `stencil_gen/phs.py`)
 
-This investigation will determine whether PHS-derived stencils match or outperform
-optimizer-derived stencils, potentially replacing the expensive optimization loop
-with a direct analytical construction.
+**Priority:** Active research — if successful, replaces expensive multi-alpha optimizer.
 
-**Approach**: Build a standalone PHS stencil module, compare against known-good stencils
-on E2_1 (simplest) and E4_1 (production), check stability via total positivity and
-eigenvalue analysis.
+**Read first:**
+- `scripts/stencil_gen/stencil_gen/phs.py` (existing PHS engine to extend)
+- `scripts/stencil_gen/tests/test_phs.py` (existing tests to extend)
+- `scripts/stencil_gen/stencil_gen/interior.py` (classical interior reference)
+- `scripts/stencil_gen/stencil_gen/temo.py` (SchemeParams, E2_1, E4_1 definitions)
+- `src/stencils/E2_1.cpp` (4 alphas, R=4, T=5 — production reference)
+- `src/stencils/E4_1.cpp` (2 alphas, R=5, T=7 — production reference)
 
----
-
-## 29.1 — PHS+Poly Stencil Derivation Engine
-
-**File**: `scripts/stencil_gen/stencil_gen/phs.py` (new module)
-
-Implement the core PHS+poly system for computing FD weights on arbitrary 1D point sets.
-
-### 29.1a: Core PHS system builder
-
-Given points `{x_0, ..., x_{n-1}}`, derivative order `nu`, evaluation point `x_eval`,
-polynomial degree `q`, and PHS order `k`:
-
-Build and solve the augmented system:
-
-```
-[Φ  P] [λ]   [d_Φ]
-[P' 0] [μ] = [d_P]
+**Test commands:**
+```bash
+cd scripts/stencil_gen && SYMPY_CACHE_SIZE=50000 uv run pytest tests/test_phs.py -x -v
 ```
 
-where:
-- `Φ_{ij} = φ(|x_i - x_j|)` with `φ(r) = r^(2k-1)` (1D PHS kernel)
-- `P_{ij} = x_j^i` for `i = 0..q` (polynomial reproduction)
-- `d_Φ_i = D^nu φ(|x_eval - x_i|)` (derivative of PHS kernel at eval point)
-- `d_P_i = D^nu x_eval^i` (derivative of monomials at eval point)
-- `λ` are the FD weights
+---
 
-**Function**: `phs_stencil_weights(points, x_eval, nu, q, k) -> list[Rational]`
+## Current State
 
-### 29.1b: Uniform grid specialization
+Phase 29 PHS investigation complete (committed).  Key findings:
+- PHS k=2 (cubic spline) gives max Re(λ) = 5.7e-14 for E2, 0.006 for E4
+- Higher k → worse instability (anti-Runge effect confirmed)
+- Conservation correction on a single row makes stability worse
+- Cut-cell coefficients grow as O(1/psi), same as polynomial — TEMO still needed
 
-For the uniform grid case, provide a convenience wrapper:
-- `uniform_interior_weights(p, nu, k, q) -> list` — interior stencil from 2p+1 points
-- `uniform_boundary_weights(i, t, nu, k, q) -> list` — boundary row i from t points
-
-Verify: for sufficiently high `k`, the interior weights should match the classical
-`derive_interior` results (since polynomial interpolation is the high-k limit of PHS).
-
-### 29.1c: Cut-cell grid specialization
-
-For a cut-cell grid with wall at position `-psi` relative to grid point 0:
-- `cut_cell_weights(i, T, nu, k, q, psi) -> list[Expr]` — symbolic in psi
-
-This builds the PHS system on the non-uniform point set
-`{-psi, 0, 1, 2, ..., T-2}` (normalized by h).
+The Gaussian RBF φ(r) = exp(-ε²r²) has a continuous shape parameter ε that
+interpolates between heavy smoothing (large ε) and polynomial interpolation (ε→0).
+If there exists an ε* where the boundary stencil is exactly stable, the entire
+multi-alpha optimization reduces to a 1D root-finding problem.
 
 ---
 
-## 29.2 — Comparison with Known Stencils
+## 29.5 — Gaussian RBF Stencil Engine
 
-### 29.2a: E2_1 uniform comparison
+### 29.5a — Add Gaussian RBF kernel to `phs.py`
 
-Compare PHS boundary stencils against the known E2_1 uniform boundary.
+Extend `phs_stencil_weights` to accept a `kernel` parameter.  Currently it uses
+`φ(r) = |r|^(2k-1)` (PHS).  Add support for:
+- `"gaussian"`: φ(r) = exp(-ε²r²), parameterized by ε
+- `"multiquadric"`: φ(r) = √(1 + ε²r²)
+- `"phs"`: existing |r|^(2k-1) (default, unchanged)
 
-- E2_1: p=1, q=1, nu=1, t=4, r=3 (3 boundary rows, 4 columns each)
-- Each boundary row has 1 free alpha
-- PHS with k=2 (cubic) and k=3 should produce specific alpha values
-- Compare to: (a) the optimizer-derived values used in `src/stencils/E2_1.cpp`,
-  (b) the symbolic stencil from `derive_uniform_boundary_for_temo(E2_1)`
+The augmented system structure is the same: `[Φ P; P' 0] [λ; μ] = [dΦ; dP]`.
+Only the kernel matrix Φ and RHS dΦ change.
 
-**Test**: `TestPHSvsE2Uniform` — check that PHS weights satisfy Taylor accuracy,
-compare alpha values, check if they match known good values.
+Implementation:
+- Add `kernel` parameter to `phs_stencil_weights(points, x_eval, nu, q, k=None, kernel="phs", epsilon=None)`
+- For Gaussian: `Φ_{ij} = exp(-ε²(x_i - x_j)²)`, `dΦ_i = D^nu exp(-ε²(x_eval - x_i)²)`
+- For Multiquadric: `Φ_{ij} = √(1 + ε²(x_i - x_j)²)`, derivatives accordingly
+- Factor kernel logic into `_kernel_eval(r, kernel, k, epsilon)` and `_kernel_deriv(r, nu, kernel, k, epsilon)`
+- File: `scripts/stencil_gen/stencil_gen/phs.py`
+- Test: Gaussian with ε→0 limit should approach polynomial FD (high-k PHS limit)
+- Test: Gaussian weights should sum to 0 for first derivative (polynomial reproduction from P block)
 
-### 29.2b: E4_1 uniform comparison
+### 29.5b — Add `uniform_boundary_weights_rbf` convenience wrapper
 
-Same comparison for E4_1: p=2, q=3, nu=1, t=6, r=4.
-- 4 boundary rows, each with up to 2 free params (after zeros)
-- Compare PHS-derived alphas to the Mathematica-optimized values from Table A.4
+```python
+def uniform_boundary_weights_rbf(i, t, nu, q, epsilon, kernel="gaussian"):
+    """Boundary row i using Gaussian RBF with shape parameter epsilon."""
+```
 
-### 29.2c: Interior stencil verification
+Also add `uniform_interior_weights_rbf` for verification.
+- File: `scripts/stencil_gen/stencil_gen/phs.py`
+- Test: interior weights with Gaussian at any ε should still match classical FD
+  (the polynomial augmentation forces this)
 
-Verify that PHS interior stencils match classical stencils:
-- For `k >= q+1`: PHS should recover polynomial interpolation → classical FD
-- For `k < q+1`: PHS gives different (more dissipative) interior stencils
-- Test for E2 (p=1) and E4 (p=2)
+### 29.5c — Tests for new kernels
 
----
-
-## 29.3 — Stability Analysis (Non-SBP)
-
-### 29.3a: Total positivity check
-
-Implement a total positivity diagnostic:
-- Build the full differentiation matrix D (boundary + interior) for size n
-- Form the iteration matrix `M = I + dt * D` for a range of dt values
-- Check TP via Neville elimination: factor M into bidiagonal matrices,
-  check if all multipliers are non-negative
-- Compare TP properties of PHS-derived vs optimizer-derived stencils
-
-**Function**: `neville_tp_check(M) -> (is_tp, min_multiplier)`
-
-### 29.3b: Eigenvalue analysis
-
-For the full differentiation matrix with PHS boundary stencils:
-- Compute eigenvalues for a range of grid sizes (n=20, 40, 80, 160)
-- Check: all eigenvalues should have non-positive real part (stability)
-- Compare spectral radius of PHS vs optimizer stencils
-- Plot eigenvalue loci for different PHS orders k
-
-### 29.3c: CFL number comparison
-
-For the 1D advection equation u_t + u_x = 0 with RK4 time integration:
-- Compute maximum stable CFL number for PHS stencils vs optimizer stencils
-- Vary PHS order k to find the optimal k for CFL
+Add `TestGaussianRBF` class in `test_phs.py`:
+- `test_polynomial_exactness`: Gaussian stencils exact for polynomials ≤ q
+- `test_interior_matches_classical`: Gaussian interior = classical FD for all ε
+- `test_weights_sum_to_zero`: First derivative weights sum to 0
+- `test_small_epsilon_approaches_polynomial`: As ε→0, weights → polynomial FD
+- File: `scripts/stencil_gen/tests/test_phs.py`
 
 ---
 
-## 29.4 — Cut-Cell PHS Stencils
+## 29.6 — Epsilon Stability Sweep
 
-### 29.4a: PHS cut-cell stencil as function of psi
+### 29.6a — Build differentiation matrix with RBF boundary stencils
 
-Build cut-cell stencils using PHS on the non-uniform grid:
-- Points: `{-psi, 0, 1, ..., T-2}` for each row
-- Compare structure to the Mathematica-derived cut-cell stencils
-- Check: are PHS cut-cell entries polynomial in psi? Rational? What denominators?
+Add helper function `build_diff_matrix_rbf(n, p, q, epsilon, kernel, nu)` that:
+1. Uses RBF boundary stencils for left/right boundary rows
+2. Uses classical interior stencils (standard 2p+1 centered FD)
+3. Right boundary = antisymmetric reflection of left (for first derivative)
+- File: `scripts/stencil_gen/stencil_gen/phs.py`
+- Test: matrix shape n×n, column sums of interior region are 0
 
-### 29.4b: Small-cell stability (psi → 0)
+### 29.6b — Implement `max_real_eigenvalue(n, p, q, epsilon, kernel)` diagnostic
 
-The critical test: as psi → 0, do PHS cut-cell stencils remain well-behaved?
-- Evaluate stencil coefficients at psi = 1e-6, 1e-4, 1e-2, 0.1, 0.5, 1.0
-- Check eigenvalues of the full operator at each psi
-- Compare to the Mathematica workflow stencils at the same psi values
+Compute eigenvalues of the differentiation matrix and return the maximum real part.
+Uses numpy for numerical eigenvalue computation.
+- File: `scripts/stencil_gen/stencil_gen/phs.py`
+- Test: periodic interior-only matrix has max Re(λ) ≈ 0
 
-### 29.4c: Conservation check
+### 29.6c — Epsilon sweep for E2 (p=1, q=1)
 
-Do PHS cut-cell stencils satisfy conservation (SBP column-sum property)?
-- If yes: PHS provides conservation for free
-- If no: how large is the conservation violation? Can it be fixed by
-  adjusting the PHS order k or adding a conservation constraint to the
-  PHS system?
+Sweep ε over [0.01, 10] and record max Re(λ) at each ε for n=20,40,80.
+- Find: is there an ε* where max Re(λ) ≤ 0?
+- If yes: report ε* and the corresponding alpha values
+- If no: report the minimum max Re(λ) achieved and the ε that achieves it
+- Also sweep the Multiquadric kernel for comparison
+- File: `scripts/stencil_gen/tests/test_phs.py`, class `TestEpsilonSweepE2`
+- Output: printed table of (ε, max_Re, spectral_radius) for visual inspection
+- This test uses `pytest -s` to show output; assertion is only that the sweep completes
+
+### 29.6d — Epsilon sweep for E4 (p=2, q=3)
+
+Same sweep for E4 boundary stencils.
+- E4 is the primary production target; finding a stable ε here is the key result
+- Record implied alpha values at each ε by comparing against symbolic stencil
+- File: `scripts/stencil_gen/tests/test_phs.py`, class `TestEpsilonSweepE4`
+
+### 29.6e — If stable ε found: extract and validate alpha values
+
+If an ε* exists where the scheme is stable:
+1. Extract the FD weights at ε*
+2. Map them back to alpha values in the `derive_uniform_boundary_for_temo` parameterization
+3. Verify: substitute those alphas into the symbolic stencil and confirm eigenvalue stability
+4. Compare with the optimizer-derived alphas used in `src/stencils/E4_1.cpp`
+5. Check conservation deficit at those alpha values
+- File: `scripts/stencil_gen/tests/test_phs.py`, class `TestStableEpsilonAlphas`
+
+### 29.6f — If NO stable ε found: characterize the gap
+
+If no single ε produces stability:
+1. Report the minimum instability (min over ε of max Re(λ))
+2. Try mixed approach: different ε per boundary row
+3. Try: Gaussian boundary rows 0..r-2 with one ε, near-interior row from conservation
+4. Summarize findings and update plan with next research direction
+- File: `scripts/stencil_gen/tests/test_phs.py`, class `TestMixedEpsilon`
 
 ---
 
-## Implementation Order (Ralph Loop Sequence)
+## 29.7 — Comparison and Assessment
+
+### 29.7a — Side-by-side comparison table
+
+For the best RBF configuration found, produce a comparison table:
+- PHS k=2 vs Gaussian ε* vs optimizer-derived (from C++ stencils)
+- Metrics: max Re(λ), spectral radius, implied CFL with RK4, conservation deficit
+- For E2 and E4
+- File: `scripts/stencil_gen/tests/test_phs.py`, class `TestComparisonTable`
+
+### 29.7b — Update plan with conclusions and next steps
+
+Update this plan file with:
+- Which kernel/parameter works best
+- Whether the approach eliminates or reduces the optimization problem
+- What the cut-cell implications are (does the stable ε work for non-uniform grids?)
+- Concrete next steps (if successful: wire into codegen; if not: alternative directions)
+- File: `plans/29-phs-stencil-investigation.md`
+
+---
+
+## Implementation Order
 
 Each step produces tests that validate before moving on:
 
-1. **29.1a** — Core PHS solver (pure math, no stencil knowledge needed)
-2. **29.1b** — Uniform grid wrappers + verify interior matches classical FD
-3. **29.2c** — Interior verification (confirms PHS engine is correct)
-4. **29.2a** — E2_1 boundary comparison (first real comparison)
-5. **29.2b** — E4_1 boundary comparison
-6. **29.3b** — Eigenvalue analysis (does PHS give stable stencils?)
-7. **29.3a** — Total positivity diagnostic
-8. **29.4a** — Cut-cell PHS stencils
-9. **29.4b** — Small-cell stability
-10. **29.4c** — Conservation check
+1. **29.5a** — Gaussian/Multiquadric kernel support in phs.py
+2. **29.5b** — Convenience wrappers for uniform grids
+3. **29.5c** — Tests for new kernels
+4. **29.6a** — Differentiation matrix builder
+5. **29.6b** — max_real_eigenvalue diagnostic
+6. **29.6c** — E2 epsilon sweep (first result!)
+7. **29.6d** — E4 epsilon sweep (key result!)
+8. **29.6e** or **29.6f** — Extract alphas or characterize gap
+9. **29.7a** — Comparison table
+10. **29.7b** — Update plan with conclusions
 
 ---
 
@@ -171,29 +184,14 @@ Each step produces tests that validate before moving on:
 
 | File | Role |
 |------|------|
-| `scripts/stencil_gen/stencil_gen/phs.py` | **New** — PHS stencil engine |
-| `scripts/stencil_gen/tests/test_phs.py` | **New** — PHS tests |
-| `scripts/stencil_gen/stencil_gen/interior.py` | Reference for classical interior stencils |
-| `scripts/stencil_gen/stencil_gen/boundary.py` | Reference for classical boundary stencils |
-| `scripts/stencil_gen/stencil_gen/temo.py` | Reference for cut-cell construction |
-| `plans/29-phs-stencil-investigation.md` | This plan (copy to plans/) |
+| `scripts/stencil_gen/stencil_gen/phs.py` | **Modified** — add Gaussian/MQ kernels + matrix builder |
+| `scripts/stencil_gen/tests/test_phs.py` | **Modified** — add kernel tests + epsilon sweeps |
+| `plans/29-phs-stencil-investigation.md` | **This file** — updated with results |
 
-## Verification
+## Performance Notes
 
-```bash
-cd scripts/stencil_gen && SYMPY_CACHE_SIZE=50000 uv run pytest tests/test_phs.py -x -v
-```
-
-Each step adds tests that must pass before proceeding. The eigenvalue and CFL
-analyses (29.3) produce numerical results that we inspect manually rather than
-assert on — they're exploratory.
-
-## Expected Outcomes
-
-- **Best case**: PHS with some `k` produces stencils that are stable, conservative,
-  and match or beat optimizer stencils. The optimization loop can be replaced.
-- **Likely case**: PHS provides a good starting point (specific alpha values) that
-  is close to optimal, dramatically reducing the optimization search space.
-- **Worst case**: PHS stencils are not stable without additional constraints, but
-  the investigation reveals which spline properties correlate with stability,
-  guiding future optimization strategies.
+- `SYMPY_CACHE_SIZE=50000` for all SymPy operations
+- Eigenvalue sweeps use numpy (fast) — no SymPy needed for numerics
+- The epsilon sweep (29.6c/d) involves ~100-1000 eigenvalue computations at n=40,
+  each taking ~1ms → total sweep < 1 second
+- SymPy only needed for alpha extraction (29.6e), which is a one-time computation
