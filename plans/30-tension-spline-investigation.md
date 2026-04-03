@@ -345,7 +345,7 @@ If the sweep finds a minimum in max Re(λ):
 
 ## 30.2d-review — Follow-up items from review of Phase 30.2d
 
-### 30.2d-review-a — Assert E2 grid-independence in `test_e2_optimal_sigma`
+### 30.2d-review-a — Assert E2 grid-independence in `test_e2_optimal_sigma` ✅
 
 `test_e2_optimal_sigma` computes `all_stable` across n=20,40,80,160 but never
 asserts on it.  The plan claims grid-independent stability at σ* and the code
@@ -357,7 +357,10 @@ assert all_stable, "E2 optimal σ not grid-independent"
 
 after the grid-independence loop (line ~2518 in `test_phs.py`).
 
-### 30.2d-review-b — Complete regression assertions in `test_comparison_all_methods`
+**Done:** Added `assert all_stable, "E2 optimal σ not grid-independent"` after
+the existing grid-independence loop.  Test passes.
+
+### 30.2d-review-b — Complete regression assertions in `test_comparison_all_methods` ✅
 
 The comparison test asserts only that PHS baselines are reasonable (< 0.5 for E2,
 < 0.05 for E4) but never asserts on the actual Gaussian or tension results.
@@ -372,6 +375,11 @@ Add assertions that:
 This requires computing the sweep results outside the print loop or saving them
 during the loop for later assertion (the current structure discards per-scheme
 results after each loop iteration).
+
+**Done:** Saved per-scheme results during the loop and added 8 assertions after:
+- E2: PHS baseline < 0.5, Gaussian < STABILITY_TOL, Tension < STABILITY_TOL.
+- E4: PHS baseline < 0.05, Gaussian < 1e-3, Tension < 1e-3, both improve over PHS k=2.
+All pass.
 
 ---
 
@@ -453,8 +461,8 @@ Document findings and next steps.
 12. **30.2c** — E4 sigma sweep (key result: does tension beat Gaussian?) ✅
 13. **30.2c-review-a** — Add regression assertions to E4 tension sweep tests ✅
 14. **30.2d** — Fine-grained optimal σ search ✅
-15. **30.2d-review-a** — Assert E2 grid-independence in `test_e2_optimal_sigma`
-16. **30.2d-review-b** — Complete regression assertions in `test_comparison_all_methods`
+15. **30.2d-review-a** — Assert E2 grid-independence in `test_e2_optimal_sigma` ✅
+16. **30.2d-review-b** — Complete regression assertions in `test_comparison_all_methods` ✅
 17. **30.3a** — Soft conservation penalty implementation
 18. **30.3b** — E2 (σ, γ) sweep
 19. **30.3c** — E4 (σ, γ) sweep

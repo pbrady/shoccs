@@ -2525,6 +2525,8 @@ class TestTensionOptimalSigma:
         assert re_star < 1e-6, (
             f"E2 optimal σ not stable: max Re(λ) = {re_star:.6e}"
         )
+        # Regression: grid-independence — σ* must be stable at all grid sizes
+        assert all_stable, "E2 optimal σ not grid-independent"
 
     def test_e4_optimal_sigma(self):
         """Dense sweep for E4_1 optimal σ and report stencil weights.
@@ -2646,13 +2648,40 @@ class TestTensionOptimalSigma:
                 print(f"    Gaussian: {gauss_improve:.1f}×")
                 print(f"    Tension:  {tension_improve:.1f}×")
 
-        # Regression assertions
-        # E2: both Gaussian and tension should achieve near-machine-precision
-        e2 = configs["E2_1"]
-        e2_phs = self._max_re(0.0, n, **e2)
-        assert e2_phs < 0.5, f"E2 PHS k=2 baseline unreasonable: {e2_phs:.6e}"
+            # Save results for assertions
+            if scheme == "E2_1":
+                e2_phs_re = phs_re
+                e2_gauss_re = gauss_re
+                e2_tension_re = tension_re
+            else:
+                e4_phs_re = phs_re
+                e4_gauss_re = gauss_re
+                e4_tension_re = tension_re
 
-        # E4: all methods should improve over baseline
-        e4 = configs["E4_1"]
-        e4_phs = self._max_re(0.0, n, **e4)
-        assert e4_phs < 0.05, f"E4 PHS k=2 baseline unreasonable: {e4_phs:.6e}"
+        # Regression assertions
+        # E2: PHS k=2 baseline sanity
+        assert e2_phs_re < 0.5, f"E2 PHS k=2 baseline unreasonable: {e2_phs_re:.6e}"
+        # E2: both Gaussian and tension should achieve near-machine-precision
+        assert e2_gauss_re < STABILITY_TOL, (
+            f"E2 Gaussian not stable: max Re(λ) = {e2_gauss_re:.6e}"
+        )
+        assert e2_tension_re < STABILITY_TOL, (
+            f"E2 Tension not stable: max Re(λ) = {e2_tension_re:.6e}"
+        )
+
+        # E4: PHS k=2 baseline sanity
+        assert e4_phs_re < 0.05, f"E4 PHS k=2 baseline unreasonable: {e4_phs_re:.6e}"
+        # E4: both Gaussian and tension should improve significantly over PHS k=2
+        assert e4_gauss_re < 1e-3, (
+            f"E4 Gaussian not improved: max Re(λ) = {e4_gauss_re:.6e}"
+        )
+        assert e4_tension_re < 1e-3, (
+            f"E4 Tension not improved: max Re(λ) = {e4_tension_re:.6e}"
+        )
+        # E4: both methods must improve over PHS k=2 baseline
+        assert e4_gauss_re < e4_phs_re, (
+            f"E4 Gaussian ({e4_gauss_re:.6e}) not better than PHS k=2 ({e4_phs_re:.6e})"
+        )
+        assert e4_tension_re < e4_phs_re, (
+            f"E4 Tension ({e4_tension_re:.6e}) not better than PHS k=2 ({e4_phs_re:.6e})"
+        )
