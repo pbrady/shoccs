@@ -1772,3 +1772,49 @@ class TestTensionSpline:
             assert abs(d_hi - d_lo) < 0.2, (
                 f"D{nu}φ discontinuous near boundary: {d_lo} vs {d_hi}"
             )
+
+    def test_sigma_exactly_zero_dispatches_to_phs(self):
+        """At σ=0.0, tension wrappers must not crash and must match PHS k=2."""
+        import numpy as np
+
+        # Boundary weights: E2 layout (p=1, q=1, t=3, row i=0)
+        phs_w = uniform_boundary_weights(0, 3, nu=1, k=2, q=1)
+        phs_w_float = [float(w) for w in phs_w]
+
+        tension_w = uniform_boundary_weights_tension(0, 3, nu=1, q=1, sigma=0.0)
+        np.testing.assert_allclose(
+            tension_w, phs_w_float, atol=1e-14,
+            err_msg="Tension at σ=0 should exactly match PHS k=2",
+        )
+
+        # Interior weights: p=1, q=1
+        phs_int = uniform_interior_weights(1, nu=1, k=2, q=1)
+        phs_int_float = [float(w) for w in phs_int]
+
+        tension_int = uniform_interior_weights_tension(1, nu=1, q=1, sigma=0.0)
+        np.testing.assert_allclose(
+            tension_int, phs_int_float, atol=1e-14,
+            err_msg="Interior tension at σ=0 should exactly match PHS k=2",
+        )
+
+    def test_nu2_polynomial_exactness(self):
+        """Second-derivative weights reproduce D² x^d exactly for d ≤ q."""
+        import numpy as np
+
+        for q in [2, 3]:
+            t = q + 4  # enough points for a well-determined system
+            sigma = 3.0
+            for i in range(t):
+                w = uniform_boundary_weights_tension(i, t, nu=2, q=q, sigma=sigma)
+                pts = np.arange(t, dtype=float)
+                for d in range(q + 1):
+                    # D² x^d at x=i should be d*(d-1)*i^(d-2) for d>=2, else 0
+                    got = sum(wj * xj**d for wj, xj in zip(w, pts))
+                    if d >= 2:
+                        expected = d * (d - 1) * float(i) ** (d - 2)
+                    else:
+                        expected = 0.0
+                    assert abs(got - expected) < 1e-10, (
+                        f"nu=2 poly exactness failed: q={q}, i={i}, d={d}, "
+                        f"got={got}, expected={expected}"
+                    )

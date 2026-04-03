@@ -146,33 +146,38 @@ Add `TestTensionSpline` class in `test_phs.py`:
 
 ## 30.1-review — Follow-up items from review of Phase 30.1
 
-### 30.1-review-a — Add σ=0 guard dispatching to PHS k=2 ⬜
+### 30.1-review-a — Add σ=0 guard dispatching to PHS k=2 ✅
 
 The plan spec 30.1a requires "Handle σ=0 (return PHS k=2 values)" but this was
 not implemented.  At σ=0 the kernel returns 0 for all r, producing a singular Φ
 matrix and a `LinAlgError`.  This **blocks Phase 30.2** which sweeps σ ∈ [0, 20].
 
-Fix: In `uniform_boundary_weights_tension` and `uniform_interior_weights_tension`,
-detect σ=0 (or σ < some tiny threshold) and redirect to the PHS k=2 path.
-Alternatively, add a σ=0 branch in `_tension_kernel_eval` / `_tension_kernel_deriv`
-that returns PHS k=2 values (|r|³ and derivatives).
+**Done:** Added guard in `phs_stencil_weights` — when `kernel="tension"` and
+`|epsilon| < 1e-14`, redirects to exact PHS k=2 path and converts to float.
+This covers all callers (`uniform_boundary_weights_tension`,
+`uniform_interior_weights_tension`, `build_diff_matrix_rbf`, etc.).
+Test `test_sigma_exactly_zero_dispatches_to_phs` verifies boundary and interior
+weights match PHS k=2 at σ=0.0 to machine precision.
 
-Test: call `uniform_boundary_weights_tension(0, 3, 1, 1, sigma=0.0)` and verify
-the result matches `uniform_boundary_weights(0, 3, 1, k=2, q=1)`.
-
-### 30.1-review-b — Add D¹φ Taylor 8th term for branch-point accuracy ⬜
+### 30.1-review-b — Add D¹φ Taylor 8th term for branch-point accuracy ✅
 
 The D¹φ Taylor series uses 7 terms (up to z⁶/5040) while the eval kernel and
 D²φ use 8 terms.  At the branch point z=2, this gives ~0.6% discontinuity for
 D¹φ vs ~0.01% for eval.  Add the z⁷/40320 term to the D¹φ Horner series for
 consistent accuracy.
 
-### 30.1-review-c — Add nu=2 stencil weight test ⬜
+**Done:** Added `z * (-1.0 / 40320)` 8th term to D¹φ Horner series, matching
+the 8-term depth of eval and D²φ.
+
+### 30.1-review-c — Add nu=2 stencil weight test ✅
 
 All stencil weight tests use nu=1.  Add a test that computes second-derivative
 weights via `uniform_boundary_weights_tension(i, t, nu=2, q, sigma)` and verifies
 polynomial exactness (sum w_j x_j^d = d(d-1) i^{d-2} for d ≥ 2).  This exercises
 the D²φ code path through `_rbf_weights_numeric`.
+
+**Done:** `test_nu2_polynomial_exactness` tests q=2,3 with all boundary rows,
+verifying D² polynomial exactness to 1e-10.
 
 ---
 
@@ -281,9 +286,9 @@ Document findings and next steps.
 2. **30.1b** — Wire into `phs_stencil_weights` and `_rbf_weights_numeric` ✅
 3. **30.1c** — Convenience wrappers ✅
 4. **30.1d** — Tension kernel tests ✅
-5. **30.1-review-a** — Add σ=0 guard dispatching to PHS k=2 (blocks 30.2)
-6. **30.1-review-b** — Add D¹φ Taylor 8th term for branch-point accuracy
-7. **30.1-review-c** — Add nu=2 stencil weight test
+5. **30.1-review-a** — Add σ=0 guard dispatching to PHS k=2 (blocks 30.2) ✅
+6. **30.1-review-b** — Add D¹φ Taylor 8th term for branch-point accuracy ✅
+7. **30.1-review-c** — Add nu=2 stencil weight test ✅
 8. **30.2a** — Diff matrix builder for tension
 9. **30.2b** — E2 sigma sweep (first result: does PHS k=2 connect to stability?)
 10. **30.2c** — E4 sigma sweep (key result: does tension beat Gaussian?)

@@ -240,13 +240,15 @@ def _tension_kernel_deriv(r_val, nu: int, sigma: float) -> float:
         sgn = 1.0 if r > 0 else -1.0
         if z < 2.0:
             # D¹φ = σ sign(r)(1 - e^{-z}) = σ sign(r)(z - z²/2 + z³/6 - ...)
-            # = σ sign(r) z (1 - z/2 + z²/6 - z³/24 + z⁴/120 - z⁵/720 + z⁶/5040)
+            # = σ sign(r) z (1 - z/2 + z²/6 - z³/24 + z⁴/120 - z⁵/720 + z⁶/5040 - z⁷/40320)
             series = 1.0 + z * (
                 -1.0 / 2 + z * (
                     1.0 / 6 + z * (
                         -1.0 / 24 + z * (
                             1.0 / 120 + z * (
-                                -1.0 / 720 + z * (1.0 / 5040)
+                                -1.0 / 720 + z * (
+                                    1.0 / 5040 + z * (-1.0 / 40320)
+                                )
                             )
                         )
                     )
@@ -519,6 +521,13 @@ def phs_stencil_weights(
     elif kernel in ("gaussian", "multiquadric", "tension"):
         if epsilon is None:
             raise ValueError(f"epsilon is required for {kernel} kernel")
+        # σ=0 limit of tension spline is PHS k=2; dispatch to exact PHS path
+        # to avoid the singular Φ matrix that tension produces at σ=0.
+        if kernel == "tension" and abs(float(epsilon)) < 1e-14:
+            sympy_weights = phs_stencil_weights(
+                points, x_eval, nu, q, k=2, kernel="phs"
+            )
+            return [float(w) for w in sympy_weights]
         return _rbf_weights_numeric(points, x_eval, nu, q, kernel, epsilon)
     else:
         raise ValueError(f"Unknown kernel: {kernel!r}")
