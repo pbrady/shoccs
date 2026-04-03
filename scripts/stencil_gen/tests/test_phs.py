@@ -3143,6 +3143,9 @@ class TestTensionConservationE4:
         baseline_re = float("inf")
         baseline_deficit = None
 
+        # Track best max Re(λ) among points with γ > 0
+        best_re_gamma_pos = float("inf")
+
         for sigma in sigmas:
             for gamma in gammas:
                 max_re, deficit = self._eval_point(n, sigma, gamma)
@@ -3156,6 +3159,9 @@ class TestTensionConservationE4:
                 if gamma == 0.0 and max_re < baseline_re:
                     baseline_re = max_re
                     baseline_deficit = deficit
+
+                if gamma > 0.0 and max_re < best_re_gamma_pos:
+                    best_re_gamma_pos = max_re
 
         print(f"\n  E4_1 Joint (σ, γ) Sweep (n={n})")
         print(f"  Grid: {len(sigmas)} σ × {len(gammas)} γ = "
@@ -3189,6 +3195,13 @@ class TestTensionConservationE4:
         # Baseline (γ=0) should also be below the floor (regression from 30.2c)
         assert baseline_re < self.E4_INSTABILITY_FLOOR, (
             f"E4 γ=0 baseline {baseline_re:.6e} >= {self.E4_INSTABILITY_FLOOR}"
+        )
+        # Best (σ, γ) with γ > 0 should strictly improve over γ=0 baseline.
+        # This verifies the penalty mechanism actually affects E4 results
+        # (actual improvement is ~63%: baseline ~8.7e-5 → best ~3.3e-5).
+        assert best_re_gamma_pos < baseline_re, (
+            f"γ>0 did not improve max Re(λ) over γ=0 baseline: "
+            f"{best_re_gamma_pos:.6e} >= {baseline_re:.6e}"
         )
 
     def test_stability_vs_gamma_at_optimal_sigma(self):
@@ -3242,9 +3255,11 @@ class TestTensionConservationE4:
         assert re_0 < self.E4_INSTABILITY_FLOOR, (
             f"E4 at σ={sigma_star}, γ=0 worse than expected: {re_0:.6e}"
         )
-        # Best with γ should not be worse than γ=0
-        assert best_re <= re_0 + 1e-6, (
-            f"Adding γ worsened E4: best {best_re:.6e} > γ=0 {re_0:.6e}"
+        # Best with γ should strictly improve over γ=0
+        # (plan says γ≈1.15 improves from 1.3e-4 to 7.5e-5 at σ=37)
+        assert best_re < re_0 - 1e-7, (
+            f"γ>0 did not improve E4 stability at σ={sigma_star}: "
+            f"best {best_re:.6e} not < γ=0 {re_0:.6e}"
         )
 
     def test_fine_sweep_near_optimal(self):
@@ -3310,4 +3325,9 @@ class TestTensionConservationE4:
         # 2D search should not be worse than 1D (γ=0) baseline
         assert best_re <= best_re_baseline + 1e-6, (
             f"2D search worse than 1D: {best_re:.6e} > {best_re_baseline:.6e}"
+        )
+        # The optimizer should find a non-trivial γ > 0 point
+        # (matching the E2 fix in 30.3b-review-a)
+        assert best_gamma > 0, (
+            f"Fine sweep best γ is 0 — penalty mechanism not helping E4"
         )

@@ -504,7 +504,7 @@ and 1D ε spaces could not?
 
 ## 30.3c-review — Follow-up items from review of Phase 30.3c
 
-### 30.3c-review-a — Assert γ > 0 actually changes E4 results
+### 30.3c-review-a — Assert γ > 0 actually changes E4 results ✅
 
 The same deficiency fixed for E2 in 30.3b-review-a exists in the E4 tests:
 if `build_diff_matrix_rbf_penalty` silently ignored γ (returning γ=0 weights
@@ -524,6 +524,15 @@ verifies either claim.  Specifically:
 - `test_stability_vs_gamma_at_optimal_sigma`: asserts `best_re <= re_0 + 1e-6`.
   Fix: assert `best_re < re_0 - 1e-7` (the plan says γ≈1.15 improves over
   γ=0 at σ=37, from 1.3e-4 to 7.5e-5).
+
+**Done:** Added assertions to all three tests:
+- `test_joint_sweep_coarse`: tracks `best_re_gamma_pos` during the sweep
+  and asserts it is strictly less than the γ=0 `baseline_re`.
+- `test_fine_sweep_near_optimal`: asserts `best_gamma > 0` to verify the
+  optimizer picks a non-trivial penalty point.
+- `test_stability_vs_gamma_at_optimal_sigma`: asserts `best_re < re_0 - 1e-7`
+  to verify γ>0 strictly improves stability at σ=37.
+All 3 tests pass.
 
 ---
 
@@ -578,7 +587,7 @@ Document findings and next steps.
 18. **30.3b** — E2 (σ, γ) sweep ✅
 19. **30.3b-review-a** — Assert conservation improvement at γ > 0 ✅
 20. **30.3c** — E4 (σ, γ) sweep ✅
-21. **30.3c-review-a** — Assert γ > 0 actually changes E4 results
+21. **30.3c-review-a** — Assert γ > 0 actually changes E4 results ✅
 22. **30.4a** — Comparison table
 23. **30.4b** — Modified wavenumber analysis
 24. **30.4c** — Update plan with conclusions
