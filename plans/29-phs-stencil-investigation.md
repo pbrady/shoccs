@@ -287,6 +287,14 @@ point in the parameter space.
 - The `TestStableEpsilonAlphas` class docstring says "ε*≈2.29" (from 29.6c coarse
   sweep) but the test actually finds ε*≈1.83.  Update the docstring to match.
 
+**29.6e-fix completed:**
+- Added `assert re_rbf < 1e-13` at n=40 in `test_verify_stability_with_extracted_alphas`
+  (regression-protects machine-precision RBF stability finding).
+- Added `assert re_temo > 0.1` at n=40 (confirms conservation-enforced TEMO is unstable,
+  validating the stability-vs-conservation trade-off claim).
+- Updated class docstring from "ε*≈2.29" to "ε*≈1.83".
+- All 44 tests pass.
+
 ### 29.6f — If NO stable ε found: characterize the gap ✅
 
 Since E4_1 showed O(1e-4) instability with a single ε, investigated mixed-epsilon
@@ -371,7 +379,7 @@ Each step produces tests that validate before moving on:
 8. **29.6d** — E4 epsilon sweep (key result!)
 8. **29.6f** ✅ — Mixed epsilon characterization (E4 not stable even with per-row ε)
 9. **29.6e** ✅ — Extract alphas for E2 (stable but non-conservative)
-9b. **29.6e-fix** — Add assertions to TestStableEpsilonAlphas (review follow-up)
+9b. **29.6e-fix** ✅ — Add assertions to TestStableEpsilonAlphas (review follow-up)
 10. **29.7a** — Comparison table
 11. **29.7b** — Update plan with conclusions
 

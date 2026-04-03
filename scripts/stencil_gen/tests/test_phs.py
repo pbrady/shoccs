@@ -1026,7 +1026,7 @@ class TestStableEpsilonAlphas:
     """Extract alpha values implied by the stable Gaussian ε for E2_1.
 
     E2_1 parameters: p=1, q=1, nextra=1, nu=1.
-    From 29.6c: Gaussian ε*≈2.29 yields machine-precision eigenvalue stability.
+    From 29.6c/e: Gaussian ε*≈1.83 yields machine-precision eigenvalue stability.
 
     Steps:
     1. Extract RBF boundary weights at ε*
@@ -1212,6 +1212,15 @@ class TestStableEpsilonAlphas:
             re_temo = float(np.max(np.real(np.linalg.eigvals(D_temo))))
 
             print(f"  {n:5d}  {re_rbf:14.6e}  {re_temo:14.6e}")
+
+            # Key assertions at n=40: regression-protect the stability findings
+            if n == 40:
+                assert re_rbf < 1e-13, (
+                    f"RBF direct should be stable to machine precision, got {re_rbf}"
+                )
+                assert re_temo > 0.1, (
+                    f"TEMO+conservation should be unstable, got {re_temo}"
+                )
 
     def test_compare_with_production_alphas(self):
         """Compare RBF-extracted alphas with optimizer-derived production alphas."""
