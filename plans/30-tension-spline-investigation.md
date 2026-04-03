@@ -538,7 +538,7 @@ All 3 tests pass.
 
 ## 30.4 — Analysis and Conclusions
 
-### 30.4a — Comparison table
+### 30.4a — Comparison table ✅
 
 Produce comparison of all approaches investigated:
 - PHS k=2 (Phase 29 baseline)
@@ -548,6 +548,35 @@ Produce comparison of all approaches investigated:
 - Metrics: max Re(λ), spectral radius, CFL with RK4, conservation deficit
 - For E2 and E4
 - File: `scripts/stencil_gen/tests/test_phs.py`, class `TestTensionComparison`
+
+**Done:** 3 tests in `TestTensionComparison` — all pass. Key results (n=40):
+
+**E2_1 (p=1, q=1, nextra=1):**
+| Method | max Re(λ) | |λ|\_max | CFL(RK4) | cons deficit |
+|--------|-----------|---------|----------|--------------|
+| PHS k=2 (σ=0) | 8.7e-2 | 0.996 | 2.841 | 1.60 |
+| Gaussian ε\*=1.78 | **1.0e-15** ✓ | 0.996 | 2.839 | 0.96 |
+| Tension σ\*=42.1 | **4.8e-16** ✓ | 0.997 | 2.837 | 1.17 |
+| Tension σ=52.0 γ=11.7 | **6.6e-16** ✓ | 0.997 | 2.837 | **0.86** |
+
+- All three optimized methods achieve machine-precision stability for E2.
+- Tension+penalty achieves the best conservation deficit (0.86 vs 0.96 Gaussian,
+  1.17 tension alone, 1.60 PHS baseline) — ~46% improvement over PHS.
+- CFL numbers are nearly identical across all methods (~2.84).
+
+**E4_1 (p=2, q=3, nextra=0):**
+| Method | max Re(λ) | |λ|\_max | CFL(RK4) | cons deficit |
+|--------|-----------|---------|----------|--------------|
+| PHS k=2 (σ=0) | 6.4e-3 | 1.374 | 2.059 | 1.90 |
+| Gaussian ε\*=2.34 | 8.3e-5 | 1.365 | 2.071 | 1.61 |
+| Tension σ\*=48.8 | 3.1e-5 | 1.366 | 2.071 | 1.71 |
+| Tension σ=38.8 γ=0.36 | **2.6e-5** | 1.366 | 2.071 | 1.67 |
+
+- NO method achieves machine-precision stability for E4. The O(1e-5) floor persists.
+- Tension+penalty is best at 2.6e-5 — a 246× improvement over PHS k=2.
+- Tension (3.1e-5) beats Gaussian (8.3e-5) by ~2.7×.
+- Grid-convergence: E2 is grid-independent (stable at n=20,40,80);
+  E4 is NOT (3e-5 at n=40 but 1.7e-4 at n=20, 2.6e-4 at n=80).
 
 ### 30.4b — Modified wavenumber analysis
 
@@ -588,7 +617,7 @@ Document findings and next steps.
 19. **30.3b-review-a** — Assert conservation improvement at γ > 0 ✅
 20. **30.3c** — E4 (σ, γ) sweep ✅
 21. **30.3c-review-a** — Assert γ > 0 actually changes E4 results ✅
-22. **30.4a** — Comparison table
+22. **30.4a** — Comparison table ✅
 23. **30.4b** — Modified wavenumber analysis
 24. **30.4c** — Update plan with conclusions
 

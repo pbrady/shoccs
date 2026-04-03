@@ -3331,3 +3331,303 @@ class TestTensionConservationE4:
         assert best_gamma > 0, (
             f"Fine sweep best γ is 0 — penalty mechanism not helping E4"
         )
+
+
+# ---------------------------------------------------------------------------
+# Phase 30.4a — Comprehensive comparison table
+# ---------------------------------------------------------------------------
+
+
+class TestTensionComparison:
+    """Comprehensive comparison of all approaches for E2 and E4 (Phase 30.4a).
+
+    Methods compared:
+    1. PHS k=2 (σ=0 baseline)
+    2. Gaussian ε* (Phase 29 best)
+    3. Tension σ* (Phase 30.2d best, γ=0)
+    4. Tension + conservation penalty (σ*, γ*) (Phase 30.3b/c best)
+
+    Metrics: max Re(λ), spectral radius, CFL with RK4, conservation deficit.
+    RK4 imaginary stability limit ≈ 2.828 (along pure imaginary axis).
+    """
+
+    # E2_1 parameters
+    E2_P, E2_Q, E2_NEXTRA, E2_NU = 1, 1, 1, 1
+    # E4_1 parameters
+    E4_P, E4_Q, E4_NEXTRA, E4_NU = 2, 3, 0, 1
+
+    RK4_IMAG_LIMIT = 2.828
+
+    # ------------------------------------------------------------------ helpers
+
+    def _metrics(self, D):
+        """Compute (max_re, spectral_radius, cfl_rk4, conservation_deficit)."""
+        eigvals = np.linalg.eigvals(D)
+        max_re = float(np.max(np.real(eigvals)))
+        spec_rad = float(np.max(np.abs(eigvals)))
+        cfl = self.RK4_IMAG_LIMIT / spec_rad if spec_rad > 0 else float("inf")
+        deficit = float(np.max(np.abs(np.sum(D, axis=0))))
+        return max_re, spec_rad, cfl, deficit
+
+    def _find_best_sigma(self, n, p, q, nu, nextra):
+        """Coarse + fine sweep for best tension σ (γ=0)."""
+        sigmas_coarse = np.linspace(1.0, 55.0, 100)
+        best_sigma, best_re = None, np.inf
+        for s in sigmas_coarse:
+            mr = max_real_eigenvalue(n, p, q, s, "tension", nu, nextra)
+            if mr < best_re:
+                best_re = mr
+                best_sigma = s
+
+        # Fine sweep around coarse best
+        lo = max(0.5, best_sigma - 5.0)
+        hi = min(60.0, best_sigma + 5.0)
+        for s in np.linspace(lo, hi, 200):
+            mr = max_real_eigenvalue(n, p, q, s, "tension", nu, nextra)
+            if mr < best_re:
+                best_re = mr
+                best_sigma = s
+
+        return best_sigma, best_re
+
+    def _find_best_epsilon(self, n, p, q, nu, nextra, kernel="gaussian"):
+        """Coarse + fine sweep for best Gaussian/MQ ε."""
+        eps_coarse = np.logspace(np.log10(0.1), np.log10(20.0), 80)
+        best_eps, best_re = None, np.inf
+        for e in eps_coarse:
+            mr = max_real_eigenvalue(n, p, q, e, kernel, nu, nextra)
+            if mr < best_re:
+                best_re = mr
+                best_eps = e
+
+        lo = max(0.001, best_eps / 3)
+        hi = min(50.0, best_eps * 3)
+        for e in np.linspace(lo, hi, 200):
+            mr = max_real_eigenvalue(n, p, q, e, kernel, nu, nextra)
+            if mr < best_re:
+                best_re = mr
+                best_eps = e
+
+        return best_eps, best_re
+
+    def _find_best_sigma_gamma(self, n, p, q, nu, nextra, sigma_hint):
+        """2D sweep over (σ, γ) near sigma_hint. Returns (σ*, γ*, max_re, deficit)."""
+        sigmas = np.linspace(max(1.0, sigma_hint - 10), sigma_hint + 15, 30)
+        gammas = np.concatenate([[0.0], np.logspace(-1, 3, 30)])
+
+        best_sigma, best_gamma, best_re, best_deficit = None, None, np.inf, None
+        for s in sigmas:
+            for g in gammas:
+                D = build_diff_matrix_rbf_penalty(
+                    n, p, q, s, "tension", nu, nextra, gamma=g,
+                )
+                eigvals = np.linalg.eigvals(D)
+                max_re = float(np.max(np.real(eigvals)))
+                if max_re < best_re:
+                    best_re = max_re
+                    best_sigma = s
+                    best_gamma = g
+                    best_deficit = float(np.max(np.abs(np.sum(D, axis=0))))
+
+        return best_sigma, best_gamma, best_re, best_deficit
+
+    def _print_table(self, title, results):
+        """Print a formatted comparison table."""
+        print(f"\n  {'=' * 90}")
+        print(f"  {title}")
+        print(f"  {'=' * 90}")
+        hdr = (f"  {'Method':>30s}  {'max Re(λ)':>14s}  {'|λ|_max':>14s}"
+               f"  {'CFL(RK4)':>10s}  {'cons deficit':>14s}")
+        print(hdr)
+        print(f"  {'-' * 30}  {'-' * 14}  {'-' * 14}  {'-' * 10}  {'-' * 14}")
+        for name, max_re, sr, cfl, cd in results:
+            status = "STABLE" if max_re < STABILITY_TOL else ""
+            print(f"  {name:>30s}  {max_re:14.6e}  {sr:14.6e}"
+                  f"  {cfl:10.4f}  {cd:14.6e}  {status}")
+
+    # --------------------------------------------------------- E2 comparison
+
+    def test_e2_comparison(self):
+        """Comprehensive E2_1 comparison: PHS k=2, Gaussian, Tension, Tension+penalty."""
+        p, q, nextra, nu = self.E2_P, self.E2_Q, self.E2_NEXTRA, self.E2_NU
+        n = 40
+
+        results = []
+
+        # 1. PHS k=2 (σ=0 baseline via tension kernel at σ→0)
+        D_phs = build_diff_matrix_rbf(n, p, q, 1e-15, "tension", nu, nextra)
+        m = self._metrics(D_phs)
+        results.append(("PHS k=2 (σ=0)", *m))
+
+        # 2. Gaussian ε*
+        eps_g, _ = self._find_best_epsilon(n, p, q, nu, nextra, "gaussian")
+        D_gauss = build_diff_matrix_rbf(n, p, q, eps_g, "gaussian", nu, nextra)
+        m = self._metrics(D_gauss)
+        results.append((f"Gaussian ε*={eps_g:.3f}", *m))
+
+        # 3. Tension σ* (γ=0)
+        sigma_t, _ = self._find_best_sigma(n, p, q, nu, nextra)
+        D_tension = build_diff_matrix_rbf(n, p, q, sigma_t, "tension", nu, nextra)
+        m = self._metrics(D_tension)
+        results.append((f"Tension σ*={sigma_t:.2f}", *m))
+
+        # 4. Tension + conservation penalty (σ*, γ*)
+        sg, gg, _, _ = self._find_best_sigma_gamma(n, p, q, nu, nextra, sigma_t)
+        D_pen = build_diff_matrix_rbf_penalty(
+            n, p, q, sg, "tension", nu, nextra, gamma=gg,
+        )
+        m = self._metrics(D_pen)
+        results.append((f"Tension σ={sg:.2f} γ={gg:.2f}", *m))
+
+        self._print_table(
+            f"E2_1 Comparison (n={n}, p={p}, q={q}, nextra={nextra})", results
+        )
+
+        # --- Assertions ---
+        phs_re = results[0][1]
+        gauss_re = results[1][1]
+        tension_re = results[2][1]
+        pen_re = results[3][1]
+
+        phs_deficit = results[0][4]
+        pen_deficit = results[3][4]
+
+        # PHS k=2 baseline: unstable O(1e-2)
+        assert phs_re > 0.01, f"E2 PHS k=2 should be unstable O(1e-2), got {phs_re:.6e}"
+
+        # Gaussian achieves machine-precision stability
+        assert gauss_re < STABILITY_TOL, (
+            f"E2 Gaussian not stable: {gauss_re:.6e}"
+        )
+
+        # Tension achieves machine-precision stability
+        assert tension_re < STABILITY_TOL, (
+            f"E2 Tension not stable: {tension_re:.6e}"
+        )
+
+        # Tension+penalty: should still be reasonably stable (may or may not
+        # be machine-precision depending on γ; assert < 1e-3 as loose bound)
+        assert pen_re < 1e-3, (
+            f"E2 Tension+penalty should be near-stable, got {pen_re:.6e}"
+        )
+
+        # Conservation penalty should not make deficit worse than PHS baseline
+        assert pen_deficit <= phs_deficit + 0.1, (
+            f"Penalty deficit {pen_deficit:.4f} worse than PHS {phs_deficit:.4f}"
+        )
+
+    # --------------------------------------------------------- E4 comparison
+
+    def test_e4_comparison(self):
+        """Comprehensive E4_1 comparison: PHS k=2, Gaussian, Tension, Tension+penalty."""
+        p, q, nextra, nu = self.E4_P, self.E4_Q, self.E4_NEXTRA, self.E4_NU
+        n = 40
+
+        results = []
+
+        # 1. PHS k=2 (σ=0 baseline)
+        D_phs = build_diff_matrix_rbf(n, p, q, 1e-15, "tension", nu, nextra)
+        m = self._metrics(D_phs)
+        results.append(("PHS k=2 (σ=0)", *m))
+
+        # 2. Gaussian ε*
+        eps_g, _ = self._find_best_epsilon(n, p, q, nu, nextra, "gaussian")
+        D_gauss = build_diff_matrix_rbf(n, p, q, eps_g, "gaussian", nu, nextra)
+        m = self._metrics(D_gauss)
+        results.append((f"Gaussian ε*={eps_g:.3f}", *m))
+
+        # 3. Tension σ* (γ=0)
+        sigma_t, _ = self._find_best_sigma(n, p, q, nu, nextra)
+        D_tension = build_diff_matrix_rbf(n, p, q, sigma_t, "tension", nu, nextra)
+        m = self._metrics(D_tension)
+        results.append((f"Tension σ*={sigma_t:.2f}", *m))
+
+        # 4. Tension + conservation penalty (σ*, γ*)
+        sg, gg, _, _ = self._find_best_sigma_gamma(n, p, q, nu, nextra, sigma_t)
+        D_pen = build_diff_matrix_rbf_penalty(
+            n, p, q, sg, "tension", nu, nextra, gamma=gg,
+        )
+        m = self._metrics(D_pen)
+        results.append((f"Tension σ={sg:.2f} γ={gg:.2f}", *m))
+
+        self._print_table(
+            f"E4_1 Comparison (n={n}, p={p}, q={q}, nextra={nextra})", results
+        )
+
+        # --- Assertions ---
+        phs_re = results[0][1]
+        gauss_re = results[1][1]
+        tension_re = results[2][1]
+        pen_re = results[3][1]
+
+        # PHS k=2 baseline: small instability O(1e-3)
+        assert phs_re < 0.05, f"E4 PHS k=2 baseline unreasonable: {phs_re:.6e}"
+        assert phs_re > 1e-4, f"E4 PHS k=2 should be unstable, got {phs_re:.6e}"
+
+        # Gaussian improves significantly over PHS k=2
+        assert gauss_re < 1e-3, f"E4 Gaussian not improved: {gauss_re:.6e}"
+        assert gauss_re < phs_re, (
+            f"E4 Gaussian ({gauss_re:.6e}) not better than PHS ({phs_re:.6e})"
+        )
+
+        # Tension improves significantly over PHS k=2
+        assert tension_re < 1e-3, f"E4 Tension not improved: {tension_re:.6e}"
+        assert tension_re < phs_re, (
+            f"E4 Tension ({tension_re:.6e}) not better than PHS ({phs_re:.6e})"
+        )
+
+        # Tension+penalty should not be worse than tension alone (within noise)
+        assert pen_re < 1e-3, (
+            f"E4 Tension+penalty should be improved, got {pen_re:.6e}"
+        )
+
+    # ------------------------------------------------ grid convergence
+
+    def test_grid_convergence(self):
+        """Grid-convergence check for best tension σ* at n=20,40,80.
+
+        Verifies whether stability findings at n=40 hold across grid sizes.
+        E2 should be grid-independent; E4 is expected to NOT be.
+        """
+        configs = [
+            ("E2_1", self.E2_P, self.E2_Q, self.E2_NEXTRA, self.E2_NU),
+            ("E4_1", self.E4_P, self.E4_Q, self.E4_NEXTRA, self.E4_NU),
+        ]
+
+        print(f"\n  {'=' * 80}")
+        print(f"  Grid-Convergence: Tension σ* (found at n=40)")
+        print(f"  {'=' * 80}")
+
+        e2_results = {}
+        e4_results = {}
+
+        for label, p, q, nextra, nu in configs:
+            # Find best σ at n=40
+            sigma_star, _ = self._find_best_sigma(40, p, q, nu, nextra)
+
+            print(f"\n  {label} — Tension σ*={sigma_star:.3f}")
+            print(f"  {'n':>5s}  {'max Re(λ)':>14s}  {'|λ|_max':>14s}"
+                  f"  {'CFL(RK4)':>10s}  {'cons deficit':>14s}")
+            print(f"  {'-' * 5}  {'-' * 14}  {'-' * 14}  {'-' * 10}  {'-' * 14}")
+
+            for nn in [20, 40, 80]:
+                D = build_diff_matrix_rbf(nn, p, q, sigma_star, "tension", nu, nextra)
+                max_re, sr, cfl, deficit = self._metrics(D)
+                print(f"  {nn:5d}  {max_re:14.6e}  {sr:14.6e}"
+                      f"  {cfl:10.4f}  {deficit:14.6e}")
+                if label == "E2_1":
+                    e2_results[nn] = max_re
+                else:
+                    e4_results[nn] = max_re
+
+        # E2 should be grid-independent (stable at all sizes)
+        for nn in [20, 40, 80]:
+            assert e2_results[nn] < STABILITY_TOL, (
+                f"E2 Tension σ* not grid-independent at n={nn}: {e2_results[nn]:.6e}"
+            )
+
+        # E4 is NOT expected to be grid-independent, but should remain O(1e-4)
+        for nn in [20, 40, 80]:
+            assert e4_results[nn] < 1e-2, (
+                f"E4 Tension σ* at n={nn} unreasonably large: {e4_results[nn]:.6e}"
+            )
