@@ -129,58 +129,89 @@ N/A — no stable nextra was found.  Skipping per plan logic.
 
 ## 31.3 — Cross-Scheme Validation
 
-### 31.3a — Verify E2 is unaffected
+### 31.3a — Verify E2 is unaffected ✅
 
-Confirm that E2_1 (which already has nextra=1) retains its machine-precision stability
-at the existing optimal σ.  Also check nextra=0 for E2 (should be worse).
+- Test: `TestCrossValidationE2::test_e2_nextra_crossvalidation` — PASSED
+- **Result:** E2 achieves machine-precision stability at ALL nextra values tested:
+
+  | nextra | t | r | extra DOF | best σ  | min max Re(λ) | status |
+  |--------|---|---|-----------|---------|---------------|--------|
+  | 0      | 3 | 2 | 2         | 45.88   | 1.96e-15      | STABLE |
+  | 1      | 4 | 3 | 6         | 35.44   | 3.59e-15      | STABLE |
+  | 2      | 5 | 4 | 12        | 25.12   | 6.12e-16      | STABLE |
+
+- **Key finding:** E2 is stable even at nextra=0, contradicting the initial assumption
+  that nextra=1 was necessary.  E2 (p=1, q=1) is simple enough that the tension kernel
+  achieves stability with minimal boundary DOF.  All three floors are at machine-precision
+  noise level (~1e-15), meaning nextra is irrelevant for E2 stability.
+- **Implication:** The E4 instability is NOT about insufficient DOF per se — E2 achieves
+  stability with fewer DOF/row (1 at nextra=0) than E4 has at nextra=3 (5).  The difficulty
+  is specific to the higher-order interior stencil structure of E4.
 - File: `scripts/stencil_gen/tests/test_phs.py`
 
-### 31.3b — Try E6 and E8 if E4 succeeds
+### 31.3b — Try E6 and E8 if E4 succeeds — N/A
 
-If wider footprint enables E4 stability, test the same approach on higher-order schemes:
-- E6: p=3, q=5 — how much nextra is needed?
-- E8: p=4, q=7 — scales further?
-- This determines if the approach generalizes or if each order needs more nextra
-- File: `scripts/stencil_gen/tests/test_phs.py`, class `TestFootprintHigherOrder`
+E4 did not achieve stability at any nextra.  Skipped per plan logic.
 
 ---
 
 ## 31.4 — Analysis and Conclusions
 
-### 31.4a — Scaling analysis
+### 31.4a — Scaling analysis — N/A
 
-Quantify how the minimum nextra for stability scales with scheme order:
-- E2 (q=1): nextra=1 → total extra DOF = 6
-- E4 (q=3): nextra=? → total extra DOF = ?
-- E6 (q=5): nextra=? → total extra DOF = ?
-- Is there a pattern?  (e.g., nextra = q - 1, or total DOF ~ q²)
-- File: `scripts/stencil_gen/tests/test_phs.py`
+No stable E4 configuration exists.  Only E2 data point is available:
+- E2 (q=1): stable at ALL nextra ∈ {0, 1, 2} — nextra is irrelevant for E2.
+- E4 (q=3): NOT stable at any nextra ∈ {0, 1, 2, 3} — cannot determine minimum nextra.
+- No scaling law can be established from a single (trivially-stable) data point.
 
-### 31.4b — Cost assessment
+### 31.4b — Cost assessment — N/A
 
-For the stable E4 configuration:
-- How many extra boundary points compared to nextra=0?
-- What is the impact on stencil sparsity and bandwidth?
-- Is the computational cost acceptable for production?
-- Compare: wider boundary closure (one-time cost per grid setup) vs
-  multi-alpha optimization (expensive, repeated)
-- Document in plan
+No stable E4 configuration exists.  Cost assessment is moot.
 
-### 31.4c — Update plan with conclusions
+### 31.4c — Update plan with conclusions ✅
 
-**Pre-requisite:** Reconcile the 31.2b vs 31.2c γ=0 discrepancy for nextra=2 before
-writing conclusions.  31.2b reports nextra=2 floor = 7.2e-5, but 31.2c γ=0 finds 9.5e-6
-(~7.5× better) using a different σ grid.  Since `build_diff_matrix_rbf_penalty(gamma=0)`
-returns the same matrix as `build_diff_matrix_rbf`, the discrepancy is purely from σ-grid
-coverage.  Either re-run 31.2b with a finer/wider σ grid to confirm the true nextra=2
-floor, or note that the 31.2b table entry for nextra=2 is unreliable.  The corrected
-picture is: the floor does vary with nextra (not flat), with nextra=2 achieving the best
-floor at ~1e-5, but still far from machine-precision stability.
+**31.2b/31.2c σ-grid discrepancy (nextra=2):** Already reconciled in prior review commit.
+31.2b used 100 log-spaced points in [0.01, 50]; 31.2c used 49 points in [0.01, 55].
+The nextra=2 minimum is sensitive to σ-grid coverage.  The 31.2c figure (9.5e-6) is more
+reliable since it happened to sample closer to the true optimum.  Corrected conclusion:
+the floor varies with nextra (not flat as originally claimed in 31.2b), with nextra=2
+achieving the best floor at ~1e-5, but this is still far from machine-precision stability.
 
-Summarize findings and determine next steps:
-- If successful: plan Phase 32 for integrating tension stencils into codegen/C++
-- If not: document the remaining gap and alternative directions
-- File: `plans/31-boundary-footprint-investigation.md`
+**Summary of Phase 31 findings:**
+
+1. **E4 instability floor is fundamental to the tension kernel.**  Neither increasing
+   the boundary footprint (nextra ∈ {0,1,2,3}) nor adding a conservation penalty (γ>0)
+   nor combining both can push the E4 instability below ~1e-5.  The floor is NOT an
+   artifact of insufficient boundary DOF.
+
+2. **E2 is trivially stable.**  The tension kernel achieves machine-precision stability
+   for E2 at ALL nextra values, including nextra=0.  This means the E2 success was not
+   due to nextra=1 providing critical extra DOF — E2 is simply easy enough that even
+   the tightest closure works.
+
+3. **The difficulty is intrinsic to the E4 interior stencil structure.**  E2 with 1
+   extra DOF/row (nextra=0) is stable, while E4 with 5 extra DOF/row (nextra=3) is not.
+   The problem is not DOF count but rather the interaction between the 4th-order interior
+   stencil and the boundary closure.
+
+4. **The tension kernel + nextra approach is exhausted for E4.**  The full
+   (nextra, σ, γ) parameter space has been swept without finding a stable configuration.
+
+**Next steps / alternative directions:**
+
+- **Different kernel families:** The tension kernel (exp-based) may not be the right
+  shape for E4.  Consider Wendland compactly-supported RBFs, Matérn kernels, or
+  multi-scale kernels that can better match the oscillatory structure of 4th-order stencils.
+- **Direct optimization:** Instead of parametric RBF kernels, directly optimize the
+  boundary closure coefficients to minimize max Re(λ), using the E4 accuracy constraints
+  as equality constraints and stability as the objective.
+- **SBP-like energy estimates:** Analyze what algebraic conditions the boundary closure
+  must satisfy for E4 eigenvalue stability, independent of how the coefficients are
+  generated.
+- **Accept the ~1e-5 floor:** For practical applications, the O(1e-5) instability may
+  be manageable with appropriate time-step restrictions (the CFL number is still
+  reasonable).  Document the limitation and move to codegen/C++ integration with the
+  best available E4 stencils.
 
 ---
 
@@ -192,11 +223,11 @@ Summarize findings and determine next steps:
 4. ✅ **31.2b** — Full nextra × σ sweep → floor flat at ~5e-5 across all nextra
 5. ✅ **31.2c** — Nextra × σ × γ sweep with penalty → floor persists at ~1e-5
 6. N/A **31.2d** — No stable nextra found; skipped
-7. **31.3a** — E2 cross-validation
-8. **31.3b** — E6/E8 if E4 works (likely N/A)
-9. **31.4a** — Scaling analysis (likely N/A)
-10. **31.4b** — Cost assessment (likely N/A)
-11. **31.4c** — Conclusions
+7. ✅ **31.3a** — E2 cross-validation → E2 stable at ALL nextra (even nextra=0)
+8. N/A **31.3b** — E6/E8 if E4 works → E4 did not achieve stability; skipped
+9. N/A **31.4a** — Scaling analysis → no stable E4 config exists; skipped
+10. N/A **31.4b** — Cost assessment → no stable E4 config exists; skipped
+11. ✅ **31.4c** — Conclusions: E4 instability is fundamental; E2 trivially stable at all nextra
 
 ---
 
