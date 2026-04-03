@@ -424,14 +424,97 @@ the PHS k=2 E2_1 instability finding.
 2. `assert results[("E4_1", 80)] > 1e-5` — confirms E4_1 instability does NOT
    grid-converge (the key negative finding for E4).
 
-### 29.7b — Update plan with conclusions and next steps
+### 29.7b — Update plan with conclusions and next steps ✅
 
-Update this plan file with:
-- Which kernel/parameter works best
-- Whether the approach eliminates or reduces the optimization problem
-- What the cut-cell implications are (does the stable ε work for non-uniform grids?)
-- Concrete next steps (if successful: wire into codegen; if not: alternative directions)
-- File: `plans/29-phs-stencil-investigation.md`
+**Completed:** Conclusions and next steps written below.
+
+---
+
+## Conclusions
+
+### Best kernel/parameter by scheme
+
+**E2_1 (p=1, q=1, nextra=1):** Gaussian RBF with ε* ≈ 1.8–2.4 achieves
+machine-precision eigenvalue stability (max Re(λ) < 1e-15 at n=20–40).
+Multiquadric also works (ε* ≈ 6–13) but requires larger shape parameters.
+Both sacrifice conservation: the stable RBF stencil has column-sum deficits
+of O(1) on the overlap columns. PHS k=2 gives 8.7e-2 instability — far worse.
+
+**E4_1 (p=2, q=3, nextra=1):** No RBF kernel achieves eigenvalue stability.
+Best single-ε Gaussian gives O(1e-4) instability. Mixed per-row ε (4 independent
+parameters) reduces to O(1e-5) but is still not stable and gets *worse* with
+grid refinement. This is a 100× improvement over PHS k=2 (6.4e-3) but falls
+short of the machine-precision stability needed for production use.
+
+### Does RBF tuning eliminate the optimization problem?
+
+**No.** For E4 (the primary production target), a single shape parameter ε is
+insufficient.  Even with per-row ε (4 independent parameters), the boundary
+closure has a structural stability deficit.  The polynomial augmentation degree
+q=3 leaves only 2 extra DOF per row beyond polynomial reproduction, and the RBF
+kernel fills these DOF implicitly — but this implicit filling cannot achieve the
+precise cancellations needed for eigenvalue stability.
+
+For E2 only, the 1D search over ε does work, but the result is non-conservative.
+Substituting the RBF-extracted alphas back into the TEMO framework (which enforces
+conservation) destroys stability completely (max Re(λ) jumps from 1e-16 to 1.2).
+This confirms that eigenvalue stability and SBP conservation are fundamentally
+competing objectives for these boundary closures.
+
+### Stability–conservation trade-off
+
+The investigation revealed a sharp dichotomy:
+
+1. **RBF-direct stencils** (no conservation constraint): stable for E2, near-stable
+   for E4, but with O(1) conservation deficits on overlap columns.
+2. **TEMO-constrained stencils** (conservation enforced on last row): unstable even
+   with RBF-optimal alphas, because the conservation constraint locks the last
+   boundary row into a form that creates eigenvalue instability.
+
+This means any production boundary closure must either:
+- Accept some conservation deficit and rely on dissipation to maintain stability, or
+- Use multi-parameter optimization to find a Pareto-optimal point balancing stability
+  and conservation (the existing TEMO approach).
+
+### Cut-cell implications
+
+The stable ε* is grid-size-dependent (varies from ~1.4 at n=20 to ~2.3 at n=80 for
+E2_1 Gaussian), and the stability window is narrow (roughly ε ∈ [1.4, 3.0]).  For
+cut-cell grids with non-uniform spacing near the boundary, the effective ε would need
+to vary spatially, and there is no guarantee that a single global ε works when grid
+spacing varies by O(h) near the cut.  This makes the RBF approach even less practical
+for production cut-cell use.
+
+### Summary of key findings
+
+| Finding | Implication |
+|---------|-------------|
+| Gaussian ε* achieves machine-precision stability for E2_1 | RBF can find stable boundary stencils when DOF/constraints ratio is favorable |
+| E4_1 has O(1e-4) residual instability with any RBF tuning | Higher-order schemes need explicit multi-parameter optimization |
+| Stability requires violating conservation | Conservation and eigenvalue stability are competing objectives |
+| TEMO + RBF alphas is unstable (max Re(λ) = 1.2) | Cannot substitute RBF results into conservation-enforcing framework |
+| Optimal ε is grid-size-dependent | No universal shape parameter; impractical for adaptive grids |
+| Mixed per-row ε gives only 3× improvement for E4 | More parameters help but cannot close the stability gap |
+
+### Next steps
+
+1. **TEMO multi-alpha optimizer remains the path forward for E4+.**  The RBF
+   investigation confirms that implicit regularization (shape parameter tuning)
+   cannot replace explicit constrained optimization for higher-order schemes.
+
+2. **E2_1 could use RBF-direct stencils** if conservation is not required for the
+   specific application (e.g., pure advection with Dirichlet BCs where conservation
+   is enforced by the BC, not the stencil).  This is a niche use case.
+
+3. **Relaxed conservation** could be explored: instead of exact column-sum
+   conservation on the last row, allow a small deficit δ and optimize for stability
+   subject to |conservation deficit| < δ.  This is a refinement of the existing TEMO
+   optimizer, not a new approach.
+
+4. **No further RBF kernel investigation is warranted** for the stencil generation
+   pipeline.  The Gaussian and Multiquadric results bracket the practically useful
+   range of smooth radial kernels.  Compact-support kernels (Wendland) would reduce
+   stencil width but cannot improve the stability–conservation trade-off.
 
 ---
 
@@ -452,7 +535,7 @@ Each step produces tests that validate before moving on:
 9b. **29.6e-fix** ✅ — Add assertions to TestStableEpsilonAlphas (review follow-up)
 10. **29.7a** ✅ — Comparison table
 10b. **29.7a-fix** ✅ — Resolve PHS E2 discrepancy + add grid-convergence assertions (review follow-up)
-11. **29.7b** — Update plan with conclusions
+11. **29.7b** ✅ — Update plan with conclusions
 
 ---
 
