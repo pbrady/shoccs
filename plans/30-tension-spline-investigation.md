@@ -68,13 +68,13 @@ or equivalently (dropping the constant and normalization, which cancel in the RB
 - σ→0: φ → |r|³/6 + O(σ²) (PHS k=2, cubic spline)
 - σ→∞: φ → σ|r| (linear, maximally local)
 
-**Derivatives (for the RHS of the augmented system):**
-- D¹φ = (r/(2σ)) · sinh(σ|r|)      [note: smooth at r=0, equals 0 there]
-- D²φ = (sinh(σ|r|) + σ|r|cosh(σ|r|)) / (2σ)
+**Derivatives of the simplified kernel** φ(r;σ) = σ|r| - 1 + e^{-σ|r|}:
+- D¹φ = σ · sign(r) · (1 - e^{-σ|r|})   [smooth at r=0, equals 0 there]
+- D²φ = σ² · e^{-σ|r|}                    [for r≠0; delta term at r=0 ignored]
 
-**Numerical stability:** For small σr, use Taylor series (Horner form):
-- φ = |r|³(σ²/6)(1 + (σr)²/10 + (σr)⁴/280 + ...)
-- D¹φ = r|r|/2 · (1 + (σr)²/6 + (σr)⁴/120 + ...)
+**Numerical stability:** For small z = σ|r|, use Taylor series (Horner form):
+- φ = (z²/2)(1 - z/3 + z²/12 - z³/60 + ...)
+- D¹φ = σ · sign(r) · z · (1 - z/2 + z²/6 - z³/24 + ...)
 For large σr (>20), drop the e^{-σr} terms.
 
 **Conditional positive definiteness:** Order 1 (needs at least constant augmentation).
@@ -141,6 +141,38 @@ Add `TestTensionSpline` class in `test_phs.py`:
 **Done:** 11 tests in `TestTensionSpline` — all pass. Additional tests beyond spec:
 `test_kernel_positive_for_nonzero_r`, `test_kernel_zero_at_origin`, `test_d1_antisymmetric`,
 `test_d2_symmetric`, `test_taylor_matches_direct`.
+
+---
+
+## 30.1-review — Follow-up items from review of Phase 30.1
+
+### 30.1-review-a — Add σ=0 guard dispatching to PHS k=2 ⬜
+
+The plan spec 30.1a requires "Handle σ=0 (return PHS k=2 values)" but this was
+not implemented.  At σ=0 the kernel returns 0 for all r, producing a singular Φ
+matrix and a `LinAlgError`.  This **blocks Phase 30.2** which sweeps σ ∈ [0, 20].
+
+Fix: In `uniform_boundary_weights_tension` and `uniform_interior_weights_tension`,
+detect σ=0 (or σ < some tiny threshold) and redirect to the PHS k=2 path.
+Alternatively, add a σ=0 branch in `_tension_kernel_eval` / `_tension_kernel_deriv`
+that returns PHS k=2 values (|r|³ and derivatives).
+
+Test: call `uniform_boundary_weights_tension(0, 3, 1, 1, sigma=0.0)` and verify
+the result matches `uniform_boundary_weights(0, 3, 1, k=2, q=1)`.
+
+### 30.1-review-b — Add D¹φ Taylor 8th term for branch-point accuracy ⬜
+
+The D¹φ Taylor series uses 7 terms (up to z⁶/5040) while the eval kernel and
+D²φ use 8 terms.  At the branch point z=2, this gives ~0.6% discontinuity for
+D¹φ vs ~0.01% for eval.  Add the z⁷/40320 term to the D¹φ Horner series for
+consistent accuracy.
+
+### 30.1-review-c — Add nu=2 stencil weight test ⬜
+
+All stencil weight tests use nu=1.  Add a test that computes second-derivative
+weights via `uniform_boundary_weights_tension(i, t, nu=2, q, sigma)` and verifies
+polynomial exactness (sum w_j x_j^d = d(d-1) i^{d-2} for d ≥ 2).  This exercises
+the D²φ code path through `_rbf_weights_numeric`.
 
 ---
 
@@ -245,20 +277,23 @@ Document findings and next steps.
 
 ## Implementation Order
 
-1. **30.1a** — Tension kernel evaluation (numerical, with Taylor/exp branching)
-2. **30.1b** — Wire into `phs_stencil_weights` and `_rbf_weights_numeric`
-3. **30.1c** — Convenience wrappers
-4. **30.1d** — Tension kernel tests
-5. **30.2a** — Diff matrix builder for tension
-6. **30.2b** — E2 sigma sweep (first result: does PHS k=2 connect to stability?)
-7. **30.2c** — E4 sigma sweep (key result: does tension beat Gaussian?)
-8. **30.2d** — Fine-grained optimal σ search
-9. **30.3a** — Soft conservation penalty implementation
-10. **30.3b** — E2 (σ, γ) sweep
-11. **30.3c** — E4 (σ, γ) sweep
-12. **30.4a** — Comparison table
-13. **30.4b** — Modified wavenumber analysis
-14. **30.4c** — Update plan with conclusions
+1. **30.1a** — Tension kernel evaluation (numerical, with Taylor/exp branching) ✅
+2. **30.1b** — Wire into `phs_stencil_weights` and `_rbf_weights_numeric` ✅
+3. **30.1c** — Convenience wrappers ✅
+4. **30.1d** — Tension kernel tests ✅
+5. **30.1-review-a** — Add σ=0 guard dispatching to PHS k=2 (blocks 30.2)
+6. **30.1-review-b** — Add D¹φ Taylor 8th term for branch-point accuracy
+7. **30.1-review-c** — Add nu=2 stencil weight test
+8. **30.2a** — Diff matrix builder for tension
+9. **30.2b** — E2 sigma sweep (first result: does PHS k=2 connect to stability?)
+10. **30.2c** — E4 sigma sweep (key result: does tension beat Gaussian?)
+11. **30.2d** — Fine-grained optimal σ search
+12. **30.3a** — Soft conservation penalty implementation
+13. **30.3b** — E2 (σ, γ) sweep
+14. **30.3c** — E4 (σ, γ) sweep
+15. **30.4a** — Comparison table
+16. **30.4b** — Modified wavenumber analysis
+17. **30.4c** — Update plan with conclusions
 
 ---
 
