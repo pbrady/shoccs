@@ -113,8 +113,10 @@ Already implemented.  `max_real_eigenvalue` passes `nextra` through to the build
   2. nextra=1 sees the largest penalty benefit (70% improvement), consistent with the idea
      that moderate DOF + penalty works best.
   3. nextra=2 γ=0 is ~6× better than nextra=0 γ=0, so nextra DOES matter for pure tension.
-     But this contradicts 31.2b, suggesting the σ range matters — the penalty sweep used
-     a finer grid near low σ values (logspace from 0.01) vs 31.2b's linear grid.
+     But this contradicts 31.2b (which reported 7.2e-5 for nextra=2).  Both sweeps use
+     logspace grids, but with different density and range: 31.2b uses 100 σ-points in
+     [0.01, 50], 31.2c uses 49 points in [0.01, 55].  The nextra=2 minimum appears
+     sensitive to σ-grid coverage.  **→ Reconcile in 31.4c before writing conclusions.**
   4. Despite the improved floor at nextra=2, the O(1e-5) barrier is NOT breached.
 - **Conclusion:** Neither nextra alone (31.2b) nor nextra+penalty (31.2c) can achieve
   machine-precision stability for E4 with the tension kernel.
@@ -165,6 +167,15 @@ For the stable E4 configuration:
 - Document in plan
 
 ### 31.4c — Update plan with conclusions
+
+**Pre-requisite:** Reconcile the 31.2b vs 31.2c γ=0 discrepancy for nextra=2 before
+writing conclusions.  31.2b reports nextra=2 floor = 7.2e-5, but 31.2c γ=0 finds 9.5e-6
+(~7.5× better) using a different σ grid.  Since `build_diff_matrix_rbf_penalty(gamma=0)`
+returns the same matrix as `build_diff_matrix_rbf`, the discrepancy is purely from σ-grid
+coverage.  Either re-run 31.2b with a finer/wider σ grid to confirm the true nextra=2
+floor, or note that the 31.2b table entry for nextra=2 is unreliable.  The corrected
+picture is: the floor does vary with nextra (not flat), with nextra=2 achieving the best
+floor at ~1e-5, but still far from machine-precision stability.
 
 Summarize findings and determine next steps:
 - If successful: plan Phase 32 for integrating tension stencils into codegen/C++
