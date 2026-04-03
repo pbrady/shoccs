@@ -274,6 +274,19 @@ This confirms that eigenvalue stability and SBP conservation are competing objec
 for E2_1 boundary closures — the RBF found a stable but non-conservative solution
 point in the parameter space.
 
+**Follow-up (from review):**
+- `test_verify_stability_with_extracted_alphas` and `test_compare_with_production_alphas`
+  are print-only with no assertions.  The plan says "Verify: substitute those alphas
+  into the symbolic stencil and **confirm** eigenvalue stability", which implies an
+  assertion, not just a print.  Add:
+  1. `assert re_rbf < 1e-13` in `test_verify_stability_with_extracted_alphas` for at
+     least one grid size (n=40) to regression-protect the key finding that RBF direct
+     achieves machine-precision stability.
+  2. `assert re_temo > 0.1` to confirm that conservation-enforced TEMO is unstable
+     (the core stability-vs-conservation trade-off claim).
+- The `TestStableEpsilonAlphas` class docstring says "ε*≈2.29" (from 29.6c coarse
+  sweep) but the test actually finds ε*≈1.83.  Update the docstring to match.
+
 ### 29.6f — If NO stable ε found: characterize the gap ✅
 
 Since E4_1 showed O(1e-4) instability with a single ε, investigated mixed-epsilon
@@ -358,6 +371,7 @@ Each step produces tests that validate before moving on:
 8. **29.6d** — E4 epsilon sweep (key result!)
 8. **29.6f** ✅ — Mixed epsilon characterization (E4 not stable even with per-row ε)
 9. **29.6e** ✅ — Extract alphas for E2 (stable but non-conservative)
+9b. **29.6e-fix** — Add assertions to TestStableEpsilonAlphas (review follow-up)
 10. **29.7a** — Comparison table
 11. **29.7b** — Update plan with conclusions
 
