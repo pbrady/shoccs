@@ -2279,6 +2279,20 @@ class TestTensionSweepE4:
             print(f"\n  E4_1 tension not machine-precision stable.")
             print(f"  Best max Re(λ) = {best_fine[1]:.6e}")
 
+        # Regression: fine-sweep best should be well below 1e-3 (actual ~5e-5)
+        assert best_fine[1] < 1e-3, (
+            f"E4 tension fine-sweep regression: max Re(λ) = {best_fine[1]:.6e} >= 1e-3"
+        )
+        # Regression: tension must improve over PHS k=2 (σ=0) baseline
+        phs_baseline = max_real_eigenvalue(
+            n, p=self.P, q=self.Q, epsilon=0.0,
+            kernel="tension", nu=self.NU, nextra=self.NEXTRA,
+        )
+        assert best_fine[1] < phs_baseline, (
+            f"E4 tension fine-sweep did not improve over PHS k=2: "
+            f"best={best_fine[1]:.6e} vs PHS={phs_baseline:.6e}"
+        )
+
     def test_compare_with_gaussian(self):
         """Compare tension best σ with Gaussian best ε for E4_1.
 
@@ -2333,6 +2347,19 @@ class TestTensionSweepE4:
             ratio = best_tension[1] / max(best_gaussian[1], 1e-16)
             print(f"\n  Gaussian beats tension by factor {ratio:.1f}x")
 
+        # Regression: both methods should achieve < 1e-3 for E4 (actual ~5e-5 / ~8e-5)
+        assert best_tension[1] < 1e-3, (
+            f"E4 tension regression: max Re(λ) = {best_tension[1]:.6e} >= 1e-3"
+        )
+        assert best_gaussian[1] < 1e-3, (
+            f"E4 Gaussian regression: max Re(λ) = {best_gaussian[1]:.6e} >= 1e-3"
+        )
+        # Regression: tension should improve ≥ 10× over PHS k=2 (from ~0.006 to ~5e-5)
+        assert best_tension[1] < phs_re / 10, (
+            f"E4 tension did not improve ≥10× over PHS k=2: "
+            f"best={best_tension[1]:.6e} vs PHS/10={phs_re/10:.6e}"
+        )
+
     def test_mixed_tension_two_group(self):
         """Sweep two groups of σ: σ_outer (rows 0,1) and σ_inner (rows 2,3).
 
@@ -2382,3 +2409,8 @@ class TestTensionSweepE4:
             mr = float(np.max(np.real(eigvals)))
             status = "STABLE" if mr < STABILITY_TOL else "unstable"
             print(f"    n={nn:4d}: max Re(λ)={mr:.6e} [{status}]")
+
+        # Regression: mixed-tension best should be < 1e-3 (actual ~5e-5)
+        assert best_re < 1e-3, (
+            f"E4 mixed-tension regression: max Re(λ) = {best_re:.6e} >= 1e-3"
+        )

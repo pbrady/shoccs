@@ -285,7 +285,7 @@ Same sweep for E4 boundary stencils.
 
 ## 30.2c-review — Follow-up items from review of Phase 30.2c
 
-### 30.2c-review-a — Add regression assertions to E4 tension sweep tests
+### 30.2c-review-a — Add regression assertions to E4 tension sweep tests ✅
 
 Three of four tests in `TestTensionSweepE4` have zero `assert` statements —
 the same problem fixed for E2 in 30.2-review-a.  Only `test_tension_coarse_sweep`
@@ -299,6 +299,14 @@ threshold (e.g., 1e-3) rather than `STABILITY_TOL`:
 - `test_compare_with_gaussian`: assert both tension and Gaussian bests < 1e-3.
   Assert tension improves ≥ 10× over PHS k=2 (from ~0.006 to ~5e-5 is ~100×).
 - `test_mixed_tension_two_group`: assert mixed best < 1e-3.
+
+**Done:** Added assertions to all three tests:
+- `test_tension_fine_sweep_near_best`: asserts fine-sweep best < 1e-3, and
+  that tension improves over PHS k=2 baseline (σ=0).
+- `test_compare_with_gaussian`: asserts both tension and Gaussian bests < 1e-3,
+  and that tension improves ≥ 10× over PHS k=2.
+- `test_mixed_tension_two_group`: asserts mixed best < 1e-3.
+All 4 E4 sweep tests pass.
 
 ---
 
@@ -388,7 +396,7 @@ Document findings and next steps.
 10. **30.2-review-a** — Add regression assertions to E2 tension sweep tests ✅
 11. **30.2-review-b** — Use practical stability threshold (blocks 30.2c) ✅
 12. **30.2c** — E4 sigma sweep (key result: does tension beat Gaussian?) ✅
-13. **30.2c-review-a** — Add regression assertions to E4 tension sweep tests
+13. **30.2c-review-a** — Add regression assertions to E4 tension sweep tests ✅
 14. **30.2d** — Fine-grained optimal σ search
 15. **30.3a** — Soft conservation penalty implementation
 16. **30.3b** — E2 (σ, γ) sweep
