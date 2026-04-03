@@ -128,7 +128,7 @@ Uses numpy for numerical eigenvalue computation.
 and returns `max(Re(eigvals))`.  Tests: periodic interior-only matrix has
 max Re(λ) < 1e-12, return type is float.  All pass.
 
-### 29.6-fix — Fix `build_diff_matrix_rbf` dimension formula for nu=2
+### 29.6-fix — Fix `build_diff_matrix_rbf` dimension formula for nu=2 ✅
 
 `build_diff_matrix_rbf` hardcodes the nu=1 dimension formula
 (`t = p+q+1+nextra`, `r = q+1+nextra`) but the function accepts nu=2.
@@ -143,6 +143,15 @@ Also add a test that `build_diff_matrix_rbf` with E2_2 parameters (p=1, q=1,
 nextra=0, nu=2) produces the same dimensions as `temo.compute_dimensions`.
 
 - File: `scripts/stencil_gen/stencil_gen/phs.py`, `build_diff_matrix_rbf`
+
+**Completed:** Gated on nu: nu=1 uses original formula, nu=2 uses
+`t = p+2+nextra`, `r = p+1+nextra` (matching `temo.compute_dimensions`),
+nu≥3 raises `NotImplementedError`.  Added 4 new tests:
+`test_nu2_dimensions_match_temo` (verifies dimensions against temo),
+`test_nu2_polynomial_reproduction` (D^2(x)=0 with q=1),
+`test_nu2_polynomial_reproduction_higher_q` (D^2(x^2)=2 with E4_2 params q=3),
+`test_nu2_symmetry_second_deriv` (symmetric reflection for even nu).
+All 29 tests pass.
 
 ### 29.6c — Epsilon sweep for E2 (p=1, q=1, nextra=1)
 

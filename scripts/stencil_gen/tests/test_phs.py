@@ -264,6 +264,61 @@ class TestBuildDiffMatrixRBF:
         result = D @ x
         np.testing.assert_allclose(result, 1.0, atol=1e-12)
 
+    def test_nu2_dimensions_match_temo(self):
+        """build_diff_matrix_rbf nu=2 dimensions should match temo.compute_dimensions."""
+        from stencil_gen.temo import compute_dimensions
+
+        # E2_2: p=1, q=1, nextra=0, nu=2 → t=3, r=2
+        dims = compute_dimensions(p=1, q=1, s=0, nextra=0, nu=2)
+        n = 20
+        D = build_diff_matrix_rbf(n, p=1, q=1, epsilon=1.0, nu=2, nextra=0)
+        # Boundary stencil width = t: row 0 should have nonzero entries in cols 0..t-1
+        nonzero_cols_row0 = np.where(np.abs(D[0, :]) > 1e-15)[0]
+        assert nonzero_cols_row0[-1] <= dims.t - 1, (
+            f"Row 0 extends to col {nonzero_cols_row0[-1]}, expected max {dims.t - 1}"
+        )
+        # Number of boundary rows per side = r
+        # Interior rows should use the centered stencil, not boundary
+        # Row r should be an interior row (centered stencil)
+        r = dims.r
+        center_col = r  # interior row at index r is centered at column r
+        assert D[r, center_col] != 0, f"Interior row {r} should have centered stencil"
+        # Row r-1 should be a boundary row (one-sided stencil)
+        assert D[r - 1, 0] != 0, f"Boundary row {r-1} should use left-boundary stencil"
+
+    def test_nu2_polynomial_reproduction(self):
+        """D (nu=2) applied to x should give all 0s (exact for linear, q=1)."""
+        n = 30
+        # E2_2 params: p=1, q=1, nextra=0 → boundary exact for poly deg ≤ 1
+        D = build_diff_matrix_rbf(n, p=1, q=1, epsilon=1.0, nu=2, nextra=0)
+        x = np.arange(n, dtype=float)
+        # D^2(x) = 0 everywhere for q >= 1
+        result = D @ x
+        np.testing.assert_allclose(result, 0.0, atol=1e-10)
+
+    def test_nu2_polynomial_reproduction_higher_q(self):
+        """D (nu=2) applied to x^2 should give 2s with q=3 (E4_2 params)."""
+        n = 30
+        # E4_2: p=2, q=3, nextra=0 → boundary exact for poly deg ≤ 3
+        D = build_diff_matrix_rbf(n, p=2, q=3, epsilon=1.0, nu=2, nextra=0)
+        x = np.arange(n, dtype=float)
+        result = D @ (x**2)
+        np.testing.assert_allclose(result, 2.0, atol=1e-10)
+
+    def test_nu2_symmetry_second_deriv(self):
+        """Right boundary should be symmetric reflection of left for nu=2."""
+        n = 20
+        D = build_diff_matrix_rbf(n, p=1, q=1, epsilon=2.0, nu=2, nextra=0)
+        from stencil_gen.temo import compute_dimensions
+
+        dims = compute_dimensions(p=1, q=1, s=0, nextra=0, nu=2)
+        r, t = dims.r, dims.t
+        for i in range(r):
+            left_row = D[i, :t]
+            right_row = D[n - 1 - i, n - t:][::-1]
+            # nu=2 (even) → symmetric reflection: sign = (-1)^2 = +1
+            np.testing.assert_allclose(right_row, left_row, atol=1e-14)
+
 
 # ---------------------------------------------------------------------------
 # 29.6b: Max real eigenvalue diagnostic

@@ -586,8 +586,14 @@ def build_diff_matrix_rbf(
     from stencil_gen.interior import derive_interior, full_gamma_array
 
     # Compute boundary dimensions (same formula as temo.compute_dimensions)
-    t = p + q + 1 + nextra  # boundary stencil width
-    r = q + 1 + nextra  # number of boundary rows per side
+    if nu == 1:
+        t = p + q + 1 + nextra  # boundary stencil width
+        r = q + 1 + nextra  # number of boundary rows per side
+    elif nu == 2:
+        t = p + 2 + nextra
+        r = p + 1 + nextra
+    else:
+        raise NotImplementedError(f"build_diff_matrix_rbf: nu={nu} not supported")
 
     if n < 2 * r:
         raise ValueError(f"Grid too small: n={n} < 2*r={2*r}")
