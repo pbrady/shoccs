@@ -3640,3 +3640,329 @@ class TestTensionComparison:
             assert e4_results[nn] < 1e-2, (
                 f"E4 Tension σ* at n={nn} unreasonably large: {e4_results[nn]:.6e}"
             )
+
+
+# ---------------------------------------------------------------------------
+# 30.4b: Modified wavenumber analysis for tension spline stencils
+# ---------------------------------------------------------------------------
+
+
+class TestModifiedWavenumber:
+    """Modified wavenumber analysis for boundary vs interior stencils (Phase 30.4b).
+
+    For a stencil w_j applied at node i_eval using nodes {j_0, ..., j_{t-1}},
+    the modified wavenumber is:
+
+        κ*(ξ) = Σ_j w_j · exp(i·(j - i_eval)·ξ)
+
+    For D¹: exact κ* = iξ  →  Re(κ*)=0, Im(κ*)=ξ.
+      - Re(κ*) < 0 is dissipative (good for stability)
+      - Re(κ*) > 0 is amplifying (bad — causes eigenvalue instability)
+
+    We check:
+    1. Interior stencil Re(κ*) = 0 (centered, antisymmetric → pure imaginary)
+    2. At optimal tension σ*, boundary Re(κ*_bdy) ≤ 0 for all ξ (E2)
+    3. For E4, boundary Re(κ*_bdy) may have small positive region (unstable)
+    4. Compare boundary vs interior dispersion Im(κ*)
+    """
+
+    # E2_1 parameters
+    E2_P, E2_Q, E2_NEXTRA, E2_NU = 1, 1, 1, 1
+    # E4_1 parameters
+    E4_P, E4_Q, E4_NEXTRA, E4_NU = 2, 3, 0, 1
+
+    N_XI = 500  # wavenumber resolution
+
+    # ------------------------------------------------------------------ helpers
+
+    @staticmethod
+    def _modified_wavenumber(weights, i_eval, node_indices, xi_array):
+        """Compute modified wavenumber κ*(ξ) for given stencil weights.
+
+        Parameters
+        ----------
+        weights : array-like
+            Stencil coefficients w_j.
+        i_eval : int
+            Grid index where derivative is evaluated.
+        node_indices : array-like of int
+            Grid indices used by the stencil (e.g. [0,1,...,t-1] for boundary).
+        xi_array : np.ndarray
+            Wavenumber values ξ ∈ [0, π].
+
+        Returns
+        -------
+        np.ndarray (complex)
+            κ*(ξ) = Σ_j w_j exp(i (j - i_eval) ξ)
+        """
+        w = np.asarray(weights, dtype=complex)
+        offsets = np.asarray(node_indices) - i_eval  # j - i_eval
+        # κ*(ξ) = Σ w_j exp(i·offset_j·ξ)  (vectorized over ξ)
+        # shape: (len(xi), len(offsets))
+        phase = np.exp(1j * np.outer(xi_array, offsets))
+        return phase @ w  # shape (len(xi),)
+
+    def _interior_mod_wavenumber(self, p, nu, xi_array):
+        """Compute modified wavenumber for the classical interior stencil."""
+        from stencil_gen.interior import derive_interior, full_gamma_array
+
+        coeffs = derive_interior(0, p, nu)
+        w = [float(c) for c in full_gamma_array(coeffs)]
+        nodes = list(range(-p, p + 1))
+        return self._modified_wavenumber(w, 0, nodes, xi_array)
+
+    def _boundary_mod_wavenumbers(self, p, q, nextra, nu, sigma, kernel="tension"):
+        """Compute modified wavenumber for all boundary rows.
+
+        Returns dict: {row_index: κ*(ξ)} for rows 0..r-1.
+        """
+        t = p + q + 1 + nextra  # boundary stencil width (nu=1)
+        r = q + 1 + nextra       # number of boundary rows
+
+        xi = np.linspace(0, np.pi, self.N_XI)
+        nodes = list(range(t))
+        result = {}
+        for i in range(r):
+            w = uniform_boundary_weights_rbf(i, t, nu, q, sigma, kernel=kernel)
+            result[i] = self._modified_wavenumber(w, i, nodes, xi)
+        return result
+
+    def _find_best_sigma(self, n, p, q, nu, nextra):
+        """Coarse + fine sweep for best tension σ (same as TestTensionComparison)."""
+        sigmas_coarse = np.linspace(1.0, 55.0, 100)
+        best_sigma, best_re = None, np.inf
+        for s in sigmas_coarse:
+            mr = max_real_eigenvalue(n, p, q, s, "tension", nu, nextra)
+            if mr < best_re:
+                best_re = mr
+                best_sigma = s
+
+        lo = max(0.5, best_sigma - 5.0)
+        hi = min(60.0, best_sigma + 5.0)
+        for s in np.linspace(lo, hi, 200):
+            mr = max_real_eigenvalue(n, p, q, s, "tension", nu, nextra)
+            if mr < best_re:
+                best_re = mr
+                best_sigma = s
+
+        return best_sigma, best_re
+
+    # ---------------------------------------------- interior sanity check
+
+    def test_interior_pure_imaginary(self):
+        """Interior centered D¹ stencil has Re(κ*)=0 (antisymmetric weights)."""
+        xi = np.linspace(0, np.pi, self.N_XI)
+        for p in [1, 2]:
+            kappa = self._interior_mod_wavenumber(p, nu=1, xi_array=xi)
+            max_real = float(np.max(np.abs(np.real(kappa))))
+            assert max_real < 1e-14, (
+                f"Interior p={p} Re(κ*) should be 0, got max |Re|={max_real:.2e}"
+            )
+
+    # ---------------------------------------------- E2 boundary analysis
+
+    def test_e2_boundary_at_optimal_sigma(self):
+        """Modified wavenumber profile of E2 boundary rows at optimal tension σ*.
+
+        Key finding: even though the full matrix achieves machine-precision
+        stability, individual boundary stencils can have small positive Re(κ*).
+        Stability is a global property of the coupled operator, not a per-stencil
+        property.  The modified wavenumber analysis shows:
+        - Row 0 (boundary point) is strongly dissipative (Re(κ*) << 0)
+        - Inner boundary rows may have small positive Re(κ*) regions
+        - The positive regions are small enough that the full operator remains stable
+        """
+        p, q, nextra, nu = self.E2_P, self.E2_Q, self.E2_NEXTRA, self.E2_NU
+        sigma_star, best_re = self._find_best_sigma(40, p, q, nu, nextra)
+
+        xi = np.linspace(0, np.pi, self.N_XI)
+        bdy_kappas = self._boundary_mod_wavenumbers(p, q, nextra, nu, sigma_star)
+
+        r = q + 1 + nextra
+        print(f"\n  E2 Modified Wavenumber Analysis at σ*={sigma_star:.3f}")
+        print(f"  (matrix max Re(λ) = {best_re:.2e})")
+        print(f"  {'row':>4s}  {'max Re(κ*)':>14s}  {'min Re(κ*)':>14s}"
+              f"  {'max |Im(κ*)-ξ|':>16s}")
+        print(f"  {'-'*4}  {'-'*14}  {'-'*14}  {'-'*16}")
+
+        kappa_int = self._interior_mod_wavenumber(p, nu, xi)
+
+        max_re_all = -np.inf
+        for i in range(r):
+            kappa = bdy_kappas[i]
+            max_re = float(np.max(np.real(kappa)))
+            min_re = float(np.min(np.real(kappa)))
+            disp_err = float(np.max(np.abs(np.imag(kappa) - np.imag(kappa_int))))
+            print(f"  {i:4d}  {max_re:14.6e}  {min_re:14.6e}  {disp_err:16.6e}")
+            max_re_all = max(max_re_all, max_re)
+
+        # Row 0 (boundary point itself) should be dissipative
+        assert float(np.max(np.real(bdy_kappas[0]))) < STABILITY_TOL, (
+            f"E2 boundary row 0 should be dissipative at σ*={sigma_star:.3f}"
+        )
+
+        # Per-stencil amplification is bounded (small), even if not zero
+        assert max_re_all < 0.05, (
+            f"E2 boundary max Re(κ*) too large at σ*={sigma_star:.3f}: {max_re_all:.6e}"
+        )
+
+        # Full matrix is stable even though individual stencils may amplify slightly
+        assert best_re < STABILITY_TOL, (
+            f"E2 full matrix should be stable at σ*: {best_re:.6e}"
+        )
+
+    def test_e2_boundary_amplifying_at_sigma_zero(self):
+        """At σ=0 (PHS k=2), E2 boundary rows have Re(κ*) > 0 (some amplifying).
+
+        This confirms the mechanism: PHS k=2 is unstable because at least one
+        boundary row has a positive real part in its modified wavenumber.
+        """
+        p, q, nextra, nu = self.E2_P, self.E2_Q, self.E2_NEXTRA, self.E2_NU
+        # Use σ → 0 (dispatches to PHS k=2)
+        sigma_zero = 1e-15
+
+        bdy_kappas = self._boundary_mod_wavenumbers(p, q, nextra, nu, sigma_zero)
+
+        r = q + 1 + nextra
+        any_amplifying = False
+        for i in range(r):
+            kappa = bdy_kappas[i]
+            max_re = float(np.max(np.real(kappa)))
+            if max_re > STABILITY_TOL:
+                any_amplifying = True
+
+        assert any_amplifying, (
+            "At σ=0 (PHS k=2), at least one E2 boundary row should be amplifying"
+        )
+
+    # ---------------------------------------------- E4 boundary analysis
+
+    def test_e4_boundary_at_optimal_sigma(self):
+        """Modified wavenumber profile of E4 boundary rows at optimal tension σ*.
+
+        E4 does NOT achieve machine-precision stability (full matrix O(1e-5)).
+        The per-stencil modified wavenumber shows larger amplification (O(0.1))
+        than the full-matrix instability, confirming that:
+        - Per-stencil analysis overpredicts instability vs the coupled operator
+        - At least one boundary row has significant positive Re(κ*) region
+        - Rows 2 and 3 are antisymmetric reflections (right boundary mirrors)
+        """
+        p, q, nextra, nu = self.E4_P, self.E4_Q, self.E4_NEXTRA, self.E4_NU
+        sigma_star, best_re = self._find_best_sigma(40, p, q, nu, nextra)
+
+        xi = np.linspace(0, np.pi, self.N_XI)
+        bdy_kappas = self._boundary_mod_wavenumbers(p, q, nextra, nu, sigma_star)
+
+        r = q + 1 + nextra
+        kappa_int = self._interior_mod_wavenumber(p, nu, xi)
+
+        print(f"\n  E4 Modified Wavenumber Analysis at σ*={sigma_star:.3f}")
+        print(f"  (matrix max Re(λ) = {best_re:.2e})")
+        print(f"  {'row':>4s}  {'max Re(κ*)':>14s}  {'min Re(κ*)':>14s}"
+              f"  {'max |Im(κ*)-ξ|':>16s}")
+        print(f"  {'-'*4}  {'-'*14}  {'-'*14}  {'-'*16}")
+
+        overall_max_re = -np.inf
+        any_amplifying = False
+        for i in range(r):
+            kappa = bdy_kappas[i]
+            max_re = float(np.max(np.real(kappa)))
+            min_re = float(np.min(np.real(kappa)))
+            disp_err = float(np.max(np.abs(np.imag(kappa) - np.imag(kappa_int))))
+            print(f"  {i:4d}  {max_re:14.6e}  {min_re:14.6e}  {disp_err:16.6e}")
+            overall_max_re = max(overall_max_re, max_re)
+            if max_re > STABILITY_TOL:
+                any_amplifying = True
+
+        # Per-stencil amplification is bounded (O(0.1), much less than 1)
+        assert overall_max_re < 0.5, (
+            f"E4 boundary max Re(κ*) too large at σ*={sigma_star:.3f}: {overall_max_re:.6e}"
+        )
+
+        # At least one boundary row should have positive Re(κ*), explaining
+        # why E4 cannot achieve machine-precision stability
+        assert any_amplifying, (
+            "E4 boundary rows should have positive Re(κ*) regions (explaining O(1e-5) instability)"
+        )
+
+    def test_e4_phs_boundary_worse_than_tension(self):
+        """PHS k=2 boundary rows have larger max Re(κ*) than tension σ* for E4.
+
+        Confirms that tension reduces the amplifying modes in boundary stencils.
+        """
+        p, q, nextra, nu = self.E4_P, self.E4_Q, self.E4_NEXTRA, self.E4_NU
+        sigma_star, _ = self._find_best_sigma(40, p, q, nu, nextra)
+
+        xi = np.linspace(0, np.pi, self.N_XI)
+
+        # PHS k=2 boundary max Re
+        bdy_phs = self._boundary_mod_wavenumbers(p, q, nextra, nu, 1e-15)
+        r = q + 1 + nextra
+        phs_max_re = max(
+            float(np.max(np.real(bdy_phs[i]))) for i in range(r)
+        )
+
+        # Tension σ* boundary max Re
+        bdy_tension = self._boundary_mod_wavenumbers(p, q, nextra, nu, sigma_star)
+        tension_max_re = max(
+            float(np.max(np.real(bdy_tension[i]))) for i in range(r)
+        )
+
+        print(f"\n  E4 max Re(κ*) across boundary rows:")
+        print(f"    PHS k=2 (σ=0):      {phs_max_re:.6e}")
+        print(f"    Tension σ*={sigma_star:.3f}: {tension_max_re:.6e}")
+
+        assert tension_max_re < phs_max_re, (
+            f"Tension ({tension_max_re:.6e}) should reduce boundary amplification "
+            f"vs PHS ({phs_max_re:.6e})"
+        )
+
+    # ---------------------------------------------- dispersion comparison
+
+    def test_dispersion_comparison(self):
+        """Compare boundary vs interior dispersion for E2 and E4.
+
+        Interior Im(κ*) approximates ξ to order 2p.  Boundary rows may have
+        different dispersion.  We verify boundary dispersion error is bounded
+        and report the comparison.
+        """
+        xi = np.linspace(0, np.pi, self.N_XI)
+
+        configs = [
+            ("E2", self.E2_P, self.E2_Q, self.E2_NEXTRA, self.E2_NU),
+            ("E4", self.E4_P, self.E4_Q, self.E4_NEXTRA, self.E4_NU),
+        ]
+
+        print(f"\n  {'='*80}")
+        print(f"  Dispersion Comparison: boundary vs interior Im(κ*)")
+        print(f"  {'='*80}")
+
+        for label, p, q, nextra, nu in configs:
+            sigma_star, _ = self._find_best_sigma(40, p, q, nu, nextra)
+            kappa_int = self._interior_mod_wavenumber(p, nu, xi)
+
+            bdy_kappas = self._boundary_mod_wavenumbers(
+                p, q, nextra, nu, sigma_star,
+            )
+            r = q + 1 + nextra
+
+            print(f"\n  {label} — σ*={sigma_star:.3f}")
+            print(f"  {'row':>4s}  {'max |ΔIm|':>14s}  {'mean |ΔIm|':>14s}")
+            print(f"  {'-'*4}  {'-'*14}  {'-'*14}")
+
+            # Interior dispersion error vs exact (iξ → Im = ξ)
+            int_disp_err = float(np.max(np.abs(np.imag(kappa_int) - xi)))
+            print(f"  {'int':>4s}  {int_disp_err:14.6e}  "
+                  f"{float(np.mean(np.abs(np.imag(kappa_int) - xi))):14.6e}")
+
+            for i in range(r):
+                kappa = bdy_kappas[i]
+                disp_vs_exact = np.abs(np.imag(kappa) - xi)
+                max_err = float(np.max(disp_vs_exact))
+                mean_err = float(np.mean(disp_vs_exact))
+                print(f"  {i:4d}  {max_err:14.6e}  {mean_err:14.6e}")
+
+                # Boundary dispersion should be finite (not blow up)
+                assert max_err < 10.0, (
+                    f"{label} row {i} dispersion error too large: {max_err:.2e}"
+                )

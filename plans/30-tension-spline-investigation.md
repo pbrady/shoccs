@@ -608,7 +608,7 @@ assert pen_re <= tension_re + 1e-6, (
 
 ---
 
-### 30.4b — Modified wavenumber analysis
+### 30.4b — Modified wavenumber analysis ✅
 
 For the best tension stencil found:
 - Compute κ*(ξ;σ) = Σ w_j exp(ijξ) for the boundary rows
@@ -616,6 +616,37 @@ For the best tension stencil found:
 - Compare with interior stencil κ*_int
 - Verify: is Re(κ*_bdy) ≤ 0 for all ξ at the optimal σ?
 - File: `scripts/stencil_gen/tests/test_phs.py`
+
+**Done:** 6 tests in `TestModifiedWavenumber` — all pass. Key findings:
+
+- **Interior stencils are pure imaginary** (Re(κ*)=0 to machine precision),
+  as expected for centered antisymmetric stencils. Verified for p=1,2.
+
+- **E2 at optimal σ*=42.1 (matrix-stable):** Row 0 is strongly dissipative
+  (Re(κ*) ∈ [-1.37, 0]). Inner rows 1,2 have small positive Re(κ*) regions
+  (~9e-3) yet the full matrix is machine-precision stable (4.8e-16).
+  **Key insight:** matrix-level stability is a global property of the coupled
+  operator, not a per-stencil property. Individual boundary rows can amplify
+  slightly without destabilizing the system.
+
+- **E2 at σ=0 (PHS k=2, matrix-unstable):** At least one boundary row has
+  positive Re(κ*), confirming the mechanism of instability.
+
+- **E4 at optimal σ*=48.8 (matrix instability O(1e-5)):**
+  | Row | max Re(κ*) | min Re(κ*) | max |ΔIm vs interior| |
+  |-----|------------|------------|------------------------|
+  | 0   | 3.8e-2     | -3.04      | 1.12                   |
+  | 1   | 7.9e-3     | -0.214     | 0.576                  |
+  | 2   | 0.180      | -0.141     | 0.370                  |
+  | 3   | 0.141      | -0.180     | 0.370                  |
+  Per-stencil amplification is O(0.1), much larger than the matrix-level O(1e-5).
+  Rows 2,3 are antisymmetric reflections of each other.
+
+- **Tension reduces E4 boundary amplification:** PHS k=2 max Re(κ*) = 0.267
+  vs tension σ* max Re(κ*) = 0.180, a 33% reduction.
+
+- **Dispersion:** Boundary rows have larger dispersion error than interior
+  (especially row 0 which sees only one-sided points), but errors are bounded.
 
 ### 30.4c — Update plan with conclusions
 
@@ -649,7 +680,7 @@ Document findings and next steps.
 21. **30.3c-review-a** — Assert γ > 0 actually changes E4 results ✅
 22. **30.4a** — Comparison table ✅
 23. **30.4a-review-a** — Assert E4 cross-method ordering in comparison test ✅
-24. **30.4b** — Modified wavenumber analysis
+24. **30.4b** — Modified wavenumber analysis ✅
 25. **30.4c** — Update plan with conclusions
 
 ---
