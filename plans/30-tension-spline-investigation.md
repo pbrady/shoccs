@@ -216,6 +216,38 @@ Sweep σ over [0, 20] and record max Re(λ) at each σ for n=20,40,80.
   The tension kernel reaches stability at σ≈5.5 (vs ε≈1.36 for Gaussian).
   Both are effectively zero to machine precision at their optima.
 
+---
+
+## 30.2-review — Follow-up items from review of Phase 30.2b
+
+### 30.2-review-a — Add regression assertions to E2 tension sweep tests
+
+The three tests in `TestTensionSweepE2` have zero `assert` statements — they only
+print output.  If the tension kernel is broken, these tests still pass silently.
+Add at least one assertion per test that codifies the key finding:
+
+- `test_tension_coarse_sweep`: assert that for n=40, the minimum max Re(λ) across
+  the sweep is < 1e-10 (i.e., machine-precision stability exists).
+- `test_tension_fine_sweep_near_best`: assert that the fine-sweep best max Re(λ)
+  is < 1e-10 and that the multi-grid check (n=20,40,80,160) all satisfy < 1e-10.
+- `test_compare_with_gaussian`: assert that both tension and Gaussian bests are
+  < 1e-10 (both achieve machine-precision stability for E2).
+
+### 30.2-review-b — Use practical stability threshold instead of strict ≤ 0
+
+The sweep tests classify stability as `max_re <= 0`.  Floating-point eigenvalue
+computation yields tiny positive residuals (~1e-14) for genuinely stable operators,
+so all results print "unstable" despite being machine-precision stable.  This makes
+the output misleading and will make 30.2c E4 results uninterpretable (true instability
+at 1e-4 and machine-precision stability at 1e-14 get the same label).
+
+Fix: define a threshold constant (e.g., `STABILITY_TOL = 1e-10`) and use
+`max_re < STABILITY_TOL` for stability classification in both `TestTensionSweepE2`
+and the existing `TestEpsilonSweepE2`/`TestEpsilonSweepE4` classes.  This should be
+done before 30.2c so the E4 sweep results are immediately interpretable.
+
+---
+
 ### 30.2c — Sigma sweep for E4 (p=2, q=3)
 
 Same sweep for E4 boundary stencils.
@@ -309,14 +341,16 @@ Document findings and next steps.
 7. **30.1-review-c** — Add nu=2 stencil weight test ✅
 8. **30.2a** — Diff matrix builder for tension ✅
 9. **30.2b** — E2 sigma sweep (first result: does PHS k=2 connect to stability?) ✅
-10. **30.2c** — E4 sigma sweep (key result: does tension beat Gaussian?)
-11. **30.2d** — Fine-grained optimal σ search
-12. **30.3a** — Soft conservation penalty implementation
-13. **30.3b** — E2 (σ, γ) sweep
-14. **30.3c** — E4 (σ, γ) sweep
-15. **30.4a** — Comparison table
-16. **30.4b** — Modified wavenumber analysis
-17. **30.4c** — Update plan with conclusions
+10. **30.2-review-a** — Add regression assertions to E2 tension sweep tests
+11. **30.2-review-b** — Use practical stability threshold (blocks 30.2c)
+12. **30.2c** — E4 sigma sweep (key result: does tension beat Gaussian?)
+13. **30.2d** — Fine-grained optimal σ search
+14. **30.3a** — Soft conservation penalty implementation
+15. **30.3b** — E2 (σ, γ) sweep
+16. **30.3c** — E4 (σ, γ) sweep
+17. **30.4a** — Comparison table
+18. **30.4b** — Modified wavenumber analysis
+19. **30.4c** — Update plan with conclusions
 
 ---
 
