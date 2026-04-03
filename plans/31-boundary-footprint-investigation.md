@@ -96,25 +96,32 @@ Already implemented.  `max_real_eigenvalue` passes `nextra` through to the build
   boundary DOF.  It appears to be fundamental to the tension kernel + E4 combination,
   regardless of footprint size.
 
-### 31.2c — Nextra sweep for E4 with tension + soft conservation penalty
+### 31.2c — Nextra sweep for E4 with tension + soft conservation penalty ✅
 
-Repeat with the (σ, γ) joint optimization from Phase 30:
-- For each nextra: find optimal (σ*, γ*) pair
-- Does the penalty help more at larger nextra? (more DOF to trade)
-- File: `scripts/stencil_gen/tests/test_phs.py`, class `TestFootprintPenalty`
-- Test: `test_nextra_penalty_e4` — sweep nextra × σ × γ
+- Test: `TestFootprintPenalty::test_nextra_penalty_e4` — PASSED
+- **Result:** No (nextra, σ, γ) combination achieves machine-precision stability.
+
+  | nextra | t | r | extra DOF | γ=0 floor  | best σ*  | best γ*  | (σ,γ) floor | improvement |
+  |--------|---|---|-----------|------------|----------|----------|-------------|-------------|
+  | 0      | 6 | 4 | 8         | 8.2e-5     | 7.64     | 0.77     | 5.6e-5      | 31.8%       |
+  | 1      | 7 | 5 | 15        | 9.6e-5     | 6.39     | 0.17     | 2.9e-5      | 70.1%       |
+  | 2      | 8 | 6 | 24        | 9.5e-6     | 6.39     | 0.00     | 9.5e-6      | 0.0%        |
+  | 3      | 9 | 7 | 35        | 6.2e-5     | 22.4     | 46.4     | 2.2e-5      | 64.8%       |
+
+- **Key observations:**
+  1. nextra=2 at γ=0 achieves the overall best floor (9.5e-6) — penalty does not help here.
+  2. nextra=1 sees the largest penalty benefit (70% improvement), consistent with the idea
+     that moderate DOF + penalty works best.
+  3. nextra=2 γ=0 is ~6× better than nextra=0 γ=0, so nextra DOES matter for pure tension.
+     But this contradicts 31.2b, suggesting the σ range matters — the penalty sweep used
+     a finer grid near low σ values (logspace from 0.01) vs 31.2b's linear grid.
+  4. Despite the improved floor at nextra=2, the O(1e-5) barrier is NOT breached.
+- **Conclusion:** Neither nextra alone (31.2b) nor nextra+penalty (31.2c) can achieve
+  machine-precision stability for E4 with the tension kernel.
 
 ### 31.2d — If stable nextra found: identify the minimum boundary footprint
 
-If some nextra achieves stability:
-1. Report the minimum nextra that works
-2. Extract the stencil weights at (nextra*, σ*)
-3. Compute the implied alpha values
-4. Compare the boundary stencil dimensions with existing C++ stencils
-5. Assess: is the wider stencil acceptable for production use?
-   (wider boundary = more computation per boundary point, but boundary points
-   are a small fraction of total grid)
-- File: `scripts/stencil_gen/tests/test_phs.py`, class `TestStableFootprint`
+N/A — no stable nextra was found.  Skipping per plan logic.
 
 ---
 
@@ -172,8 +179,8 @@ Summarize findings and determine next steps:
 2. ✅ **31.1b** — Extend max_real_eigenvalue for nextra (already existed)
 3. ✅ **31.2a** — Quick E4 nextra=1 diagnostic → nextra=1 marginally better, NOT stable
 4. ✅ **31.2b** — Full nextra × σ sweep → floor flat at ~5e-5 across all nextra
-5. **31.2c** — Nextra × σ × γ sweep with penalty
-6. **31.2d** — If stable nextra found: extract stencil weights (likely N/A given 31.2b result)
+5. ✅ **31.2c** — Nextra × σ × γ sweep with penalty → floor persists at ~1e-5
+6. N/A **31.2d** — No stable nextra found; skipped
 7. **31.3a** — E2 cross-validation
 8. **31.3b** — E6/E8 if E4 works (likely N/A)
 9. **31.4a** — Scaling analysis (likely N/A)

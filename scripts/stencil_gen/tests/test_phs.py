@@ -4174,3 +4174,195 @@ class TestFootprintSweep:
                 f"nextra=1 floor ({best_per_nx[1][1]:.6e}) should be less than "
                 f"nextra=0 floor ({best_per_nx[0][1]:.6e})"
             )
+
+
+# ---------------------------------------------------------------------------
+# 31.2c: Nextra × σ × γ sweep with conservation penalty
+# ---------------------------------------------------------------------------
+
+
+class TestFootprintPenalty:
+    """Nextra sweep for E4 tension with soft conservation penalty.
+
+    Phase 31.2b showed the instability floor is flat at ~5e-5 across nextra
+    values when using pure tension kernel (γ=0).  Phase 30.3 showed that
+    conservation penalty (γ>0) can improve E4 stability at nextra=0 from
+    ~8.7e-5 → ~3.3e-5 (a ~63% improvement).
+
+    This test combines both: sweep nextra × σ × γ to determine whether
+    the penalty mechanism is more effective at larger nextra (more DOF to
+    trade for conservation).
+
+    E4 parameters: p=2, q=3.
+    """
+
+    P = 2
+    Q = 3
+    NU = 1
+
+    def _eval_point(self, n, nextra, sigma, gamma):
+        """Evaluate (nextra, σ, γ) point: return (max_re, deficit)."""
+        D = build_diff_matrix_rbf_penalty(
+            n, self.P, self.Q, sigma, "tension", self.NU, nextra,
+            gamma=gamma,
+        )
+        eigvals = np.linalg.eigvals(D)
+        max_re = float(np.max(np.real(eigvals)))
+        deficit = float(np.max(np.abs(np.sum(D, axis=0))))
+        return max_re, deficit
+
+    def test_nextra_penalty_e4(self):
+        """Sweep nextra × σ × γ for E4 with tension + conservation penalty.
+
+        For each nextra ∈ {0, 1, 2, 3}:
+        1. Find optimal (σ*, γ*) pair that minimizes max Re(λ)
+        2. Compare γ=0 baseline (from 31.2b) with best (σ, γ)
+        3. Check whether the penalty helps more at larger nextra
+
+        Grid: ~4 × 50 × 20 = 4000 evals, expected < 5 seconds.
+        """
+        n = 40
+        nextra_values = [0, 1, 2, 3]
+        sigmas = np.concatenate([
+            [0.0],
+            np.logspace(np.log10(0.01), np.log10(55), 49),
+        ])
+        gammas = np.concatenate([
+            [0.0],
+            np.logspace(-1, 3, 19),  # 0.1 to 1000
+        ])
+
+        # Collect results per nextra
+        summary = {}  # nextra -> dict with best_gamma0, best_overall, etc.
+
+        for nx in nextra_values:
+            r = self.Q + 1 + nx
+            t = self.P + self.Q + 1 + nx
+            if n < 2 * r:
+                print(f"  nextra={nx}: grid too small (n={n} < 2*r={2*r}), skipping")
+                continue
+
+            best_gamma0_re = float("inf")
+            best_gamma0_sigma = None
+
+            best_overall_re = float("inf")
+            best_overall_sigma = None
+            best_overall_gamma = None
+            best_overall_deficit = None
+
+            for sigma in sigmas:
+                for gamma in gammas:
+                    max_re, deficit = self._eval_point(n, nx, sigma, gamma)
+
+                    if max_re < best_overall_re:
+                        best_overall_re = max_re
+                        best_overall_sigma = sigma
+                        best_overall_gamma = gamma
+                        best_overall_deficit = deficit
+
+                    if gamma == 0.0 and max_re < best_gamma0_re:
+                        best_gamma0_re = max_re
+                        best_gamma0_sigma = sigma
+
+            summary[nx] = {
+                "t": t, "r": r,
+                "extra_dof": r * (self.P + nx),
+                "gamma0_re": best_gamma0_re,
+                "gamma0_sigma": best_gamma0_sigma,
+                "best_re": best_overall_re,
+                "best_sigma": best_overall_sigma,
+                "best_gamma": best_overall_gamma,
+                "best_deficit": best_overall_deficit,
+            }
+
+        # Print results
+        print(f"\n{'='*85}")
+        print(f"  Phase 31.2c: E4 Tension + Penalty — nextra × σ × γ Sweep (n={n})")
+        print(f"{'='*85}")
+        print(f"  Grid: {len(nextra_values)} nextra × {len(sigmas)} σ × "
+              f"{len(gammas)} γ = {len(nextra_values) * len(sigmas) * len(gammas)} points")
+
+        # Summary table
+        print(f"\n  {'nextra':>6s}  {'t':>3s}  {'r':>3s}  {'DOF':>5s}  "
+              f"{'γ=0 floor':>12s}  {'best σ*':>8s}  {'best γ*':>10s}  "
+              f"{'(σ,γ) floor':>12s}  {'improve':>8s}  {'status':>10s}")
+        print(f"  {'-'*6}  {'-'*3}  {'-'*3}  {'-'*5}  "
+              f"{'-'*12}  {'-'*8}  {'-'*10}  "
+              f"{'-'*12}  {'-'*8}  {'-'*10}")
+
+        for nx in nextra_values:
+            if nx not in summary:
+                continue
+            s = summary[nx]
+            if s["gamma0_re"] > 0:
+                improvement = 1.0 - s["best_re"] / s["gamma0_re"]
+                imp_str = f"{improvement:7.1%}"
+            else:
+                imp_str = "N/A"
+            status = "STABLE" if s["best_re"] < STABILITY_TOL else "unstable"
+            print(f"  {nx:6d}  {s['t']:3d}  {s['r']:3d}  {s['extra_dof']:5d}  "
+                  f"{s['gamma0_re']:12.6e}  {s['best_sigma']:8.4f}  "
+                  f"{s['best_gamma']:10.4f}  "
+                  f"{s['best_re']:12.6e}  {imp_str:>8s}  {status:>10s}")
+
+        # Detailed per-nextra info
+        for nx in nextra_values:
+            if nx not in summary:
+                continue
+            s = summary[nx]
+            print(f"\n  nextra={nx}: γ=0 σ*={s['gamma0_sigma']:.4f} "
+                  f"→ {s['gamma0_re']:.6e}")
+            print(f"          : (σ,γ)*=({s['best_sigma']:.4f}, {s['best_gamma']:.4f}) "
+                  f"→ {s['best_re']:.6e}  deficit={s['best_deficit']:.6e}")
+
+        # Check if any nextra achieved stability
+        any_stable = any(
+            s["best_re"] < STABILITY_TOL
+            for s in summary.values()
+        )
+        if any_stable:
+            stable_nx = [nx for nx, s in summary.items()
+                         if s["best_re"] < STABILITY_TOL]
+            print(f"\n  *** STABLE nextra values with penalty: {stable_nx} ***")
+        else:
+            print(f"\n  E4 NOT stable at any nextra with penalty.")
+            print(f"  The O(1e-5) instability floor persists across "
+                  f"nextra × (σ, γ) space.")
+
+        # Check if penalty improvement grows with nextra
+        improvements = []
+        for nx in nextra_values:
+            if nx not in summary:
+                continue
+            s = summary[nx]
+            if s["gamma0_re"] > 0:
+                imp = 1.0 - s["best_re"] / s["gamma0_re"]
+                improvements.append((nx, imp))
+
+        if len(improvements) >= 2:
+            print(f"\n  Penalty improvement vs nextra:")
+            for nx, imp in improvements:
+                print(f"    nextra={nx}: {imp:.1%} improvement from γ>0")
+
+        # --- Assertions ---
+        # All nextra values must produce valid results
+        assert len(summary) == len(nextra_values), (
+            f"Expected results for {len(nextra_values)} nextra values, "
+            f"got {len(summary)}"
+        )
+
+        # The penalty (γ>0) must improve over γ=0 baseline for at least
+        # nextra=0 (regression from Phase 30.3 which showed ~63% improvement)
+        if 0 in summary:
+            s0 = summary[0]
+            assert s0["best_re"] < s0["gamma0_re"], (
+                f"Penalty did not improve nextra=0: "
+                f"best={s0['best_re']:.6e} >= γ=0={s0['gamma0_re']:.6e}"
+            )
+
+        # The best floor across all (nextra, σ, γ) must be below 1e-3
+        # (loose bound — actual floors are ~1e-5)
+        global_best = min(s["best_re"] for s in summary.values())
+        assert global_best < 1e-3, (
+            f"Global best floor {global_best:.6e} >= 1e-3"
+        )
