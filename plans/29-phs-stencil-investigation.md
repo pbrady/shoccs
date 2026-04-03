@@ -102,7 +102,7 @@ flat-limit test only checks interior stencils where the system is fully determin
 
 ## 29.6 — Epsilon Stability Sweep
 
-### 29.6a — Build differentiation matrix with RBF boundary stencils
+### 29.6a — Build differentiation matrix with RBF boundary stencils ✅
 
 Add helper function `build_diff_matrix_rbf(n, p, q, epsilon, kernel, nu)` that:
 1. Uses RBF boundary stencils for left/right boundary rows
@@ -111,12 +111,22 @@ Add helper function `build_diff_matrix_rbf(n, p, q, epsilon, kernel, nu)` that:
 - File: `scripts/stencil_gen/stencil_gen/phs.py`
 - Test: matrix shape n×n, column sums of interior region are 0
 
-### 29.6b — Implement `max_real_eigenvalue(n, p, q, epsilon, kernel)` diagnostic
+**Completed:** Added `build_diff_matrix_rbf(n, p, q, epsilon, kernel, nu, nextra)` that
+computes boundary dimensions from p, q, nextra (matching temo.compute_dimensions),
+fills interior rows with classical centered FD, left boundary with RBF+poly stencils,
+and right boundary with (-1)^nu reflection.  Tests: shape, interior row sums, boundary
+nonzero, antisymmetry, polynomial reproduction (D @ x = 1).  All 5 tests pass.
+
+### 29.6b — Implement `max_real_eigenvalue(n, p, q, epsilon, kernel)` diagnostic ✅
 
 Compute eigenvalues of the differentiation matrix and return the maximum real part.
 Uses numpy for numerical eigenvalue computation.
 - File: `scripts/stencil_gen/stencil_gen/phs.py`
 - Test: periodic interior-only matrix has max Re(λ) ≈ 0
+
+**Completed:** Added `max_real_eigenvalue()` wrapper that calls `build_diff_matrix_rbf`
+and returns `max(Re(eigvals))`.  Tests: periodic interior-only matrix has
+max Re(λ) < 1e-12, return type is float.  All pass.
 
 ### 29.6c — Epsilon sweep for E2 (p=1, q=1)
 

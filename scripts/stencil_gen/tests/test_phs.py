@@ -208,6 +208,100 @@ class TestPHSvsE4Boundary:
 
 import numpy as np
 
+from stencil_gen.phs import build_diff_matrix_rbf, max_real_eigenvalue
+
+
+# ---------------------------------------------------------------------------
+# 29.6a: Differentiation matrix builder
+# ---------------------------------------------------------------------------
+
+
+class TestBuildDiffMatrixRBF:
+    """Tests for build_diff_matrix_rbf."""
+
+    def test_matrix_shape(self):
+        """Matrix should be n×n."""
+        for n in [20, 40]:
+            D = build_diff_matrix_rbf(n, p=1, q=1, epsilon=1.0, nextra=1)
+            assert D.shape == (n, n)
+
+    def test_interior_column_sums_zero(self):
+        """Interior rows should have column sums of 0 (first derivative)."""
+        n = 30
+        # E2: p=1, q=1, nextra=1 → r=3 boundary rows
+        D = build_diff_matrix_rbf(n, p=1, q=1, epsilon=1.0, nextra=1)
+        r = 3
+        # Each interior row should sum to 0
+        for i in range(r, n - r):
+            row_sum = np.sum(D[i, :])
+            assert abs(row_sum) < 1e-14, f"Interior row {i} sum = {row_sum}"
+
+    def test_boundary_rows_nonzero(self):
+        """Boundary rows should have nonzero entries."""
+        n = 20
+        D = build_diff_matrix_rbf(n, p=2, q=3, epsilon=1.0)
+        # Left boundary row 0 should have nonzero entries in first t=6 columns
+        assert np.any(D[0, :6] != 0)
+        # Right boundary row n-1 should have nonzero entries in last t=6 columns
+        assert np.any(D[-1, -6:] != 0)
+
+    def test_antisymmetry_first_deriv(self):
+        """Right boundary should be antisymmetric reflection of left for nu=1."""
+        n = 20
+        D = build_diff_matrix_rbf(n, p=1, q=1, epsilon=2.0, nextra=1)
+        r = 3
+        t = 4
+        for i in range(r):
+            left_row = D[i, :t]
+            right_row = D[n - 1 - i, n - t:][::-1]
+            np.testing.assert_allclose(right_row, -left_row, atol=1e-14)
+
+    def test_polynomial_reproduction(self):
+        """D applied to x should give all 1s (exact for linear)."""
+        n = 30
+        D = build_diff_matrix_rbf(n, p=1, q=1, epsilon=1.0, nextra=1)
+        x = np.arange(n, dtype=float)
+        result = D @ x
+        np.testing.assert_allclose(result, 1.0, atol=1e-12)
+
+
+# ---------------------------------------------------------------------------
+# 29.6b: Max real eigenvalue diagnostic
+# ---------------------------------------------------------------------------
+
+
+class TestMaxRealEigenvalue:
+    """Tests for max_real_eigenvalue."""
+
+    def test_interior_only_pure_imaginary(self):
+        """Interior-only (periodic) FD matrix should have max Re(λ) ≈ 0.
+
+        Build a matrix with ALL rows using classical interior stencils
+        (wrapping around periodically).  This is equivalent to the circulant
+        interior matrix which has purely imaginary eigenvalues.
+        """
+        n = 40
+        p = 2
+        from stencil_gen.interior import derive_interior, full_gamma_array
+
+        interior_coeffs = derive_interior(0, p, 1)
+        interior_w = [float(c) for c in full_gamma_array(interior_coeffs)]
+
+        D = np.zeros((n, n))
+        for i in range(n):
+            for k_idx, offset in enumerate(range(-p, p + 1)):
+                j = (i + offset) % n  # periodic wrapping
+                D[i, j] = interior_w[k_idx]
+
+        eigvals = np.linalg.eigvals(D)
+        max_re = float(np.max(np.real(eigvals)))
+        assert abs(max_re) < 1e-12, f"Periodic interior max Re(λ) = {max_re}"
+
+    def test_returns_float(self):
+        """max_real_eigenvalue should return a float."""
+        result = max_real_eigenvalue(20, p=1, q=1, epsilon=1.0, nextra=1)
+        assert isinstance(result, float)
+
 
 class TestGaussianRBF:
     """Tests for Gaussian and Multiquadric RBF kernels."""

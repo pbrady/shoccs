@@ -541,6 +541,114 @@ def uniform_boundary_weights_rbf(
     return phs_stencil_weights(points, x_eval, nu, q, kernel=kernel, epsilon=epsilon)
 
 
+# ---------------------------------------------------------------------------
+# Differentiation matrix and eigenvalue diagnostics (Phase 29.6)
+# ---------------------------------------------------------------------------
+
+
+def build_diff_matrix_rbf(
+    n: int,
+    p: int,
+    q: int,
+    epsilon: float,
+    kernel: str = "gaussian",
+    nu: int = 1,
+    nextra: int = 0,
+) -> np.ndarray:
+    """Build n×n differentiation matrix with RBF boundary stencils.
+
+    Interior rows use classical centered 2p+1 FD stencils.  Left and right
+    boundary rows use RBF+polynomial stencils.  Right boundary rows are the
+    antisymmetric (nu odd) or symmetric (nu even) reflection of the left.
+
+    Parameters
+    ----------
+    n : int
+        Grid size (number of points).
+    p : int
+        Interior half-bandwidth (interior stencil width = 2p+1).
+    q : int
+        Polynomial degree for boundary RBF augmentation.
+    epsilon : float
+        RBF shape parameter.
+    kernel : str
+        RBF kernel type (``"gaussian"`` or ``"multiquadric"``).
+    nu : int
+        Derivative order (1 or 2).
+    nextra : int
+        Extra boundary rows/columns (matches TEMO nextra parameter).
+
+    Returns
+    -------
+    np.ndarray
+        n×n differentiation matrix.
+    """
+    from stencil_gen.interior import derive_interior, full_gamma_array
+
+    # Compute boundary dimensions (same formula as temo.compute_dimensions)
+    t = p + q + 1 + nextra  # boundary stencil width
+    r = q + 1 + nextra  # number of boundary rows per side
+
+    if n < 2 * r:
+        raise ValueError(f"Grid too small: n={n} < 2*r={2*r}")
+    if t > n:
+        raise ValueError(f"Boundary stencil wider than grid: t={t} > n={n}")
+
+    # Classical interior weights
+    interior_coeffs = derive_interior(0, p, nu)
+    interior_w = [float(c) for c in full_gamma_array(interior_coeffs)]
+
+    D = np.zeros((n, n))
+
+    # Left boundary rows: row i uses t points {0, ..., t-1}
+    for i in range(r):
+        w = uniform_boundary_weights_rbf(i, t, nu, q, epsilon, kernel=kernel)
+        for j in range(t):
+            D[i, j] = w[j]
+
+    # Interior rows: centered 2p+1 stencil
+    for i in range(r, n - r):
+        for k_idx, j in enumerate(range(i - p, i + p + 1)):
+            D[i, j] = interior_w[k_idx]
+
+    # Right boundary rows: antisymmetric reflection for odd nu, symmetric for even
+    sign = (-1.0) ** nu
+    for i in range(r):
+        w = uniform_boundary_weights_rbf(i, t, nu, q, epsilon, kernel=kernel)
+        row = n - 1 - i
+        for j in range(t):
+            col = n - 1 - j
+            D[row, col] = sign * w[j]
+
+    return D
+
+
+def max_real_eigenvalue(
+    n: int,
+    p: int,
+    q: int,
+    epsilon: float,
+    kernel: str = "gaussian",
+    nu: int = 1,
+    nextra: int = 0,
+) -> float:
+    """Compute maximum real part of eigenvalues of the differentiation matrix.
+
+    Parameters
+    ----------
+    n, p, q, epsilon, kernel, nu, nextra
+        Passed to :func:`build_diff_matrix_rbf`.
+
+    Returns
+    -------
+    float
+        max Re(λ) over all eigenvalues of D.
+    """
+    D = build_diff_matrix_rbf(n, p, q, epsilon, kernel, nu, nextra)
+    eigvals = np.linalg.eigvals(D)
+    return float(np.max(np.real(eigvals)))
+
+
 def cut_cell_weights(
     i: int,
     T: int,
