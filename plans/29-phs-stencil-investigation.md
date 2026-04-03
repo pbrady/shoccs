@@ -388,6 +388,37 @@ For the best RBF configuration found, produce a comparison table:
 - Conservation deficit is nonzero for all RBF methods (none enforce conservation)
 - Mixed-ε does not improve over single ε for E4_1 in this sweep range
 
+### 29.7a-fix — Review follow-ups for comparison table
+
+**Follow-up 1: PHS k=2 E2 result contradicts "Current State".**
+
+The "Current State" section (line 31) claims "PHS k=2 gives max Re(λ) = 5.7e-14
+for E2" and 29.6c results (line 191) cite the same value, but the 29.7a comparison
+table (`test_e2_comparison`) computes PHS k=2 E2_1 at 8.7e-2 using
+`_build_diff_matrix_phs`.  This is a 12-order-of-magnitude discrepancy.  The 5.7e-14
+was reported in the original commit (99a0b20) but was never regression-tested — no
+eigenvalue test existed until `build_diff_matrix_rbf` was added in 29.6a.
+
+Action:
+1. Run `_build_diff_matrix_phs(n=40, p=1, q=1, k=2, nu=1, nextra=1)` standalone
+   and verify the PHS k=2 E2_1 eigenvalue.  Also check with `nextra=0` (t=3, r=2)
+   to see if the original 5.7e-14 was from a different configuration.
+2. If the 5.7e-14 was from a different configuration (e.g. nextra=0), document
+   which configuration it applies to.  If it was simply wrong, correct it.
+3. Update the "Current State" section (line 31) to match the verified value.
+4. Update the 29.6c results section (line 191) which says "significant improvement
+   over PHS k=2 which had max Re(λ) = 5.7e-14" — if PHS k=2 E2 is actually 8.7e-2,
+   then the Gaussian improvement is ~1e14×, not ~15×, and the narrative changes.
+
+**Follow-up 2: `test_summary_across_grid_sizes` has no assertions.**
+
+Same pattern as flagged in 29.6e-fix: print-only test with no regression protection.
+Add:
+1. `assert max_re < 1e-12` for E2_1 Gaussian at n=40 (regression-protects
+   machine-precision stability finding, consistent with `test_e2_comparison`).
+2. `assert max_re > 1e-5` for E4_1 Gaussian at n=80 (confirms instability does NOT
+   grid-converge — the key negative finding for E4).
+
 ### 29.7b — Update plan with conclusions and next steps
 
 Update this plan file with:
@@ -415,6 +446,7 @@ Each step produces tests that validate before moving on:
 9. **29.6e** ✅ — Extract alphas for E2 (stable but non-conservative)
 9b. **29.6e-fix** ✅ — Add assertions to TestStableEpsilonAlphas (review follow-up)
 10. **29.7a** ✅ — Comparison table
+10b. **29.7a-fix** — Resolve PHS E2 discrepancy + add grid-convergence assertions (review follow-up)
 11. **29.7b** — Update plan with conclusions
 
 ---
