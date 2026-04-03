@@ -218,6 +218,11 @@ from stencil_gen.phs import (
     max_real_eigenvalue,
 )
 
+# Floating-point eigenvalue solvers return tiny positive real parts (~1e-14)
+# for genuinely stable operators.  Use this threshold to distinguish true
+# instability from numerical noise.
+STABILITY_TOL = 1e-10
+
 
 # ---------------------------------------------------------------------------
 # 29.6a: Differentiation matrix builder
@@ -637,7 +642,7 @@ class TestEpsilonSweepE2:
         print(f"\n  --- Best epsilon (min max Re(λ)) ---")
         for n, rows in sorted(results.items()):
             best = min(rows, key=lambda r: r[1])
-            stable = "STABLE" if best[1] <= 0 else "unstable"
+            stable = "STABLE" if best[1] < STABILITY_TOL else "unstable"
             print(f"  n={n:3d}: eps={best[0]:.4f}, max Re(λ)={best[1]:.6e} [{stable}]")
 
     def test_gaussian_sweep(self):
@@ -650,7 +655,7 @@ class TestEpsilonSweepE2:
         # Find if any epsilon gives stability
         for n, rows in results.items():
             best = min(rows, key=lambda r: r[1])
-            if best[1] <= 0:
+            if best[1] < STABILITY_TOL:
                 print(f"\n  *** STABLE epsilon found for n={n}: eps={best[0]:.6f} ***")
 
     def test_multiquadric_sweep(self):
@@ -662,7 +667,7 @@ class TestEpsilonSweepE2:
 
         for n, rows in results.items():
             best = min(rows, key=lambda r: r[1])
-            if best[1] <= 0:
+            if best[1] < STABILITY_TOL:
                 print(f"\n  *** STABLE epsilon found for n={n}: eps={best[0]:.6f} ***")
 
     def test_gaussian_fine_sweep_near_best(self):
@@ -701,7 +706,7 @@ class TestEpsilonSweepE2:
         print(f"  Coarse best: eps={best_coarse[0]:.6f}, max Re(λ)={best_coarse[1]:.6e}")
         print(f"  Fine best:   eps={best_fine[0]:.6f}, max Re(λ)={best_fine[1]:.6e}")
 
-        stable = best_fine[1] <= 0
+        stable = best_fine[1] < STABILITY_TOL
         print(f"  Stable: {stable}")
 
         # Verify at multiple grid sizes
@@ -768,7 +773,7 @@ class TestEpsilonSweepE4:
         print(f"\n  --- Best epsilon (min max Re(λ)) ---")
         for n, rows in sorted(results.items()):
             best = min(rows, key=lambda r: r[1])
-            stable = "STABLE" if best[1] <= 0 else "unstable"
+            stable = "STABLE" if best[1] < STABILITY_TOL else "unstable"
             print(f"  n={n:3d}: eps={best[0]:.4f}, max Re(λ)={best[1]:.6e} [{stable}]")
 
     def test_gaussian_sweep(self):
@@ -781,7 +786,7 @@ class TestEpsilonSweepE4:
         # Find if any epsilon gives stability
         for n, rows in results.items():
             best = min(rows, key=lambda r: r[1])
-            if best[1] <= 0:
+            if best[1] < STABILITY_TOL:
                 print(f"\n  *** STABLE epsilon found for n={n}: eps={best[0]:.6f} ***")
 
     def test_multiquadric_sweep(self):
@@ -793,7 +798,7 @@ class TestEpsilonSweepE4:
 
         for n, rows in results.items():
             best = min(rows, key=lambda r: r[1])
-            if best[1] <= 0:
+            if best[1] < STABILITY_TOL:
                 print(f"\n  *** STABLE epsilon found for n={n}: eps={best[0]:.6f} ***")
 
     def test_gaussian_fine_sweep_near_best(self):
@@ -832,7 +837,7 @@ class TestEpsilonSweepE4:
         print(f"  Coarse best: eps={best_coarse[0]:.6f}, max Re(λ)={best_coarse[1]:.6e}")
         print(f"  Fine best:   eps={best_fine[0]:.6f}, max Re(λ)={best_fine[1]:.6e}")
 
-        stable = best_fine[1] <= 0
+        stable = best_fine[1] < STABILITY_TOL
         print(f"  Stable: {stable}")
 
         # Verify at multiple grid sizes
@@ -1979,7 +1984,7 @@ class TestTensionSweepE2:
         print(f"\n  --- Best sigma (min max Re(λ)) ---")
         for n, rows in sorted(results.items()):
             best = min(rows, key=lambda r: r[1])
-            stable = "STABLE" if best[1] <= 0 else "unstable"
+            stable = "STABLE" if best[1] < STABILITY_TOL else "unstable"
             print(f"  n={n:3d}: σ={best[0]:.4f}, max Re(λ)={best[1]:.6e} [{stable}]")
 
     def test_tension_coarse_sweep(self):
@@ -1995,8 +2000,15 @@ class TestTensionSweepE2:
         # Find if any sigma gives stability
         for n, rows in results.items():
             best = min(rows, key=lambda r: r[1])
-            if best[1] <= 0:
+            if best[1] < STABILITY_TOL:
                 print(f"\n  *** STABLE sigma found for n={n}: σ={best[0]:.6f} ***")
+
+        # Regression: machine-precision stability must exist for n=40
+        best_40 = min(results[40], key=lambda r: r[1])
+        assert best_40[1] < STABILITY_TOL, (
+            f"E2 tension coarse sweep: expected machine-precision stable σ for n=40, "
+            f"got min max Re(λ) = {best_40[1]:.6e}"
+        )
 
     def test_tension_fine_sweep_near_best(self):
         """Fine sweep around the best σ from coarse sweep.
@@ -2039,19 +2051,28 @@ class TestTensionSweepE2:
         print(f"  Coarse best: σ={best_coarse[0]:.6f}, max Re(λ)={best_coarse[1]:.6e}")
         print(f"  Fine best:   σ={best_fine[0]:.6f}, max Re(λ)={best_fine[1]:.6e}")
 
-        stable = best_fine[1] <= 0
+        stable = best_fine[1] < STABILITY_TOL
         print(f"  Stable: {stable}")
 
+        # Regression: fine-sweep best must be machine-precision stable
+        assert best_fine[1] < STABILITY_TOL, (
+            f"E2 tension fine sweep: expected stable, got max Re(λ) = {best_fine[1]:.6e}"
+        )
+
         # Verify at multiple grid sizes
-        if stable or best_fine[1] < 1e-6:
-            sigma_star = best_fine[0]
-            print(f"\n  Checking σ*={sigma_star:.6f} across grid sizes:")
-            for nn in [20, 40, 80, 160]:
-                mr = max_real_eigenvalue(
-                    nn, p=self.P, q=self.Q, epsilon=sigma_star,
-                    kernel="tension", nu=self.NU, nextra=self.NEXTRA,
-                )
-                print(f"    n={nn:4d}: max Re(λ)={mr:.6e}")
+        sigma_star = best_fine[0]
+        print(f"\n  Checking σ*={sigma_star:.6f} across grid sizes:")
+        for nn in [20, 40, 80, 160]:
+            mr = max_real_eigenvalue(
+                nn, p=self.P, q=self.Q, epsilon=sigma_star,
+                kernel="tension", nu=self.NU, nextra=self.NEXTRA,
+            )
+            print(f"    n={nn:4d}: max Re(λ)={mr:.6e}")
+            # Regression: stability must hold at all grid sizes
+            assert mr < STABILITY_TOL, (
+                f"E2 tension σ*={sigma_star:.4f} unstable at n={nn}: "
+                f"max Re(λ) = {mr:.6e}"
+            )
 
     def test_compare_with_gaussian(self):
         """Compare tension best σ with Gaussian best ε for E2_1.
@@ -2089,12 +2110,21 @@ class TestTensionSweepE2:
         print(f"  {'Method':>15s}  {'param':>10s}  {'max Re(λ)':>14s}  {'status':>10s}")
         print(f"  {'-'*15}  {'-'*10}  {'-'*14}  {'-'*10}")
 
-        t_stable = "STABLE" if best_tension[1] <= 0 else "unstable"
-        g_stable = "STABLE" if best_gaussian[1] <= 0 else "unstable"
+        t_stable = "STABLE" if best_tension[1] < STABILITY_TOL else "unstable"
+        g_stable = "STABLE" if best_gaussian[1] < STABILITY_TOL else "unstable"
         print(f"  {'Tension':>15s}  {best_tension[0]:10.4f}  {best_tension[1]:14.6e}  {t_stable:>10s}")
         print(f"  {'Gaussian':>15s}  {best_gaussian[0]:10.4f}  {best_gaussian[1]:14.6e}  {g_stable:>10s}")
 
         # Also report PHS k=2 (σ=0) for reference
         phs_re = tension_results[0][1]  # σ=0 entry
-        phs_stable = "STABLE" if phs_re <= 0 else "unstable"
+        phs_stable = "STABLE" if phs_re < STABILITY_TOL else "unstable"
         print(f"  {'PHS k=2 (σ=0)':>15s}  {'0.0':>10s}  {phs_re:14.6e}  {phs_stable:>10s}")
+
+        # Regression: both tension and Gaussian achieve machine-precision
+        # stability for E2
+        assert best_tension[1] < STABILITY_TOL, (
+            f"E2 tension best not stable: max Re(λ) = {best_tension[1]:.6e}"
+        )
+        assert best_gaussian[1] < STABILITY_TOL, (
+            f"E2 Gaussian best not stable: max Re(λ) = {best_gaussian[1]:.6e}"
+        )

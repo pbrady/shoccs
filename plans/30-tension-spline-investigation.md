@@ -220,7 +220,7 @@ Sweep σ over [0, 20] and record max Re(λ) at each σ for n=20,40,80.
 
 ## 30.2-review — Follow-up items from review of Phase 30.2b
 
-### 30.2-review-a — Add regression assertions to E2 tension sweep tests
+### 30.2-review-a — Add regression assertions to E2 tension sweep tests ✅
 
 The three tests in `TestTensionSweepE2` have zero `assert` statements — they only
 print output.  If the tension kernel is broken, these tests still pass silently.
@@ -233,7 +233,13 @@ Add at least one assertion per test that codifies the key finding:
 - `test_compare_with_gaussian`: assert that both tension and Gaussian bests are
   < 1e-10 (both achieve machine-precision stability for E2).
 
-### 30.2-review-b — Use practical stability threshold instead of strict ≤ 0
+**Done:** Added assertions to all three tests:
+- `test_tension_coarse_sweep`: asserts best n=40 result < STABILITY_TOL.
+- `test_tension_fine_sweep_near_best`: asserts fine-sweep best < STABILITY_TOL
+  AND all four grid sizes (n=20,40,80,160) satisfy < STABILITY_TOL.
+- `test_compare_with_gaussian`: asserts both tension and Gaussian bests < STABILITY_TOL.
+
+### 30.2-review-b — Use practical stability threshold instead of strict ≤ 0 ✅
 
 The sweep tests classify stability as `max_re <= 0`.  Floating-point eigenvalue
 computation yields tiny positive residuals (~1e-14) for genuinely stable operators,
@@ -245,6 +251,11 @@ Fix: define a threshold constant (e.g., `STABILITY_TOL = 1e-10`) and use
 `max_re < STABILITY_TOL` for stability classification in both `TestTensionSweepE2`
 and the existing `TestEpsilonSweepE2`/`TestEpsilonSweepE4` classes.  This should be
 done before 30.2c so the E4 sweep results are immediately interpretable.
+
+**Done:** Added `STABILITY_TOL = 1e-10` module-level constant.  Updated all
+`<= 0` stability checks to `< STABILITY_TOL` in `TestEpsilonSweepE2`,
+`TestEpsilonSweepE4`, and `TestTensionSweepE2` (9 occurrences total).
+All 9 sweep tests pass.
 
 ---
 
@@ -341,8 +352,8 @@ Document findings and next steps.
 7. **30.1-review-c** — Add nu=2 stencil weight test ✅
 8. **30.2a** — Diff matrix builder for tension ✅
 9. **30.2b** — E2 sigma sweep (first result: does PHS k=2 connect to stability?) ✅
-10. **30.2-review-a** — Add regression assertions to E2 tension sweep tests
-11. **30.2-review-b** — Use practical stability threshold (blocks 30.2c)
+10. **30.2-review-a** — Add regression assertions to E2 tension sweep tests ✅
+11. **30.2-review-b** — Use practical stability threshold (blocks 30.2c) ✅
 12. **30.2c** — E4 sigma sweep (key result: does tension beat Gaussian?)
 13. **30.2d** — Fine-grained optimal σ search
 14. **30.3a** — Soft conservation penalty implementation
