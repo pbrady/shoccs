@@ -1015,3 +1015,303 @@ class TestMixedEpsilon:
             mr = self._max_re_mixed(nn, opt_eps, kernel="multiquadric")
             stable = "STABLE" if mr <= 0 else "unstable"
             print(f"    n={nn:3d}: max Re(λ)={mr:.6e} [{stable}]")
+
+
+# ---------------------------------------------------------------------------
+# 29.6e: Extract and validate alpha values for E2 stable ε
+# ---------------------------------------------------------------------------
+
+
+class TestStableEpsilonAlphas:
+    """Extract alpha values implied by the stable Gaussian ε for E2_1.
+
+    E2_1 parameters: p=1, q=1, nextra=1, nu=1.
+    From 29.6c: Gaussian ε*≈2.29 yields machine-precision eigenvalue stability.
+
+    Steps:
+    1. Extract RBF boundary weights at ε*
+    2. Map to alpha values in the TEMO parameterization
+    3. Verify eigenvalue stability with those alphas
+    4. Compare with optimizer-derived production alphas
+    5. Check conservation deficit
+    """
+
+    P = 1
+    Q = 1
+    NEXTRA = 1
+    NU = 1
+
+    # Production alphas from src/operators/gradient.t.cpp
+    PROD_ALPHAS = [
+        -1.47956280234494,
+        0.261900367793859,
+        -0.145072532538541,
+        -0.224665713988644,
+    ]
+
+    def _find_best_epsilon(self, n=40):
+        """Find the best Gaussian ε for E2_1 via fine sweep."""
+        epsilons = np.linspace(1.5, 3.5, 200)
+        best_eps, best_re = None, np.inf
+        for eps in epsilons:
+            mr = max_real_eigenvalue(
+                n, p=self.P, q=self.Q, epsilon=eps,
+                kernel="gaussian", nu=self.NU, nextra=self.NEXTRA,
+            )
+            if mr < best_re:
+                best_re = mr
+                best_eps = eps
+        return best_eps, best_re
+
+    def _extract_boundary_weights(self, epsilon):
+        """Extract the r×t boundary weight matrix at a given ε."""
+        t = self.P + self.Q + 1 + self.NEXTRA  # = 4
+        r = self.Q + 1 + self.NEXTRA  # = 3
+        rows = []
+        for i in range(r):
+            w = uniform_boundary_weights_rbf(
+                i, t, self.NU, self.Q, epsilon, kernel="gaussian"
+            )
+            rows.append(w)
+        return np.array(rows), r, t
+
+    def _extract_alphas_and_report(self, eps_star, best_re, verbose=True):
+        """Extract alpha values from RBF boundary weights at given ε.
+
+        The TEMO parameterization for E2_1 (nextra=1) places free parameters
+        in the last n_free=2 columns of each of the first r_eff-1 rows.
+        The last row is determined by conservation.  The RBF weights satisfy
+        polynomial exactness but NOT conservation, so the alphas are extracted
+        from rows 0 and 1 only.
+
+        Returns (rbf_alphas, B_num, B_temo, ur).
+        """
+        from stencil_gen.temo import E2_1, derive_uniform_boundary_for_temo
+
+        B_num, r, t = self._extract_boundary_weights(eps_star)
+        ur = derive_uniform_boundary_for_temo(E2_1)
+        B_sym = ur.B_u
+        alphas = ur.alpha_symbols
+
+        # For E2_1 with nextra=1: n_eqs=2, n_free=2
+        # The alpha distribution is:
+        #   Row 0: cols [0,1] determined, cols [2,3] = alpha_0, alpha_1
+        #   Row 1: cols [0,1] determined, cols [2,3] = alpha_2, alpha_3
+        #   Row 2: fully determined by conservation
+        # Extract alphas directly from the free columns of rows 0,1.
+        n_eqs = 2  # max(q+1, nu+1) = max(2,2)
+        rbf_alphas = np.array([
+            B_num[0, n_eqs],      # alpha_0 = B[0, 2]
+            B_num[0, n_eqs + 1],  # alpha_1 = B[0, 3]
+            B_num[1, n_eqs],      # alpha_2 = B[1, 2]
+            B_num[1, n_eqs + 1],  # alpha_3 = B[1, 3]
+        ])
+
+        # Build the TEMO boundary block with these alphas
+        B_temo = np.zeros((r, t))
+        for i_row in range(r):
+            for j_col in range(t):
+                expr = B_sym[i_row, j_col]
+                B_temo[i_row, j_col] = float(
+                    expr.subs({a: v for a, v in zip(alphas, rbf_alphas)})
+                )
+
+        if verbose:
+            print(f"\n  RBF boundary weights at ε*={eps_star:.6f}:")
+            for i in range(r):
+                w_str = ", ".join(f"{B_num[i, j]:12.8f}" for j in range(t))
+                print(f"    row {i}: [{w_str}]")
+            print(f"\n  Extracted alphas (from free columns of rows 0,1):")
+            for k, (a, v) in enumerate(zip(alphas, rbf_alphas)):
+                print(f"    {a} = {v:.12f}")
+
+            # Verify rows 0,1 match exactly (they share polynomial conditions)
+            for row in range(r - 1):
+                resid = np.max(np.abs(B_temo[row] - B_num[row]))
+                print(f"    Row {row} residual: {resid:.6e}")
+                assert resid < 1e-12, f"Row {row} residual too large: {resid}"
+
+            # Row 2: TEMO (conservation-enforced) vs RBF (not conserved)
+            row2_diff = B_temo[r - 1] - B_num[r - 1]
+            print(f"\n  Row {r-1} comparison (TEMO conservation vs RBF):")
+            print(f"    TEMO: [{', '.join(f'{v:12.8f}' for v in B_temo[r-1])}]")
+            print(f"    RBF:  [{', '.join(f'{v:12.8f}' for v in B_num[r-1])}]")
+            print(f"    Diff: [{', '.join(f'{v:12.8f}' for v in row2_diff)}]")
+            print(f"    Max diff: {np.max(np.abs(row2_diff)):.6e}")
+
+        return rbf_alphas, B_num, B_temo, ur
+
+    def test_extract_alphas(self):
+        """Extract alpha values from the stable ε and verify rows 0,1 match."""
+        # 1. Find best epsilon
+        eps_star, best_re = self._find_best_epsilon(n=40)
+        print(f"\n  E2_1 best Gaussian epsilon: ε*={eps_star:.6f}")
+        print(f"  max Re(λ) at ε*: {best_re:.6e}")
+
+        # 2. Extract alphas and verify
+        rbf_alphas, B_num, B_temo, ur = self._extract_alphas_and_report(eps_star, best_re)
+
+        # Rows 0,1 must match exactly (asserted inside helper)
+        # Row 2 will differ — quantify the conservation violation
+        r = B_num.shape[0]
+        row2_diff_max = np.max(np.abs(B_temo[r - 1] - B_num[r - 1]))
+        print(f"\n  Conservation violation (max row-2 diff): {row2_diff_max:.6e}")
+
+    def _build_D_from_boundary(self, n, B_boundary):
+        """Build n×n differentiation matrix from explicit boundary weights."""
+        from stencil_gen.interior import derive_interior, full_gamma_array
+
+        r, t = B_boundary.shape
+        interior_coeffs = derive_interior(0, self.P, self.NU)
+        interior_w = [float(c) for c in full_gamma_array(interior_coeffs)]
+
+        D = np.zeros((n, n))
+        # Left boundary
+        for i in range(r):
+            for j in range(t):
+                D[i, j] = B_boundary[i, j]
+        # Interior
+        for i in range(r, n - r):
+            for k_idx, j in enumerate(range(i - self.P, i + self.P + 1)):
+                D[i, j] = interior_w[k_idx]
+        # Right boundary (antisymmetric for nu=1)
+        for i in range(r):
+            row = n - 1 - i
+            for j in range(t):
+                D[row, n - 1 - j] = -B_boundary[i, j]
+        return D
+
+    def test_verify_stability_with_extracted_alphas(self):
+        """Verify eigenvalue stability: RBF direct, TEMO with RBF alphas, and TEMO
+        with RBF alphas + conservation on last row.
+
+        Three variants:
+        1. RBF direct (original boundary weights from ε*)
+        2. TEMO + RBF alphas (conservation-enforced last row)
+        3. Production alphas for comparison
+        """
+        eps_star, _ = self._find_best_epsilon(n=40)
+        rbf_alphas, B_num, B_temo, ur = self._extract_alphas_and_report(
+            eps_star, None, verbose=False
+        )
+
+        print(f"\n  Eigenvalue stability comparison (ε*={eps_star:.4f}):")
+        print(f"  {'n':>5s}  {'RBF direct':>14s}  {'TEMO+RBF α':>14s}")
+        print(f"  {'-'*5}  {'-'*14}  {'-'*14}")
+
+        for n in [20, 40, 80, 160]:
+            # RBF direct (uses ε* for all rows)
+            D_rbf = build_diff_matrix_rbf(
+                n, p=self.P, q=self.Q, epsilon=eps_star,
+                kernel="gaussian", nu=self.NU, nextra=self.NEXTRA,
+            )
+            re_rbf = float(np.max(np.real(np.linalg.eigvals(D_rbf))))
+
+            # TEMO with RBF-extracted alphas (conservation on last row)
+            D_temo = self._build_D_from_boundary(n, B_temo)
+            re_temo = float(np.max(np.real(np.linalg.eigvals(D_temo))))
+
+            print(f"  {n:5d}  {re_rbf:14.6e}  {re_temo:14.6e}")
+
+    def test_compare_with_production_alphas(self):
+        """Compare RBF-extracted alphas with optimizer-derived production alphas."""
+        from stencil_gen.temo import E2_1, derive_uniform_boundary_for_temo
+
+        eps_star, _ = self._find_best_epsilon(n=40)
+        rbf_alphas, B_num, B_temo, ur = self._extract_alphas_and_report(
+            eps_star, None, verbose=False
+        )
+        alphas = ur.alpha_symbols
+        B_sym = ur.B_u
+        prod_alphas = np.array(self.PROD_ALPHAS)
+        r, t = B_num.shape
+
+        print(f"\n  Alpha comparison (E2_1, ε*={eps_star:.4f}):")
+        print(f"  {'Symbol':>10s}  {'RBF-extracted':>16s}  {'Production':>16s}  {'Diff':>12s}")
+        print(f"  {'-'*10}  {'-'*16}  {'-'*16}  {'-'*12}")
+        for k, a in enumerate(alphas):
+            diff = rbf_alphas[k] - prod_alphas[k]
+            print(f"  {str(a):>10s}  {rbf_alphas[k]:16.10f}  {prod_alphas[k]:16.10f}  {diff:12.6e}")
+
+        # Build boundary block with production alphas
+        B_prod = np.zeros((r, t))
+        for i_row in range(r):
+            for j_col in range(t):
+                expr = B_sym[i_row, j_col]
+                B_prod[i_row, j_col] = float(
+                    expr.subs({a: v for a, v in zip(alphas, prod_alphas)})
+                )
+
+        # Eigenvalue stability comparison
+        n = 40
+        print(f"\n  Eigenvalue stability comparison (n={n}):")
+
+        # RBF direct (uses ε*)
+        D_rbf = build_diff_matrix_rbf(
+            n, p=self.P, q=self.Q, epsilon=eps_star,
+            kernel="gaussian", nu=self.NU, nextra=self.NEXTRA,
+        )
+        eig_rbf = np.linalg.eigvals(D_rbf)
+        re_rbf = float(np.max(np.real(eig_rbf)))
+        sr_rbf = float(np.max(np.abs(eig_rbf)))
+
+        # TEMO with RBF alphas (conservation)
+        D_temo_rbf = self._build_D_from_boundary(n, B_temo)
+        eig_temo_rbf = np.linalg.eigvals(D_temo_rbf)
+        re_temo_rbf = float(np.max(np.real(eig_temo_rbf)))
+        sr_temo_rbf = float(np.max(np.abs(eig_temo_rbf)))
+
+        # Production alphas (conservation)
+        D_prod = self._build_D_from_boundary(n, B_prod)
+        eig_prod = np.linalg.eigvals(D_prod)
+        re_prod = float(np.max(np.real(eig_prod)))
+        sr_prod = float(np.max(np.abs(eig_prod)))
+
+        print(f"  {'Method':>25s}  {'max Re(λ)':>14s}  {'spec radius':>14s}")
+        print(f"  {'-'*25}  {'-'*14}  {'-'*14}")
+        print(f"  {'RBF direct (ε*)':>25s}  {re_rbf:14.6e}  {sr_rbf:14.6e}")
+        print(f"  {'TEMO + RBF alphas':>25s}  {re_temo_rbf:14.6e}  {sr_temo_rbf:14.6e}")
+        print(f"  {'Production alphas':>25s}  {re_prod:14.6e}  {sr_prod:14.6e}")
+
+    def test_conservation_deficit(self):
+        """Check conservation deficit of the RBF-extracted boundary stencil.
+
+        Conservation requires: sum_i B_u[i, j] + IC_contribution = 0 for
+        columns in the overlap region (j >= p+1).  The deficit measures how
+        far the boundary block is from satisfying SBP conservation.
+        """
+        from stencil_gen.interior import derive_interior, full_gamma_array
+
+        # Find best epsilon and get boundary weights
+        eps_star, _ = self._find_best_epsilon(n=40)
+        B_num, r, t = self._extract_boundary_weights(eps_star)
+
+        # Interior stencil
+        interior_coeffs = derive_interior(0, self.P, self.NU)
+        interior_w = [float(c) for c in full_gamma_array(interior_coeffs)]
+
+        # Conservation check: for each column j of the boundary block,
+        # compute the column sum of boundary rows.
+        # For a conservative scheme with unit weights: sum_i B_u[i,j] = 0
+        # for columns j >= r (the overlap region where boundary and interior agree).
+        # More precisely, for j in [p+1, t-1], the boundary column sum
+        # should equal the negative of the interior contribution at that column.
+        print(f"\n  Conservation analysis for E2_1 RBF boundary (ε*={eps_star:.4f}):")
+        print(f"  r={r}, t={t}, p={self.P}")
+        print(f"\n  Column sums of boundary block B_u:")
+        for j in range(t):
+            col_sum = sum(B_num[i, j] for i in range(r))
+            print(f"    col {j}: sum = {col_sum:12.8f}")
+
+        # For the overlap columns (j >= p+1 = 2), the interior stencil's
+        # contribution to these columns from row r (first interior row) is
+        # interior_w[j - r + p] (when the interior stencil is centered at row r).
+        # Conservation deficit = boundary col sum + interior extension.
+        print(f"\n  Conservation deficit (boundary col sum for overlap cols j >= {self.P+1}):")
+        for j in range(self.P + 1, t):
+            col_sum = sum(B_num[i, j] for i in range(r))
+            # Interior row r has stencil centered at r, so column j has
+            # contribution interior_w[j - r + p] = interior_w[j - r + 1]
+            # But this depends on which interior rows contribute to column j.
+            # For unit-weight conservation: boundary col sum should be 0.
+            print(f"    col {j}: boundary sum = {col_sum:12.8f}")

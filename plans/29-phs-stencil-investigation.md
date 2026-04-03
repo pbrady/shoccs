@@ -225,7 +225,7 @@ RBF to influence stability compared to q=1 in E2.
 This motivates 29.6f (mixed ε per row) or 29.6e (alpha extraction to see how close
 the best RBF alphas are to the optimizer solution).
 
-### 29.6e — Extract and validate alpha values for E2 stable ε
+### 29.6e — Extract and validate alpha values for E2 stable ε ✅
 
 E2_1 has a stable ε* (machine precision, see 29.6c).  E4_1 does NOT (see 29.6d/f).
 This step applies to E2_1 only:
@@ -235,6 +235,44 @@ This step applies to E2_1 only:
 4. Compare with the optimizer-derived alphas used in `src/stencils/E2_1.cpp`
 5. Check conservation deficit at those alpha values
 - File: `scripts/stencil_gen/tests/test_phs.py`, class `TestStableEpsilonAlphas`
+
+**Completed:** Added `TestStableEpsilonAlphas` with 4 tests (all 44 tests pass).
+
+**Results — Alpha extraction:**
+- Best ε* ≈ 1.83 (Gaussian, n=40), max Re(λ) = 1.6e-16 (machine precision)
+- Extracted alphas: [0.043, 0.279, 0.288, 0.158]
+- Rows 0,1 of the TEMO symbolic stencil match the RBF weights to machine precision
+  (residual < 1e-16), confirming the extraction is exact.
+
+**Results — Conservation violation:**
+- Row 2 (last boundary row) differs dramatically: max diff = 3.26
+- TEMO conservation enforces col sums = 0 for overlap columns, but the RBF gives
+  col sums of [0.38, 0.83] for the overlap columns (j=2,3).
+- The RBF-stable stencil is fundamentally non-conservative.
+
+**Results — Stability comparison (n=40):**
+| Method                | max Re(λ)    | Spectral radius |
+|-----------------------|-------------|-----------------|
+| RBF direct (ε*)      | 1.6e-16     | 0.996           |
+| TEMO + RBF alphas    | 1.204       | 1.204           |
+| Production alphas     | 1.126       | 1.720           |
+
+**Key findings:**
+1. The RBF achieves perfect eigenvalue stability for E2_1, but ONLY without
+   conservation enforcement on the last row.
+2. Substituting the RBF-extracted alphas into the TEMO framework (which enforces
+   conservation) destroys stability completely (max Re(λ) = 1.2).
+3. The production alphas also show max Re(λ) = 1.13 in the uniform floating-BC
+   case — they were likely optimized for a different configuration (Dirichlet BC
+   or cut-cell case).
+4. The RBF alphas are very different from the production alphas:
+   alpha_0: 0.043 vs -1.480, alpha_2: 0.288 vs -0.145 (opposite signs).
+
+**Implication:** RBF boundary stencils achieve stability by sacrificing conservation.
+The TEMO conservation constraint on the last row is a fundamental stability trade-off.
+This confirms that eigenvalue stability and SBP conservation are competing objectives
+for E2_1 boundary closures — the RBF found a stable but non-conservative solution
+point in the parameter space.
 
 ### 29.6f — If NO stable ε found: characterize the gap ✅
 
@@ -319,7 +357,7 @@ Each step produces tests that validate before moving on:
 7. **29.6c** — E2 epsilon sweep (first result!) — remember nextra=1
 8. **29.6d** — E4 epsilon sweep (key result!)
 8. **29.6f** ✅ — Mixed epsilon characterization (E4 not stable even with per-row ε)
-9. **29.6e** — Extract alphas for E2 (stable ε found)
+9. **29.6e** ✅ — Extract alphas for E2 (stable but non-conservative)
 10. **29.7a** — Comparison table
 11. **29.7b** — Update plan with conclusions
 
