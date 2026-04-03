@@ -197,13 +197,24 @@ which dispatches tension to `_rbf_weights_numeric`. Updated docstrings in `build
 (8 tests): shape, interior column sums, σ=0 matches PHS k=2, polynomial reproduction,
 antisymmetry, nu=2 reproduction, finite eigenvalues, and mixed-epsilon tension. All pass.
 
-### 30.2b — Sigma sweep for E2 (p=1, q=1)
+### 30.2b — Sigma sweep for E2 (p=1, q=1) ✅
 
 Sweep σ over [0, 20] and record max Re(λ) at each σ for n=20,40,80.
 - Compare with Gaussian ε sweep results from Phase 29
 - Key question: does the σ=0 limit (PHS k=2) connect smoothly to a stable region?
 - If yes: report σ* and compare with Gaussian ε*
 - File: `scripts/stencil_gen/tests/test_phs.py`, class `TestTensionSweepE2`
+
+**Done:** 3 tests in `TestTensionSweepE2` — all pass. Key findings:
+- **YES, the σ=0 limit connects smoothly to a stable region.** max Re(λ)
+  decreases monotonically from ~0.087 at σ=0 (PHS k=2) to machine precision
+  (~1e-14) at σ ≈ 5.5, remaining stable for all larger σ.
+- The transition is smooth: σ=1 gives max Re(λ)≈0.083, σ=3 gives ~0.018,
+  σ=4.85 gives ~0.0016, σ=5.5 reaches machine precision.
+- Stability is grid-independent: verified at n=20,40,80,160 with max Re(λ) < 5e-14.
+- **Comparison with Gaussian ε*≈1.36:** Both achieve machine-precision stability.
+  The tension kernel reaches stability at σ≈5.5 (vs ε≈1.36 for Gaussian).
+  Both are effectively zero to machine precision at their optima.
 
 ### 30.2c — Sigma sweep for E4 (p=2, q=3)
 
@@ -297,7 +308,7 @@ Document findings and next steps.
 6. **30.1-review-b** — Add D¹φ Taylor 8th term for branch-point accuracy ✅
 7. **30.1-review-c** — Add nu=2 stencil weight test ✅
 8. **30.2a** — Diff matrix builder for tension ✅
-9. **30.2b** — E2 sigma sweep (first result: does PHS k=2 connect to stability?)
+9. **30.2b** — E2 sigma sweep (first result: does PHS k=2 connect to stability?) ✅
 10. **30.2c** — E4 sigma sweep (key result: does tension beat Gaussian?)
 11. **30.2d** — Fine-grained optimal σ search
 12. **30.3a** — Soft conservation penalty implementation
