@@ -79,3 +79,21 @@ Lua config → `simulation::builder` → mesh + operators + system + integrator 
 ### Historical Context
 
 The codebase was migrated from range-v3 to Kokkos. The `plans/` directory contains the migration plans and architectural decisions from that effort. Key decisions are documented in `plans/meta.md`.
+
+## Stencil Derivation Pipeline (SymPy)
+
+The `scripts/stencil_gen/` directory contains a SymPy-based pipeline for deriving finite difference stencil coefficients symbolically. Managed by `uv`.
+
+```bash
+# Run stencil_gen tests (from repo root)
+cd scripts/stencil_gen && SYMPY_CACHE_SIZE=50000 uv run pytest tests/ -x -q
+
+# Run only fast tests (skip slow full-pipeline E4 tests)
+cd scripts/stencil_gen && uv run pytest tests/ -x -q -k "not TestMathematicaWorkflow and not TestPolynomialFullStencil and not TestE4CodeGeneration"
+```
+
+- **SYMPY_CACHE_SIZE=50000** is essential for performance — default 1000 causes severe slowdowns with large symbolic expressions.
+- For linear systems with symbolic parameters, use `linear_eq_to_matrix` + `linsolve` (not `sympy.solve`). Linearize bilinear terms first with the theta-substitution trick (`theta = w*phi`).
+- Reference Mathematica code in `mathematica-files/finitedifferences/` (`taylor.wl` for functions, `explicitr-E4d1.nb.pdf` for workflow).
+- Key entry points: `derive_cut_cell_mathematica()` (singularity-free), `derive_cut_cell_scheme()` (legacy with psi-clamping).
+- Generated C++ goes to `scripts/stencil_gen/output/` and replaces files in `src/stencils/`.
