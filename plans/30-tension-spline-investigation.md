@@ -578,6 +578,33 @@ Produce comparison of all approaches investigated:
 - Grid-convergence: E2 is grid-independent (stable at n=20,40,80);
   E4 is NOT (3e-5 at n=40 but 1.7e-4 at n=20, 2.6e-4 at n=80).
 
+---
+
+## 30.4a-review — Follow-up items from review of Phase 30.4a
+
+### 30.4a-review-a — Assert E4 cross-method ordering in comparison test
+
+The plan's headline findings for E4 are "Tension (3.1e-5) beats Gaussian (8.3e-5)
+by ~2.7×" and "Tension+penalty is best at 2.6e-5".  But `test_e4_comparison`
+asserts only that each method is `< 1e-3` and improves over PHS k=2.  It never
+asserts that tension < gaussian or that tension+penalty ≤ tension.  If a
+regression made tension worse than Gaussian (or penalty worse than tension alone),
+the test would still pass.  No other test in the file covers this ordering.
+
+Fix: in `test_e4_comparison`, add:
+```python
+# Tension should beat Gaussian for E4 (documented ~2.7× improvement)
+assert tension_re < gauss_re, (
+    f"E4 Tension ({tension_re:.6e}) should beat Gaussian ({gauss_re:.6e})"
+)
+# Tension+penalty should be best (at least as good as tension alone)
+assert pen_re <= tension_re + 1e-6, (
+    f"E4 Tension+penalty ({pen_re:.6e}) should be ≤ Tension ({tension_re:.6e})"
+)
+```
+
+---
+
 ### 30.4b — Modified wavenumber analysis
 
 For the best tension stencil found:
@@ -618,8 +645,9 @@ Document findings and next steps.
 20. **30.3c** — E4 (σ, γ) sweep ✅
 21. **30.3c-review-a** — Assert γ > 0 actually changes E4 results ✅
 22. **30.4a** — Comparison table ✅
-23. **30.4b** — Modified wavenumber analysis
-24. **30.4c** — Update plan with conclusions
+23. **30.4a-review-a** — Assert E4 cross-method ordering in comparison test
+24. **30.4b** — Modified wavenumber analysis
+25. **30.4c** — Update plan with conclusions
 
 ---
 
