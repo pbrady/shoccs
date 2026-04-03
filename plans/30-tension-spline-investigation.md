@@ -502,6 +502,31 @@ and 1D ε spaces could not?
 
 ---
 
+## 30.3c-review — Follow-up items from review of Phase 30.3c
+
+### 30.3c-review-a — Assert γ > 0 actually changes E4 results
+
+The same deficiency fixed for E2 in 30.3b-review-a exists in the E4 tests:
+if `build_diff_matrix_rbf_penalty` silently ignored γ (returning γ=0 weights
+regardless of γ), all three `TestTensionConservationE4` tests still pass.
+
+The plan documents "2D improves over 1D: 63% stability improvement" and
+"conservation slightly improves: deficit 1.71 → 1.65", but no assertion
+verifies either claim.  Specifically:
+
+- `test_joint_sweep_coarse`: asserts `best_max_re < 1e-3` and
+  `baseline_re < 1e-3`, both satisfied trivially if γ is ignored.
+  Fix: assert the best (σ, γ) with γ > 0 has strictly lower max Re(λ)
+  than the γ=0 baseline (actual improvement is ~63%).
+- `test_fine_sweep_near_optimal`: asserts `best_re <= best_re_baseline + 1e-6`.
+  Fix: assert `best_gamma > 0` to verify the optimizer found a non-trivial
+  penalty point (matching the E2 fix in 30.3b-review-a).
+- `test_stability_vs_gamma_at_optimal_sigma`: asserts `best_re <= re_0 + 1e-6`.
+  Fix: assert `best_re < re_0 - 1e-7` (the plan says γ≈1.15 improves over
+  γ=0 at σ=37, from 1.3e-4 to 7.5e-5).
+
+---
+
 ## 30.4 — Analysis and Conclusions
 
 ### 30.4a — Comparison table
@@ -553,9 +578,10 @@ Document findings and next steps.
 18. **30.3b** — E2 (σ, γ) sweep ✅
 19. **30.3b-review-a** — Assert conservation improvement at γ > 0 ✅
 20. **30.3c** — E4 (σ, γ) sweep ✅
-21. **30.4a** — Comparison table
-22. **30.4b** — Modified wavenumber analysis
-23. **30.4c** — Update plan with conclusions
+21. **30.3c-review-a** — Assert γ > 0 actually changes E4 results
+22. **30.4a** — Comparison table
+23. **30.4b** — Modified wavenumber analysis
+24. **30.4c** — Update plan with conclusions
 
 ---
 
