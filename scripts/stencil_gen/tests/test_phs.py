@@ -7,7 +7,9 @@ from stencil_gen.phs import (
     cut_cell_weights,
     phs_stencil_weights,
     uniform_boundary_weights,
+    uniform_boundary_weights_rbf,
     uniform_interior_weights,
+    uniform_interior_weights_rbf,
 )
 
 
@@ -198,3 +200,123 @@ class TestPHSvsE4Boundary:
                 w_phs = uniform_boundary_weights(i, t=6, nu=1, k=k, q=3)
                 # Print the PHS weights
                 print(f"    Row {i}: {[float(cancel(w)) for w in w_phs]}")
+
+
+# ---------------------------------------------------------------------------
+# 29.5b + 29.5c: Gaussian/Multiquadric RBF convenience wrappers & tests
+# ---------------------------------------------------------------------------
+
+import numpy as np
+
+
+class TestGaussianRBF:
+    """Tests for Gaussian and Multiquadric RBF kernels."""
+
+    def test_polynomial_exactness(self):
+        """Gaussian RBF stencils should be exact for polynomials up to degree q."""
+        for epsilon in [0.5, 1.0, 3.0]:
+            for q in [1, 2, 3]:
+                # Use t = q + 3 points (enough for the augmented system)
+                t = q + 3
+                w = uniform_boundary_weights_rbf(i=0, t=t, nu=1, q=q, epsilon=epsilon)
+                pts = list(range(t))
+                for d in range(q + 1):
+                    actual = sum(wj * xj**d for wj, xj in zip(w, pts))
+                    expected = d * 0 ** max(0, d - 1) if d >= 1 else 0.0
+                    assert abs(actual - expected) < 1e-12, (
+                        f"eps={epsilon}, q={q}, d={d}: got {actual}, expected {expected}"
+                    )
+
+    def test_interior_matches_classical(self):
+        """Gaussian interior weights should match classical FD for all epsilon.
+
+        The polynomial augmentation forces polynomial reproduction, so the
+        interior (centered) weights must equal the classical FD coefficients
+        regardless of the RBF shape parameter.
+        """
+        from stencil_gen.interior import derive_interior, full_gamma_array
+
+        # E2: p=1, q=2
+        classical_e2 = full_gamma_array(derive_interior(0, 1, 1))
+        for epsilon in [0.1, 1.0, 5.0]:
+            w = uniform_interior_weights_rbf(p=1, nu=1, q=2, epsilon=epsilon)
+            for j in range(len(classical_e2)):
+                assert abs(w[j] - float(classical_e2[j])) < 1e-12, (
+                    f"E2 eps={epsilon}, j={j}: RBF={w[j]}, classical={classical_e2[j]}"
+                )
+
+        # E4: p=2, q=4
+        classical_e4 = full_gamma_array(derive_interior(0, 2, 1))
+        for epsilon in [0.1, 1.0, 5.0]:
+            w = uniform_interior_weights_rbf(p=2, nu=1, q=4, epsilon=epsilon)
+            for j in range(len(classical_e4)):
+                assert abs(w[j] - float(classical_e4[j])) < 1e-12, (
+                    f"E4 eps={epsilon}, j={j}: RBF={w[j]}, classical={classical_e4[j]}"
+                )
+
+    def test_weights_sum_to_zero(self):
+        """First derivative weights should sum to 0 (exact for constants)."""
+        for kernel in ["gaussian", "multiquadric"]:
+            for epsilon in [0.5, 1.0, 3.0]:
+                # Interior
+                w = uniform_interior_weights_rbf(
+                    p=2, nu=1, q=3, epsilon=epsilon, kernel=kernel
+                )
+                assert abs(sum(w)) < 1e-12, (
+                    f"{kernel} eps={epsilon} interior: sum={sum(w)}"
+                )
+                # Boundary
+                w = uniform_boundary_weights_rbf(
+                    i=0, t=6, nu=1, q=3, epsilon=epsilon, kernel=kernel
+                )
+                assert abs(sum(w)) < 1e-12, (
+                    f"{kernel} eps={epsilon} boundary: sum={sum(w)}"
+                )
+
+    def test_small_epsilon_interior_matches_polynomial(self):
+        """As epsilon -> 0, interior Gaussian RBF weights approach polynomial FD.
+
+        For centered interior stencils where 2p+1 = q+1, the polynomial
+        augmentation fully determines the weights, so the flat limit is
+        well-defined and equals classical FD.  For over-determined boundary
+        stencils (t > q+1) the flat limit is ill-conditioned, so we only
+        test interior convergence here.
+        """
+        from stencil_gen.interior import derive_interior, full_gamma_array
+
+        # E4: p=2, 5 points, q=4 (5 poly terms = n, so system is determined)
+        classical = full_gamma_array(derive_interior(0, 2, 1))
+        ref = [float(c) for c in classical]
+
+        # As epsilon decreases, should approach classical
+        for epsilon in [2.0, 1.0, 0.5]:
+            w = uniform_interior_weights_rbf(p=2, nu=1, q=4, epsilon=epsilon)
+            err = max(abs(w[j] - ref[j]) for j in range(len(ref)))
+            assert err < 1e-10, f"eps={epsilon}: error {err} too large"
+
+    def test_boundary_weights_bounded(self):
+        """Boundary weights remain bounded across a range of epsilon values."""
+        for epsilon in [0.5, 1.0, 2.0, 5.0]:
+            for kernel in ["gaussian", "multiquadric"]:
+                w = uniform_boundary_weights_rbf(
+                    i=0, t=6, nu=1, q=3, epsilon=epsilon, kernel=kernel
+                )
+                assert all(abs(wj) < 100 for wj in w), (
+                    f"{kernel} eps={epsilon}: weights unbounded: {w}"
+                )
+
+    def test_multiquadric_polynomial_exactness(self):
+        """Multiquadric RBF stencils should be exact for polynomials up to degree q."""
+        for epsilon in [0.5, 1.0, 3.0]:
+            q = 3
+            t = q + 3
+            w = uniform_boundary_weights_rbf(
+                i=1, t=t, nu=1, q=q, epsilon=epsilon, kernel="multiquadric"
+            )
+            pts = list(range(t))
+            for d in range(q + 1):
+                actual = sum(wj * xj**d for wj, xj in zip(w, pts))
+                expected = d * 1 ** max(0, d - 1) if d >= 1 else 0.0
+                assert abs(actual - expected) < 1e-12, (
+                    f"MQ eps={epsilon}, d={d}: got {actual}, expected {expected}"
+                )

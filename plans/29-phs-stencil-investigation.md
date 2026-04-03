@@ -68,7 +68,7 @@ with `kernel`/`epsilon` keyword args.  PHS path uses `_kernel_eval`/`_kernel_der
 the augmented system.  Gaussian/MQ dispatches to numpy for efficiency.  All 12 existing
 PHS tests pass.  Smoke-tested: boundary weights vary with ε, polynomial reproduction holds.
 
-### 29.5b — Add `uniform_boundary_weights_rbf` convenience wrapper
+### 29.5b — Add `uniform_boundary_weights_rbf` convenience wrapper ✅
 
 ```python
 def uniform_boundary_weights_rbf(i, t, nu, q, epsilon, kernel="gaussian"):
@@ -80,14 +80,23 @@ Also add `uniform_interior_weights_rbf` for verification.
 - Test: interior weights with Gaussian at any ε should still match classical FD
   (the polynomial augmentation forces this)
 
-### 29.5c — Tests for new kernels
+**Completed:** Added `uniform_interior_weights_rbf` and `uniform_boundary_weights_rbf`
+wrappers that delegate to `phs_stencil_weights` with `kernel`/`epsilon` kwargs.
+
+### 29.5c — Tests for new kernels ✅
 
 Add `TestGaussianRBF` class in `test_phs.py`:
 - `test_polynomial_exactness`: Gaussian stencils exact for polynomials ≤ q
 - `test_interior_matches_classical`: Gaussian interior = classical FD for all ε
 - `test_weights_sum_to_zero`: First derivative weights sum to 0
-- `test_small_epsilon_approaches_polynomial`: As ε→0, weights → polynomial FD
+- `test_small_epsilon_interior_matches_polynomial`: Interior weights converge to classical in flat limit
+- `test_boundary_weights_bounded`: Boundary weights remain bounded across ε range
+- `test_multiquadric_polynomial_exactness`: MQ kernel exact for polynomials ≤ q
 - File: `scripts/stencil_gen/tests/test_phs.py`
+
+**Completed:** Added `TestGaussianRBF` class with 6 tests (all pass).  Note: the
+flat-limit test only checks interior stencils where the system is fully determined
+(2p+1 = q+1); over-determined boundary systems are ill-conditioned as ε→0.
 
 ---
 

@@ -516,6 +516,31 @@ def uniform_boundary_weights(i: int, t: int, nu: int, k: int, q: int) -> list:
     return phs_stencil_weights(points, x_eval, nu, q, k)
 
 
+def uniform_interior_weights_rbf(
+    p: int, nu: int, q: int, epsilon: float, kernel: str = "gaussian"
+) -> list[float]:
+    """Compute interior FD weights on a uniform grid using RBF+poly.
+
+    The stencil uses 2p+1 points centered at 0: {-p, ..., -1, 0, 1, ..., p}.
+    """
+    points = [Rational(j) for j in range(-p, p + 1)]
+    x_eval = Rational(0)
+    return phs_stencil_weights(points, x_eval, nu, q, kernel=kernel, epsilon=epsilon)
+
+
+def uniform_boundary_weights_rbf(
+    i: int, t: int, nu: int, q: int, epsilon: float, kernel: str = "gaussian"
+) -> list[float]:
+    """Compute boundary row i FD weights on a uniform grid using RBF+poly.
+
+    The stencil uses t points: {0, 1, ..., t-1}, evaluating D^nu at grid
+    point i.
+    """
+    points = [Rational(j) for j in range(t)]
+    x_eval = Rational(i)
+    return phs_stencil_weights(points, x_eval, nu, q, kernel=kernel, epsilon=epsilon)
+
+
 def cut_cell_weights(
     i: int,
     T: int,
