@@ -2895,6 +2895,9 @@ class TestTensionConservationE2:
         # Track the γ=0 baseline deficit at optimal σ
         baseline_deficit = None
 
+        # Track best deficit among stable points with γ > 0
+        best_deficit_gamma_pos = float("inf")
+
         n_stable = 0
         for sigma in sigmas:
             for gamma in gammas:
@@ -2911,6 +2914,10 @@ class TestTensionConservationE2:
                     if gamma == 0.0:
                         if baseline_deficit is None or deficit < baseline_deficit:
                             baseline_deficit = deficit
+
+                    # Track best stable deficit at γ > 0
+                    if gamma > 0.0 and deficit < best_deficit_gamma_pos:
+                        best_deficit_gamma_pos = deficit
 
         # Print landscape summary
         total = len(sigmas) * len(gammas)
@@ -2950,6 +2957,14 @@ class TestTensionConservationE2:
         # Stability must exist at γ=0 (regression from Phase 30.2)
         assert baseline_deficit is not None, (
             "E2 should be stable at γ=0 for some σ in [0, 10]"
+        )
+
+        # Best stable deficit at γ > 0 must improve over the γ=0 baseline.
+        # This verifies the penalty mechanism actually reduces conservation
+        # deficit while maintaining stability (actual improvement ~29%).
+        assert best_deficit_gamma_pos < baseline_deficit, (
+            f"γ>0 did not improve deficit over γ=0 baseline: "
+            f"{best_deficit_gamma_pos:.6e} >= {baseline_deficit:.6e}"
         )
 
     def test_stability_survives_moderate_penalty(self):
@@ -3061,6 +3076,11 @@ class TestTensionConservationE2:
         # --- Assertions ---
         assert best_sigma is not None, (
             "No stable point found in E2 fine sweep region σ ∈ [4, 8]"
+        )
+        # The optimizer must find a non-trivial penalty point (γ > 0) that
+        # improves conservation — not just pick the γ=0 baseline.
+        assert best_gamma > 0, (
+            f"Fine sweep best was at γ=0 — penalty did not improve deficit"
         )
         # The best deficit with penalty should not be worse than γ=0
         _, deficit_baseline = self._eval_point(n, best_sigma, 0.0)

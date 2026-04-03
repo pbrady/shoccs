@@ -450,7 +450,7 @@ Sweep both tension parameter σ and conservation penalty γ:
 
 ## 30.3b-review — Follow-up items from review of Phase 30.3b
 
-### 30.3b-review-a — Assert conservation improvement at γ > 0 in joint tests
+### 30.3b-review-a — Assert conservation improvement at γ > 0 in joint tests ✅
 
 The plan's key finding is "deficit reduced 29% (1.20 → 0.85)" — that the
 penalty mechanism improves conservation while maintaining stability.  But none
@@ -470,6 +470,13 @@ Fix: in `test_fine_sweep_near_optimal`, assert `best_gamma > 0` (verifying
 the optimizer found a non-trivial penalty point that improves conservation).
 In `test_joint_sweep_coarse`, assert that the best stable deficit at γ > 0 is
 strictly less than the γ=0 baseline deficit (actual improvement is ~29%).
+
+**Done:** Added both assertions:
+- `test_joint_sweep_coarse`: tracks `best_deficit_gamma_pos` during the sweep
+  and asserts it is strictly less than the γ=0 `baseline_deficit`.
+- `test_fine_sweep_near_optimal`: asserts `best_gamma > 0` to verify the
+  optimizer picks a non-trivial penalty point.
+All 3 tests pass.
 
 ### 30.3c — Joint (σ, γ) sweep for E4
 
@@ -528,7 +535,7 @@ Document findings and next steps.
 16. **30.2d-review-b** — Complete regression assertions in `test_comparison_all_methods` ✅
 17. **30.3a** — Soft conservation penalty implementation ✅
 18. **30.3b** — E2 (σ, γ) sweep ✅
-19. **30.3b-review-a** — Assert conservation improvement at γ > 0
+19. **30.3b-review-a** — Assert conservation improvement at γ > 0 ✅
 20. **30.3c** — E4 (σ, γ) sweep
 21. **30.4a** — Comparison table
 22. **30.4b** — Modified wavenumber analysis
