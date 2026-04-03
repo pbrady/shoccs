@@ -19,6 +19,7 @@ polynomials in RBF-FD approximations."
 
 from __future__ import annotations
 
+import numpy as np
 from sympy import (
     Abs,
     Expr,
@@ -28,7 +29,9 @@ from sympy import (
     Symbol,
     cancel,
     diff,
+    exp as sym_exp,
     factorial,
+    sqrt as sym_sqrt,
 )
 
 
@@ -140,14 +143,190 @@ def _phs_kernel_1d_deriv(r_expr: Expr, r_sym: Symbol, nu: int, k: int) -> Expr:
         return d_expr.subs(x, r_val)
 
 
+def _kernel_eval(r, kernel: str, k: int | None = None, epsilon=None):
+    """Evaluate RBF kernel φ(r).
+
+    Parameters
+    ----------
+    r : Expr or numeric
+        Signed distance.
+    kernel : str
+        ``"phs"``, ``"gaussian"``, or ``"multiquadric"``.
+    k : int, optional
+        PHS order (required for ``"phs"``).
+    epsilon : numeric, optional
+        Shape parameter (required for ``"gaussian"`` and ``"multiquadric"``).
+
+    Returns
+    -------
+    Expr
+        Kernel value φ(r).
+    """
+    if kernel == "phs":
+        m = 2 * k - 1
+        return _phi_val(r, m)
+    elif kernel == "gaussian":
+        return sym_exp(-(epsilon**2) * r**2)
+    elif kernel == "multiquadric":
+        return sym_sqrt(1 + (epsilon**2) * r**2)
+    else:
+        raise ValueError(f"Unknown kernel: {kernel!r}")
+
+
+def _kernel_deriv(r_val, nu: int, kernel: str, k: int | None = None, epsilon=None):
+    """Evaluate D^nu φ(r) at r = r_val.
+
+    Parameters
+    ----------
+    r_val : Expr or numeric
+        Point at which to evaluate.
+    nu : int
+        Derivative order.
+    kernel : str
+        ``"phs"``, ``"gaussian"``, or ``"multiquadric"``.
+    k : int, optional
+        PHS order (required for ``"phs"``).
+    epsilon : numeric, optional
+        Shape parameter (required for ``"gaussian"`` and ``"multiquadric"``).
+
+    Returns
+    -------
+    Expr
+        D^nu φ(r) evaluated at r_val.
+    """
+    if kernel == "phs":
+        m = 2 * k - 1
+        return _eval_phs_deriv(r_val, nu, m)
+
+    # For Gaussian and Multiquadric, use symbolic differentiation.
+    r = Symbol("_rbf_r")
+    if kernel == "gaussian":
+        expr = sym_exp(-(epsilon**2) * r**2)
+    elif kernel == "multiquadric":
+        expr = sym_sqrt(1 + (epsilon**2) * r**2)
+    else:
+        raise ValueError(f"Unknown kernel: {kernel!r}")
+
+    d_expr = diff(expr, r, nu)
+    return d_expr.subs(r, r_val)
+
+
+# ---------------------------------------------------------------------------
+# Numeric (numpy) path for Gaussian / Multiquadric kernels
+# ---------------------------------------------------------------------------
+
+
+def _rbf_weights_numeric(
+    points: list,
+    x_eval,
+    nu: int,
+    q: int,
+    kernel: str,
+    epsilon: float,
+) -> list[float]:
+    """Compute RBF+poly FD weights using numpy.
+
+    Used for Gaussian and Multiquadric kernels where exact symbolic
+    computation is neither necessary nor efficient.
+
+    Parameters
+    ----------
+    points : list
+        Grid point locations.
+    x_eval : numeric
+        Evaluation point.
+    nu : int
+        Derivative order (1 or 2).
+    q : int
+        Polynomial degree for augmentation.
+    kernel : str
+        ``"gaussian"`` or ``"multiquadric"``.
+    epsilon : float
+        Shape parameter.
+
+    Returns
+    -------
+    list of float
+        FD weights.
+    """
+    n = len(points)
+    n_poly = q + 1
+    eps = float(epsilon)
+    pts = np.array([float(p) for p in points])
+    x0 = float(x_eval)
+
+    # Kernel matrix Φ_{ij} = φ(x_i - x_j)
+    diffs = pts[:, None] - pts[None, :]
+    if kernel == "gaussian":
+        Phi = np.exp(-(eps**2) * diffs**2)
+    elif kernel == "multiquadric":
+        Phi = np.sqrt(1 + (eps**2) * diffs**2)
+    else:
+        raise ValueError(f"Unknown kernel for numeric path: {kernel!r}")
+
+    # RHS: D^nu φ(x_eval - x_i)
+    r = x0 - pts
+    if kernel == "gaussian":
+        base = np.exp(-(eps**2) * r**2)
+        if nu == 0:
+            dPhi = base
+        elif nu == 1:
+            dPhi = -2 * eps**2 * r * base
+        elif nu == 2:
+            dPhi = (4 * eps**4 * r**2 - 2 * eps**2) * base
+        else:
+            raise NotImplementedError(f"Gaussian derivative for nu={nu}")
+    else:  # multiquadric
+        s2 = 1 + (eps**2) * r**2
+        if nu == 0:
+            dPhi = np.sqrt(s2)
+        elif nu == 1:
+            dPhi = eps**2 * r / np.sqrt(s2)
+        elif nu == 2:
+            dPhi = eps**2 / s2**1.5
+        else:
+            raise NotImplementedError(f"Multiquadric derivative for nu={nu}")
+
+    # Polynomial matrix P_{ij} = x_j^i, i = 0 .. q
+    P = np.zeros((n_poly, n))
+    for i in range(n_poly):
+        P[i, :] = pts**i
+
+    # Polynomial RHS: D^nu x_eval^i
+    dP = np.zeros(n_poly)
+    for i in range(n_poly):
+        if i >= nu:
+            coeff = 1.0
+            for j in range(nu):
+                coeff *= i - j
+            dP[i] = coeff * x0 ** (i - nu)
+
+    # Assemble augmented system  [Φ P'; P 0] [λ; μ] = [dΦ; dP]
+    N = n + n_poly
+    A = np.zeros((N, N))
+    A[:n, :n] = Phi
+    A[:n, n:] = P.T
+    A[n:, :n] = P
+
+    b_vec = np.zeros(N)
+    b_vec[:n] = dPhi
+    b_vec[n:] = dP
+
+    x = np.linalg.solve(A, b_vec)
+    return list(x[:n])
+
+
 def phs_stencil_weights(
     points: list,
     x_eval,
     nu: int,
     q: int,
-    k: int,
+    k: int = None,
+    *,
+    kernel: str = "phs",
+    epsilon=None,
 ) -> list:
-    """Compute FD weights using PHS+polynomial augmentation.
+    """Compute FD weights using RBF+polynomial augmentation.
 
     Solves the augmented system:
         [Φ  P] [λ]   [d_Φ]
@@ -164,9 +343,12 @@ def phs_stencil_weights(
     q : int
         Polynomial degree for augmentation.  The stencil will be exact
         for polynomials up to degree q.
-    k : int
-        PHS order.  φ(r) = |r|^(2k-1).  k=2 gives cubic-spline-like
-        behavior.  Must satisfy k >= nu (so that derivatives exist).
+    k : int, optional
+        PHS order.  φ(r) = |r|^(2k-1).  Required when kernel="phs".
+    kernel : str
+        ``"phs"`` (default), ``"gaussian"``, or ``"multiquadric"``.
+    epsilon : float, optional
+        Shape parameter for Gaussian/Multiquadric kernels.
 
     Returns
     -------
@@ -174,23 +356,35 @@ def phs_stencil_weights(
         FD weights [w_0, ..., w_{n-1}] such that
         f^(nu)(x_eval) ≈ Σ_j w_j f(x_j).
     """
+    # --- Parameter validation and dispatch ---
+    if kernel == "phs":
+        if k is None:
+            raise ValueError("k is required for PHS kernel")
+        if k < nu:
+            raise ValueError(f"PHS order k={k} must be >= nu={nu}")
+    elif kernel in ("gaussian", "multiquadric"):
+        if epsilon is None:
+            raise ValueError(f"epsilon is required for {kernel} kernel")
+        return _rbf_weights_numeric(points, x_eval, nu, q, kernel, epsilon)
+    else:
+        raise ValueError(f"Unknown kernel: {kernel!r}")
+
+    # --- PHS path (exact SymPy computation) ---
     n = len(points)
     n_poly = q + 1  # number of polynomial basis functions: 1, x, x^2, ..., x^q
 
-    if k < nu:
-        raise ValueError(f"PHS order k={k} must be >= nu={nu}")
-
-    m = 2 * k - 1  # PHS exponent
-
-    # Build Φ matrix: Φ_{ij} = |x_i - x_j|^m
-    Phi = Matrix(n, n, lambda i, j: _phi_val(points[i] - points[j], m))
+    # Build Φ matrix using kernel dispatch
+    Phi = Matrix(
+        n, n, lambda i, j: _kernel_eval(points[i] - points[j], "phs", k=k)
+    )
 
     # Build P matrix: P_{ij} = x_j^i for i=0..q (polynomial basis)
     P = Matrix(n_poly, n, lambda i, j: points[j] ** i)
 
     # Build RHS: d_Φ_i = D^nu φ(x_eval - x_i)
-    r_sym = Symbol("_r")
-    d_Phi = Matrix(n, 1, lambda i, _: _eval_phs_deriv(x_eval - points[i], nu, m))
+    d_Phi = Matrix(
+        n, 1, lambda i, _: _kernel_deriv(x_eval - points[i], nu, "phs", k=k)
+    )
 
     # Build d_P: D^nu x_eval^i
     d_P = Matrix(n_poly, 1, lambda i, _: _monomial_deriv(x_eval, i, nu))

@@ -42,7 +42,7 @@ multi-alpha optimization reduces to a 1D root-finding problem.
 
 ## 29.5 — Gaussian RBF Stencil Engine
 
-### 29.5a — Add Gaussian RBF kernel to `phs.py`
+### 29.5a — Add Gaussian RBF kernel to `phs.py` ✅
 
 Extend `phs_stencil_weights` to accept a `kernel` parameter.  Currently it uses
 `φ(r) = |r|^(2k-1)` (PHS).  Add support for:
@@ -61,6 +61,12 @@ Implementation:
 - File: `scripts/stencil_gen/stencil_gen/phs.py`
 - Test: Gaussian with ε→0 limit should approach polynomial FD (high-k PHS limit)
 - Test: Gaussian weights should sum to 0 for first derivative (polynomial reproduction from P block)
+
+**Completed:** Added `_kernel_eval`, `_kernel_deriv` (SymPy-based, all 3 kernels),
+`_rbf_weights_numeric` (numpy path for Gaussian/MQ), and extended `phs_stencil_weights`
+with `kernel`/`epsilon` keyword args.  PHS path uses `_kernel_eval`/`_kernel_deriv` for
+the augmented system.  Gaussian/MQ dispatches to numpy for efficiency.  All 12 existing
+PHS tests pass.  Smoke-tested: boundary weights vary with ε, polynomial reproduction holds.
 
 ### 29.5b — Add `uniform_boundary_weights_rbf` convenience wrapper
 
