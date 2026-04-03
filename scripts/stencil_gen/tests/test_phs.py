@@ -3581,6 +3581,15 @@ class TestTensionComparison:
             f"E4 Tension+penalty should be improved, got {pen_re:.6e}"
         )
 
+        # Tension should beat Gaussian for E4 (documented ~2.7× improvement)
+        assert tension_re < gauss_re, (
+            f"E4 Tension ({tension_re:.6e}) should beat Gaussian ({gauss_re:.6e})"
+        )
+        # Tension+penalty should be best (at least as good as tension alone)
+        assert pen_re <= tension_re + 1e-6, (
+            f"E4 Tension+penalty ({pen_re:.6e}) should be ≤ Tension ({tension_re:.6e})"
+        )
+
     # ------------------------------------------------ grid convergence
 
     def test_grid_convergence(self):

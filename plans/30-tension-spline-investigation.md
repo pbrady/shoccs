@@ -582,7 +582,7 @@ Produce comparison of all approaches investigated:
 
 ## 30.4a-review — Follow-up items from review of Phase 30.4a
 
-### 30.4a-review-a — Assert E4 cross-method ordering in comparison test
+### 30.4a-review-a — Assert E4 cross-method ordering in comparison test ✅
 
 The plan's headline findings for E4 are "Tension (3.1e-5) beats Gaussian (8.3e-5)
 by ~2.7×" and "Tension+penalty is best at 2.6e-5".  But `test_e4_comparison`
@@ -602,6 +602,9 @@ assert pen_re <= tension_re + 1e-6, (
     f"E4 Tension+penalty ({pen_re:.6e}) should be ≤ Tension ({tension_re:.6e})"
 )
 ```
+
+**Done:** Added both assertions to `test_e4_comparison`. Test passes — tension
+(~3e-5) beats Gaussian (~8e-5) and tension+penalty (~3e-5) is ≤ tension alone.
 
 ---
 
@@ -645,7 +648,7 @@ Document findings and next steps.
 20. **30.3c** — E4 (σ, γ) sweep ✅
 21. **30.3c-review-a** — Assert γ > 0 actually changes E4 results ✅
 22. **30.4a** — Comparison table ✅
-23. **30.4a-review-a** — Assert E4 cross-method ordering in comparison test
+23. **30.4a-review-a** — Assert E4 cross-method ordering in comparison test ✅
 24. **30.4b** — Modified wavenumber analysis
 25. **30.4c** — Update plan with conclusions
 
