@@ -648,10 +648,82 @@ For the best tension stencil found:
 - **Dispersion:** Boundary rows have larger dispersion error than interior
   (especially row 0 which sees only one-sided points), but errors are bounded.
 
-### 30.4c — Update plan with conclusions
+### 30.4c — Update plan with conclusions ✅
 
 Document findings and next steps.
 - File: `plans/30-tension-spline-investigation.md`
+
+**Done:** Conclusions and next steps documented below.
+
+---
+
+## Conclusions
+
+### Summary of Results
+
+Phase 30 investigated tension spline (L-spline) RBF-FD kernels as a physics-motivated
+alternative to Gaussian RBFs for stabilizing boundary stencils in high-order finite
+difference schemes.
+
+**E2 (2nd-order, p=1):**
+- **Tension splines achieve machine-precision stability** (max Re(λ) < 1e-15) at σ* ≈ 42,
+  matching the Gaussian result from Phase 29.
+- Stability is **grid-independent** (verified at n=20, 40, 80, 160).
+- Combined tension + soft conservation penalty (σ=52, γ=11.7) achieves the **best
+  conservation deficit** of all methods tested (0.86, a 46% improvement over PHS k=2).
+- CFL numbers are nearly identical across all methods (~2.84 with RK4).
+
+**E4 (4th-order, p=2):**
+- **No method achieves machine-precision stability.** An O(1e-5) instability floor persists
+  across all approaches: PHS k=2 (6.4e-3), Gaussian ε* (8.3e-5), tension σ* (3.1e-5),
+  tension + penalty (2.6e-5).
+- Tension improves over PHS k=2 by **246×** and over Gaussian by **~2.7×**, making it the
+  best kernel tested for E4.
+- The instability is **NOT grid-independent** — optimal parameters at n=40 give worse
+  results at n=20 and n=80.
+- Modified wavenumber analysis shows per-boundary-row amplification is O(0.1), much larger
+  than the O(1e-5) matrix-level instability. Matrix stability is a global property of
+  the coupled operator, not a per-stencil property.
+
+### Key Insights
+
+1. **The σ=0 limit is the right starting point.** Unlike Gaussian (ε=0 degenerates),
+   tension at σ=0 equals PHS k=2 — the best-performing kernel from Phase 29. This gives
+   a meaningful continuous deformation from a known-good baseline.
+
+2. **Conservation and stability compete.** Full conservation (zero column-sum deficit)
+   is not achievable while maintaining polynomial exactness — the null space of the
+   polynomial constraint has insufficient dimensionality. The soft penalty reduces
+   the deficit by ~30%, but cannot eliminate it.
+
+3. **The E4 instability floor is fundamental.** Four independent approaches (PHS, Gaussian,
+   tension, tension+penalty) all hit an O(1e-5) floor, suggesting this is an intrinsic
+   limitation of the E4 boundary closure structure, not a tuning problem.
+
+4. **Mixed per-row parameters don't help.** Both mixed-epsilon (Gaussian) and mixed-tension
+   per-row searches found no improvement over uniform parameters for E4.
+
+### Implications for the Solver
+
+- **E2 is production-ready** with tension σ*: machine-precision stable, grid-independent,
+  and conservative to within 46% of the PHS baseline deficit.
+- **E4 requires a different approach** to boundary closure. The O(1e-5) floor means
+  RBF-FD kernel tuning alone cannot produce a stable E4 operator. Possible directions:
+  - SBP-compatible boundary operators (different stencil structure entirely)
+  - Dissipation-based stabilization (explicit artificial dissipation at boundaries)
+  - Penalty/SAT methods for boundary enforcement
+  - Accept the O(1e-5) instability and use temporal filtering (impractical for long-time)
+
+### Next Steps
+
+1. **Phase 31 (potential):** Investigate whether the E2 tension stencil at σ*≈42 can be
+   integrated into the C++ solver as an alternative to the classical E2_1 stencil. This
+   would require generating C++ coefficient code from the optimal weights.
+
+2. **E4 alternative:** The E4 instability floor suggests investigating fundamentally
+   different boundary closure strategies rather than further kernel tuning. The classical
+   TEMO approach (which sacrifices one boundary row for conservation) may be the most
+   practical path for production E4.
 
 ---
 
@@ -681,7 +753,7 @@ Document findings and next steps.
 22. **30.4a** — Comparison table ✅
 23. **30.4a-review-a** — Assert E4 cross-method ordering in comparison test ✅
 24. **30.4b** — Modified wavenumber analysis ✅
-25. **30.4c** — Update plan with conclusions
+25. **30.4c** — Update plan with conclusions ✅
 
 ---
 
