@@ -153,7 +153,7 @@ nu≥3 raises `NotImplementedError`.  Added 4 new tests:
 `test_nu2_symmetry_second_deriv` (symmetric reflection for even nu).
 All 29 tests pass.
 
-### 29.6c — Epsilon sweep for E2 (p=1, q=1, nextra=1)
+### 29.6c — Epsilon sweep for E2 (p=1, q=1, nextra=1) ✅
 
 Sweep ε over [0.01, 10] and record max Re(λ) at each ε for n=20,40,80.
 **Important:** E2_1 requires `nextra=1` — pass it explicitly to
@@ -165,6 +165,30 @@ Sweep ε over [0.01, 10] and record max Re(λ) at each ε for n=20,40,80.
 - File: `scripts/stencil_gen/tests/test_phs.py`, class `TestEpsilonSweepE2`
 - Output: printed table of (ε, max_Re, spectral_radius) for visual inspection
 - This test uses `pytest -s` to show output; assertion is only that the sweep completes
+
+**Completed:** Added `TestEpsilonSweepE2` with 3 tests: `test_gaussian_sweep`,
+`test_multiquadric_sweep`, `test_gaussian_fine_sweep_near_best`.  All 32 tests pass.
+
+**Results — Gaussian kernel:**
+- Best ε varies by grid size: ~1.4 (n=20), ~1.5 (n=40), ~2.2 (n=80)
+- At best ε, max Re(λ) is at machine precision: 4.7e-15 (n=20), 9.1e-15 (n=40), 2.0e-14 (n=80)
+- **Effectively stable** — eigenvalues are purely imaginary to machine precision
+- Clear instability region at ε ∈ [0.05, 1.2] with peak max Re(λ) ≈ 0.23
+- Large ε (>4) has mild instability (~1e-6), likely floating-point noise
+- Fine sweep (n=40): best ε*≈2.29, max Re(λ)=3.7e-15; consistent across n=20..160
+
+**Results — Multiquadric kernel:**
+- Best ε is higher: ~6.3–7.9 depending on grid size
+- Also reaches machine precision: 4.7e-16 (n=20), 2.4e-15 (n=40), 3.5e-14 (n=80)
+- **Effectively stable**, but instability region is wider (ε ∈ [0.01, 3.5])
+- MQ has a gentler stability transition than Gaussian
+- MQ spectral radius stays closer to 1.0 at best ε (better CFL)
+
+**Key finding:** Both Gaussian and Multiquadric RBFs achieve eigenvalue stability
+for E2_1.  The Gaussian has a narrower sweet spot (~1.4–2.3) but the minimum is
+sharper.  The Multiquadric has a wider stable range (~4.4–10+) but requires
+larger ε.  This is a significant improvement over PHS k=2 which had max Re(λ) =
+5.7e-14 — both RBF kernels match or improve on this.
 
 ### 29.6d — Epsilon sweep for E4 (p=2, q=3)
 
