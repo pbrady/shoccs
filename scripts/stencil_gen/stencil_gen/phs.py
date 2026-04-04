@@ -928,6 +928,48 @@ def max_real_eigenvalue(
     return float(np.max(np.real(eigvals)))
 
 
+def stability_eigenvalue(
+    n: int,
+    p: int,
+    q: int,
+    epsilon: float,
+    kernel: str = "gaussian",
+    nu: int = 1,
+    nextra: int = 0,
+) -> float:
+    """Return the maximum real part of the eigenvalues of -D with inflow BCs.
+
+    For the advection equation u_t + u_x = 0, the semi-discrete system is
+    du/dt = -D u.  Stability requires all eigenvalues of -D_bc to have
+    non-positive real parts, where D_bc is D with the inflow row/column
+    removed (Dirichlet at inflow, floating at outflow).
+
+    Returns the maximum real part of eigenvalues of -D_bc.
+    A non-positive return value means the scheme is stable.
+    """
+    D = build_diff_matrix_rbf(n, p, q, epsilon, kernel, nu, nextra)
+    D_bc = D[1:, 1:]  # remove inflow (first row and column)
+    eigs = np.linalg.eigvals(-D_bc)
+    return float(np.max(eigs.real))
+
+
+def stability_eigenvalue_from_matrix(D: np.ndarray) -> float:
+    """Return the maximum real part of eigenvalues of -D_bc.
+
+    D_bc = D[1:, 1:] removes the inflow row/column (Dirichlet at left,
+    floating at right).  For the advection equation u_t + u_x = 0, the
+    semi-discrete operator is -D.  Stability requires all eigenvalues of
+    -D_bc to have non-positive real parts.
+
+    Returns
+    -------
+    float
+        max Re(eigenvalue of -D_bc).  Non-positive means stable.
+    """
+    D_bc = D[1:, 1:]
+    return float(np.max(np.linalg.eigvals(-D_bc).real))
+
+
 def build_diff_matrix_rbf_penalty(
     n: int,
     p: int,

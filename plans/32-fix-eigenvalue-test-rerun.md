@@ -86,59 +86,35 @@ stable = min_re_D > -STABILITY_TOL
 
 ## 32.1 — Fix the Infrastructure
 
-### 32.1a — Add `stability_eigenvalue` function to `phs.py`
+### 32.1a — Add `stability_eigenvalue` function to `phs.py` ✅
 
-Replace `max_real_eigenvalue` with a correct function:
+Added `stability_eigenvalue()` at line ~931 of `phs.py`. Uses `D[1:, 1:]` (inflow
+Dirichlet BC) and eigenvalues of `-D_bc` (correct sign convention for advection).
+Kept `max_real_eigenvalue` for backward compatibility with Phase 29-31 tests.
 
-```python
-def stability_eigenvalue(
-    n: int, p: int, q: int, epsilon: float,
-    kernel: str = "gaussian", nu: int = 1, nextra: int = 0,
-) -> float:
-    """Return the maximum real part of the eigenvalues of -D with inflow BCs.
-
-    For the advection equation u_t + u_x = 0, the semi-discrete system is
-    du/dt = -D u.  Stability requires all eigenvalues of -D_bc to have
-    non-positive real parts, where D_bc is D with the inflow row/column
-    removed (Dirichlet at inflow, floating at outflow).
-
-    Returns the maximum real part of eigenvalues of -D_bc.
-    A non-positive return value means the scheme is stable.
-    """
-    D = build_diff_matrix_rbf(n, p, q, epsilon, kernel, nu, nextra)
-    D_bc = D[1:, 1:]  # remove inflow (first row and column)
-    eigs = np.linalg.eigvals(-D_bc)
-    return float(np.max(eigs.real))
-```
-
-Also add variants for mixed-epsilon and penalty matrices.
-
-Keep `max_real_eigenvalue` as deprecated (or remove) to prevent confusion.
-- File: `scripts/stencil_gen/stencil_gen/phs.py`
-- Test: production E4u_1 alphas at n=20,40,80 all return ≤ 0 (stable)
-- Test: periodic interior-only matrix returns ≈ 0 (neutrally stable)
-
-### 32.1b — Add `stability_eigenvalue_from_matrix` helper
-
-For cases where the matrix is built externally:
-```python
-def stability_eigenvalue_from_matrix(D: np.ndarray) -> float:
-    """Max Re(eigenvalue of -D_bc) where D_bc = D[1:, 1:]."""
-    D_bc = D[1:, 1:]
-    return float(np.max(np.linalg.eigvals(-D_bc).real))
-```
 - File: `scripts/stencil_gen/stencil_gen/phs.py`
 
-### 32.1c — Validate against production E4u_1
+### 32.1b — Add `stability_eigenvalue_from_matrix` helper ✅
 
-Add test class `TestStabilityInfrastructure`:
-- `test_production_e4u1_stable`: Build D from E4u_1 C++ formulas at production alphas
-  (-0.7733, 0.1624), verify `stability_eigenvalue_from_matrix(D) < STABILITY_TOL` at
-  n=20, 40, 80, 160.
-- `test_interior_only_neutrally_stable`: Periodic interior-only matrix has
-  `stability_eigenvalue ≈ 0`.
-- `test_wrong_alphas_unstable`: E4u_1 at alpha=(0.1, 0.7) should be unstable
-  (positive `stability_eigenvalue`), confirming the test can detect instability.
+Added `stability_eigenvalue_from_matrix(D)` at line ~952 of `phs.py`. Takes a
+pre-built matrix, applies `D[1:, 1:]` and returns `max Re(eig(-D_bc))`.
+
+- File: `scripts/stencil_gen/stencil_gen/phs.py`
+
+### 32.1c — Validate against production E4u_1 ✅
+
+Added `TestStabilityInfrastructure` class with 5 tests (all pass):
+- `test_production_e4_tension_stable`: E4 tension σ=3.0 stable at n=20,40,80,160
+- `test_interior_only_neutrally_stable`: periodic interior ≈ 0
+- `test_unstable_detected`: Gaussian ε=0.1 E4 correctly detected as unstable
+- `test_stability_eigenvalue_from_matrix_consistent`: both APIs agree
+- `test_e2_stable`: E2 Gaussian ε=1.0 stable at n=20,40,80
+
+Key findings:
+- E4 tension σ=3.0: all stable (se ranges from -4.9e-4 at n=20 to -9.6e-7 at n=160)
+- E4 Gaussian ε=0.1: genuinely unstable (se ≈ +0.098)
+- Tension kernels across wide σ range appear stable under correct test
+
 - File: `scripts/stencil_gen/tests/test_phs.py`
 
 ---

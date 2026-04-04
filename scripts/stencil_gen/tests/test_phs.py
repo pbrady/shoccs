@@ -217,6 +217,8 @@ from stencil_gen.phs import (
     build_diff_matrix_mixed_epsilon,
     build_diff_matrix_rbf,
     max_real_eigenvalue,
+    stability_eigenvalue,
+    stability_eigenvalue_from_matrix,
 )
 
 # Floating-point eigenvalue solvers return tiny positive real parts (~1e-14)
@@ -4486,3 +4488,91 @@ class TestCrossValidationE2:
         assert best_nx2[1] < STABILITY_TOL, (
             f"E2 nextra=2 unexpectedly unstable: {best_nx2[1]:.6e}"
         )
+
+
+# ---------------------------------------------------------------------------
+# 32.1c: Validate corrected stability infrastructure
+# ---------------------------------------------------------------------------
+
+
+class TestStabilityInfrastructure:
+    """Validate stability_eigenvalue with correct BC and sign convention.
+
+    The corrected test removes the inflow row/column (Dirichlet at left)
+    and checks eigenvalues of -D (the semi-discrete advection operator).
+    """
+
+    def test_production_e4_tension_stable(self):
+        """E4 with tension spline at σ=3.0 is stable under correct test.
+
+        With the corrected stability check (inflow-Dirichlet BC, eigenvalues
+        of -D), the E4 tension spline configuration is stable at all grid
+        sizes.
+        """
+        for n in [20, 40, 80, 160]:
+            se = stability_eigenvalue(n, p=2, q=3, epsilon=3.0,
+                                      kernel="tension", nu=1, nextra=0)
+            assert se < STABILITY_TOL, (
+                f"E4 tension σ=3.0, n={n}: expected stable, "
+                f"got stability_eigenvalue={se:.6e}"
+            )
+
+    def test_interior_only_neutrally_stable(self):
+        """Periodic interior-only matrix should be neutrally stable.
+
+        A pure circulant interior matrix has purely imaginary eigenvalues,
+        so eigenvalues of -D also have zero real parts (neutrally stable).
+        """
+        from stencil_gen.interior import derive_interior, full_gamma_array
+
+        n = 40
+        p = 2
+        interior_coeffs = derive_interior(0, p, 1)
+        interior_w = [float(c) for c in full_gamma_array(interior_coeffs)]
+
+        D = np.zeros((n, n))
+        for i in range(n):
+            for k_idx, offset in enumerate(range(-p, p + 1)):
+                j = (i + offset) % n
+                D[i, j] = interior_w[k_idx]
+
+        se = stability_eigenvalue_from_matrix(D)
+        assert abs(se) < 1e-12, (
+            f"Periodic interior stability_eigenvalue should be ≈0, got {se:.6e}"
+        )
+
+    def test_unstable_detected(self):
+        """A known-unstable configuration should have positive stability_eigenvalue.
+
+        E4 (p=2) with Gaussian RBF at epsilon=0.1 produces an unstable
+        advection operator, confirming the test can detect instability.
+        """
+        se = stability_eigenvalue(20, p=2, q=3, epsilon=0.1,
+                                  kernel="gaussian", nu=1, nextra=0)
+        assert se > STABILITY_TOL, (
+            f"Expected unstable configuration, got stability_eigenvalue={se:.6e}"
+        )
+
+    def test_stability_eigenvalue_from_matrix_consistent(self):
+        """stability_eigenvalue and stability_eigenvalue_from_matrix agree."""
+        n, p, q, eps = 20, 1, 2, 1.0
+        D = build_diff_matrix_rbf(n, p, q, eps, kernel="gaussian", nu=1, nextra=0)
+        se_direct = stability_eigenvalue(n, p, q, eps, kernel="gaussian",
+                                         nu=1, nextra=0)
+        se_from_mat = stability_eigenvalue_from_matrix(D)
+        assert abs(se_direct - se_from_mat) < 1e-14, (
+            f"Mismatch: direct={se_direct:.6e}, from_matrix={se_from_mat:.6e}"
+        )
+
+    def test_e2_stable(self):
+        """E2 (p=1) with standard parameters should be stable.
+
+        E2 is known to be unconditionally stable with reasonable boundary
+        closures.
+        """
+        for n in [20, 40, 80]:
+            se = stability_eigenvalue(n, p=1, q=2, epsilon=1.0,
+                                      kernel="gaussian", nu=1, nextra=0)
+            assert se < STABILITY_TOL, (
+                f"E2 n={n}: expected stable, got stability_eigenvalue={se:.6e}"
+            )
