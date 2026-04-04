@@ -138,20 +138,38 @@ Results summary:
 
 - File: `scripts/stencil_gen/tests/test_phs.py`, class `TestCorrectedSweepE2`
 
-**Follow-up (review flag):** All 4 tests in `TestCorrectedSweepE2` are assertion-free —
-they print tables but never `assert`, so they trivially pass even if results regress.
-Add assertions to lock in the documented findings:
-- `test_multiquadric_sweep`: assert all 60 epsilons stable at each n (60/60 claimed)
-- `test_gaussian_sweep`: assert ≥55/60 stable at each n (57/60 claimed)
-- `test_phs_k2_baseline`: assert stable at n=20,40,80
-- `test_gaussian_fine_sweep`: assert best ε* is stable across n=20,40,80,160
+**Review follow-up (assertions added) ✅:** All 4 tests now have assertions:
+- `test_multiquadric_sweep`: asserts 60/60 stable at each n
+- `test_gaussian_sweep`: asserts ≥55/60 stable at each n
+- `test_phs_k2_baseline`: asserts stable at n=20,40,80
+- `test_gaussian_fine_sweep`: asserts best ε* stable across n=20,40,80,160
 
-### 32.2b — E4 PHS/Gaussian/MQ sweep with correct stability test
+### 32.2b — E4 PHS/Gaussian/MQ sweep with correct stability test ✅
 
-Same for E4:
-- PHS k=2 for E4
-- Gaussian ε sweep for E4
-- Key question: is the O(1e-5) "floor" still present, or was it an artifact?
+Redid the Phase 29 E4 sweeps using `stability_eigenvalue`.  All tests pass.
+
+**Key finding: E4 instability is real for most Gaussian epsilons, but stable bands exist.
+The O(1e-5) "floor" was partially an artifact — correct test reveals clear stability
+in the stable regions.**
+
+Results summary:
+- **PHS k=2**: Stable at n=20,40,80 (se from -8.6e-3 to -5.9e-4).
+- **Gaussian ε sweep**: Only 8/60 epsilons stable at each n, in a narrow band
+  around ε≈0.68-1.94.  Most of the epsilon range is genuinely unstable (se≈+0.087-0.098).
+  Best ε≈0.86 with se≈-6.2e-3 (n=20) to -2.9e-5 (n=80), scaling as O(h).
+- **Multiquadric ε sweep**: Much broader stability — 24/60 at n=20, 21/60 at n=40,80.
+  Two stable bands: [0.68, 1.08] and [1.54, 10.0] (narrow unstable gap at ε≈1.2-1.4).
+  Best ε≈0.96 (n=20, se≈-1.2e-2) to ε≈1.08 (n=40,80, se≈-1.4e-3 to -1.1e-4).
+- **Gaussian fine sweep**: Best ε*≈0.894 gives se≈-3.6e-4 at n=40, stable
+  across n=20,40,80,160 with se scaling as O(h).
+
+Conclusions vs Phase 29:
+- Phase 29 "floor" at O(1e-5) was the wrong metric entirely — the correct stability
+  eigenvalue shows clearly negative values (stable) in the stable bands.
+- Gaussian E4 is genuinely unstable for most ε values (large positive se), but a
+  tunable stable band exists. MQ has a much broader stable region.
+- PHS k=2 is unconditionally stable for E4, same as E2.
+
 - File: `scripts/stencil_gen/tests/test_phs.py`, class `TestCorrectedSweepE4`
 
 ---
