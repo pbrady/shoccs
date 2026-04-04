@@ -224,16 +224,35 @@ Conclusions:
 
 - File: `scripts/stencil_gen/tests/test_phs.py`, class `TestCorrectedTensionE4`
 
-**Review follow-up (missing count assertions):** `test_tension_coarse_sweep` in
-`TestCorrectedTensionE4` only asserts σ=0 is stable and best se < -1e-6.  It does
-NOT assert stability counts, unlike the E2 equivalent which asserts `>=55/61`.
-Add count assertions to guard the "broad stability" claim:
+**Review follow-up (count assertions added) ✅:** Added count assertions to
+`test_tension_coarse_sweep` in `TestCorrectedTensionE4`:
 - n=20,40: assert `n_stable >= 55` (plan says 61/61)
 - n=80: assert `n_stable >= 50` (plan says 56/61, conservative bound)
 
-### 32.3c — E4 tension + penalty sweep with correct stability test
+### 32.3c — E4 tension + penalty sweep with correct stability test ✅
 
-Redo (σ, γ) joint sweep for E4 with correct test.
+Redid the Phase 30.3c joint (σ, γ) sweep using `stability_eigenvalue_from_matrix`.
+All tests pass.
+
+**Key finding: Penalty does NOT help — PHS k=2 (σ=0, γ=0) is already optimal.
+Moderate-to-large γ destroys stability.**
+
+Results summary:
+- **Coarse 2D sweep** (n=40, 25 σ × 25 γ = 625 points): Best is (σ=0, γ=0)
+  with stab_eig=-4.1e-3.  Best γ>0 point gives stab_eig=-2.1e-3 (worse).
+- **Penalty at σ=0**: Very small γ≈0.032 gives marginal improvement
+  (stab_eig=-4.26e-3 vs -4.15e-3).  γ ≥ 0.87 makes the scheme unstable
+  (stab_eig≈+1.5e-4 to +1.8e-4).
+- **Grid independence**: (σ=0, γ=0) stable at n=20,40,80 with stab_eig
+  from -8.6e-3 (n=20) to -5.9e-4 (n=80), scaling as O(h).
+
+Conclusions vs Phase 30.3c:
+- Phase 30.3c found penalty "improved" E4 from max Re(λ)≈8.7e-5 to ≈3.3e-5 —
+  but this was under the wrong metric.  Under the correct metric, E4 tension
+  was already stable, and the penalty mostly hurts.
+- The conservation penalty is not useful for E4 stability.  PHS k=2 (σ=0)
+  with no penalty is the best choice.
+
 - File: `scripts/stencil_gen/tests/test_phs.py`, class `TestCorrectedTensionPenaltyE4`
 
 ---
