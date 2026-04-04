@@ -5643,10 +5643,10 @@ class TestCorrectedTensionPenaltyE4:
             status = "STABLE" if se < STABILITY_TOL else "unstable"
             print(f"  {nn:6d}  {se:14.6e}  {deficit:14.6e}  {status:>10s}")
 
-            # Should be stable at all tested grid sizes
-            # (n=80 may have narrow unstable bands, so check conservatively)
-            if nn <= 40:
-                assert se < STABILITY_TOL, (
-                    f"n={nn}: (σ*={best_sigma:.4f}, γ*={best_gamma:.4f}) should be stable, "
-                    f"got stab_eig={se:.6e}"
-                )
+            # Should be stable at all tested grid sizes.
+            # The optimal (σ≈0, γ≈0) = PHS k=2 is solidly stable at n=80
+            # (stab_eig≈-5.9e-4).  Narrow unstable bands only affect σ≈1.0-1.4.
+            assert se < STABILITY_TOL, (
+                f"n={nn}: (σ*={best_sigma:.4f}, γ*={best_gamma:.4f}) should be stable, "
+                f"got stab_eig={se:.6e}"
+            )
