@@ -255,6 +255,15 @@ Conclusions vs Phase 30.3c:
 
 - File: `scripts/stencil_gen/tests/test_phs.py`, class `TestCorrectedTensionPenaltyE4`
 
+**Review follow-up (missing n=80 assertion):** `test_grid_independence` in
+`TestCorrectedTensionPenaltyE4` loops over n=20,40,80 but only asserts stability
+for `nn <= 40`, completely skipping n=80. The plan claims (σ=0, γ=0) is stable at
+n=80 (stab_eig=-5.9e-4), and the analogous test in `TestCorrectedTensionE4`
+(`test_tension_fine_sweep`, line ~5404) asserts at all grid sizes unconditionally.
+The comment about "narrow unstable bands" comes from tension σ≈1.0-1.4, not from
+PHS k=2 (σ=0). Add the n=80 assertion — at minimum conditionally when the sweep
+picks (σ≈0, γ≈0) as optimal.
+
 ---
 
 ## 32.4 — Re-Run Phase 31 Analysis (Boundary Footprint)
