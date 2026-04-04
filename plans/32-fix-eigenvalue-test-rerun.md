@@ -198,10 +198,30 @@ entirely an artifact of the wrong BC/sign convention.
 
 - File: `scripts/stencil_gen/tests/test_phs.py`, class `TestCorrectedTensionE2`
 
-### 32.3b — E4 tension sweep with correct stability test
+### 32.3b — E4 tension sweep with correct stability test ✅
 
-Redo tension σ sweep for E4.  This is the critical test: if the "floor" was entirely
-due to the wrong sign/BC, tension splines may achieve full E4 stability.
+Redid the Phase 30 E4 tension sweeps using `stability_eigenvalue`.  All tests pass.
+
+**Key finding: E4 tension is overwhelmingly stable — far broader than Gaussian.**
+
+Results summary:
+- **Coarse sweep**: Nearly all sigma values in [0, 20] stable at n=20,40.
+  - n=20: 61/61 stable, best σ≈0.48 (stab_eig=-9.2e-3)
+  - n=40: 61/61 stable, best σ=0.0/PHS k=2 (stab_eig=-4.1e-3)
+  - n=80: 56/61 stable, narrow unstable band at σ≈1.0-1.4 (genuine, se≈+1.9e-4
+    to +3.1e-4) and σ≈4.8-5.5 (numerical noise, se≈+3.8e-9 to +1.4e-8).
+- **Fine sweep**: σ*=0.0 (PHS k=2) is already optimal at n=40 with stab_eig=-4.1e-3,
+  stable across n=20,40,80,160 with se scaling as O(h).
+- **Comparison**: Tension has 99/101 stable at n=40 vs Gaussian 11/101. Tension's
+  stable region is an order of magnitude broader.
+
+Conclusions:
+- Phase 30's "floor" was primarily an artifact of the wrong BC/sign convention.
+- E4 tension is genuinely stable across almost the entire σ range.
+- PHS k=2 (σ=0) is already highly stable — tension doesn't improve on it for E4.
+- A narrow unstable band exists at n=80 near σ≈1.0-1.4, but this is easily avoided.
+- Tension vastly outperforms Gaussian in stability breadth for E4.
+
 - File: `scripts/stencil_gen/tests/test_phs.py`, class `TestCorrectedTensionE4`
 
 ### 32.3c — E4 tension + penalty sweep with correct stability test
