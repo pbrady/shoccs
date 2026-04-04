@@ -5840,6 +5840,15 @@ class TestCorrectedFootprint:
                     f"got best stab_eig={best_per_nx[nx][1]:.6e}"
                 )
 
+        # Count assertions: nextra=0 is broadest, nextra=1 is narrowest
+        min_stable = {0: 90, 1: 50, 2: 70, 3: 90}
+        for nx, threshold in min_stable.items():
+            if nx in stable_counts:
+                assert stable_counts[nx] >= threshold, (
+                    f"nextra={nx}: expected >={threshold}/{len(sigmas)} stable, "
+                    f"got {stable_counts[nx]}"
+                )
+
     def test_nextra0_grid_independence(self):
         """Verify E4 nextra=0 PHS k=2 stability across grid sizes.
 
