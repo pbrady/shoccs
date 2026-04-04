@@ -294,6 +294,16 @@ Conclusions vs Phase 31:
 
 - File: `scripts/stencil_gen/tests/test_phs.py`, class `TestCorrectedFootprint`
 
+**Review follow-up (missing count assertions):** `test_nextra_sweep_e4_tension`
+asserts each nextra has at least one stable σ, but does not assert on the count
+of stable points per nextra. This is the key finding (nextra=0: 100/101 vs
+nextra=1: 63/101) and follows the same gap pattern flagged in 32.2a, 32.3b, 32.3c.
+Add conservative count assertions per nextra value:
+- nextra=0: assert `n_stable >= 90` (plan says 100/101)
+- nextra=1: assert `n_stable >= 50` (plan says 63/101)
+- nextra=2: assert `n_stable >= 70` (plan says 82/101)
+- nextra=3: assert `n_stable >= 90` (plan says 100/101)
+
 ---
 
 ## 32.5 — Updated Comparison and Conclusions
