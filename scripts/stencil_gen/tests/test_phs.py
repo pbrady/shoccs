@@ -5026,3 +5026,208 @@ class TestCorrectedSweepE4:
                 f"E4 Gaussian best eps*={eps_star:.6f} should be stable at n={nn}, "
                 f"got stab_eig={se:.6e}"
             )
+
+
+# ---------------------------------------------------------------------------
+# 32.3a: E2 corrected tension sweep
+# ---------------------------------------------------------------------------
+
+
+class TestCorrectedTensionE2:
+    """Re-run Phase 30 E2 tension sweeps with the corrected stability metric.
+
+    Uses stability_eigenvalue (inflow-Dirichlet BC, eigenvalues of -D)
+    instead of the raw max Re(eig(D)) used in Phase 30.
+
+    E2_1 parameters: p=1, q=1, nextra=1.
+    Sweeps tension parameter σ over [0, 20].
+    """
+
+    # E2_1 parameters
+    P = 1
+    Q = 1
+    NEXTRA = 1
+    NU = 1
+
+    def _sweep_stability(self, n_values, sigmas):
+        """Run sigma sweep using stability_eigenvalue.
+
+        Returns dict {n: list of (sigma, se)} where se = max Re(eig(-D_bc)).
+        """
+        results = {}
+        for n in n_values:
+            rows = []
+            for sigma in sigmas:
+                se = stability_eigenvalue(
+                    n, p=self.P, q=self.Q, epsilon=sigma,
+                    kernel="tension", nu=self.NU, nextra=self.NEXTRA,
+                )
+                rows.append((sigma, se))
+            results[n] = rows
+        return results
+
+    def _print_table(self, label, results):
+        """Print formatted sweep table with stability classification."""
+        print(f"\n{'='*72}")
+        print(f"  {label}")
+        print(f"{'='*72}")
+        for n, rows in sorted(results.items()):
+            print(f"\n  n = {n}")
+            print(f"  {'sigma':>10s}  {'stab_eig':>14s}  {'status':>10s}")
+            print(f"  {'-'*10}  {'-'*14}  {'-'*10}")
+            for sigma, se in rows:
+                status = "STABLE" if se < STABILITY_TOL else "unstable"
+                print(f"  {sigma:10.4f}  {se:14.6e}  {status:>10s}")
+
+        # Summary: best sigma per n
+        print(f"\n  --- Best sigma (min stability eigenvalue) ---")
+        for n, rows in sorted(results.items()):
+            best = min(rows, key=lambda r: r[1])
+            stable = "STABLE" if best[1] < STABILITY_TOL else "unstable"
+            print(f"  n={n:3d}: σ={best[0]:.4f}, stab_eig={best[1]:.6e} [{stable}]")
+
+    def test_tension_coarse_sweep(self):
+        """Coarse sweep of σ over [0, 20] for E2_1 with corrected stability."""
+        sigmas = np.concatenate([[0.0], np.logspace(np.log10(0.01), np.log10(20), 60)])
+        n_values = [20, 40, 80]
+        results = self._sweep_stability(n_values, sigmas)
+        self._print_table(
+            "E2_1 Tension — Corrected Stability (p=1, q=1, nextra=1)", results
+        )
+
+        # Report stable sigma ranges
+        for n, rows in results.items():
+            stable_sigmas = [s for s, se in rows if se < STABILITY_TOL]
+            n_stable = len(stable_sigmas)
+            if stable_sigmas:
+                print(f"\n  n={n}: {n_stable}/{len(rows)} stable, "
+                      f"σ range [{min(stable_sigmas):.4f}, {max(stable_sigmas):.4f}]")
+            else:
+                best = min(rows, key=lambda r: r[1])
+                print(f"\n  n={n}: no stable σ found, "
+                      f"best stab_eig={best[1]:.6e} at σ={best[0]:.4f}")
+
+        # E2 was universally stable under corrected test (Phase 32.2a).
+        # Tension (being a generalization of PHS k=2) should also be stable
+        # across essentially the entire σ range.
+        for n, rows in results.items():
+            n_stable = sum(1 for _, se in rows if se < STABILITY_TOL)
+            assert n_stable >= 55, (
+                f"n={n}: expected >=55/61 stable tension sigmas, got {n_stable}"
+            )
+
+    def test_tension_fine_sweep(self):
+        """Fine sweep around best σ from coarse sweep with corrected stability.
+
+        Uses n=40 for the coarse pass, then refines around minimum.
+        """
+        n = 40
+        # Coarse sweep (include σ=0)
+        sigmas_coarse = np.concatenate(
+            [[0.0], np.logspace(np.log10(0.01), np.log10(20), 60)]
+        )
+        coarse = []
+        for sigma in sigmas_coarse:
+            se = stability_eigenvalue(
+                n, p=self.P, q=self.Q, epsilon=sigma,
+                kernel="tension", nu=self.NU, nextra=self.NEXTRA,
+            )
+            coarse.append((sigma, se))
+
+        best_coarse = min(coarse, key=lambda r: r[1])
+        sigma_best = best_coarse[0]
+
+        # Fine sweep: ±factor around best (or [0, 2] if best is near 0)
+        if sigma_best < 0.1:
+            lo, hi = 0.0, 2.0
+        else:
+            lo = max(0.0, sigma_best / 5)
+            hi = sigma_best * 5
+        sigmas_fine = np.linspace(lo, hi, 200)
+        fine = []
+        for sigma in sigmas_fine:
+            se = stability_eigenvalue(
+                n, p=self.P, q=self.Q, epsilon=sigma,
+                kernel="tension", nu=self.NU, nextra=self.NEXTRA,
+            )
+            fine.append((sigma, se))
+
+        best_fine = min(fine, key=lambda r: r[1])
+        stable = best_fine[1] < STABILITY_TOL
+        print(f"\n  E2_1 Tension corrected fine sweep (n={n}):")
+        print(f"  Coarse best: σ={best_coarse[0]:.6f}, stab_eig={best_coarse[1]:.6e}")
+        print(f"  Fine best:   σ={best_fine[0]:.6f}, stab_eig={best_fine[1]:.6e}")
+        print(f"  Stable: {stable}")
+
+        assert stable, (
+            f"E2 tension fine sweep best σ={best_fine[0]:.6f} should be stable, "
+            f"got stab_eig={best_fine[1]:.6e}"
+        )
+
+        # Verify best σ* is stable at multiple grid sizes
+        sigma_star = best_fine[0]
+        print(f"\n  Checking σ*={sigma_star:.6f} across grid sizes:")
+        for nn in [20, 40, 80, 160]:
+            se = stability_eigenvalue(
+                nn, p=self.P, q=self.Q, epsilon=sigma_star,
+                kernel="tension", nu=self.NU, nextra=self.NEXTRA,
+            )
+            status = "STABLE" if se < STABILITY_TOL else "unstable"
+            print(f"    n={nn:4d}: stab_eig={se:.6e} [{status}]")
+            assert se < STABILITY_TOL, (
+                f"E2 tension σ*={sigma_star:.6f} should be stable at n={nn}, "
+                f"got stab_eig={se:.6e}"
+            )
+
+    def test_compare_with_gaussian(self):
+        """Compare tension best σ with Gaussian best ε for E2_1.
+
+        Both should be comfortably stable under the corrected test.
+        """
+        n = 40
+        # Tension sweep
+        sigmas = np.concatenate(
+            [[0.0], np.logspace(np.log10(0.01), np.log10(20), 100)]
+        )
+        tension_results = []
+        for sigma in sigmas:
+            se = stability_eigenvalue(
+                n, p=self.P, q=self.Q, epsilon=sigma,
+                kernel="tension", nu=self.NU, nextra=self.NEXTRA,
+            )
+            tension_results.append((sigma, se))
+
+        # Gaussian sweep (same range for comparison)
+        epsilons = np.logspace(np.log10(0.01), np.log10(20), 100)
+        gaussian_results = []
+        for eps in epsilons:
+            se = stability_eigenvalue(
+                n, p=self.P, q=self.Q, epsilon=eps,
+                kernel="gaussian", nu=self.NU, nextra=self.NEXTRA,
+            )
+            gaussian_results.append((eps, se))
+
+        best_tension = min(tension_results, key=lambda r: r[1])
+        best_gaussian = min(gaussian_results, key=lambda r: r[1])
+
+        print(f"\n  E2_1 Corrected Comparison (n={n}):")
+        print(f"  {'Method':>15s}  {'param':>10s}  {'stab_eig':>14s}  {'status':>10s}")
+        print(f"  {'-'*15}  {'-'*10}  {'-'*14}  {'-'*10}")
+
+        t_stable = "STABLE" if best_tension[1] < STABILITY_TOL else "unstable"
+        g_stable = "STABLE" if best_gaussian[1] < STABILITY_TOL else "unstable"
+        print(f"  {'Tension':>15s}  {best_tension[0]:10.4f}  {best_tension[1]:14.6e}  {t_stable:>10s}")
+        print(f"  {'Gaussian':>15s}  {best_gaussian[0]:10.4f}  {best_gaussian[1]:14.6e}  {g_stable:>10s}")
+
+        # PHS k=2 (σ=0) for reference
+        phs_se = tension_results[0][1]  # σ=0 entry
+        phs_stable = "STABLE" if phs_se < STABILITY_TOL else "unstable"
+        print(f"  {'PHS k=2 (σ=0)':>15s}  {'0.0':>10s}  {phs_se:14.6e}  {phs_stable:>10s}")
+
+        # Both tension and Gaussian should be stable for E2 under corrected test
+        assert best_tension[1] < STABILITY_TOL, (
+            f"E2 tension best not stable: stab_eig = {best_tension[1]:.6e}"
+        )
+        assert best_gaussian[1] < STABILITY_TOL, (
+            f"E2 Gaussian best not stable: stab_eig = {best_gaussian[1]:.6e}"
+        )

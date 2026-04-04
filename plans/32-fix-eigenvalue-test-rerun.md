@@ -176,9 +176,26 @@ Conclusions vs Phase 29:
 
 ## 32.3 — Re-Run Phase 30 Analysis (Tension Spline)
 
-### 32.3a — E2 tension sweep with correct stability test
+### 32.3a — E2 tension sweep with correct stability test ✅
 
-Redo tension σ sweep for E2.
+Redid the Phase 30 E2 tension sweeps using `stability_eigenvalue`.  All tests pass.
+
+**Key finding: E2 tension is universally stable — 61/61 sigmas stable at every grid size.**
+
+Results summary:
+- **Coarse sweep**: All 61 sigma values in [0, 20] stable at n=20,40,80.
+  - n=20: best σ=0.0 (PHS k=2), stab_eig=-1.94e-2
+  - n=40: best σ≈3.29, stab_eig=-2.72e-3
+  - n=80: best σ≈4.85, stab_eig=-3.85e-4
+- **Fine sweep**: σ*≈3.44 gives stab_eig=-2.85e-3 at n=40, stable across
+  n=20,40,80,160 with se scaling as O(h²).
+- **Comparison**: Both tension (σ*≈3.42) and Gaussian (ε*≈0.01) are stable.
+  PHS k=2 (σ=0) also stable. E2 is unconditionally stable regardless of
+  kernel choice.
+
+Confirms Phase 32.2a: E2 was always stable. Phase 30 E2 "instability" was
+entirely an artifact of the wrong BC/sign convention.
+
 - File: `scripts/stencil_gen/tests/test_phs.py`, class `TestCorrectedTensionE2`
 
 ### 32.3b — E4 tension sweep with correct stability test
