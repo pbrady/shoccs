@@ -264,11 +264,34 @@ The narrow unstable bands only affect σ≈1.0-1.4, not σ=0. Test passes.
 
 ## 32.4 — Re-Run Phase 31 Analysis (Boundary Footprint)
 
-### 32.4a — Nextra sweep with correct stability test
+### 32.4a — Nextra sweep with correct stability test ✅
 
-Redo nextra × σ sweep for E4 with correct test.
-- If E4 is now stable at nextra=0, this section confirms it and is brief.
-- If E4 is STILL not stable, nextra sweep determines minimum footprint.
+Redid the Phase 31 nextra × σ sweep using `stability_eigenvalue`.  All tests pass.
+
+**Key finding: E4 at nextra=0 is already the most stable — nextra>0 is not needed
+and can actually hurt stability.**
+
+Results summary (n=40):
+- **nextra=0**: 100/101 σ values stable.  Best σ=0 (PHS k=2), stab_eig=-4.1e-3.
+  Only 1 unstable point near σ≈5.2 (marginal, se≈+1.9e-7).
+- **nextra=1**: Only 63/101 stable.  Many σ>2.0 become unstable (se up to +3.3e-3).
+  Best σ≈1.75, stab_eig=-9.5e-4.
+- **nextra=2**: 82/101 stable.  Best σ≈2.68, stab_eig=-2.3e-3.  Some instability
+  at larger σ values.
+- **nextra=3**: 100/101 stable, recovers broad stability.  Best σ≈2.92,
+  stab_eig=-1.0e-3.  But still not as good as nextra=0.
+
+Grid independence (nextra=0, σ=0 PHS k=2): stable at n=20,40,80,160 with
+stab_eig from -8.6e-3 (n=20) to -5.2e-5 (n=160), scaling as O(h).
+
+Conclusions vs Phase 31:
+- Phase 31 found nextra=1 helped under the wrong metric (lowered max Re(eig(D))).
+  Under the correct metric, nextra=0 is already broadly stable and nextra=1
+  actually narrows the stable σ range.
+- The entire boundary footprint investigation was unnecessary — E4 nextra=0 with
+  PHS k=2 is the most stable configuration.
+- Increasing nextra adds DOF but doesn't improve stability.
+
 - File: `scripts/stencil_gen/tests/test_phs.py`, class `TestCorrectedFootprint`
 
 ---

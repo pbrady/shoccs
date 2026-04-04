@@ -5650,3 +5650,216 @@ class TestCorrectedTensionPenaltyE4:
                 f"n={nn}: (σ*={best_sigma:.4f}, γ*={best_gamma:.4f}) should be stable, "
                 f"got stab_eig={se:.6e}"
             )
+
+
+# ---------------------------------------------------------------------------
+# 32.4a: Nextra sweep with correct stability test
+# ---------------------------------------------------------------------------
+
+
+class TestCorrectedFootprint:
+    """Re-run Phase 31 nextra × σ sweep for E4 with corrected stability.
+
+    Uses stability_eigenvalue (inflow-Dirichlet BC, eigenvalues of -D)
+    instead of the raw max Re(eig(D)) used in Phase 31.
+
+    Phase 32.3b confirmed E4 at nextra=0 is already broadly stable with PHS k=2
+    (σ=0).  This test verifies that finding and checks how nextra affects stability.
+
+    E4 dimensions per nextra:
+      nx=0: t=6, r=4, extra DOF/row=2, total=8
+      nx=1: t=7, r=5, extra DOF/row=3, total=15
+      nx=2: t=8, r=6, extra DOF/row=4, total=24
+      nx=3: t=9, r=7, extra DOF/row=5, total=35
+    """
+
+    P = 2
+    Q = 3
+    NU = 1
+
+    def _sweep_stability(self, n, nextra, sigmas):
+        """Sweep sigma for given nextra, return list of (sigma, se).
+
+        se = max Re(eig(-D_bc)) via stability_eigenvalue.
+        """
+        rows = []
+        for sigma in sigmas:
+            se = stability_eigenvalue(
+                n, p=self.P, q=self.Q, epsilon=sigma,
+                kernel="tension", nu=self.NU, nextra=nextra,
+            )
+            rows.append((sigma, se))
+        return rows
+
+    def test_nextra_comparison(self):
+        """Compare nextra=0 vs nextra=1 for E4 tension with corrected stability.
+
+        Phase 31.2a found nextra=1 helped under the wrong metric.
+        Phase 32.3b found E4 nextra=0 is already stable.
+        Confirm: nextra=0 is stable, and nextra=1 is also stable.
+        """
+        n = 40
+        sigmas = np.concatenate([
+            [0.0],
+            np.logspace(np.log10(0.01), np.log10(50), 80),
+        ])
+
+        results_nx0 = self._sweep_stability(n, nextra=0, sigmas=sigmas)
+        results_nx1 = self._sweep_stability(n, nextra=1, sigmas=sigmas)
+
+        best_nx0 = min(results_nx0, key=lambda r: r[1])
+        best_nx1 = min(results_nx1, key=lambda r: r[1])
+
+        n_stable_nx0 = sum(1 for _, se in results_nx0 if se < STABILITY_TOL)
+        n_stable_nx1 = sum(1 for _, se in results_nx1 if se < STABILITY_TOL)
+
+        print(f"\n{'='*72}")
+        print(f"  Phase 32.4a: E4 Tension — nextra=0 vs nextra=1 (corrected, n={n})")
+        print(f"{'='*72}")
+        print(f"\n  nextra=0: t={self.P + self.Q + 1}, r={self.Q + 1}")
+        print(f"  nextra=1: t={self.P + self.Q + 2}, r={self.Q + 2}")
+        print(f"\n  {'sigma':>10s}  {'nx=0 stab_eig':>16s}  {'nx=1 stab_eig':>16s}")
+        print(f"  {'-'*10}  {'-'*16}  {'-'*16}")
+        for (s0, se0), (s1, se1) in zip(results_nx0, results_nx1):
+            m0 = " *" if se0 < STABILITY_TOL else ""
+            m1 = " *" if se1 < STABILITY_TOL else ""
+            print(f"  {s0:10.4f}  {se0:14.6e}{m0}  {se1:14.6e}{m1}")
+
+        print(f"\n  --- Summary ---")
+        print(f"  nextra=0: best σ={best_nx0[0]:.4f}, stab_eig={best_nx0[1]:.6e}, "
+              f"{n_stable_nx0}/{len(sigmas)} stable")
+        print(f"  nextra=1: best σ={best_nx1[0]:.4f}, stab_eig={best_nx1[1]:.6e}, "
+              f"{n_stable_nx1}/{len(sigmas)} stable")
+
+        # nextra=0 is already stable (confirmed in 32.3b)
+        assert best_nx0[1] < STABILITY_TOL, (
+            f"E4 nextra=0 should be stable, got stab_eig={best_nx0[1]:.6e}"
+        )
+
+        # nextra=1 should also be stable
+        assert best_nx1[1] < STABILITY_TOL, (
+            f"E4 nextra=1 should be stable, got stab_eig={best_nx1[1]:.6e}"
+        )
+
+        # Both should have broad stability (most sigmas stable)
+        assert n_stable_nx0 >= 50, (
+            f"nextra=0: expected >=50/{len(sigmas)} stable, got {n_stable_nx0}"
+        )
+
+    def test_nextra_sweep_e4_tension(self):
+        """Full nextra × σ sweep for E4 tension with corrected stability.
+
+        Redo Phase 31.2b with stability_eigenvalue.
+        Sweep nextra ∈ {0, 1, 2, 3} × σ ∈ [0, 50] at n=40.
+        """
+        n = 40
+        nextra_values = [0, 1, 2, 3]
+        sigmas = np.concatenate([
+            [0.0],
+            np.logspace(np.log10(0.01), np.log10(50), 100),
+        ])
+
+        best_per_nx = {}
+        all_results = {}
+        stable_counts = {}
+
+        for nx in nextra_values:
+            r = self.Q + 1 + nx
+            if n < 2 * r:
+                print(f"  nextra={nx}: grid too small (n={n} < 2*r={2*r}), skipping")
+                continue
+
+            rows = self._sweep_stability(n, nextra=nx, sigmas=sigmas)
+            all_results[nx] = rows
+            best = min(rows, key=lambda r: r[1])
+            best_per_nx[nx] = best
+            stable_counts[nx] = sum(1 for _, se in rows if se < STABILITY_TOL)
+
+        # Print results
+        print(f"\n{'='*80}")
+        print(f"  Phase 32.4a: E4 Tension — Full nextra × σ Sweep (corrected, n={n})")
+        print(f"{'='*80}")
+
+        header = f"  {'sigma':>10s}"
+        for nx in nextra_values:
+            if nx in all_results:
+                header += f"  {'nx=' + str(nx):>16s}"
+        print(header)
+        divider = f"  {'-'*10}"
+        for nx in nextra_values:
+            if nx in all_results:
+                divider += f"  {'-'*16}"
+        print(divider)
+
+        # Print every 5th row
+        for idx in range(0, len(sigmas), 5):
+            line = f"  {sigmas[idx]:10.4f}"
+            for nx in nextra_values:
+                if nx in all_results:
+                    _, se = all_results[nx][idx]
+                    marker = " *" if se < STABILITY_TOL else ""
+                    line += f"  {se:14.6e}{marker}"
+            print(line)
+
+        # Summary table
+        print(f"\n  {'='*70}")
+        print(f"  Summary: Corrected stability per nextra")
+        print(f"  {'='*70}")
+        print(f"  {'nextra':>6s}  {'t':>3s}  {'r':>3s}  "
+              f"{'extra DOF':>9s}  {'best σ':>10s}  {'stab_eig':>16s}  "
+              f"{'stable':>8s}  {'status':>10s}")
+        print(f"  {'-'*6}  {'-'*3}  {'-'*3}  "
+              f"{'-'*9}  {'-'*10}  {'-'*16}  "
+              f"{'-'*8}  {'-'*10}")
+
+        for nx in nextra_values:
+            if nx not in best_per_nx:
+                continue
+            best_sigma, best_se = best_per_nx[nx]
+            t = self.P + self.Q + 1 + nx
+            r = self.Q + 1 + nx
+            extra_dof = r * (self.P + nx)
+            status = "STABLE" if best_se < STABILITY_TOL else "unstable"
+            sc = stable_counts[nx]
+            total = len(all_results[nx])
+            print(f"  {nx:6d}  {t:3d}  {r:3d}  "
+                  f"{extra_dof:9d}  {best_sigma:10.4f}  {best_se:16.6e}  "
+                  f"{sc:>3d}/{total:<3d}  {status:>10s}")
+
+        # Key assertion: nextra=0 is already stable
+        assert 0 in best_per_nx, "nextra=0 must be present"
+        assert best_per_nx[0][1] < STABILITY_TOL, (
+            f"E4 nextra=0 should be stable, got stab_eig={best_per_nx[0][1]:.6e}"
+        )
+
+        # All tested nextra values should have at least some stable region
+        for nx in nextra_values:
+            if nx in best_per_nx:
+                assert best_per_nx[nx][1] < STABILITY_TOL, (
+                    f"E4 nextra={nx} should have a stable σ, "
+                    f"got best stab_eig={best_per_nx[nx][1]:.6e}"
+                )
+
+    def test_nextra0_grid_independence(self):
+        """Verify E4 nextra=0 PHS k=2 stability across grid sizes.
+
+        Confirms the 32.3b result: PHS k=2 (σ=0, nextra=0) is stable at all
+        grid sizes.  This is the key result — nextra>0 is not needed for stability.
+        """
+        sigma = 0.0  # PHS k=2
+        print(f"\n  E4 nextra=0, σ={sigma} (PHS k=2) — Grid Independence")
+        print(f"  {'n':>6s}  {'stab_eig':>14s}  {'status':>10s}")
+        print(f"  {'-'*6}  {'-'*14}  {'-'*10}")
+
+        for nn in [20, 40, 80, 160]:
+            se = stability_eigenvalue(
+                nn, p=self.P, q=self.Q, epsilon=sigma,
+                kernel="tension", nu=self.NU, nextra=0,
+            )
+            status = "STABLE" if se < STABILITY_TOL else "unstable"
+            print(f"  {nn:6d}  {se:14.6e}  {status:>10s}")
+
+            assert se < STABILITY_TOL, (
+                f"n={nn}: E4 PHS k=2 (nextra=0) should be stable, "
+                f"got stab_eig={se:.6e}"
+            )
