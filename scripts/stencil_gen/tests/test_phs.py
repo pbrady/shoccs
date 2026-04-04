@@ -4576,3 +4576,199 @@ class TestStabilityInfrastructure:
             assert se < STABILITY_TOL, (
                 f"E2 n={n}: expected stable, got stability_eigenvalue={se:.6e}"
             )
+
+
+# ---------------------------------------------------------------------------
+# 32.2a: E2 corrected sweep (PHS/Gaussian/MQ) with stability_eigenvalue
+# ---------------------------------------------------------------------------
+
+
+class TestCorrectedSweepE2:
+    """Re-run Phase 29 E2 sweeps with the corrected stability metric.
+
+    Uses stability_eigenvalue (inflow-Dirichlet BC, eigenvalues of -D)
+    instead of the raw max Re(eig(D)) used in Phase 29.
+
+    E2_1 parameters: p=1, q=1, nextra=1.
+    """
+
+    # E2_1 parameters
+    P = 1
+    Q = 1
+    NEXTRA = 1
+    NU = 1
+
+    def _sweep_stability(self, kernel: str, n_values, epsilons):
+        """Run epsilon sweep using stability_eigenvalue.
+
+        Returns dict {n: list of (eps, se)} where se = max Re(eig(-D_bc)).
+        """
+        results = {}
+        for n in n_values:
+            rows = []
+            for eps in epsilons:
+                se = stability_eigenvalue(
+                    n, p=self.P, q=self.Q, epsilon=eps,
+                    kernel=kernel, nu=self.NU, nextra=self.NEXTRA,
+                )
+                rows.append((eps, se))
+            results[n] = rows
+        return results
+
+    def _print_table(self, label, results):
+        """Print formatted sweep table with stability classification."""
+        print(f"\n{'='*72}")
+        print(f"  {label}")
+        print(f"{'='*72}")
+        for n, rows in sorted(results.items()):
+            print(f"\n  n = {n}")
+            print(f"  {'epsilon':>10s}  {'stab_eig':>14s}  {'status':>10s}")
+            print(f"  {'-'*10}  {'-'*14}  {'-'*10}")
+            for eps, se in rows:
+                status = "STABLE" if se < STABILITY_TOL else "unstable"
+                print(f"  {eps:10.4f}  {se:14.6e}  {status:>10s}")
+
+        # Summary: best epsilon per n (most negative stability eigenvalue = most stable)
+        print(f"\n  --- Best epsilon (min stability eigenvalue) ---")
+        for n, rows in sorted(results.items()):
+            best = min(rows, key=lambda r: r[1])
+            stable = "STABLE" if best[1] < STABILITY_TOL else "unstable"
+            print(f"  n={n:3d}: eps={best[0]:.4f}, stab_eig={best[1]:.6e} [{stable}]")
+
+    def test_gaussian_sweep(self):
+        """Sweep Gaussian kernel epsilon for E2_1 with corrected stability."""
+        epsilons = np.logspace(np.log10(0.01), np.log10(10), 60)
+        n_values = [20, 40, 80]
+        results = self._sweep_stability("gaussian", n_values, epsilons)
+        self._print_table(
+            "E2_1 Gaussian — Corrected Stability (p=1, q=1, nextra=1)", results
+        )
+
+        # Report stable epsilon ranges
+        for n, rows in results.items():
+            stable_eps = [eps for eps, se in rows if se < STABILITY_TOL]
+            if stable_eps:
+                print(f"\n  n={n}: {len(stable_eps)}/{len(rows)} stable, "
+                      f"eps range [{min(stable_eps):.4f}, {max(stable_eps):.4f}]")
+            else:
+                best = min(rows, key=lambda r: r[1])
+                print(f"\n  n={n}: no stable epsilon found, "
+                      f"best stab_eig={best[1]:.6e} at eps={best[0]:.4f}")
+
+    def test_multiquadric_sweep(self):
+        """Sweep Multiquadric kernel epsilon for E2_1 with corrected stability."""
+        epsilons = np.logspace(np.log10(0.01), np.log10(10), 60)
+        n_values = [20, 40, 80]
+        results = self._sweep_stability("multiquadric", n_values, epsilons)
+        self._print_table(
+            "E2_1 Multiquadric — Corrected Stability (p=1, q=1, nextra=1)", results
+        )
+
+        for n, rows in results.items():
+            stable_eps = [eps for eps, se in rows if se < STABILITY_TOL]
+            if stable_eps:
+                print(f"\n  n={n}: {len(stable_eps)}/{len(rows)} stable, "
+                      f"eps range [{min(stable_eps):.4f}, {max(stable_eps):.4f}]")
+            else:
+                best = min(rows, key=lambda r: r[1])
+                print(f"\n  n={n}: no stable epsilon found, "
+                      f"best stab_eig={best[1]:.6e} at eps={best[0]:.4f}")
+
+    def test_phs_k2_baseline(self):
+        """PHS k=2 baseline for E2_1 with corrected stability.
+
+        PHS k=2 is equivalent to tension at σ=0.  Build the matrix via the
+        symbolic PHS weights and check with stability_eigenvalue_from_matrix.
+        """
+        from sympy import cancel as sym_cancel
+
+        from stencil_gen.interior import derive_interior, full_gamma_array
+        from stencil_gen.phs import uniform_boundary_weights
+
+        p, q, nextra, nu = self.P, self.Q, self.NEXTRA, self.NU
+        t = p + q + 1 + nextra  # boundary stencil width
+        r = q + 1 + nextra       # number of boundary rows per side
+
+        interior_coeffs = derive_interior(0, p, nu)
+        interior_w = [float(c) for c in full_gamma_array(interior_coeffs)]
+
+        print(f"\n  E2_1 PHS k=2 Corrected Stability (p={p}, q={q}, nextra={nextra})")
+        print(f"  {'n':>6s}  {'stab_eig':>14s}  {'status':>10s}")
+        print(f"  {'-'*6}  {'-'*14}  {'-'*10}")
+
+        for n in [20, 40, 80]:
+            D = np.zeros((n, n))
+
+            # Left boundary rows
+            for i in range(r):
+                w_sym = uniform_boundary_weights(i, t, nu, 2, q)
+                w = [float(sym_cancel(c)) for c in w_sym]
+                for j in range(t):
+                    D[i, j] = w[j]
+
+            # Interior rows
+            for i in range(r, n - r):
+                for k_idx, j in enumerate(range(i - p, i + p + 1)):
+                    D[i, j] = interior_w[k_idx]
+
+            # Right boundary (antisymmetric for nu=1)
+            sign = (-1.0) ** nu
+            for i in range(r):
+                w_sym = uniform_boundary_weights(i, t, nu, 2, q)
+                w = [float(sym_cancel(c)) for c in w_sym]
+                row = n - 1 - i
+                for j in range(t):
+                    D[row, n - 1 - j] = sign * w[j]
+
+            se = stability_eigenvalue_from_matrix(D)
+            status = "STABLE" if se < STABILITY_TOL else "unstable"
+            print(f"  {n:6d}  {se:14.6e}  {status:>10s}")
+
+    def test_gaussian_fine_sweep(self):
+        """Fine sweep around best Gaussian epsilon with corrected stability.
+
+        Uses n=40 for coarse pass, then refines around minimum.
+        """
+        n = 40
+        # Coarse sweep
+        epsilons_coarse = np.logspace(np.log10(0.01), np.log10(10), 60)
+        coarse = []
+        for eps in epsilons_coarse:
+            se = stability_eigenvalue(
+                n, p=self.P, q=self.Q, epsilon=eps,
+                kernel="gaussian", nu=self.NU, nextra=self.NEXTRA,
+            )
+            coarse.append((eps, se))
+
+        best_coarse = min(coarse, key=lambda r: r[1])
+        eps_best = best_coarse[0]
+
+        # Fine sweep: ±1 decade around best
+        lo = max(0.001, eps_best / 10)
+        hi = min(100, eps_best * 10)
+        epsilons_fine = np.linspace(lo, hi, 200)
+        fine = []
+        for eps in epsilons_fine:
+            se = stability_eigenvalue(
+                n, p=self.P, q=self.Q, epsilon=eps,
+                kernel="gaussian", nu=self.NU, nextra=self.NEXTRA,
+            )
+            fine.append((eps, se))
+
+        best_fine = min(fine, key=lambda r: r[1])
+        stable = best_fine[1] < STABILITY_TOL
+        print(f"\n  E2_1 Gaussian corrected fine sweep (n={n}):")
+        print(f"  Coarse best: eps={best_coarse[0]:.6f}, stab_eig={best_coarse[1]:.6e}")
+        print(f"  Fine best:   eps={best_fine[0]:.6f}, stab_eig={best_fine[1]:.6e}")
+        print(f"  Stable: {stable}")
+
+        # Verify at multiple grid sizes
+        eps_star = best_fine[0]
+        print(f"\n  Checking eps*={eps_star:.6f} across grid sizes:")
+        for nn in [20, 40, 80, 160]:
+            se = stability_eigenvalue(
+                nn, p=self.P, q=self.Q, epsilon=eps_star,
+                kernel="gaussian", nu=self.NU, nextra=self.NEXTRA,
+            )
+            status = "STABLE" if se < STABILITY_TOL else "unstable"
+            print(f"    n={nn:4d}: stab_eig={se:.6e} [{status}]")

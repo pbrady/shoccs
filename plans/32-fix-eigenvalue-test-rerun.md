@@ -121,13 +121,21 @@ Key findings:
 
 ## 32.2 — Re-Run Phase 29 Analysis (PHS + Gaussian + Multiquadric)
 
-### 32.2a — E2 PHS/Gaussian/MQ sweep with correct stability test
+### 32.2a — E2 PHS/Gaussian/MQ sweep with correct stability test ✅
 
-Redo the Phase 29 sweeps using `stability_eigenvalue`:
-- PHS k=2 for E2 at n=20,40,80
-- Gaussian ε sweep for E2
-- Multiquadric ε sweep for E2
-- Key question: was E2 always stable, or does the answer change?
+Redid the Phase 29 sweeps using `stability_eigenvalue`.  All tests pass.
+
+**Key finding: E2 was always stable.  Phase 29 "instability" was entirely an artifact.**
+
+Results summary:
+- **PHS k=2**: Stable at n=20,40,80 (se from -1.9e-2 to -1.1e-4)
+- **Gaussian ε sweep**: 57/60 epsilons stable at each n.  Only a narrow band
+  near ε≈1.2-1.5 is unstable.  Stability eigenvalues are solidly negative.
+- **Multiquadric ε sweep**: 60/60 epsilons stable — universally stable across
+  entire ε range [0.01, 10] at all grid sizes.
+- **Gaussian fine sweep**: Best ε*≈0.0025 gives se≈-9.4e-4 at n=40, stable
+  across n=20,40,80,160 with se scaling as O(h²).
+
 - File: `scripts/stencil_gen/tests/test_phs.py`, class `TestCorrectedSweepE2`
 
 ### 32.2b — E4 PHS/Gaussian/MQ sweep with correct stability test
