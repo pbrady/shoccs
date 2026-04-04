@@ -138,6 +138,14 @@ Results summary:
 
 - File: `scripts/stencil_gen/tests/test_phs.py`, class `TestCorrectedSweepE2`
 
+**Follow-up (review flag):** All 4 tests in `TestCorrectedSweepE2` are assertion-free —
+they print tables but never `assert`, so they trivially pass even if results regress.
+Add assertions to lock in the documented findings:
+- `test_multiquadric_sweep`: assert all 60 epsilons stable at each n (60/60 claimed)
+- `test_gaussian_sweep`: assert ≥55/60 stable at each n (57/60 claimed)
+- `test_phs_k2_baseline`: assert stable at n=20,40,80
+- `test_gaussian_fine_sweep`: assert best ε* is stable across n=20,40,80,160
+
 ### 32.2b — E4 PHS/Gaussian/MQ sweep with correct stability test
 
 Same for E4:
