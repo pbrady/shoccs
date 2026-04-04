@@ -224,6 +224,13 @@ Conclusions:
 
 - File: `scripts/stencil_gen/tests/test_phs.py`, class `TestCorrectedTensionE4`
 
+**Review follow-up (missing count assertions):** `test_tension_coarse_sweep` in
+`TestCorrectedTensionE4` only asserts σ=0 is stable and best se < -1e-6.  It does
+NOT assert stability counts, unlike the E2 equivalent which asserts `>=55/61`.
+Add count assertions to guard the "broad stability" claim:
+- n=20,40: assert `n_stable >= 55` (plan says 61/61)
+- n=80: assert `n_stable >= 50` (plan says 56/61, conservative bound)
+
 ### 32.3c — E4 tension + penalty sweep with correct stability test
 
 Redo (σ, γ) joint sweep for E4 with correct test.
