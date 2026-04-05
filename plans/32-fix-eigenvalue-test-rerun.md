@@ -412,7 +412,7 @@ All 5 classes updated (18 tests pass):
 - `TestComparisonTable.test_e4_comparison`: removed "PHS should have small instability", assert PHS stable
 - `TestComparisonTable.test_summary_across_grid_sizes`: eigvals → `stability_eigenvalue_from_matrix`, assert both E2 and E4 stable
 
-#### 32.5b-ii — Update Phase 30 tension sweep and wavenumber classes
+#### 32.5b-ii — Update Phase 30 tension sweep and wavenumber classes ✅
 
 Classes: `TestTensionSweepE2`, `TestTensionSweepE4`, `TestTensionOptimalSigma`,
 `TestModifiedWavenumber`.
@@ -454,6 +454,27 @@ Changes:
   optimal, so this comparison may need rethinking — the assertion that tension
   reduces per-stencil amplification vs PHS may still hold locally but the
   motivation is different.
+
+All 4 classes updated (16 tests pass):
+- `TestTensionSweepE2/E4._sweep`: `np.linalg.eigvals(D)` → `stability_eigenvalue_from_matrix(D)`
+- `TestTensionSweepE2/E4._print_table`: labels/threshold updated to `stab eig` / `< 0`
+- `TestTensionSweepE2.test_tension_coarse_sweep`: stability check `< 0`
+- `TestTensionSweepE2.test_tension_fine_sweep_near_best`: `max_real_eigenvalue` → `stability_eigenvalue`
+- `TestTensionSweepE2.test_compare_with_gaussian`: `max_real_eigenvalue` → `stability_eigenvalue`
+- `TestTensionSweepE4.test_tension_coarse_sweep`: removed "must improve over PHS k=2", assert PHS stable
+- `TestTensionSweepE4.test_tension_fine_sweep_near_best`: `max_real_eigenvalue` → `stability_eigenvalue`, removed "must improve over PHS k=2"
+- `TestTensionSweepE4.test_compare_with_gaussian`: `max_real_eigenvalue` → `stability_eigenvalue`, removed "tension ≥10× over PHS k=2", assert all three methods stable
+- `TestTensionSweepE4.test_mixed_tension_two_group`: raw eigvals → `stability_eigenvalue_from_matrix`
+- `TestTensionOptimalSigma._max_re` → `_stab_eig`: `max_real_eigenvalue` → `stability_eigenvalue`
+- `TestTensionOptimalSigma._max_re_gaussian` → `_stab_eig_gaussian`: same
+- `TestTensionOptimalSigma.test_e2_optimal_sigma`: rewrote — E2 universally stable, no bisection needed, dense sweep confirms all σ stable
+- `TestTensionOptimalSigma.test_e4_optimal_sigma`: sweep includes σ=0, assert stab_eig < 0, removed "must improve over PHS k=2"
+- `TestTensionOptimalSigma.test_comparison_all_methods`: assert all methods stable for E2 and E4, removed "E4 must improve over PHS" assertions
+- `TestModifiedWavenumber._find_best_sigma`: `max_real_eigenvalue` → `stability_eigenvalue`, includes σ=0
+- `TestModifiedWavenumber.test_e2_boundary_at_optimal_sigma`: `best_re` → `best_se`, assert `< 0`, relaxed per-stencil bound to 0.5 (σ*=3.465 has larger per-stencil amplification than old σ*≈6-7)
+- `TestModifiedWavenumber.test_e2_boundary_amplifying_at_sigma_zero`: updated docstring — PHS k=2 IS stable, per-stencil amplification doesn't imply full-operator instability
+- `TestModifiedWavenumber.test_e4_boundary_at_optimal_sigma`: updated comments — E4 IS stable, removed `any_amplifying` assertion, assert `best_se < 0`
+- `TestModifiedWavenumber.test_e4_phs_boundary_worse_than_tension` → `test_e4_phs_boundary_vs_tension_per_stencil`: σ* is now PHS k=2, so compare PHS (σ=0) with production σ=3.0 instead; assert both have bounded per-stencil amplification
 
 #### 32.5b-iii — Update Phase 30 conservation and comparison classes
 
