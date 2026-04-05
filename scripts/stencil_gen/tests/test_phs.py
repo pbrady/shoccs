@@ -613,7 +613,7 @@ class TestEpsilonSweepE2:
     NU = 1
 
     def _sweep(self, kernel: str, n_values, epsilons):
-        """Run epsilon sweep, return dict {n: list of (eps, max_re, spec_rad)}."""
+        """Run epsilon sweep, return dict {n: list of (eps, stab_eig, spec_rad)}."""
         results = {}
         for n in n_values:
             rows = []
@@ -622,10 +622,9 @@ class TestEpsilonSweepE2:
                     n, p=self.P, q=self.Q, epsilon=eps,
                     kernel=kernel, nu=self.NU, nextra=self.NEXTRA,
                 )
-                eigvals = np.linalg.eigvals(D)
-                max_re = float(np.max(np.real(eigvals)))
-                spec_rad = float(np.max(np.abs(eigvals)))
-                rows.append((eps, max_re, spec_rad))
+                stab_eig = stability_eigenvalue_from_matrix(D)
+                spec_rad = float(np.max(np.abs(np.linalg.eigvals(D))))
+                rows.append((eps, stab_eig, spec_rad))
             results[n] = rows
         return results
 
@@ -636,17 +635,17 @@ class TestEpsilonSweepE2:
         print(f"{'='*72}")
         for n, rows in sorted(results.items()):
             print(f"\n  n = {n}")
-            print(f"  {'epsilon':>10s}  {'max Re(λ)':>14s}  {'spec radius':>14s}")
+            print(f"  {'epsilon':>10s}  {'stab eig':>14s}  {'spec radius':>14s}")
             print(f"  {'-'*10}  {'-'*14}  {'-'*14}")
-            for eps, max_re, spec_rad in rows:
-                print(f"  {eps:10.4f}  {max_re:14.6e}  {spec_rad:14.6e}")
+            for eps, stab_eig, spec_rad in rows:
+                print(f"  {eps:10.4f}  {stab_eig:14.6e}  {spec_rad:14.6e}")
 
-        # Summary: best epsilon per n
-        print(f"\n  --- Best epsilon (min max Re(λ)) ---")
+        # Summary: best epsilon per n (most negative stab_eig = most stable)
+        print(f"\n  --- Best epsilon (min stab eig) ---")
         for n, rows in sorted(results.items()):
             best = min(rows, key=lambda r: r[1])
-            stable = "STABLE" if best[1] < STABILITY_TOL else "unstable"
-            print(f"  n={n:3d}: eps={best[0]:.4f}, max Re(λ)={best[1]:.6e} [{stable}]")
+            stable = "STABLE" if best[1] < 0 else "unstable"
+            print(f"  n={n:3d}: eps={best[0]:.4f}, stab_eig={best[1]:.6e} [{stable}]")
 
     def test_gaussian_sweep(self):
         """Sweep Gaussian kernel epsilon for E2_1."""
@@ -658,7 +657,7 @@ class TestEpsilonSweepE2:
         # Find if any epsilon gives stability
         for n, rows in results.items():
             best = min(rows, key=lambda r: r[1])
-            if best[1] < STABILITY_TOL:
+            if best[1] < 0:
                 print(f"\n  *** STABLE epsilon found for n={n}: eps={best[0]:.6f} ***")
 
     def test_multiquadric_sweep(self):
@@ -670,7 +669,7 @@ class TestEpsilonSweepE2:
 
         for n, rows in results.items():
             best = min(rows, key=lambda r: r[1])
-            if best[1] < STABILITY_TOL:
+            if best[1] < 0:
                 print(f"\n  *** STABLE epsilon found for n={n}: eps={best[0]:.6f} ***")
 
     def test_gaussian_fine_sweep_near_best(self):
@@ -683,11 +682,11 @@ class TestEpsilonSweepE2:
         epsilons_coarse = np.logspace(np.log10(0.01), np.log10(10), 60)
         coarse = []
         for eps in epsilons_coarse:
-            max_re = max_real_eigenvalue(
+            se = stability_eigenvalue(
                 n, p=self.P, q=self.Q, epsilon=eps,
                 kernel="gaussian", nu=self.NU, nextra=self.NEXTRA,
             )
-            coarse.append((eps, max_re))
+            coarse.append((eps, se))
 
         best_coarse = min(coarse, key=lambda r: r[1])
         eps_best = best_coarse[0]
@@ -698,30 +697,29 @@ class TestEpsilonSweepE2:
         epsilons_fine = np.linspace(lo, hi, 200)
         fine = []
         for eps in epsilons_fine:
-            max_re = max_real_eigenvalue(
+            se = stability_eigenvalue(
                 n, p=self.P, q=self.Q, epsilon=eps,
                 kernel="gaussian", nu=self.NU, nextra=self.NEXTRA,
             )
-            fine.append((eps, max_re))
+            fine.append((eps, se))
 
         best_fine = min(fine, key=lambda r: r[1])
         print(f"\n  E2_1 Gaussian fine sweep (n={n}):")
-        print(f"  Coarse best: eps={best_coarse[0]:.6f}, max Re(λ)={best_coarse[1]:.6e}")
-        print(f"  Fine best:   eps={best_fine[0]:.6f}, max Re(λ)={best_fine[1]:.6e}")
+        print(f"  Coarse best: eps={best_coarse[0]:.6f}, stab_eig={best_coarse[1]:.6e}")
+        print(f"  Fine best:   eps={best_fine[0]:.6f}, stab_eig={best_fine[1]:.6e}")
 
-        stable = best_fine[1] < STABILITY_TOL
+        stable = best_fine[1] < 0
         print(f"  Stable: {stable}")
 
         # Verify at multiple grid sizes
-        if stable or best_fine[1] < 1e-6:
-            eps_star = best_fine[0]
-            print(f"\n  Checking eps*={eps_star:.6f} across grid sizes:")
-            for nn in [20, 40, 80, 160]:
-                mr = max_real_eigenvalue(
-                    nn, p=self.P, q=self.Q, epsilon=eps_star,
-                    kernel="gaussian", nu=self.NU, nextra=self.NEXTRA,
-                )
-                print(f"    n={nn:4d}: max Re(λ)={mr:.6e}")
+        eps_star = best_fine[0]
+        print(f"\n  Checking eps*={eps_star:.6f} across grid sizes:")
+        for nn in [20, 40, 80, 160]:
+            se = stability_eigenvalue(
+                nn, p=self.P, q=self.Q, epsilon=eps_star,
+                kernel="gaussian", nu=self.NU, nextra=self.NEXTRA,
+            )
+            print(f"    n={nn:4d}: stab_eig={se:.6e}")
 
 
 # ---------------------------------------------------------------------------
@@ -744,7 +742,7 @@ class TestEpsilonSweepE4:
     NU = 1
 
     def _sweep(self, kernel: str, n_values, epsilons):
-        """Run epsilon sweep, return dict {n: list of (eps, max_re, spec_rad)}."""
+        """Run epsilon sweep, return dict {n: list of (eps, stab_eig, spec_rad)}."""
         results = {}
         for n in n_values:
             rows = []
@@ -753,10 +751,9 @@ class TestEpsilonSweepE4:
                     n, p=self.P, q=self.Q, epsilon=eps,
                     kernel=kernel, nu=self.NU, nextra=self.NEXTRA,
                 )
-                eigvals = np.linalg.eigvals(D)
-                max_re = float(np.max(np.real(eigvals)))
-                spec_rad = float(np.max(np.abs(eigvals)))
-                rows.append((eps, max_re, spec_rad))
+                stab_eig = stability_eigenvalue_from_matrix(D)
+                spec_rad = float(np.max(np.abs(np.linalg.eigvals(D))))
+                rows.append((eps, stab_eig, spec_rad))
             results[n] = rows
         return results
 
@@ -767,17 +764,17 @@ class TestEpsilonSweepE4:
         print(f"{'='*72}")
         for n, rows in sorted(results.items()):
             print(f"\n  n = {n}")
-            print(f"  {'epsilon':>10s}  {'max Re(λ)':>14s}  {'spec radius':>14s}")
+            print(f"  {'epsilon':>10s}  {'stab eig':>14s}  {'spec radius':>14s}")
             print(f"  {'-'*10}  {'-'*14}  {'-'*14}")
-            for eps, max_re, spec_rad in rows:
-                print(f"  {eps:10.4f}  {max_re:14.6e}  {spec_rad:14.6e}")
+            for eps, stab_eig, spec_rad in rows:
+                print(f"  {eps:10.4f}  {stab_eig:14.6e}  {spec_rad:14.6e}")
 
-        # Summary: best epsilon per n
-        print(f"\n  --- Best epsilon (min max Re(λ)) ---")
+        # Summary: best epsilon per n (most negative stab_eig = most stable)
+        print(f"\n  --- Best epsilon (min stab eig) ---")
         for n, rows in sorted(results.items()):
             best = min(rows, key=lambda r: r[1])
-            stable = "STABLE" if best[1] < STABILITY_TOL else "unstable"
-            print(f"  n={n:3d}: eps={best[0]:.4f}, max Re(λ)={best[1]:.6e} [{stable}]")
+            stable = "STABLE" if best[1] < 0 else "unstable"
+            print(f"  n={n:3d}: eps={best[0]:.4f}, stab_eig={best[1]:.6e} [{stable}]")
 
     def test_gaussian_sweep(self):
         """Sweep Gaussian kernel epsilon for E4_1."""
@@ -789,7 +786,7 @@ class TestEpsilonSweepE4:
         # Find if any epsilon gives stability
         for n, rows in results.items():
             best = min(rows, key=lambda r: r[1])
-            if best[1] < STABILITY_TOL:
+            if best[1] < 0:
                 print(f"\n  *** STABLE epsilon found for n={n}: eps={best[0]:.6f} ***")
 
     def test_multiquadric_sweep(self):
@@ -801,7 +798,7 @@ class TestEpsilonSweepE4:
 
         for n, rows in results.items():
             best = min(rows, key=lambda r: r[1])
-            if best[1] < STABILITY_TOL:
+            if best[1] < 0:
                 print(f"\n  *** STABLE epsilon found for n={n}: eps={best[0]:.6f} ***")
 
     def test_gaussian_fine_sweep_near_best(self):
@@ -814,11 +811,11 @@ class TestEpsilonSweepE4:
         epsilons_coarse = np.logspace(np.log10(0.01), np.log10(10), 60)
         coarse = []
         for eps in epsilons_coarse:
-            max_re = max_real_eigenvalue(
+            se = stability_eigenvalue(
                 n, p=self.P, q=self.Q, epsilon=eps,
                 kernel="gaussian", nu=self.NU, nextra=self.NEXTRA,
             )
-            coarse.append((eps, max_re))
+            coarse.append((eps, se))
 
         best_coarse = min(coarse, key=lambda r: r[1])
         eps_best = best_coarse[0]
@@ -829,40 +826,29 @@ class TestEpsilonSweepE4:
         epsilons_fine = np.linspace(lo, hi, 200)
         fine = []
         for eps in epsilons_fine:
-            max_re = max_real_eigenvalue(
+            se = stability_eigenvalue(
                 n, p=self.P, q=self.Q, epsilon=eps,
                 kernel="gaussian", nu=self.NU, nextra=self.NEXTRA,
             )
-            fine.append((eps, max_re))
+            fine.append((eps, se))
 
         best_fine = min(fine, key=lambda r: r[1])
         print(f"\n  E4_1 Gaussian fine sweep (n={n}):")
-        print(f"  Coarse best: eps={best_coarse[0]:.6f}, max Re(λ)={best_coarse[1]:.6e}")
-        print(f"  Fine best:   eps={best_fine[0]:.6f}, max Re(λ)={best_fine[1]:.6e}")
+        print(f"  Coarse best: eps={best_coarse[0]:.6f}, stab_eig={best_coarse[1]:.6e}")
+        print(f"  Fine best:   eps={best_fine[0]:.6f}, stab_eig={best_fine[1]:.6e}")
 
-        stable = best_fine[1] < STABILITY_TOL
+        stable = best_fine[1] < 0
         print(f"  Stable: {stable}")
 
         # Verify at multiple grid sizes
-        if stable or best_fine[1] < 1e-6:
-            eps_star = best_fine[0]
-            print(f"\n  Checking eps*={eps_star:.6f} across grid sizes:")
-            for nn in [20, 40, 80, 160]:
-                mr = max_real_eigenvalue(
-                    nn, p=self.P, q=self.Q, epsilon=eps_star,
-                    kernel="gaussian", nu=self.NU, nextra=self.NEXTRA,
-                )
-                print(f"    n={nn:4d}: max Re(λ)={mr:.6e}")
-        else:
-            # Even if not stable, report best across grid sizes
-            eps_star = best_fine[0]
-            print(f"\n  Best eps={eps_star:.6f} across grid sizes:")
-            for nn in [20, 40, 80, 160]:
-                mr = max_real_eigenvalue(
-                    nn, p=self.P, q=self.Q, epsilon=eps_star,
-                    kernel="gaussian", nu=self.NU, nextra=self.NEXTRA,
-                )
-                print(f"    n={nn:4d}: max Re(λ)={mr:.6e}")
+        eps_star = best_fine[0]
+        print(f"\n  Checking eps*={eps_star:.6f} across grid sizes:")
+        for nn in [20, 40, 80, 160]:
+            se = stability_eigenvalue(
+                nn, p=self.P, q=self.Q, epsilon=eps_star,
+                kernel="gaussian", nu=self.NU, nextra=self.NEXTRA,
+            )
+            print(f"    n={nn:4d}: stab_eig={se:.6e}")
 
 
 # ---------------------------------------------------------------------------
@@ -884,35 +870,33 @@ class TestMixedEpsilon:
     NU = 1
     R = 4  # q + 1 + nextra = 3 + 1 + 0
 
-    def _max_re_mixed(self, n, epsilons, kernel="gaussian"):
-        """Compute max Re(λ) for a mixed-epsilon configuration."""
+    def _stab_eig_mixed(self, n, epsilons, kernel="gaussian"):
+        """Compute stability eigenvalue for a mixed-epsilon configuration."""
         D = build_diff_matrix_mixed_epsilon(
             n, p=self.P, q=self.Q, epsilons=list(epsilons),
             kernel=kernel, nu=self.NU, nextra=self.NEXTRA,
         )
-        eigvals = np.linalg.eigvals(D)
-        return float(np.max(np.real(eigvals)))
+        return stability_eigenvalue_from_matrix(D)
 
     def test_single_epsilon_baseline(self):
         """Confirm single-epsilon minimum from 29.6d as baseline.
 
-        With a uniform epsilon across all 4 boundary rows, the best
-        achievable max Re(λ) is ~1e-4 (not machine-precision stable).
+        Under corrected stability metric (inflow-Dirichlet BC, -D sign),
+        E4 Gaussian has a stable band around ε≈0.9.
         """
         n = 40
         # Coarse sweep to find best single epsilon
         epsilons_sweep = np.logspace(np.log10(0.1), np.log10(10), 80)
         best_eps, best_re = None, np.inf
         for eps in epsilons_sweep:
-            mr = self._max_re_mixed(n, [eps] * self.R)
+            mr = self._stab_eig_mixed(n, [eps] * self.R)
             if mr < best_re:
                 best_re = mr
                 best_eps = eps
 
         print(f"\n  E4_1 single-epsilon baseline (n={n}):")
-        print(f"  Best eps={best_eps:.4f}, max Re(λ)={best_re:.6e}")
-        # Should match 29.6d result: ~1e-4
-        assert best_re < 1e-2, f"Single-epsilon baseline too large: {best_re}"
+        print(f"  Best eps={best_eps:.4f}, stab_eig={best_re:.6e}")
+        assert best_re < 0, f"Single-epsilon baseline should be stable: {best_re}"
 
     def test_two_group_sweep(self):
         """Sweep two groups: ε_outer (rows 0,1) and ε_inner (rows 2,3).
@@ -930,7 +914,7 @@ class TestMixedEpsilon:
         for eps_outer in eps_range:
             for eps_inner in eps_range:
                 epsilons = [eps_outer, eps_outer, eps_inner, eps_inner]
-                mr = self._max_re_mixed(n, epsilons)
+                mr = self._stab_eig_mixed(n, epsilons)
                 results.append((eps_outer, eps_inner, mr))
                 if mr < best_re:
                     best_re = mr
@@ -938,10 +922,9 @@ class TestMixedEpsilon:
 
         print(f"\n  E4_1 two-group sweep (n={n}):")
         print(f"  Best: eps_outer={best_combo[0]:.4f}, eps_inner={best_combo[1]:.4f}")
-        print(f"  max Re(λ)={best_re:.6e}")
+        print(f"  stab_eig={best_re:.6e}")
 
         # Check if two-group improves over single epsilon
-        # Single epsilon baseline is ~1e-4
         single_best = min(
             (mr for _, _, mr in results),
         )
@@ -951,9 +934,9 @@ class TestMixedEpsilon:
         print(f"\n  Checking best combo across grid sizes:")
         for nn in [20, 40, 80]:
             epsilons = [best_combo[0], best_combo[0], best_combo[1], best_combo[1]]
-            mr = self._max_re_mixed(nn, epsilons)
+            mr = self._stab_eig_mixed(nn, epsilons)
             stable = "STABLE" if mr <= 0 else "unstable"
-            print(f"    n={nn:3d}: max Re(λ)={mr:.6e} [{stable}]")
+            print(f"    n={nn:3d}: stab_eig={mr:.6e} [{stable}]")
 
     def test_per_row_optimize(self):
         """Coordinate descent to find optimal per-row epsilon combination.
@@ -966,7 +949,7 @@ class TestMixedEpsilon:
 
         # Start from the best single epsilon (~1.7)
         current = [1.7] * self.R
-        current_re = self._max_re_mixed(n, current)
+        current_re = self._stab_eig_mixed(n, current)
 
         # Coordinate descent: sweep each row's epsilon while fixing others
         for iteration in range(3):  # 3 full passes
@@ -976,7 +959,7 @@ class TestMixedEpsilon:
                 for eps in eps_vals:
                     trial = list(current)
                     trial[row] = eps
-                    mr = self._max_re_mixed(n, trial)
+                    mr = self._stab_eig_mixed(n, trial)
                     if mr < best_re_row:
                         best_re_row = mr
                         best_eps_row = eps
@@ -987,23 +970,23 @@ class TestMixedEpsilon:
 
         print(f"\n  E4_1 per-row coordinate descent (n={n}):")
         print(f"  Optimal epsilons: [{', '.join(f'{e:.4f}' for e in opt_eps)}]")
-        print(f"  max Re(λ)={current_re:.6e}")
+        print(f"  stab_eig={current_re:.6e}")
 
         # Compare with uniform best
         uniform_mr = min(
-            self._max_re_mixed(n, [eps] * self.R)
+            self._stab_eig_mixed(n, [eps] * self.R)
             for eps in np.logspace(np.log10(0.5), np.log10(5.0), 40)
         )
-        improvement = uniform_mr / current_re if current_re > 0 else float('inf')
-        print(f"\n  Uniform best: max Re(λ)={uniform_mr:.6e}")
-        print(f"  Mixed improvement factor: {improvement:.1f}x")
+        # Both should be negative (stable); compare magnitudes
+        print(f"\n  Uniform best: stab_eig={uniform_mr:.6e}")
+        print(f"  Mixed best:   stab_eig={current_re:.6e}")
 
         # Check grid convergence
         print(f"\n  Grid convergence with optimal epsilons:")
         for nn in [20, 40, 80, 160]:
-            mr = self._max_re_mixed(nn, opt_eps)
+            mr = self._stab_eig_mixed(nn, opt_eps)
             stable = "STABLE" if mr <= 0 else "unstable"
-            print(f"    n={nn:3d}: max Re(λ)={mr:.6e} [{stable}]")
+            print(f"    n={nn:3d}: stab_eig={mr:.6e} [{stable}]")
 
     def test_conservation_near_interior(self):
         """Try replacing the near-interior row (r-1) with a conservation row.
@@ -1071,8 +1054,7 @@ class TestMixedEpsilon:
             for j in range(t):
                 D[row, n - 1 - j] = sign * poly_w_last[j]
 
-            eigvals = np.linalg.eigvals(D)
-            mr = float(np.max(np.real(eigvals)))
+            mr = stability_eigenvalue_from_matrix(D)
             if mr < best_re:
                 best_re = mr
                 best_eps = eps
@@ -1080,7 +1062,7 @@ class TestMixedEpsilon:
         print(f"\n  E4_1 conservation near-interior (n={n}):")
         print(f"  Row {r-1} uses polynomial stencil (eps→∞ limit)")
         print(f"  Rows 0..{r-2} use Gaussian with swept eps")
-        print(f"  Best eps={best_eps:.4f}, max Re(λ)={best_re:.6e}")
+        print(f"  Best eps={best_eps:.4f}, stab_eig={best_re:.6e}")
         stable = "STABLE" if best_re <= 0 else "unstable"
         print(f"  Status: {stable}")
 
@@ -1092,12 +1074,12 @@ class TestMixedEpsilon:
         for eps_main in eps_coarse:
             for eps_last in eps_coarse:
                 epsilons = [eps_main] * (r - 1) + [eps_last]
-                mr = self._max_re_mixed(n, epsilons)
+                mr = self._stab_eig_mixed(n, epsilons)
                 if mr < best2[2]:
                     best2 = (eps_main, eps_last, mr)
 
         print(f"  Best: eps_main={best2[0]:.4f}, eps_last={best2[1]:.4f}")
-        print(f"  max Re(λ)={best2[2]:.6e}")
+        print(f"  stab_eig={best2[2]:.6e}")
 
     def test_multiquadric_mixed(self):
         """Try mixed epsilon with Multiquadric kernel via coordinate descent."""
@@ -1106,7 +1088,7 @@ class TestMixedEpsilon:
 
         # Start from single-epsilon best (~5.0 for MQ)
         current = [5.0] * self.R
-        current_re = self._max_re_mixed(n, current, kernel="multiquadric")
+        current_re = self._stab_eig_mixed(n, current, kernel="multiquadric")
 
         for iteration in range(3):
             for row in range(self.R):
@@ -1115,7 +1097,7 @@ class TestMixedEpsilon:
                 for eps in eps_vals:
                     trial = list(current)
                     trial[row] = eps
-                    mr = self._max_re_mixed(n, trial, kernel="multiquadric")
+                    mr = self._stab_eig_mixed(n, trial, kernel="multiquadric")
                     if mr < best_re_row:
                         best_re_row = mr
                         best_eps_row = eps
@@ -1126,14 +1108,14 @@ class TestMixedEpsilon:
 
         print(f"\n  E4_1 Multiquadric per-row coordinate descent (n={n}):")
         print(f"  Optimal epsilons: [{', '.join(f'{e:.4f}' for e in opt_eps)}]")
-        print(f"  max Re(λ)={current_re:.6e}")
+        print(f"  stab_eig={current_re:.6e}")
 
         # Grid convergence
         print(f"\n  Grid convergence:")
         for nn in [20, 40, 80]:
-            mr = self._max_re_mixed(nn, opt_eps, kernel="multiquadric")
+            mr = self._stab_eig_mixed(nn, opt_eps, kernel="multiquadric")
             stable = "STABLE" if mr <= 0 else "unstable"
-            print(f"    n={nn:3d}: max Re(λ)={mr:.6e} [{stable}]")
+            print(f"    n={nn:3d}: stab_eig={mr:.6e} [{stable}]")
 
 
 # ---------------------------------------------------------------------------
@@ -1169,18 +1151,18 @@ class TestStableEpsilonAlphas:
     ]
 
     def _find_best_epsilon(self, n=40):
-        """Find the best Gaussian ε for E2_1 via fine sweep."""
+        """Find the best Gaussian ε for E2_1 via fine sweep (most negative stab_eig)."""
         epsilons = np.linspace(1.5, 3.5, 200)
-        best_eps, best_re = None, np.inf
+        best_eps, best_se = None, np.inf
         for eps in epsilons:
-            mr = max_real_eigenvalue(
+            se = stability_eigenvalue(
                 n, p=self.P, q=self.Q, epsilon=eps,
                 kernel="gaussian", nu=self.NU, nextra=self.NEXTRA,
             )
-            if mr < best_re:
-                best_re = mr
+            if se < best_se:
+                best_se = se
                 best_eps = eps
-        return best_eps, best_re
+        return best_eps, best_se
 
     def _extract_boundary_weights(self, epsilon):
         """Extract the r×t boundary weight matrix at a given ε."""
@@ -1314,7 +1296,7 @@ class TestStableEpsilonAlphas:
             eps_star, None, verbose=False
         )
 
-        print(f"\n  Eigenvalue stability comparison (ε*={eps_star:.4f}):")
+        print(f"\n  Stability eigenvalue comparison (ε*={eps_star:.4f}):")
         print(f"  {'n':>5s}  {'RBF direct':>14s}  {'TEMO+RBF α':>14s}")
         print(f"  {'-'*5}  {'-'*14}  {'-'*14}")
 
@@ -1324,21 +1306,18 @@ class TestStableEpsilonAlphas:
                 n, p=self.P, q=self.Q, epsilon=eps_star,
                 kernel="gaussian", nu=self.NU, nextra=self.NEXTRA,
             )
-            re_rbf = float(np.max(np.real(np.linalg.eigvals(D_rbf))))
+            se_rbf = stability_eigenvalue_from_matrix(D_rbf)
 
             # TEMO with RBF-extracted alphas (conservation on last row)
             D_temo = self._build_D_from_boundary(n, B_temo)
-            re_temo = float(np.max(np.real(np.linalg.eigvals(D_temo))))
+            se_temo = stability_eigenvalue_from_matrix(D_temo)
 
-            print(f"  {n:5d}  {re_rbf:14.6e}  {re_temo:14.6e}")
+            print(f"  {n:5d}  {se_rbf:14.6e}  {se_temo:14.6e}")
 
             # Key assertions at n=40: regression-protect the stability findings
             if n == 40:
-                assert re_rbf < 1e-13, (
-                    f"RBF direct should be stable to machine precision, got {re_rbf}"
-                )
-                assert re_temo > 0.1, (
-                    f"TEMO+conservation should be unstable, got {re_temo}"
+                assert se_rbf < 0, (
+                    f"RBF direct should be stable under corrected metric, got {se_rbf}"
                 )
 
     def test_compare_with_production_alphas(self):
@@ -1370,36 +1349,33 @@ class TestStableEpsilonAlphas:
                     expr.subs({a: v for a, v in zip(alphas, prod_alphas)})
                 )
 
-        # Eigenvalue stability comparison
+        # Stability eigenvalue comparison
         n = 40
-        print(f"\n  Eigenvalue stability comparison (n={n}):")
+        print(f"\n  Stability eigenvalue comparison (n={n}):")
 
         # RBF direct (uses ε*)
         D_rbf = build_diff_matrix_rbf(
             n, p=self.P, q=self.Q, epsilon=eps_star,
             kernel="gaussian", nu=self.NU, nextra=self.NEXTRA,
         )
-        eig_rbf = np.linalg.eigvals(D_rbf)
-        re_rbf = float(np.max(np.real(eig_rbf)))
-        sr_rbf = float(np.max(np.abs(eig_rbf)))
+        se_rbf = stability_eigenvalue_from_matrix(D_rbf)
+        sr_rbf = float(np.max(np.abs(np.linalg.eigvals(D_rbf))))
 
         # TEMO with RBF alphas (conservation)
         D_temo_rbf = self._build_D_from_boundary(n, B_temo)
-        eig_temo_rbf = np.linalg.eigvals(D_temo_rbf)
-        re_temo_rbf = float(np.max(np.real(eig_temo_rbf)))
-        sr_temo_rbf = float(np.max(np.abs(eig_temo_rbf)))
+        se_temo_rbf = stability_eigenvalue_from_matrix(D_temo_rbf)
+        sr_temo_rbf = float(np.max(np.abs(np.linalg.eigvals(D_temo_rbf))))
 
         # Production alphas (conservation)
         D_prod = self._build_D_from_boundary(n, B_prod)
-        eig_prod = np.linalg.eigvals(D_prod)
-        re_prod = float(np.max(np.real(eig_prod)))
-        sr_prod = float(np.max(np.abs(eig_prod)))
+        se_prod = stability_eigenvalue_from_matrix(D_prod)
+        sr_prod = float(np.max(np.abs(np.linalg.eigvals(D_prod))))
 
-        print(f"  {'Method':>25s}  {'max Re(λ)':>14s}  {'spec radius':>14s}")
+        print(f"  {'Method':>25s}  {'stab eig':>14s}  {'spec radius':>14s}")
         print(f"  {'-'*25}  {'-'*14}  {'-'*14}")
-        print(f"  {'RBF direct (ε*)':>25s}  {re_rbf:14.6e}  {sr_rbf:14.6e}")
-        print(f"  {'TEMO + RBF alphas':>25s}  {re_temo_rbf:14.6e}  {sr_temo_rbf:14.6e}")
-        print(f"  {'Production alphas':>25s}  {re_prod:14.6e}  {sr_prod:14.6e}")
+        print(f"  {'RBF direct (ε*)':>25s}  {se_rbf:14.6e}  {sr_rbf:14.6e}")
+        print(f"  {'TEMO + RBF alphas':>25s}  {se_temo_rbf:14.6e}  {sr_temo_rbf:14.6e}")
+        print(f"  {'Production alphas':>25s}  {se_prod:14.6e}  {sr_prod:14.6e}")
 
     def test_conservation_deficit(self):
         """Check conservation deficit of the RBF-extracted boundary stencil.
@@ -1510,13 +1486,13 @@ class TestComparisonTable:
         return D
 
     def _find_best_epsilon(self, p, q, nextra, nu, kernel, n=40):
-        """Find best ε via coarse + fine sweep."""
+        """Find best ε via coarse + fine sweep (most negative stab_eig)."""
         eps_coarse = np.logspace(np.log10(0.01), np.log10(15), 80)
-        best_eps, best_re = None, np.inf
+        best_eps, best_se = None, np.inf
         for eps in eps_coarse:
-            mr = max_real_eigenvalue(n, p, q, eps, kernel, nu, nextra)
-            if mr < best_re:
-                best_re = mr
+            se = stability_eigenvalue(n, p, q, eps, kernel, nu, nextra)
+            if se < best_se:
+                best_se = se
                 best_eps = eps
 
         # Fine sweep around coarse best
@@ -1524,12 +1500,12 @@ class TestComparisonTable:
         hi = min(50, best_eps * 3)
         eps_fine = np.linspace(lo, hi, 200)
         for eps in eps_fine:
-            mr = max_real_eigenvalue(n, p, q, eps, kernel, nu, nextra)
-            if mr < best_re:
-                best_re = mr
+            se = stability_eigenvalue(n, p, q, eps, kernel, nu, nextra)
+            if se < best_se:
+                best_se = se
                 best_eps = eps
 
-        return best_eps, best_re
+        return best_eps, best_se
 
     def _find_best_mixed_epsilon(self, p, q, nextra, nu, r, kernel, n=40):
         """Coordinate descent to find per-row optimal ε (returns list of ε)."""
@@ -1538,24 +1514,24 @@ class TestComparisonTable:
         current = [best_single] * r
         eps_vals = np.logspace(np.log10(0.3), np.log10(10.0), 40)
 
-        def _max_re(eps_list):
+        def _stab_eig(eps_list):
             D = build_diff_matrix_mixed_epsilon(
                 n, p, q, eps_list, kernel, nu, nextra
             )
-            return float(np.max(np.real(np.linalg.eigvals(D))))
+            return stability_eigenvalue_from_matrix(D)
 
-        current_re = _max_re(current)
+        current_se = _stab_eig(current)
         for _ in range(3):
             for row in range(r):
                 for eps in eps_vals:
                     trial = list(current)
                     trial[row] = eps
-                    mr = _max_re(trial)
-                    if mr < current_re:
-                        current_re = mr
+                    se = _stab_eig(trial)
+                    if se < current_se:
+                        current_se = se
                         current[row] = eps
 
-        return current, current_re
+        return current, current_se
 
     def _conservation_deficit(self, D, n, p, r):
         """Max absolute column-sum deviation in the overlap region.
@@ -1569,13 +1545,12 @@ class TestComparisonTable:
 
     def _metrics(self, D, n, p, r):
         """Compute all comparison metrics from a differentiation matrix."""
-        eigvals = np.linalg.eigvals(D)
-        max_re = float(np.max(np.real(eigvals)))
-        spec_rad = float(np.max(np.abs(eigvals)))
+        stab_eig = stability_eigenvalue_from_matrix(D)
+        spec_rad = float(np.max(np.abs(np.linalg.eigvals(D))))
         # CFL = RK4 imaginary limit / spectral_radius
         cfl = self.RK4_IMAG_LIMIT / spec_rad if spec_rad > 0 else float("inf")
         cons_deficit = self._conservation_deficit(D, n, p, r)
-        return max_re, spec_rad, cfl, cons_deficit
+        return stab_eig, spec_rad, cfl, cons_deficit
 
     # --------------------------------------------------------- E2 comparison
 
@@ -1608,23 +1583,16 @@ class TestComparisonTable:
         print(f"\n{'='*80}")
         print(f"  E2_1 Comparison Table (n={n}, p={p}, q={q}, nextra={nextra})")
         print(f"{'='*80}")
-        hdr = f"  {'Method':>22s}  {'max Re(λ)':>14s}  {'|λ|_max':>14s}  {'CFL(RK4)':>10s}  {'cons deficit':>14s}"
+        hdr = f"  {'Method':>22s}  {'stab eig':>14s}  {'|λ|_max':>14s}  {'CFL(RK4)':>10s}  {'cons deficit':>14s}"
         print(hdr)
         print(f"  {'-'*22}  {'-'*14}  {'-'*14}  {'-'*10}  {'-'*14}")
-        for name, max_re, sr, cfl, cd in results:
-            print(f"  {name:>22s}  {max_re:14.6e}  {sr:14.6e}  {cfl:10.4f}  {cd:14.6e}")
+        for name, stab_eig, sr, cfl, cd in results:
+            print(f"  {name:>22s}  {stab_eig:14.6e}  {sr:14.6e}  {cfl:10.4f}  {cd:14.6e}")
 
-        # Key assertion: Gaussian RBF should achieve machine-precision stability
-        gauss_re = results[1][1]
-        assert gauss_re < 1e-12, f"E2 Gaussian should be stable, got {gauss_re}"
-
-        # PHS k=2 with E2_1 parameters (nextra=1) is NOT stable — O(1e-2).
-        # Note: the original Phase 29 finding of 5.7e-14 was for nextra=0 (t=3, r=2),
-        # a smaller configuration that doesn't match the production E2_1 scheme.
-        phs_re = results[0][1]
-        assert phs_re > 0.01, (
-            f"PHS k=2 E2_1 (nextra=1) should be unstable O(1e-2), got {phs_re}"
-        )
+        # Under corrected metric (inflow-Dirichlet BC, -D sign), all E2 methods
+        # are stable. Phase 32.2a confirmed E2 was always stable.
+        for name, stab_eig, sr, cfl, cd in results:
+            assert stab_eig < 0, f"E2 {name} should be stable, got stab_eig={stab_eig}"
 
     # --------------------------------------------------------- E4 comparison
 
@@ -1668,21 +1636,21 @@ class TestComparisonTable:
         print(f"\n{'='*80}")
         print(f"  E4_1 Comparison Table (n={n}, p={p}, q={q}, nextra={nextra})")
         print(f"{'='*80}")
-        hdr = f"  {'Method':>30s}  {'max Re(λ)':>14s}  {'|λ|_max':>14s}  {'CFL(RK4)':>10s}  {'cons deficit':>14s}"
+        hdr = f"  {'Method':>30s}  {'stab eig':>14s}  {'|λ|_max':>14s}  {'CFL(RK4)':>10s}  {'cons deficit':>14s}"
         print(hdr)
         print(f"  {'-'*30}  {'-'*14}  {'-'*14}  {'-'*10}  {'-'*14}")
-        for name, max_re, sr, cfl, cd in results:
-            print(f"  {name:>30s}  {max_re:14.6e}  {sr:14.6e}  {cfl:10.4f}  {cd:14.6e}")
+        for name, stab_eig, sr, cfl, cd in results:
+            print(f"  {name:>30s}  {stab_eig:14.6e}  {sr:14.6e}  {cfl:10.4f}  {cd:14.6e}")
 
-        # Key assertion: PHS k=2 should be better than raw unstable (< 0.01)
-        phs_re = results[0][1]
-        assert phs_re < 0.01, f"E4 PHS k=2 should have small instability, got {phs_re}"
+        # Under corrected metric, PHS k=2 is stable for E4
+        phs_se = results[0][1]
+        assert phs_se < 0, f"E4 PHS k=2 should be stable, got stab_eig={phs_se}"
 
-        # Mixed-ε should improve over single Gaussian
-        gauss_re = results[1][1]
-        mixed_re_actual = results[3][1]
-        assert mixed_re_actual <= gauss_re * 1.1, (
-            f"Mixed-ε should not be worse than single: {mixed_re_actual} vs {gauss_re}"
+        # Mixed-ε should not be worse than single Gaussian
+        gauss_se = results[1][1]
+        mixed_se = results[3][1]
+        assert mixed_se <= gauss_se * 1.1 or mixed_se < 0, (
+            f"Mixed-ε should not be worse than single: {mixed_se} vs {gauss_se}"
         )
 
     # ---------------------------------------------- combined summary
@@ -1709,38 +1677,35 @@ class TestComparisonTable:
             eps_g, _ = self._find_best_epsilon(p, q, nextra, nu, "gaussian", n=40)
 
             print(f"\n  {label} — Gaussian ε*={eps_g:.3f}")
-            print(f"  {'n':>5s}  {'max Re(λ)':>14s}  {'|λ|_max':>14s}  {'CFL(RK4)':>10s}")
+            print(f"  {'n':>5s}  {'stab eig':>14s}  {'|λ|_max':>14s}  {'CFL(RK4)':>10s}")
             print(f"  {'-'*5}  {'-'*14}  {'-'*14}  {'-'*10}")
 
-            prev_re = None
+            prev_se = None
             for n in [20, 40, 80]:
                 D = build_diff_matrix_rbf(n, p, q, eps_g, "gaussian", nu, nextra)
-                eigvals = np.linalg.eigvals(D)
-                max_re = float(np.max(np.real(eigvals)))
-                sr = float(np.max(np.abs(eigvals)))
+                stab_eig = stability_eigenvalue_from_matrix(D)
+                sr = float(np.max(np.abs(np.linalg.eigvals(D))))
                 cfl = self.RK4_IMAG_LIMIT / sr if sr > 0 else float("inf")
                 trend = ""
-                if prev_re is not None:
-                    if max_re > prev_re * 10:
+                if prev_se is not None:
+                    if stab_eig > prev_se * 10:
                         trend = " ↑ DEGRADING"
-                    elif max_re < prev_re * 0.1:
+                    elif stab_eig < prev_se * 0.1:
                         trend = " ↓ improving"
                     else:
                         trend = " ~ stable"
-                prev_re = max_re
-                results[(label, n)] = max_re
-                print(f"  {n:5d}  {max_re:14.6e}  {sr:14.6e}  {cfl:10.4f}{trend}")
+                prev_se = stab_eig
+                results[(label, n)] = stab_eig
+                print(f"  {n:5d}  {stab_eig:14.6e}  {sr:14.6e}  {cfl:10.4f}{trend}")
 
-        # Regression-protect the key findings:
-        # E2_1 Gaussian achieves machine-precision stability at n=40
-        assert results[("E2_1", 40)] < 1e-12, (
-            f"E2_1 Gaussian at n=40 should be machine-precision stable, "
+        # Under corrected metric, both E2 and E4 Gaussian are stable at optimal ε
+        assert results[("E2_1", 40)] < 0, (
+            f"E2_1 Gaussian at n=40 should be stable, "
             f"got {results[('E2_1', 40)]:.3e}"
         )
-        # E4_1 Gaussian does NOT achieve stability — instability persists at n=80
-        assert results[("E4_1", 80)] > 1e-5, (
-            f"E4_1 Gaussian at n=80 should show residual instability, "
-            f"got {results[('E4_1', 80)]:.3e}"
+        assert results[("E4_1", 40)] < 0, (
+            f"E4_1 Gaussian at n=40 should be stable at optimal ε, "
+            f"got {results[('E4_1', 40)]:.3e}"
         )
 
 

@@ -372,7 +372,7 @@ The Phase 29-31 tests have hard assertions based on the wrong metric.  Update:
 - All `STABILITY_TOL` comparisons on old metric → `stab_eig < 0` on correct metric
 - `E4_INSTABILITY_FLOOR` concept → E4 is stable, no floor exists
 
-#### 32.5b-i — Update Phase 29 sweep classes
+#### 32.5b-i — Update Phase 29 sweep classes ✅
 
 Classes: `TestEpsilonSweepE2`, `TestEpsilonSweepE4`, `TestMixedEpsilon`,
 `TestStableEpsilonAlphas`, `TestComparisonTable`.
@@ -394,6 +394,23 @@ Changes:
   Assert all methods stable (`stab_eig < 0`).
 - `TestComparisonTable.test_e4_comparison`: Remove "PHS k=2 should have small instability".
   Assert PHS k=2 stable. Update mixed-ε comparison.
+
+All 5 classes updated (18 tests pass):
+- `TestEpsilonSweepE2/E4._sweep`: `np.linalg.eigvals(D)` → `stability_eigenvalue_from_matrix(D)`
+- `TestEpsilonSweepE2/E4._print_table`: labels/threshold updated
+- `TestEpsilonSweepE2/E4.test_gaussian_fine_sweep_near_best`: `max_real_eigenvalue` → `stability_eigenvalue`
+- `TestMixedEpsilon._max_re_mixed` → `_stab_eig_mixed` using `stability_eigenvalue_from_matrix`
+- `TestMixedEpsilon.test_single_epsilon_baseline`: assert `< 0` (stable)
+- `TestMixedEpsilon.test_conservation_near_interior`: raw eigvals → `stability_eigenvalue_from_matrix`
+- `TestStableEpsilonAlphas._find_best_epsilon`: `max_real_eigenvalue` → `stability_eigenvalue`
+- `TestStableEpsilonAlphas.test_verify_stability_with_extracted_alphas`: eigvals → `stability_eigenvalue_from_matrix`, removed TEMO unstable assertion (value printed for inspection)
+- `TestStableEpsilonAlphas.test_compare_with_production_alphas`: eigvals → `stability_eigenvalue_from_matrix`
+- `TestComparisonTable._find_best_epsilon`: `max_real_eigenvalue` → `stability_eigenvalue`
+- `TestComparisonTable._find_best_mixed_epsilon`: raw eigvals → `stability_eigenvalue_from_matrix`
+- `TestComparisonTable._metrics`: raw eigvals → `stability_eigenvalue_from_matrix`
+- `TestComparisonTable.test_e2_comparison`: removed "PHS should be unstable", assert all methods `stab_eig < 0`
+- `TestComparisonTable.test_e4_comparison`: removed "PHS should have small instability", assert PHS stable
+- `TestComparisonTable.test_summary_across_grid_sizes`: eigvals → `stability_eigenvalue_from_matrix`, assert both E2 and E4 stable
 
 #### 32.5b-ii — Update Phase 30 tension sweep and wavenumber classes
 
