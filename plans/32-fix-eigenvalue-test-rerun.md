@@ -395,9 +395,10 @@ Changes:
 - `TestComparisonTable.test_e4_comparison`: Remove "PHS k=2 should have small instability".
   Assert PHS k=2 stable. Update mixed-ε comparison.
 
-#### 32.5b-ii — Update Phase 30 tension sweep classes
+#### 32.5b-ii — Update Phase 30 tension sweep and wavenumber classes
 
-Classes: `TestTensionSweepE2`, `TestTensionSweepE4`, `TestTensionOptimalSigma`.
+Classes: `TestTensionSweepE2`, `TestTensionSweepE4`, `TestTensionOptimalSigma`,
+`TestModifiedWavenumber`.
 
 Changes:
 - `TestTensionSweepE2/E4._sweep`: Replace manual eigvals with
@@ -417,6 +418,25 @@ Changes:
   broadly stable (PHS k=2 at σ=0 is already best). Rewrite assertions.
 - `TestTensionOptimalSigma.test_comparison_all_methods`: Update all assertions.
   E2: all stable. E4: PHS stable, remove "improves over PHS" assertions.
+- `TestModifiedWavenumber._find_best_sigma`: Replace `max_real_eigenvalue` →
+  `stability_eigenvalue`. Under corrected metric, E4 optimal is PHS k=2 (σ=0),
+  not the old tension σ* — this changes which σ the wavenumber analysis runs at.
+- `TestModifiedWavenumber.test_e2_boundary_at_optimal_sigma`: `best_re` now
+  comes from `stability_eigenvalue`. Replace `assert best_re < STABILITY_TOL`
+  with `assert best_re < 0` (stable under corrected metric).
+- `TestModifiedWavenumber.test_e2_boundary_amplifying_at_sigma_zero`: Update
+  docstring — PHS k=2 IS stable under correct metric. Per-stencil amplification
+  can exist without implying full-operator instability. Assertion may still pass
+  (per-stencil Re(κ*)>0 is a local property), but explanation must be corrected.
+- `TestModifiedWavenumber.test_e4_boundary_at_optimal_sigma`: Comments claim
+  "E4 does NOT achieve machine-precision stability (full matrix O(1e-5))" —
+  wrong under corrected metric. Update σ* (now PHS k=2 σ=0), update comments,
+  update assertion message at line ~3887 ("explaining O(1e-5) instability").
+- `TestModifiedWavenumber.test_e4_phs_boundary_worse_than_tension`: Uses old
+  `_find_best_sigma` to pick σ*. Under corrected metric PHS k=2 σ=0 IS the
+  optimal, so this comparison may need rethinking — the assertion that tension
+  reduces per-stencil amplification vs PHS may still hold locally but the
+  motivation is different.
 
 #### 32.5b-iii — Update Phase 30 conservation and comparison classes
 
