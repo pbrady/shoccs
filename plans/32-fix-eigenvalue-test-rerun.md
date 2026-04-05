@@ -476,31 +476,29 @@ All 4 classes updated (16 tests pass):
 - `TestModifiedWavenumber.test_e4_boundary_at_optimal_sigma`: updated comments — E4 IS stable, removed `any_amplifying` assertion, assert `best_se < 0`
 - `TestModifiedWavenumber.test_e4_phs_boundary_worse_than_tension` → `test_e4_phs_boundary_vs_tension_per_stencil`: σ* is now PHS k=2, so compare PHS (σ=0) with production σ=3.0 instead; assert both have bounded per-stencil amplification
 
-#### 32.5b-iii — Update Phase 30 conservation and comparison classes
+#### 32.5b-iii — Update Phase 30 conservation and comparison classes ✅
 
 Classes: `TestTensionConservationE2`, `TestTensionConservationE4`,
 `TestTensionComparison`.
 
-Changes:
-- `TestTensionConservationE2._eval_point`: Replace manual eigvals with
-  `stability_eigenvalue_from_matrix(D)`. Return `(stab_eig, deficit)`.
-- `TestTensionConservationE2` assertions: E2 universally stable, so "at least
-  one stable point" → "all points stable". Keep deficit improvement assertions
-  (conservation deficit is independent of stability metric).
-- `TestTensionConservationE4._eval_point`: Same fix.
-- `TestTensionConservationE4` assertions: Remove `E4_INSTABILITY_FLOOR` concept.
-  Under correct metric E4 is stable. Assert `stab_eig < 0` instead of
-  `< E4_INSTABILITY_FLOOR`. Remove "γ>0 improves over γ=0" (penalty doesn't help).
-- `TestTensionComparison._metrics`: Compute `stab_eig` via
-  `stability_eigenvalue_from_matrix`. Keep `spec_rad` / CFL from full D.
-- `TestTensionComparison._find_best_sigma` / `_find_best_epsilon`: Replace
-  `max_real_eigenvalue` → `stability_eigenvalue`.
-- `TestTensionComparison._find_best_sigma_gamma`: Replace manual eigvals.
-- `TestTensionComparison.test_e2_comparison`: Remove "PHS should be unstable O(1e-2)"
-  (line 3498). Assert all methods stable.
-- `TestTensionComparison.test_e4_comparison`: Remove "PHS should be unstable"
-  (line 3567). Assert all methods stable at optimal params.
-- `TestTensionComparison.test_grid_convergence`: E2 and E4 both stable across grids.
+All 3 classes updated (9 tests pass):
+- `TestTensionConservationE2._eval_point`: `np.linalg.eigvals(D)` → `stability_eigenvalue_from_matrix(D)`
+- `TestTensionConservationE2` assertions: stability check `stab_eig < 0` instead of `max_re < STABILITY_TOL`
+- `TestTensionConservationE2.test_stability_survives_moderate_penalty`: labels/threshold updated
+- `TestTensionConservationE2.test_fine_sweep_near_optimal`: labels updated, stability check `stab_eig < 0`
+- `TestTensionConservationE4._eval_point`: `np.linalg.eigvals(D)` → `stability_eigenvalue_from_matrix(D)`
+- `TestTensionConservationE4`: removed `E4_INSTABILITY_FLOOR` constant, updated docstring
+- `TestTensionConservationE4.test_joint_sweep_coarse`: σ range [0,20] (was [5,55]), assert `stab_eig < 0`, removed "γ>0 improves" assertion
+- `TestTensionConservationE4.test_stability_vs_gamma_at_optimal_sigma`: σ*=0 (PHS k=2, was 37), assert `stab_eig < 0`, removed "γ>0 must improve" assertion
+- `TestTensionConservationE4.test_fine_sweep_near_optimal`: σ range [0,5] (was [20,55]), assert `stab_eig < 0`, removed "γ>0 must be found" assertion
+- `TestTensionComparison._metrics`: `np.linalg.eigvals(D)` → `stability_eigenvalue_from_matrix(D)` for stab_eig, kept full D for spec_rad/CFL
+- `TestTensionComparison._find_best_sigma`: `max_real_eigenvalue` → `stability_eigenvalue`, includes σ=0
+- `TestTensionComparison._find_best_epsilon`: `max_real_eigenvalue` → `stability_eigenvalue`
+- `TestTensionComparison._find_best_sigma_gamma`: raw eigvals → `stability_eigenvalue_from_matrix`, includes σ=0
+- `TestTensionComparison._print_table`: labels updated to `stab eig` / `< 0`
+- `TestTensionComparison.test_e2_comparison`: removed "PHS should be unstable O(1e-2)", assert all 4 methods `stab_eig < 0`
+- `TestTensionComparison.test_e4_comparison`: removed "PHS should be unstable", removed ordering assertions, assert all 4 methods `stab_eig < 0`
+- `TestTensionComparison.test_grid_convergence`: labels updated, assert both E2 and E4 `stab_eig < 0` at all grid sizes
 
 #### 32.5b-iv — Update Phase 31 footprint and cross-validation classes
 

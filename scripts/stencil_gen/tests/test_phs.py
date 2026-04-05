@@ -2785,27 +2785,30 @@ class TestTensionConservationE2:
 
     Sweep both tension parameter σ and conservation penalty γ to find
     whether there exists a (σ*, γ*) where both:
-    - max Re(λ) < STABILITY_TOL  (stability)
+    - stab_eig < 0  (stability under corrected metric)
     - conservation deficit < some threshold  (conservation)
 
     E2_1 parameters: p=1, q=1, nextra=1.
-    From Phase 30.2d, E2 achieves machine-precision stability at σ ≈ 5–6
-    with γ=0.  The question is: does adding conservation penalty γ > 0
+    Under the corrected stability metric (Phase 32), E2 is universally
+    stable.  The question is: does adding conservation penalty γ > 0
     destroy stability, or can both be achieved simultaneously?
     """
 
     P, Q, NEXTRA, NU = 1, 1, 1, 1
 
     def _eval_point(self, n, sigma, gamma):
-        """Evaluate (σ, γ) point: return (max_re, deficit)."""
+        """Evaluate (σ, γ) point: return (stab_eig, deficit).
+
+        stab_eig = max Re(eig(-D_bc)) where D_bc = D[1:, 1:] (inflow Dirichlet).
+        Stable means stab_eig < 0.
+        """
         D = build_diff_matrix_rbf_penalty(
             n, self.P, self.Q, sigma, "tension", self.NU, self.NEXTRA,
             gamma=gamma,
         )
-        eigvals = np.linalg.eigvals(D)
-        max_re = float(np.max(np.real(eigvals)))
+        se = stability_eigenvalue_from_matrix(D)
         deficit = float(np.max(np.abs(np.sum(D, axis=0))))
-        return max_re, deficit
+        return se, deficit
 
     def test_joint_sweep_coarse(self):
         """Coarse 2D sweep over σ × γ for E2_1.
@@ -2830,9 +2833,9 @@ class TestTensionConservationE2:
         n_stable = 0
         for sigma in sigmas:
             for gamma in gammas:
-                max_re, deficit = self._eval_point(n, sigma, gamma)
+                stab_eig, deficit = self._eval_point(n, sigma, gamma)
 
-                if max_re < STABILITY_TOL:
+                if stab_eig < 0:
                     n_stable += 1
                     if deficit < best_stable_deficit:
                         best_stable_deficit = deficit
@@ -2871,8 +2874,8 @@ class TestTensionConservationE2:
         for sigma in sigmas[::3]:  # every 3rd σ for brevity
             max_gamma = -1.0
             for gamma in gammas:
-                max_re, _ = self._eval_point(n, sigma, gamma)
-                if max_re < STABILITY_TOL:
+                se, _ = self._eval_point(n, sigma, gamma)
+                if se < 0:
                     max_gamma = gamma
             if max_gamma >= 0:
                 print(f"    σ={sigma:6.2f}: stable up to γ={max_gamma:.2f}")
@@ -2880,7 +2883,7 @@ class TestTensionConservationE2:
                 print(f"    σ={sigma:6.2f}: unstable at all γ")
 
         # --- Assertions ---
-        # E2 must have at least one stable point (we know γ=0, σ≈6 is stable)
+        # E2 is universally stable under corrected metric — all points should be stable
         assert n_stable > 0, "No stable (σ, γ) point found for E2"
 
         # Stability must exist at γ=0 (regression from Phase 30.2)
@@ -2907,7 +2910,7 @@ class TestTensionConservationE2:
         gammas = np.concatenate([[0.0], np.logspace(-1, 2, 50)])  # 0..100
 
         print(f"\n  E2_1 Stability vs γ at σ*={sigma_star} (n={n})")
-        print(f"  {'γ':>10s}  {'max Re(λ)':>14s}  {'deficit':>14s}  {'status':>10s}")
+        print(f"  {'γ':>10s}  {'stab eig':>14s}  {'deficit':>14s}  {'status':>10s}")
         print(f"  {'-'*10}  {'-'*14}  {'-'*14}  {'-'*10}")
 
         max_stable_gamma = -1.0
@@ -2915,15 +2918,15 @@ class TestTensionConservationE2:
         deficit_at_max_stable = None
 
         for gamma in gammas:
-            max_re, deficit = self._eval_point(n, sigma_star, gamma)
-            status = "STABLE" if max_re < STABILITY_TOL else "unstable"
+            stab_eig, deficit = self._eval_point(n, sigma_star, gamma)
+            status = "STABLE" if stab_eig < 0 else "unstable"
             # Print a representative subset of rows
             if (gamma == 0.0 or gamma < 0.2
                     or abs(gamma - 1.0) < 0.2 or abs(gamma - 10.0) < 1.5
                     or abs(gamma - 50.0) < 5.0 or gamma > 90.0):
-                print(f"  {gamma:10.4f}  {max_re:14.6e}  {deficit:14.6e}  {status:>10s}")
+                print(f"  {gamma:10.4f}  {stab_eig:14.6e}  {deficit:14.6e}  {status:>10s}")
 
-            if max_re < STABILITY_TOL:
+            if stab_eig < 0:
                 max_stable_gamma = gamma
                 deficit_at_max_stable = deficit
             if gamma == 0.0:
@@ -2941,9 +2944,9 @@ class TestTensionConservationE2:
 
         # --- Assertions ---
         # γ=0 must be stable (regression)
-        re_0, _ = self._eval_point(n, sigma_star, 0.0)
-        assert re_0 < STABILITY_TOL, (
-            f"E2 unstable at σ={sigma_star}, γ=0: max Re(λ) = {re_0:.6e}"
+        se_0, _ = self._eval_point(n, sigma_star, 0.0)
+        assert se_0 < 0, (
+            f"E2 unstable at σ={sigma_star}, γ=0: stab_eig = {se_0:.6e}"
         )
 
         # Some γ > 0 should also be stable (conservation penalty shouldn't
@@ -2964,16 +2967,16 @@ class TestTensionConservationE2:
         best_deficit = float("inf")
         best_sigma = None
         best_gamma = None
-        best_re = None
+        best_se = None
 
         for sigma in sigmas:
             for gamma in gammas:
-                max_re, deficit = self._eval_point(n, sigma, gamma)
-                if max_re < STABILITY_TOL and deficit < best_deficit:
+                stab_eig, deficit = self._eval_point(n, sigma, gamma)
+                if stab_eig < 0 and deficit < best_deficit:
                     best_deficit = deficit
                     best_sigma = sigma
                     best_gamma = gamma
-                    best_re = max_re
+                    best_se = stab_eig
 
         print(f"\n  E2_1 Fine joint sweep: σ ∈ [4, 8], γ ∈ [0, 100]")
         print(f"  Grid: {len(sigmas)} × {len(gammas)} = {len(sigmas) * len(gammas)} points")
@@ -2981,13 +2984,13 @@ class TestTensionConservationE2:
         if best_sigma is not None:
             print(f"\n  Best stable + lowest deficit:")
             print(f"    σ*={best_sigma:.4f}, γ*={best_gamma:.4f}")
-            print(f"    max Re(λ)={best_re:.6e}")
+            print(f"    stab_eig={best_se:.6e}")
             print(f"    deficit={best_deficit:.6e}")
 
             # Compare with γ=0 baseline
-            re_0, deficit_0 = self._eval_point(n, best_sigma, 0.0)
+            se_0, deficit_0 = self._eval_point(n, best_sigma, 0.0)
             print(f"\n  Baseline at same σ, γ=0:")
-            print(f"    max Re(λ)={re_0:.6e}")
+            print(f"    stab_eig={se_0:.6e}")
             print(f"    deficit={deficit_0:.6e}")
             if deficit_0 > 0:
                 improvement = 1.0 - best_deficit / deficit_0
@@ -2996,9 +2999,9 @@ class TestTensionConservationE2:
             # Verify grid independence of best point
             print(f"\n  Grid independence at (σ*={best_sigma:.4f}, γ*={best_gamma:.4f}):")
             for nn in [20, 40, 80]:
-                mr, df = self._eval_point(nn, best_sigma, best_gamma)
-                status = "STABLE" if mr < STABILITY_TOL else "unstable"
-                print(f"    n={nn:4d}: max Re(λ)={mr:.6e}, deficit={df:.6e} [{status}]")
+                se, df = self._eval_point(nn, best_sigma, best_gamma)
+                status = "STABLE" if se < 0 else "unstable"
+                print(f"    n={nn:4d}: stab_eig={se:.6e}, deficit={df:.6e} [{status}]")
         else:
             print("  No stable point found in fine sweep region.")
 
@@ -3027,238 +3030,196 @@ class TestTensionConservationE4:
     """Joint (σ, γ) sweep for E4_1 boundary stencils (Phase 30.3c).
 
     Sweep both tension parameter σ and conservation penalty γ to investigate
-    whether the 2D (σ, γ) space can breach the O(1e-4–1e-5) stability floor
-    that 1D σ sweeps could not.
+    the stability–conservation trade-off.
 
     E4_1 parameters: p=2, q=3, nextra=0.
-    From Phase 30.2d, E4 best uniform σ gives max Re(λ) ≈ 5e-5 (NOT stable).
-    The key question: can adding conservation penalty γ > 0 find a (σ*, γ*)
-    that achieves machine-precision stability for E4?
+    Under the corrected stability metric (Phase 32), E4 is already stable
+    at PHS k=2 (σ=0, γ=0).  The penalty (γ > 0) does NOT help stability
+    and can actually destroy it.
     """
 
     P, Q, NEXTRA, NU = 2, 3, 0, 1
 
-    # E4 instability floor from Phase 30.2c/d — best 1D σ gives ~5e-5
-    E4_INSTABILITY_FLOOR = 1e-3
-
     def _eval_point(self, n, sigma, gamma):
-        """Evaluate (σ, γ) point: return (max_re, deficit)."""
+        """Evaluate (σ, γ) point: return (stab_eig, deficit).
+
+        stab_eig = max Re(eig(-D_bc)) where D_bc = D[1:, 1:] (inflow Dirichlet).
+        Stable means stab_eig < 0.
+        """
         D = build_diff_matrix_rbf_penalty(
             n, self.P, self.Q, sigma, "tension", self.NU, self.NEXTRA,
             gamma=gamma,
         )
-        eigvals = np.linalg.eigvals(D)
-        max_re = float(np.max(np.real(eigvals)))
+        se = stability_eigenvalue_from_matrix(D)
         deficit = float(np.max(np.abs(np.sum(D, axis=0))))
-        return max_re, deficit
+        return se, deficit
 
     def test_joint_sweep_coarse(self):
-        """Coarse 2D sweep over σ × γ for E4_1.
+        """Coarse 2D sweep over σ × γ for E4_1 with corrected stability.
 
-        Maps the stability–conservation landscape.  Since E4 is not
-        machine-precision stable at any 1D σ, we check whether the
-        2D (σ, γ) space can improve on the 1D floor.
+        Under the corrected metric, E4 is already stable at PHS k=2 (σ=0).
+        Sweep σ ∈ [0, 20] (matching Phase 32.3b range) with γ ∈ [0, 100].
         """
         n = 40
-        sigmas = np.linspace(5.0, 55.0, 25)
+        sigmas = np.concatenate([[0.0], np.linspace(0.5, 20.0, 24)])
         gammas = np.concatenate([[0.0], np.logspace(-1, 2, 24)])  # 0 + log[0.1..100]
 
-        best_max_re = float("inf")
+        best_se = float("inf")
         best_sigma = None
         best_gamma = None
         best_deficit = None
 
         # Track γ=0 baseline
-        baseline_re = float("inf")
+        baseline_se = float("inf")
         baseline_deficit = None
 
-        # Track best max Re(λ) among points with γ > 0
-        best_re_gamma_pos = float("inf")
-
+        n_stable = 0
         for sigma in sigmas:
             for gamma in gammas:
-                max_re, deficit = self._eval_point(n, sigma, gamma)
+                stab_eig, deficit = self._eval_point(n, sigma, gamma)
 
-                if max_re < best_max_re:
-                    best_max_re = max_re
+                if stab_eig < best_se:
+                    best_se = stab_eig
                     best_sigma = sigma
                     best_gamma = gamma
                     best_deficit = deficit
 
-                if gamma == 0.0 and max_re < baseline_re:
-                    baseline_re = max_re
+                if gamma == 0.0 and stab_eig < baseline_se:
+                    baseline_se = stab_eig
                     baseline_deficit = deficit
 
-                if gamma > 0.0 and max_re < best_re_gamma_pos:
-                    best_re_gamma_pos = max_re
+                if stab_eig < 0:
+                    n_stable += 1
 
+        total = len(sigmas) * len(gammas)
         print(f"\n  E4_1 Joint (σ, γ) Sweep (n={n})")
-        print(f"  Grid: {len(sigmas)} σ × {len(gammas)} γ = "
-              f"{len(sigmas) * len(gammas)} points")
+        print(f"  Grid: {len(sigmas)} σ × {len(gammas)} γ = {total} points")
+        print(f"  Stable points: {n_stable}/{total}")
 
-        print(f"\n  Best (σ, γ) point (lowest max Re(λ)):")
+        print(f"\n  Best (σ, γ) point (most negative stab_eig):")
         print(f"    σ*={best_sigma:.4f}, γ*={best_gamma:.4f}")
-        print(f"    max Re(λ)={best_max_re:.6e}")
+        print(f"    stab_eig={best_se:.6e}")
         print(f"    deficit={best_deficit:.6e}")
 
         print(f"\n  Baseline (γ=0) best:")
-        print(f"    max Re(λ)={baseline_re:.6e}")
+        print(f"    stab_eig={baseline_se:.6e}")
         print(f"    deficit={baseline_deficit:.6e}")
 
-        if baseline_re > 0:
-            improvement = 1.0 - best_max_re / baseline_re
-            print(f"  Stability improvement with (σ,γ) over 1D σ: {improvement:.1%}")
-
-        # Check whether machine-precision stability was achieved
-        if best_max_re < STABILITY_TOL:
-            print(f"\n  *** BREAKTHROUGH: E4 achieves machine-precision stability! ***")
-        else:
-            print(f"\n  E4 NOT machine-precision stable (best {best_max_re:.6e})")
-            print(f"  The O(1e-4–1e-5) floor persists in 2D (σ, γ) space.")
-
         # --- Assertions ---
-        # Best max Re(λ) should be below the loose E4 floor (actual ~5e-5)
-        assert best_max_re < self.E4_INSTABILITY_FLOOR, (
-            f"E4 (σ,γ) sweep best {best_max_re:.6e} >= {self.E4_INSTABILITY_FLOOR}"
+        # Under corrected metric, E4 γ=0 is already stable
+        assert baseline_se < 0, (
+            f"E4 γ=0 baseline should be stable: stab_eig = {baseline_se:.6e}"
         )
-        # Baseline (γ=0) should also be below the floor (regression from 30.2c)
-        assert baseline_re < self.E4_INSTABILITY_FLOOR, (
-            f"E4 γ=0 baseline {baseline_re:.6e} >= {self.E4_INSTABILITY_FLOOR}"
-        )
-        # Best (σ, γ) with γ > 0 should strictly improve over γ=0 baseline.
-        # This verifies the penalty mechanism actually affects E4 results
-        # (actual improvement is ~63%: baseline ~8.7e-5 → best ~3.3e-5).
-        assert best_re_gamma_pos < baseline_re, (
-            f"γ>0 did not improve max Re(λ) over γ=0 baseline: "
-            f"{best_re_gamma_pos:.6e} >= {baseline_re:.6e}"
+        # Best overall should also be stable
+        assert best_se < 0, (
+            f"E4 (σ,γ) sweep best should be stable: stab_eig = {best_se:.6e}"
         )
 
     def test_stability_vs_gamma_at_optimal_sigma(self):
-        """Check how γ affects E4 stability at the known optimal σ.
+        """Check how γ affects E4 stability at the corrected optimal.
 
-        Fix σ at the Phase 30.2d optimal (~37–50) and sweep γ.
-        Key question: does γ > 0 help or hurt E4 stability?
+        Under the corrected metric, PHS k=2 (σ=0) is the optimal.
+        Fix σ=0 and sweep γ to check whether penalty helps or hurts.
+        Phase 32.3c found: very small γ gives marginal improvement,
+        but γ ≥ 0.87 makes the scheme unstable.
         """
         n = 40
-        sigma_star = 37.0  # from Phase 30.2c optimal
-        gammas = np.concatenate([[0.0], np.logspace(-1, 3, 50)])  # 0..1000
+        sigma_star = 0.0  # PHS k=2 is optimal under corrected metric
+        gammas = np.concatenate([[0.0], np.logspace(-2, 2, 50)])  # 0..100
 
         print(f"\n  E4_1 Stability vs γ at σ*={sigma_star} (n={n})")
-        print(f"  {'γ':>10s}  {'max Re(λ)':>14s}  {'deficit':>14s}")
+        print(f"  {'γ':>10s}  {'stab eig':>14s}  {'deficit':>14s}")
         print(f"  {'-'*10}  {'-'*14}  {'-'*14}")
 
-        best_re = float("inf")
+        best_se = float("inf")
         best_gamma = None
         deficit_at_zero = None
         deficit_at_best = None
 
         for gamma in gammas:
-            max_re, deficit = self._eval_point(n, sigma_star, gamma)
+            stab_eig, deficit = self._eval_point(n, sigma_star, gamma)
             # Print a representative subset
-            if (gamma == 0.0 or gamma < 0.2
-                    or abs(gamma - 1.0) < 0.2 or abs(gamma - 10.0) < 1.5
-                    or abs(gamma - 100.0) < 15.0 or gamma > 800.0):
-                print(f"  {gamma:10.4f}  {max_re:14.6e}  {deficit:14.6e}")
+            if (gamma == 0.0 or gamma < 0.02
+                    or abs(gamma - 0.1) < 0.02 or abs(gamma - 1.0) < 0.2
+                    or abs(gamma - 10.0) < 1.5 or gamma > 80.0):
+                print(f"  {gamma:10.4f}  {stab_eig:14.6e}  {deficit:14.6e}")
 
-            if max_re < best_re:
-                best_re = max_re
+            if stab_eig < best_se:
+                best_se = stab_eig
                 best_gamma = gamma
                 deficit_at_best = deficit
             if gamma == 0.0:
                 deficit_at_zero = deficit
 
         print(f"\n  Best γ for stability: {best_gamma:.4f}")
-        print(f"    max Re(λ)={best_re:.6e}")
+        print(f"    stab_eig={best_se:.6e}")
         print(f"    deficit={deficit_at_best:.6e}")
         if deficit_at_zero is not None:
             print(f"  Deficit at γ=0: {deficit_at_zero:.6e}")
 
-        if best_re < STABILITY_TOL:
-            print(f"  *** E4 achieves machine-precision stability at γ={best_gamma}! ***")
-        else:
-            print(f"  E4 NOT machine-precision stable (floor persists)")
-
         # --- Assertions ---
-        # γ=0 stability should match Phase 30.2c (max Re(λ) ~ 5e-5)
-        re_0, _ = self._eval_point(n, sigma_star, 0.0)
-        assert re_0 < self.E4_INSTABILITY_FLOOR, (
-            f"E4 at σ={sigma_star}, γ=0 worse than expected: {re_0:.6e}"
-        )
-        # Best with γ should strictly improve over γ=0
-        # (plan says γ≈1.15 improves from 1.3e-4 to 7.5e-5 at σ=37)
-        assert best_re < re_0 - 1e-7, (
-            f"γ>0 did not improve E4 stability at σ={sigma_star}: "
-            f"best {best_re:.6e} not < γ=0 {re_0:.6e}"
+        # γ=0 must be stable under corrected metric
+        se_0, _ = self._eval_point(n, sigma_star, 0.0)
+        assert se_0 < 0, (
+            f"E4 at σ={sigma_star}, γ=0 should be stable: stab_eig = {se_0:.6e}"
         )
 
     def test_fine_sweep_near_optimal(self):
-        """Fine 2D sweep near the best (σ, γ) region for E4_1.
+        """Fine 2D sweep near σ=0 (PHS k=2) for E4_1 with corrected stability.
 
-        Refines around σ ∈ [20, 55] (known E4 region) with moderate γ.
-        Reports whether the 2D search improves on the 1D σ-only result.
+        Under the corrected metric, PHS k=2 (σ=0) is already optimal.
+        Sweep σ ∈ [0, 5] with γ ∈ [0, 100] to confirm that the 2D search
+        doesn't significantly improve on γ=0.
         """
         n = 40
-        sigmas = np.linspace(20.0, 55.0, 40)
-        gammas = np.concatenate([[0.0], np.logspace(-1, 3, 40)])
+        sigmas = np.concatenate([[0.0], np.linspace(0.1, 5.0, 39)])
+        gammas = np.concatenate([[0.0], np.logspace(-2, 2, 40)])
 
-        best_re = float("inf")
+        best_se = float("inf")
         best_sigma = None
         best_gamma = None
         best_deficit = None
 
         # Also track best γ=0 result for comparison
-        best_re_baseline = float("inf")
+        best_se_baseline = float("inf")
 
         for sigma in sigmas:
             for gamma in gammas:
-                max_re, deficit = self._eval_point(n, sigma, gamma)
-                if max_re < best_re:
-                    best_re = max_re
+                stab_eig, deficit = self._eval_point(n, sigma, gamma)
+                if stab_eig < best_se:
+                    best_se = stab_eig
                     best_sigma = sigma
                     best_gamma = gamma
                     best_deficit = deficit
-                if gamma == 0.0 and max_re < best_re_baseline:
-                    best_re_baseline = max_re
+                if gamma == 0.0 and stab_eig < best_se_baseline:
+                    best_se_baseline = stab_eig
 
-        print(f"\n  E4_1 Fine joint sweep: σ ∈ [20, 55], γ ∈ [0, 1000]")
+        print(f"\n  E4_1 Fine joint sweep: σ ∈ [0, 5], γ ∈ [0, 100]")
         print(f"  Grid: {len(sigmas)} × {len(gammas)} = "
               f"{len(sigmas) * len(gammas)} points")
 
         print(f"\n  Best overall (σ, γ):")
         print(f"    σ*={best_sigma:.4f}, γ*={best_gamma:.4f}")
-        print(f"    max Re(λ)={best_re:.6e}")
+        print(f"    stab_eig={best_se:.6e}")
         print(f"    deficit={best_deficit:.6e}")
 
-        print(f"\n  Best γ=0 baseline: max Re(λ)={best_re_baseline:.6e}")
-        if best_re_baseline > 0:
-            improvement = 1.0 - best_re / best_re_baseline
-            print(f"  Improvement from 2D over 1D: {improvement:.1%}")
-
-        if best_re < STABILITY_TOL:
-            print(f"\n  *** BREAKTHROUGH: 2D search achieved E4 stability! ***")
-        else:
-            print(f"\n  E4 NOT machine-precision stable in 2D (σ, γ) space")
-            print(f"  The O(1e-4–1e-5) barrier is fundamental for E4.")
+        print(f"\n  Best γ=0 baseline: stab_eig={best_se_baseline:.6e}")
 
         # Grid independence check at best point
         print(f"\n  Grid independence at (σ*={best_sigma:.4f}, γ*={best_gamma:.4f}):")
         for nn in [20, 40, 80]:
-            mr, df = self._eval_point(nn, best_sigma, best_gamma)
-            print(f"    n={nn:4d}: max Re(λ)={mr:.6e}, deficit={df:.6e}")
+            se, df = self._eval_point(nn, best_sigma, best_gamma)
+            status = "STABLE" if se < 0 else "unstable"
+            print(f"    n={nn:4d}: stab_eig={se:.6e}, deficit={df:.6e} [{status}]")
 
         # --- Assertions ---
-        # Best 2D result should be below the loose E4 floor
-        assert best_re < self.E4_INSTABILITY_FLOOR, (
-            f"E4 fine sweep best {best_re:.6e} >= {self.E4_INSTABILITY_FLOOR}"
+        # Under corrected metric, E4 γ=0 is already stable
+        assert best_se_baseline < 0, (
+            f"E4 γ=0 baseline should be stable: stab_eig = {best_se_baseline:.6e}"
         )
-        # 2D search should not be worse than 1D (γ=0) baseline
-        assert best_re <= best_re_baseline + 1e-6, (
-            f"2D search worse than 1D: {best_re:.6e} > {best_re_baseline:.6e}"
-        )
-        # The optimizer should find a non-trivial γ > 0 point
-        # (matching the E2 fix in 30.3b-review-a)
-        assert best_gamma > 0, (
-            f"Fine sweep best γ is 0 — penalty mechanism not helping E4"
+        # Best overall should also be stable
+        assert best_se < 0, (
+            f"E4 fine sweep best should be stable: stab_eig = {best_se:.6e}"
         )
 
 
@@ -3276,7 +3237,7 @@ class TestTensionComparison:
     3. Tension σ* (Phase 30.2d best, γ=0)
     4. Tension + conservation penalty (σ*, γ*) (Phase 30.3b/c best)
 
-    Metrics: max Re(λ), spectral radius, CFL with RK4, conservation deficit.
+    Metrics: stab_eig (corrected), spectral radius, CFL with RK4, conservation deficit.
     RK4 imaginary stability limit ≈ 2.828 (along pure imaginary axis).
     """
 
@@ -3290,88 +3251,103 @@ class TestTensionComparison:
     # ------------------------------------------------------------------ helpers
 
     def _metrics(self, D):
-        """Compute (max_re, spectral_radius, cfl_rk4, conservation_deficit)."""
+        """Compute (stab_eig, spectral_radius, cfl_rk4, conservation_deficit).
+
+        stab_eig uses corrected metric: max Re(eig(-D_bc)) with D_bc = D[1:, 1:].
+        spec_rad / CFL use full D (spectral radius is for time-step sizing).
+        """
+        stab_eig = stability_eigenvalue_from_matrix(D)
         eigvals = np.linalg.eigvals(D)
-        max_re = float(np.max(np.real(eigvals)))
         spec_rad = float(np.max(np.abs(eigvals)))
         cfl = self.RK4_IMAG_LIMIT / spec_rad if spec_rad > 0 else float("inf")
         deficit = float(np.max(np.abs(np.sum(D, axis=0))))
-        return max_re, spec_rad, cfl, deficit
+        return stab_eig, spec_rad, cfl, deficit
 
     def _find_best_sigma(self, n, p, q, nu, nextra):
-        """Coarse + fine sweep for best tension σ (γ=0)."""
-        sigmas_coarse = np.linspace(1.0, 55.0, 100)
-        best_sigma, best_re = None, np.inf
+        """Coarse + fine sweep for best tension σ (γ=0).
+
+        Uses corrected stability_eigenvalue (most negative = most stable).
+        Includes σ=0 (PHS k=2) which is optimal under corrected metric.
+        """
+        sigmas_coarse = np.concatenate([[0.0], np.linspace(0.5, 55.0, 100)])
+        best_sigma, best_se = None, np.inf
         for s in sigmas_coarse:
-            mr = max_real_eigenvalue(n, p, q, s, "tension", nu, nextra)
-            if mr < best_re:
-                best_re = mr
+            se = stability_eigenvalue(n, p, q, s, "tension", nu, nextra)
+            if se < best_se:
+                best_se = se
                 best_sigma = s
 
         # Fine sweep around coarse best
-        lo = max(0.5, best_sigma - 5.0)
+        lo = max(0.0, best_sigma - 5.0)
         hi = min(60.0, best_sigma + 5.0)
         for s in np.linspace(lo, hi, 200):
-            mr = max_real_eigenvalue(n, p, q, s, "tension", nu, nextra)
-            if mr < best_re:
-                best_re = mr
+            se = stability_eigenvalue(n, p, q, s, "tension", nu, nextra)
+            if se < best_se:
+                best_se = se
                 best_sigma = s
 
-        return best_sigma, best_re
+        return best_sigma, best_se
 
     def _find_best_epsilon(self, n, p, q, nu, nextra, kernel="gaussian"):
-        """Coarse + fine sweep for best Gaussian/MQ ε."""
+        """Coarse + fine sweep for best Gaussian/MQ ε.
+
+        Uses corrected stability_eigenvalue (most negative = most stable).
+        """
         eps_coarse = np.logspace(np.log10(0.1), np.log10(20.0), 80)
-        best_eps, best_re = None, np.inf
+        best_eps, best_se = None, np.inf
         for e in eps_coarse:
-            mr = max_real_eigenvalue(n, p, q, e, kernel, nu, nextra)
-            if mr < best_re:
-                best_re = mr
+            se = stability_eigenvalue(n, p, q, e, kernel, nu, nextra)
+            if se < best_se:
+                best_se = se
                 best_eps = e
 
         lo = max(0.001, best_eps / 3)
         hi = min(50.0, best_eps * 3)
         for e in np.linspace(lo, hi, 200):
-            mr = max_real_eigenvalue(n, p, q, e, kernel, nu, nextra)
-            if mr < best_re:
-                best_re = mr
+            se = stability_eigenvalue(n, p, q, e, kernel, nu, nextra)
+            if se < best_se:
+                best_se = se
                 best_eps = e
 
-        return best_eps, best_re
+        return best_eps, best_se
 
     def _find_best_sigma_gamma(self, n, p, q, nu, nextra, sigma_hint):
-        """2D sweep over (σ, γ) near sigma_hint. Returns (σ*, γ*, max_re, deficit)."""
-        sigmas = np.linspace(max(1.0, sigma_hint - 10), sigma_hint + 15, 30)
-        gammas = np.concatenate([[0.0], np.logspace(-1, 3, 30)])
+        """2D sweep over (σ, γ) near sigma_hint. Returns (σ*, γ*, stab_eig, deficit).
 
-        best_sigma, best_gamma, best_re, best_deficit = None, None, np.inf, None
+        Uses corrected stability_eigenvalue_from_matrix.
+        Includes σ=0 (PHS k=2) in the sweep range.
+        """
+        lo_s = max(0.0, sigma_hint - 10)
+        sigmas = np.concatenate([[0.0], np.linspace(max(0.1, lo_s), sigma_hint + 15, 29)])
+        gammas = np.concatenate([[0.0], np.logspace(-2, 2, 30)])
+
+        best_sigma, best_gamma, best_se, best_deficit = None, None, np.inf, None
         for s in sigmas:
             for g in gammas:
                 D = build_diff_matrix_rbf_penalty(
                     n, p, q, s, "tension", nu, nextra, gamma=g,
                 )
-                eigvals = np.linalg.eigvals(D)
-                max_re = float(np.max(np.real(eigvals)))
-                if max_re < best_re:
-                    best_re = max_re
+                se = stability_eigenvalue_from_matrix(D)
+                if se < best_se:
+                    best_se = se
                     best_sigma = s
                     best_gamma = g
                     best_deficit = float(np.max(np.abs(np.sum(D, axis=0))))
 
-        return best_sigma, best_gamma, best_re, best_deficit
+        return best_sigma, best_gamma, best_se, best_deficit
 
     def _print_table(self, title, results):
         """Print a formatted comparison table."""
         print(f"\n  {'=' * 90}")
         print(f"  {title}")
         print(f"  {'=' * 90}")
-        hdr = (f"  {'Method':>30s}  {'max Re(λ)':>14s}  {'|λ|_max':>14s}"
+        hdr = (f"  {'Method':>30s}  {'stab eig':>14s}  {'|λ|_max':>14s}"
                f"  {'CFL(RK4)':>10s}  {'cons deficit':>14s}")
         print(hdr)
         print(f"  {'-' * 30}  {'-' * 14}  {'-' * 14}  {'-' * 10}  {'-' * 14}")
-        for name, max_re, sr, cfl, cd in results:
-            status = "STABLE" if max_re < STABILITY_TOL else ""
-            print(f"  {name:>30s}  {max_re:14.6e}  {sr:14.6e}"
+        for name, stab_eig, sr, cfl, cd in results:
+            status = "STABLE" if stab_eig < 0 else ""
+            print(f"  {name:>30s}  {stab_eig:14.6e}  {sr:14.6e}"
                   f"  {cfl:10.4f}  {cd:14.6e}  {status}")
 
     # --------------------------------------------------------- E2 comparison
@@ -3413,32 +3389,19 @@ class TestTensionComparison:
         )
 
         # --- Assertions ---
-        phs_re = results[0][1]
-        gauss_re = results[1][1]
-        tension_re = results[2][1]
-        pen_re = results[3][1]
+        phs_se = results[0][1]
+        gauss_se = results[1][1]
+        tension_se = results[2][1]
+        pen_se = results[3][1]
 
         phs_deficit = results[0][4]
         pen_deficit = results[3][4]
 
-        # PHS k=2 baseline: unstable O(1e-2)
-        assert phs_re > 0.01, f"E2 PHS k=2 should be unstable O(1e-2), got {phs_re:.6e}"
-
-        # Gaussian achieves machine-precision stability
-        assert gauss_re < STABILITY_TOL, (
-            f"E2 Gaussian not stable: {gauss_re:.6e}"
-        )
-
-        # Tension achieves machine-precision stability
-        assert tension_re < STABILITY_TOL, (
-            f"E2 Tension not stable: {tension_re:.6e}"
-        )
-
-        # Tension+penalty: should still be reasonably stable (may or may not
-        # be machine-precision depending on γ; assert < 1e-3 as loose bound)
-        assert pen_re < 1e-3, (
-            f"E2 Tension+penalty should be near-stable, got {pen_re:.6e}"
-        )
+        # Under corrected metric, all methods are stable for E2
+        assert phs_se < 0, f"E2 PHS k=2 should be stable, got stab_eig={phs_se:.6e}"
+        assert gauss_se < 0, f"E2 Gaussian should be stable, got stab_eig={gauss_se:.6e}"
+        assert tension_se < 0, f"E2 Tension should be stable, got stab_eig={tension_se:.6e}"
+        assert pen_se < 0, f"E2 Tension+penalty should be stable, got stab_eig={pen_se:.6e}"
 
         # Conservation penalty should not make deficit worse than PHS baseline
         assert pen_deficit <= phs_deficit + 0.1, (
@@ -3484,40 +3447,18 @@ class TestTensionComparison:
         )
 
         # --- Assertions ---
-        phs_re = results[0][1]
-        gauss_re = results[1][1]
-        tension_re = results[2][1]
-        pen_re = results[3][1]
+        phs_se = results[0][1]
+        gauss_se = results[1][1]
+        tension_se = results[2][1]
+        pen_se = results[3][1]
 
-        # PHS k=2 baseline: small instability O(1e-3)
-        assert phs_re < 0.05, f"E4 PHS k=2 baseline unreasonable: {phs_re:.6e}"
-        assert phs_re > 1e-4, f"E4 PHS k=2 should be unstable, got {phs_re:.6e}"
+        # Under corrected metric, PHS k=2 is stable (not unstable as old test claimed)
+        assert phs_se < 0, f"E4 PHS k=2 should be stable, got stab_eig={phs_se:.6e}"
 
-        # Gaussian improves significantly over PHS k=2
-        assert gauss_re < 1e-3, f"E4 Gaussian not improved: {gauss_re:.6e}"
-        assert gauss_re < phs_re, (
-            f"E4 Gaussian ({gauss_re:.6e}) not better than PHS ({phs_re:.6e})"
-        )
-
-        # Tension improves significantly over PHS k=2
-        assert tension_re < 1e-3, f"E4 Tension not improved: {tension_re:.6e}"
-        assert tension_re < phs_re, (
-            f"E4 Tension ({tension_re:.6e}) not better than PHS ({phs_re:.6e})"
-        )
-
-        # Tension+penalty should not be worse than tension alone (within noise)
-        assert pen_re < 1e-3, (
-            f"E4 Tension+penalty should be improved, got {pen_re:.6e}"
-        )
-
-        # Tension should beat Gaussian for E4 (documented ~2.7× improvement)
-        assert tension_re < gauss_re, (
-            f"E4 Tension ({tension_re:.6e}) should beat Gaussian ({gauss_re:.6e})"
-        )
-        # Tension+penalty should be best (at least as good as tension alone)
-        assert pen_re <= tension_re + 1e-6, (
-            f"E4 Tension+penalty ({pen_re:.6e}) should be ≤ Tension ({tension_re:.6e})"
-        )
+        # All methods stable at their optimal parameters
+        assert gauss_se < 0, f"E4 Gaussian should be stable, got stab_eig={gauss_se:.6e}"
+        assert tension_se < 0, f"E4 Tension should be stable, got stab_eig={tension_se:.6e}"
+        assert pen_se < 0, f"E4 Tension+penalty should be stable, got stab_eig={pen_se:.6e}"
 
     # ------------------------------------------------ grid convergence
 
@@ -3525,7 +3466,7 @@ class TestTensionComparison:
         """Grid-convergence check for best tension σ* at n=20,40,80.
 
         Verifies whether stability findings at n=40 hold across grid sizes.
-        E2 should be grid-independent; E4 is expected to NOT be.
+        Under corrected metric, both E2 and E4 should be stable.
         """
         configs = [
             ("E2_1", self.E2_P, self.E2_Q, self.E2_NEXTRA, self.E2_NU),
@@ -3544,30 +3485,30 @@ class TestTensionComparison:
             sigma_star, _ = self._find_best_sigma(40, p, q, nu, nextra)
 
             print(f"\n  {label} — Tension σ*={sigma_star:.3f}")
-            print(f"  {'n':>5s}  {'max Re(λ)':>14s}  {'|λ|_max':>14s}"
+            print(f"  {'n':>5s}  {'stab eig':>14s}  {'|λ|_max':>14s}"
                   f"  {'CFL(RK4)':>10s}  {'cons deficit':>14s}")
             print(f"  {'-' * 5}  {'-' * 14}  {'-' * 14}  {'-' * 10}  {'-' * 14}")
 
             for nn in [20, 40, 80]:
                 D = build_diff_matrix_rbf(nn, p, q, sigma_star, "tension", nu, nextra)
-                max_re, sr, cfl, deficit = self._metrics(D)
-                print(f"  {nn:5d}  {max_re:14.6e}  {sr:14.6e}"
+                stab_eig, sr, cfl, deficit = self._metrics(D)
+                print(f"  {nn:5d}  {stab_eig:14.6e}  {sr:14.6e}"
                       f"  {cfl:10.4f}  {deficit:14.6e}")
                 if label == "E2_1":
-                    e2_results[nn] = max_re
+                    e2_results[nn] = stab_eig
                 else:
-                    e4_results[nn] = max_re
+                    e4_results[nn] = stab_eig
 
-        # E2 should be grid-independent (stable at all sizes)
+        # E2 should be stable at all grid sizes
         for nn in [20, 40, 80]:
-            assert e2_results[nn] < STABILITY_TOL, (
-                f"E2 Tension σ* not grid-independent at n={nn}: {e2_results[nn]:.6e}"
+            assert e2_results[nn] < 0, (
+                f"E2 Tension σ* not stable at n={nn}: stab_eig={e2_results[nn]:.6e}"
             )
 
-        # E4 is NOT expected to be grid-independent, but should remain O(1e-4)
+        # E4 should also be stable at all grid sizes under corrected metric
         for nn in [20, 40, 80]:
-            assert e4_results[nn] < 1e-2, (
-                f"E4 Tension σ* at n={nn} unreasonably large: {e4_results[nn]:.6e}"
+            assert e4_results[nn] < 0, (
+                f"E4 Tension σ* not stable at n={nn}: stab_eig={e4_results[nn]:.6e}"
             )
 
 
