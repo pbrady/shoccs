@@ -6029,7 +6029,6 @@ class TestCorrectedComparison:
         print(f"    Tension σ*={sigma_t:.4f}")
         print(f"    Tension+penalty σ*={sg:.4f}, γ*={gg:.4f}")
 
-        all_stable = True
         for n in [20, 40, 80]:
             results = []
 
@@ -6053,32 +6052,12 @@ class TestCorrectedComparison:
 
             self._print_table(f"E2_1 Corrected Comparison (n={n})", results)
 
-            # All methods should be stable for E2
+            # E2 is universally stable — assert all methods at every grid size
             for name, se, _, _, _ in results:
-                if se >= STABILITY_TOL:
-                    all_stable = False
-
-        # E2 is universally stable under corrected test
-        # Verify at n=40 (the optimization grid size)
-        D_phs40 = build_diff_matrix_rbf(40, p, q, 1e-15, "tension", nu, nextra)
-        se_phs = stability_eigenvalue_from_matrix(D_phs40)
-        assert se_phs < STABILITY_TOL, (
-            f"E2 PHS k=2 should be stable at n=40, got stab_eig={se_phs:.6e}"
-        )
-
-        D_gauss40 = build_diff_matrix_rbf(40, p, q, eps_g, "gaussian", nu, nextra)
-        se_gauss = stability_eigenvalue_from_matrix(D_gauss40)
-        assert se_gauss < STABILITY_TOL, (
-            f"E2 Gaussian ε*={eps_g:.3f} should be stable at n=40, "
-            f"got stab_eig={se_gauss:.6e}"
-        )
-
-        D_tens40 = build_diff_matrix_rbf(40, p, q, sigma_t, "tension", nu, nextra)
-        se_tens = stability_eigenvalue_from_matrix(D_tens40)
-        assert se_tens < STABILITY_TOL, (
-            f"E2 Tension σ*={sigma_t:.2f} should be stable at n=40, "
-            f"got stab_eig={se_tens:.6e}"
-        )
+                assert se < STABILITY_TOL, (
+                    f"E2 {name} should be stable at n={n}, "
+                    f"got stab_eig={se:.6e}"
+                )
 
     # --------------------------------------------------------- E4 comparison
 
@@ -6129,33 +6108,13 @@ class TestCorrectedComparison:
 
             self._print_table(f"E4_1 Corrected Comparison (n={n})", results)
 
-        # Key assertions at n=40:
-        # PHS k=2 should be stable (confirmed in 32.3b)
-        D_phs40 = build_diff_matrix_rbf(40, p, q, 1e-15, "tension", nu, nextra)
-        se_phs = stability_eigenvalue_from_matrix(D_phs40)
-        assert se_phs < STABILITY_TOL, (
-            f"E4 PHS k=2 should be stable at n=40, got stab_eig={se_phs:.6e}"
-        )
-
-        # Optimal Gaussian ε* should be stable (within the stable band)
-        D_gauss40 = build_diff_matrix_rbf(40, p, q, eps_g, "gaussian", nu, nextra)
-        se_gauss = stability_eigenvalue_from_matrix(D_gauss40)
-        assert se_gauss < STABILITY_TOL, (
-            f"E4 Gaussian ε*={eps_g:.3f} should be stable at n=40, "
-            f"got stab_eig={se_gauss:.6e}"
-        )
-
-        # Optimal tension σ* should be stable
-        D_tens40 = build_diff_matrix_rbf(40, p, q, sigma_t, "tension", nu, nextra)
-        se_tens = stability_eigenvalue_from_matrix(D_tens40)
-        assert se_tens < STABILITY_TOL, (
-            f"E4 Tension σ*={sigma_t:.2f} should be stable at n=40, "
-            f"got stab_eig={se_tens:.6e}"
-        )
-
-        # CFL: all methods should have reasonable CFL > 0
-        for name, se, sr, cfl, cd in results:
-            assert cfl > 0.01, f"E4 {name}: CFL too small ({cfl:.6f})"
+            # All 4 methods at optimal params should be stable at every grid size
+            for name, se, sr, cfl, cd in results:
+                assert se < STABILITY_TOL, (
+                    f"E4 {name} should be stable at n={n}, "
+                    f"got stab_eig={se:.6e}"
+                )
+                assert cfl > 0.01, f"E4 {name} n={n}: CFL too small ({cfl:.6f})"
 
     # --------------------------------------------------------- Grid convergence
 

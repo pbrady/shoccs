@@ -333,22 +333,21 @@ Production E4u_1 (σ=3.0) was separately validated as stable in 32.1c.
 
 - File: `scripts/stencil_gen/tests/test_phs.py`, class `TestCorrectedComparison`
 
-**Review follow-up (32.5a assertion gaps):**
-Three assertion gaps need fixing in `TestCorrectedComparison`:
+**Review follow-up (32.5a assertion gaps) ✅:**
+Fixed all three assertion gaps in `TestCorrectedComparison`:
 
-1. **Dead `all_stable` variable in `test_e2_comparison`** (line ~6032): `all_stable`
-   is computed across n=20,40,80 for all 4 methods but never asserted. Either assert
-   `all_stable` at the end, or (better) move the per-method assertions inside the
-   n-loop so all grid sizes are checked — not just n=40.
+1. **Dead `all_stable` variable in `test_e2_comparison`**: Removed `all_stable` and
+   moved per-method stability assertions inside the n-loop so all 4 methods (including
+   tension+penalty) are asserted at every grid size (n=20,40,80). Removed redundant
+   separate n=40 assertions.
 
-2. **`test_e4_comparison` only asserts at n=40**: The plan says "All 4 methods stable
-   at all grid sizes (n=20,40,80)" but assertions only check n=40. Add per-grid-size
-   assertions inside the loop (same pattern as `test_grid_convergence_summary`).
+2. **`test_e4_comparison` per-grid-size assertions**: Replaced n=40-only assertions
+   with per-method per-grid-size assertions inside the loop. All 4 methods asserted
+   stable at n=20,40,80. CFL check also moved inside the loop.
 
-3. **Tension+penalty never asserted**: Both `test_e2_comparison` and `test_e4_comparison`
-   find the optimal (σ*, γ*) penalty configuration and compute metrics for it, but
-   neither test ever asserts stability for the penalty variant. Add assertions for
-   the penalty method at n=40 (at minimum) in both tests.
+3. **Tension+penalty now asserted**: Both `test_e2_comparison` and `test_e4_comparison`
+   now assert stability for the penalty variant at all grid sizes, not just the other
+   3 methods.
 
 ### 32.5b — Update old test assertions
 
