@@ -352,11 +352,117 @@ Fixed all three assertion gaps in `TestCorrectedComparison`:
 ### 32.5b — Update old test assertions
 
 The Phase 29-31 tests have hard assertions based on the wrong metric.  Update:
-- Remove or comment out assertions that use `max_real_eigenvalue`
-- Replace with assertions using `stability_eigenvalue`
-- Keep the old sweep code but update the stability interpretation
+- Replace `max_real_eigenvalue` calls with `stability_eigenvalue` (or
+  `stability_eigenvalue_from_matrix` where D is built manually)
+- In `_sweep`/`_metrics`/`_eval_point` helpers that compute eigenvalues of D
+  directly, apply `D_bc = D[1:, 1:]` and negate (`-D_bc`) before taking eigenvalues
+- Update assertions to check `stab_eig < 0` (stable) instead of `max_re < STABILITY_TOL`
+- Flip assertions that claim instability where Phase 32 showed stability
+- Keep sweep code structure but update variable names and print labels
+- Update comparison assertions: under correct metric, PHS k=2 is stable (E2 and E4),
+  so "tension improves over PHS" and "PHS should be unstable" assertions are wrong
 - File: `scripts/stencil_gen/tests/test_phs.py`
-- Ensure ALL existing tests still pass (may need to flip assertion directions)
+- Ensure ALL existing tests still pass after updates
+
+**Key assertion changes (wrong → correct):**
+- "PHS k=2 should be unstable" → PHS k=2 IS stable
+- "tension improves ≥10× over PHS" → both stable, remove ordering assertion
+- "penalty improves E4 stability" → penalty doesn't help (PHS k=2 σ=0 already optimal)
+- "nextra=1 needed for E2" → E2 stable regardless of nextra
+- All `STABILITY_TOL` comparisons on old metric → `stab_eig < 0` on correct metric
+- `E4_INSTABILITY_FLOOR` concept → E4 is stable, no floor exists
+
+#### 32.5b-i — Update Phase 29 sweep classes
+
+Classes: `TestEpsilonSweepE2`, `TestEpsilonSweepE4`, `TestMixedEpsilon`,
+`TestStableEpsilonAlphas`, `TestComparisonTable`.
+
+Changes:
+- `TestEpsilonSweepE2/E4._sweep`: Replace manual `max_re = max(Re(eigvals(D)))` with
+  `stab_eig = stability_eigenvalue_from_matrix(D)`. Keep `spec_rad` from full D.
+- `TestEpsilonSweepE2/E4.test_gaussian_fine_sweep_near_best`: Replace
+  `max_real_eigenvalue(...)` → `stability_eigenvalue(...)`. Update print labels.
+  Stability check: `stab_eig < 0` instead of `max_re < STABILITY_TOL`.
+- `TestMixedEpsilon._max_re_mixed`: Replace with `stability_eigenvalue_from_matrix(D)`.
+  Rename to `_stab_eig_mixed`. Update assertion: `< 1e-2` → `< 0`.
+- `TestStableEpsilonAlphas._find_best_epsilon`: Replace `max_real_eigenvalue` →
+  `stability_eigenvalue`. Minimize stab_eig (most negative = most stable).
+- `TestComparisonTable._find_best_epsilon`: Same.
+- `TestComparisonTable._metrics`: Compute `stab_eig` via `stability_eigenvalue_from_matrix(D)`
+  alongside `spec_rad` from full D.
+- `TestComparisonTable.test_e2_comparison`: Remove "PHS should be unstable" assertion.
+  Assert all methods stable (`stab_eig < 0`).
+- `TestComparisonTable.test_e4_comparison`: Remove "PHS k=2 should have small instability".
+  Assert PHS k=2 stable. Update mixed-ε comparison.
+
+#### 32.5b-ii — Update Phase 30 tension sweep classes
+
+Classes: `TestTensionSweepE2`, `TestTensionSweepE4`, `TestTensionOptimalSigma`.
+
+Changes:
+- `TestTensionSweepE2/E4._sweep`: Replace manual eigvals with
+  `stability_eigenvalue_from_matrix(D)`. Keep `spec_rad`.
+- `TestTensionSweepE2.test_tension_fine_sweep_near_best`: Replace
+  `max_real_eigenvalue` → `stability_eigenvalue`. Assert `stab_eig < 0`.
+- `TestTensionSweepE4.test_tension_fine_sweep_near_best`: Same. Remove assertion
+  about "must improve over PHS k=2" (PHS k=2 is already stable).
+- `TestTensionSweepE4.test_compare_with_gaussian`: Replace calls, remove "tension
+  ≥10× over PHS k=2" assertion (PHS is stable).
+- `TestTensionOptimalSigma._max_re` / `_max_re_gaussian`: Replace with
+  `stability_eigenvalue`. Rename to `_stab_eig` / `_stab_eig_gaussian`.
+- `TestTensionOptimalSigma.test_e2_optimal_sigma`: Under correct metric E2 is
+  universally stable — bisection won't find a transition. Rewrite to verify
+  stability across σ range instead.
+- `TestTensionOptimalSigma.test_e4_optimal_sigma`: Under correct metric E4 is
+  broadly stable (PHS k=2 at σ=0 is already best). Rewrite assertions.
+- `TestTensionOptimalSigma.test_comparison_all_methods`: Update all assertions.
+  E2: all stable. E4: PHS stable, remove "improves over PHS" assertions.
+
+#### 32.5b-iii — Update Phase 30 conservation and comparison classes
+
+Classes: `TestTensionConservationE2`, `TestTensionConservationE4`,
+`TestTensionComparison`.
+
+Changes:
+- `TestTensionConservationE2._eval_point`: Replace manual eigvals with
+  `stability_eigenvalue_from_matrix(D)`. Return `(stab_eig, deficit)`.
+- `TestTensionConservationE2` assertions: E2 universally stable, so "at least
+  one stable point" → "all points stable". Keep deficit improvement assertions
+  (conservation deficit is independent of stability metric).
+- `TestTensionConservationE4._eval_point`: Same fix.
+- `TestTensionConservationE4` assertions: Remove `E4_INSTABILITY_FLOOR` concept.
+  Under correct metric E4 is stable. Assert `stab_eig < 0` instead of
+  `< E4_INSTABILITY_FLOOR`. Remove "γ>0 improves over γ=0" (penalty doesn't help).
+- `TestTensionComparison._metrics`: Compute `stab_eig` via
+  `stability_eigenvalue_from_matrix`. Keep `spec_rad` / CFL from full D.
+- `TestTensionComparison._find_best_sigma` / `_find_best_epsilon`: Replace
+  `max_real_eigenvalue` → `stability_eigenvalue`.
+- `TestTensionComparison._find_best_sigma_gamma`: Replace manual eigvals.
+- `TestTensionComparison.test_e2_comparison`: Remove "PHS should be unstable O(1e-2)"
+  (line 3498). Assert all methods stable.
+- `TestTensionComparison.test_e4_comparison`: Remove "PHS should be unstable"
+  (line 3567). Assert all methods stable at optimal params.
+- `TestTensionComparison.test_grid_convergence`: E2 and E4 both stable across grids.
+
+#### 32.5b-iv — Update Phase 31 footprint and cross-validation classes
+
+Classes: `TestFootprintE4Quick`, `TestFootprintSweep`, `TestFootprintPenalty`,
+`TestCrossValidationE2`.
+
+Changes:
+- `TestFootprintE4Quick._sweep`: Replace `max_real_eigenvalue` → `stability_eigenvalue`.
+  Stable means `stab_eig < 0`.
+- `TestFootprintSweep.test_nextra_sweep_e4_tension`: Replace `max_real_eigenvalue` →
+  `stability_eigenvalue`. Under correct metric nextra=0 is already broadly stable.
+- `TestFootprintPenalty._eval_point`: Replace manual eigvals with
+  `stability_eigenvalue_from_matrix(D)`.
+- `TestFootprintPenalty` assertions: Remove "penalty improves nextra=0" (it doesn't
+  under correct metric). Assert stability at γ=0.
+- `TestCrossValidationE2._sweep_sigma`: Replace `max_real_eigenvalue` →
+  `stability_eigenvalue`. Stable means `stab_eig < 0`.
+- `TestCrossValidationE2` assertions: Under correct metric E2 is stable at all
+  nextra values (0, 1, 2). Keep "all nextra stable" assertion, remove "nextra=0
+  is worse" expectation.
 
 ### 32.5c — Write conclusions
 
@@ -380,8 +486,11 @@ Document corrected findings in the plan:
 8. **32.3c** — E4 corrected tension + penalty
 9. **32.4a** — Nextra sweep if needed
 10. **32.5a** — Comparison table
-11. **32.5b** — Update old test assertions
-12. **32.5c** — Conclusions
+11. **32.5b-i** — Update Phase 29 sweep classes
+12. **32.5b-ii** — Update Phase 30 tension sweep classes
+13. **32.5b-iii** — Update Phase 30 conservation and comparison classes
+14. **32.5b-iv** — Update Phase 31 footprint and cross-validation classes
+15. **32.5c** — Conclusions
 
 ---
 
