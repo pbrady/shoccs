@@ -500,25 +500,24 @@ All 3 classes updated (9 tests pass):
 - `TestTensionComparison.test_e4_comparison`: removed "PHS should be unstable", removed ordering assertions, assert all 4 methods `stab_eig < 0`
 - `TestTensionComparison.test_grid_convergence`: labels updated, assert both E2 and E4 `stab_eig < 0` at all grid sizes
 
-#### 32.5b-iv — Update Phase 31 footprint and cross-validation classes
+#### 32.5b-iv — Update Phase 31 footprint and cross-validation classes ✅
 
 Classes: `TestFootprintE4Quick`, `TestFootprintSweep`, `TestFootprintPenalty`,
 `TestCrossValidationE2`.
 
-Changes:
-- `TestFootprintE4Quick._sweep`: Replace `max_real_eigenvalue` → `stability_eigenvalue`.
-  Stable means `stab_eig < 0`.
-- `TestFootprintSweep.test_nextra_sweep_e4_tension`: Replace `max_real_eigenvalue` →
-  `stability_eigenvalue`. Under correct metric nextra=0 is already broadly stable.
-- `TestFootprintPenalty._eval_point`: Replace manual eigvals with
-  `stability_eigenvalue_from_matrix(D)`.
-- `TestFootprintPenalty` assertions: Remove "penalty improves nextra=0" (it doesn't
-  under correct metric). Assert stability at γ=0.
-- `TestCrossValidationE2._sweep_sigma`: Replace `max_real_eigenvalue` →
-  `stability_eigenvalue`. Stable means `stab_eig < 0`.
-- `TestCrossValidationE2` assertions: Under correct metric E2 is stable at all
-  nextra values (0, 1, 2). Keep "all nextra stable" assertion, remove "nextra=0
-  is worse" expectation.
+All 4 classes updated (4 tests pass):
+- `TestFootprintE4Quick._sweep`: `max_real_eigenvalue` → `stability_eigenvalue`
+- `TestFootprintE4Quick.test_nextra_1_sigma_sweep`: labels/threshold updated to `stab eig` / `< 0`,
+  assert nextra=0 broadly stable (≥70 sigmas) and best stab_eig < 0
+- `TestFootprintSweep.test_nextra_sweep_e4_tension`: `max_real_eigenvalue` → `stability_eigenvalue`,
+  removed "nextra=1 floor < nextra=0 floor" assertion (nextra=0 is already best),
+  assert nextra=0 best stab_eig < 0 and ≥90 sigmas stable
+- `TestFootprintPenalty._eval_point`: `np.linalg.eigvals(D)` → `stability_eigenvalue_from_matrix(D)`,
+  removed "penalty improves nextra=0" assertion (γ=0 already stable),
+  removed "global best < 1e-3" assertion, assert γ=0 at nextra=0 stable and global best < 0
+- `TestCrossValidationE2._sweep_sigma`: `max_real_eigenvalue` → `stability_eigenvalue`
+- `TestCrossValidationE2.test_e2_nextra_crossvalidation`: labels updated, removed STABILITY_TOL
+  comparisons, assert all three nextra values (0, 1, 2) have stab_eig < 0
 
 ### 32.5c — Write conclusions
 

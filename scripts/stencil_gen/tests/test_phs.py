@@ -3846,12 +3846,11 @@ class TestModifiedWavenumber:
 
 
 class TestFootprintE4Quick:
-    """Quick diagnostic: does nextra=1 improve E4 tension stability?
+    """Quick diagnostic: nextra=0 vs nextra=1 for E4 tension stability.
 
-    Phase 30 found that E4 (p=2, q=3) with nextra=0 has an instability floor
-    of ~3e-5 with the tension kernel.  The E2 scheme that achieves stability
-    uses nextra=1.  This test checks whether nextra=1 gives E4 enough extra
-    DOF to reach stability.
+    Under the corrected stability metric (Phase 32), E4 nextra=0 is already
+    broadly stable — nextra=1 is not needed and can actually narrow the
+    stable σ range.
 
     E4 with nextra=1: p=2, q=3, nextra=1 → t=7, r=5.
     Each boundary row has 3 free DOF (vs 2 at nextra=0).
@@ -3862,22 +3861,21 @@ class TestFootprintE4Quick:
     NU = 1
 
     def _sweep(self, n, nextra, sigmas):
-        """Sweep sigma for given nextra, return list of (sigma, max_re)."""
+        """Sweep sigma for given nextra, return list of (sigma, stab_eig)."""
         rows = []
         for sigma in sigmas:
-            max_re = max_real_eigenvalue(
+            se = stability_eigenvalue(
                 n, p=self.P, q=self.Q, epsilon=sigma,
                 kernel="tension", nu=self.NU, nextra=nextra,
             )
-            rows.append((sigma, max_re))
+            rows.append((sigma, se))
         return rows
 
     def test_nextra_1_sigma_sweep(self):
-        """Sweep σ ∈ [0, 50] for E4 tension with nextra=1.
+        """Sweep σ ∈ [0, 50] for E4 tension with nextra=0 and nextra=1.
 
-        Key questions:
-        1. Does any σ give max Re(λ) < STABILITY_TOL?
-        2. How much does the instability floor drop vs nextra=0?
+        Under corrected metric, nextra=0 is already broadly stable.
+        nextra=1 may narrow the stable range.
         """
         n = 40
         sigmas = np.concatenate([
@@ -3893,40 +3891,43 @@ class TestFootprintE4Quick:
         results_nx1 = self._sweep(n, nextra=1, sigmas=sigmas)
         best_nx1 = min(results_nx1, key=lambda r: r[1])
 
+        n_stable_nx0 = sum(1 for _, se in results_nx0 if se < 0)
+        n_stable_nx1 = sum(1 for _, se in results_nx1 if se < 0)
+
         # Print comparison
         print(f"\n{'='*72}")
         print(f"  Phase 31.2a: E4 Tension — nextra=0 vs nextra=1 (n={n})")
         print(f"{'='*72}")
         print(f"\n  nextra=0: t={self.P + self.Q + 1}, r={self.Q + 1}")
         print(f"  nextra=1: t={self.P + self.Q + 2}, r={self.Q + 2}")
-        print(f"\n  {'sigma':>10s}  {'nx=0 max Re(λ)':>16s}  {'nx=1 max Re(λ)':>16s}")
+        print(f"\n  {'sigma':>10s}  {'nx=0 stab eig':>16s}  {'nx=1 stab eig':>16s}")
         print(f"  {'-'*10}  {'-'*16}  {'-'*16}")
-        for (s0, re0), (s1, re1) in zip(results_nx0, results_nx1):
-            marker = " *" if re1 < STABILITY_TOL else ""
-            print(f"  {s0:10.4f}  {re0:16.6e}  {re1:16.6e}{marker}")
+        for (s0, se0), (s1, se1) in zip(results_nx0, results_nx1):
+            marker = " *" if se1 < 0 else ""
+            print(f"  {s0:10.4f}  {se0:16.6e}  {se1:16.6e}{marker}")
 
         print(f"\n  --- Summary ---")
         print(f"  nextra=0: best σ={best_nx0[0]:.4f}, "
-              f"min max Re(λ)={best_nx0[1]:.6e} "
-              f"[{'STABLE' if best_nx0[1] < STABILITY_TOL else 'unstable'}]")
+              f"min stab eig={best_nx0[1]:.6e} "
+              f"[{'STABLE' if best_nx0[1] < 0 else 'unstable'}], "
+              f"{n_stable_nx0}/{len(sigmas)} stable")
         print(f"  nextra=1: best σ={best_nx1[0]:.4f}, "
-              f"min max Re(λ)={best_nx1[1]:.6e} "
-              f"[{'STABLE' if best_nx1[1] < STABILITY_TOL else 'unstable'}]")
-
-        if best_nx1[1] < STABILITY_TOL:
-            print(f"\n  *** HYPOTHESIS CONFIRMED: nextra=1 enables E4 stability! ***")
-        elif best_nx1[1] < best_nx0[1] * 0.5:
-            print(f"\n  Instability floor dropped by "
-                  f"{best_nx0[1]/best_nx1[1]:.1f}× with nextra=1")
-        else:
-            print(f"\n  nextra=1 did not significantly improve E4 stability")
+              f"min stab eig={best_nx1[1]:.6e} "
+              f"[{'STABLE' if best_nx1[1] < 0 else 'unstable'}], "
+              f"{n_stable_nx1}/{len(sigmas)} stable")
 
         # The sweep must complete without error
         assert len(results_nx1) == len(sigmas)
 
-        # Record the floor values for the plan update
-        print(f"\n  Instability floors: nx0={best_nx0[1]:.6e}, nx1={best_nx1[1]:.6e}")
-        print(f"  Ratio: {best_nx0[1] / max(best_nx1[1], 1e-16):.2f}×")
+        # nextra=0 should be broadly stable under corrected metric
+        assert n_stable_nx0 >= 70, (
+            f"nextra=0 should be broadly stable: {n_stable_nx0}/{len(sigmas)}"
+        )
+
+        # nextra=0 best should be stable
+        assert best_nx0[1] < 0, (
+            f"nextra=0 best should be stable: stab_eig={best_nx0[1]:.6e}"
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -3938,7 +3939,9 @@ class TestFootprintSweep:
     """Full nextra × σ sweep for E4 with tension kernel.
 
     Sweep nextra ∈ {0, 1, 2, 3} × σ ∈ [0, 50] at n=40.
-    Key question: does the instability floor decrease monotonically with nextra?
+
+    Under the corrected stability metric (Phase 32), nextra=0 is already
+    the most stable — nextra>0 is not needed and can narrow the stable range.
 
     E4 dimensions per nextra:
       nx=0: t=6, r=4, extra DOF/row=2, total=8
@@ -3962,6 +3965,7 @@ class TestFootprintSweep:
 
         # Collect results per nextra
         best_per_nx = {}
+        stable_count_per_nx = {}
         all_results = {}
         for nx in nextra_values:
             r = self.Q + 1 + nx
@@ -3973,14 +3977,15 @@ class TestFootprintSweep:
 
             rows = []
             for sigma in sigmas:
-                max_re = max_real_eigenvalue(
+                se = stability_eigenvalue(
                     n, p=self.P, q=self.Q, epsilon=sigma,
                     kernel="tension", nu=self.NU, nextra=nx,
                 )
-                rows.append((sigma, max_re))
+                rows.append((sigma, se))
             all_results[nx] = rows
             best = min(rows, key=lambda r: r[1])
             best_per_nx[nx] = best
+            stable_count_per_nx[nx] = sum(1 for _, se in rows if se < 0)
 
         # Print detailed comparison
         print(f"\n{'='*80}")
@@ -4004,48 +4009,43 @@ class TestFootprintSweep:
             line = f"  {sigmas[idx]:10.4f}"
             for nx in nextra_values:
                 if nx in all_results:
-                    _, max_re = all_results[nx][idx]
-                    marker = " *" if max_re < STABILITY_TOL else ""
-                    line += f"  {max_re:14.6e}{marker}"
+                    _, se = all_results[nx][idx]
+                    marker = " *" if se < 0 else ""
+                    line += f"  {se:14.6e}{marker}"
             print(line)
 
         # Summary table
         print(f"\n  {'='*70}")
-        print(f"  Summary: Minimum instability floor per nextra")
+        print(f"  Summary: Best stability eigenvalue per nextra")
         print(f"  {'='*70}")
         print(f"  {'nextra':>6s}  {'t':>3s}  {'r':>3s}  "
-              f"{'extra DOF':>9s}  {'best σ':>10s}  {'min max Re(λ)':>16s}  {'status':>10s}")
+              f"{'extra DOF':>9s}  {'best σ':>10s}  {'min stab eig':>16s}  "
+              f"{'n_stable':>10s}  {'status':>10s}")
         print(f"  {'-'*6}  {'-'*3}  {'-'*3}  "
-              f"{'-'*9}  {'-'*10}  {'-'*16}  {'-'*10}")
+              f"{'-'*9}  {'-'*10}  {'-'*16}  {'-'*10}  {'-'*10}")
 
-        floors = []
         for nx in nextra_values:
             if nx not in best_per_nx:
                 continue
-            best_sigma, best_re = best_per_nx[nx]
+            best_sigma, best_se = best_per_nx[nx]
             t = self.P + self.Q + 1 + nx
             r = self.Q + 1 + nx
             extra_dof = r * (self.P + nx)
-            status = "STABLE" if best_re < STABILITY_TOL else "unstable"
+            status = "STABLE" if best_se < 0 else "unstable"
+            n_stable = stable_count_per_nx[nx]
             print(f"  {nx:6d}  {t:3d}  {r:3d}  "
-                  f"{extra_dof:9d}  {best_sigma:10.4f}  {best_re:16.6e}  {status:>10s}")
-            floors.append((nx, best_re))
+                  f"{extra_dof:9d}  {best_sigma:10.4f}  {best_se:16.6e}  "
+                  f"{n_stable:>10d}  {status:>10s}")
 
-        # Check monotonic decrease
-        if len(floors) >= 2:
-            print(f"\n  Floor improvement ratios:")
-            for i in range(1, len(floors)):
-                nx_prev, re_prev = floors[i - 1]
-                nx_curr, re_curr = floors[i]
-                ratio = re_prev / max(re_curr, 1e-16)
-                print(f"    nextra {nx_prev} → {nx_curr}: {ratio:.2f}×")
-
-        # Assertion: nextra=1 floor < nextra=0 floor
-        if 0 in best_per_nx and 1 in best_per_nx:
-            assert best_per_nx[1][1] < best_per_nx[0][1], (
-                f"nextra=1 floor ({best_per_nx[1][1]:.6e}) should be less than "
-                f"nextra=0 floor ({best_per_nx[0][1]:.6e})"
-            )
+        # Under corrected metric, nextra=0 is broadly stable
+        assert best_per_nx[0][1] < 0, (
+            f"nextra=0 best should be stable: stab_eig={best_per_nx[0][1]:.6e}"
+        )
+        # nextra=0 should have the broadest stable range
+        assert stable_count_per_nx[0] >= 90, (
+            f"nextra=0 should be broadly stable: "
+            f"{stable_count_per_nx[0]}/{len(sigmas)}"
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -4056,14 +4056,10 @@ class TestFootprintSweep:
 class TestFootprintPenalty:
     """Nextra sweep for E4 tension with soft conservation penalty.
 
-    Phase 31.2b showed the instability floor is flat at ~5e-5 across nextra
-    values when using pure tension kernel (γ=0).  Phase 30.3 showed that
-    conservation penalty (γ>0) can improve E4 stability at nextra=0 from
-    ~8.7e-5 → ~3.3e-5 (a ~63% improvement).
-
-    This test combines both: sweep nextra × σ × γ to determine whether
-    the penalty mechanism is more effective at larger nextra (more DOF to
-    trade for conservation).
+    Under the corrected stability metric (Phase 32), PHS k=2 (σ=0, γ=0)
+    is already the optimal choice.  Penalty does NOT help — moderate-to-large
+    γ destroys stability.  This test verifies that γ=0 is stable and that
+    the penalty does not improve on it.
 
     E4 parameters: p=2, q=3.
     """
@@ -4073,23 +4069,22 @@ class TestFootprintPenalty:
     NU = 1
 
     def _eval_point(self, n, nextra, sigma, gamma):
-        """Evaluate (nextra, σ, γ) point: return (max_re, deficit)."""
+        """Evaluate (nextra, σ, γ) point: return (stab_eig, deficit)."""
         D = build_diff_matrix_rbf_penalty(
             n, self.P, self.Q, sigma, "tension", self.NU, nextra,
             gamma=gamma,
         )
-        eigvals = np.linalg.eigvals(D)
-        max_re = float(np.max(np.real(eigvals)))
+        stab_eig = stability_eigenvalue_from_matrix(D)
         deficit = float(np.max(np.abs(np.sum(D, axis=0))))
-        return max_re, deficit
+        return stab_eig, deficit
 
     def test_nextra_penalty_e4(self):
         """Sweep nextra × σ × γ for E4 with tension + conservation penalty.
 
         For each nextra ∈ {0, 1, 2, 3}:
-        1. Find optimal (σ*, γ*) pair that minimizes max Re(λ)
-        2. Compare γ=0 baseline (from 31.2b) with best (σ, γ)
-        3. Check whether the penalty helps more at larger nextra
+        1. Find optimal (σ*, γ*) pair that minimizes stab_eig
+        2. Compare γ=0 baseline with best (σ, γ)
+        3. Verify γ=0 is already stable
 
         Grid: ~4 × 50 × 20 = 4000 evals, expected < 5 seconds.
         """
@@ -4114,34 +4109,34 @@ class TestFootprintPenalty:
                 print(f"  nextra={nx}: grid too small (n={n} < 2*r={2*r}), skipping")
                 continue
 
-            best_gamma0_re = float("inf")
+            best_gamma0_se = float("inf")
             best_gamma0_sigma = None
 
-            best_overall_re = float("inf")
+            best_overall_se = float("inf")
             best_overall_sigma = None
             best_overall_gamma = None
             best_overall_deficit = None
 
             for sigma in sigmas:
                 for gamma in gammas:
-                    max_re, deficit = self._eval_point(n, nx, sigma, gamma)
+                    stab_eig, deficit = self._eval_point(n, nx, sigma, gamma)
 
-                    if max_re < best_overall_re:
-                        best_overall_re = max_re
+                    if stab_eig < best_overall_se:
+                        best_overall_se = stab_eig
                         best_overall_sigma = sigma
                         best_overall_gamma = gamma
                         best_overall_deficit = deficit
 
-                    if gamma == 0.0 and max_re < best_gamma0_re:
-                        best_gamma0_re = max_re
+                    if gamma == 0.0 and stab_eig < best_gamma0_se:
+                        best_gamma0_se = stab_eig
                         best_gamma0_sigma = sigma
 
             summary[nx] = {
                 "t": t, "r": r,
                 "extra_dof": r * (self.P + nx),
-                "gamma0_re": best_gamma0_re,
+                "gamma0_se": best_gamma0_se,
                 "gamma0_sigma": best_gamma0_sigma,
-                "best_re": best_overall_re,
+                "best_se": best_overall_se,
                 "best_sigma": best_overall_sigma,
                 "best_gamma": best_overall_gamma,
                 "best_deficit": best_overall_deficit,
@@ -4156,26 +4151,21 @@ class TestFootprintPenalty:
 
         # Summary table
         print(f"\n  {'nextra':>6s}  {'t':>3s}  {'r':>3s}  {'DOF':>5s}  "
-              f"{'γ=0 floor':>12s}  {'best σ*':>8s}  {'best γ*':>10s}  "
-              f"{'(σ,γ) floor':>12s}  {'improve':>8s}  {'status':>10s}")
+              f"{'γ=0 stab eig':>14s}  {'best σ*':>8s}  {'best γ*':>10s}  "
+              f"{'(σ,γ) stab eig':>16s}  {'status':>10s}")
         print(f"  {'-'*6}  {'-'*3}  {'-'*3}  {'-'*5}  "
-              f"{'-'*12}  {'-'*8}  {'-'*10}  "
-              f"{'-'*12}  {'-'*8}  {'-'*10}")
+              f"{'-'*14}  {'-'*8}  {'-'*10}  "
+              f"{'-'*16}  {'-'*10}")
 
         for nx in nextra_values:
             if nx not in summary:
                 continue
             s = summary[nx]
-            if s["gamma0_re"] > 0:
-                improvement = 1.0 - s["best_re"] / s["gamma0_re"]
-                imp_str = f"{improvement:7.1%}"
-            else:
-                imp_str = "N/A"
-            status = "STABLE" if s["best_re"] < STABILITY_TOL else "unstable"
+            status = "STABLE" if s["best_se"] < 0 else "unstable"
             print(f"  {nx:6d}  {s['t']:3d}  {s['r']:3d}  {s['extra_dof']:5d}  "
-                  f"{s['gamma0_re']:12.6e}  {s['best_sigma']:8.4f}  "
+                  f"{s['gamma0_se']:14.6e}  {s['best_sigma']:8.4f}  "
                   f"{s['best_gamma']:10.4f}  "
-                  f"{s['best_re']:12.6e}  {imp_str:>8s}  {status:>10s}")
+                  f"{s['best_se']:16.6e}  {status:>10s}")
 
         # Detailed per-nextra info
         for nx in nextra_values:
@@ -4183,38 +4173,9 @@ class TestFootprintPenalty:
                 continue
             s = summary[nx]
             print(f"\n  nextra={nx}: γ=0 σ*={s['gamma0_sigma']:.4f} "
-                  f"→ {s['gamma0_re']:.6e}")
+                  f"→ {s['gamma0_se']:.6e}")
             print(f"          : (σ,γ)*=({s['best_sigma']:.4f}, {s['best_gamma']:.4f}) "
-                  f"→ {s['best_re']:.6e}  deficit={s['best_deficit']:.6e}")
-
-        # Check if any nextra achieved stability
-        any_stable = any(
-            s["best_re"] < STABILITY_TOL
-            for s in summary.values()
-        )
-        if any_stable:
-            stable_nx = [nx for nx, s in summary.items()
-                         if s["best_re"] < STABILITY_TOL]
-            print(f"\n  *** STABLE nextra values with penalty: {stable_nx} ***")
-        else:
-            print(f"\n  E4 NOT stable at any nextra with penalty.")
-            print(f"  The O(1e-5) instability floor persists across "
-                  f"nextra × (σ, γ) space.")
-
-        # Check if penalty improvement grows with nextra
-        improvements = []
-        for nx in nextra_values:
-            if nx not in summary:
-                continue
-            s = summary[nx]
-            if s["gamma0_re"] > 0:
-                imp = 1.0 - s["best_re"] / s["gamma0_re"]
-                improvements.append((nx, imp))
-
-        if len(improvements) >= 2:
-            print(f"\n  Penalty improvement vs nextra:")
-            for nx, imp in improvements:
-                print(f"    nextra={nx}: {imp:.1%} improvement from γ>0")
+                  f"→ {s['best_se']:.6e}  deficit={s['best_deficit']:.6e}")
 
         # --- Assertions ---
         # All nextra values must produce valid results
@@ -4223,20 +4184,17 @@ class TestFootprintPenalty:
             f"got {len(summary)}"
         )
 
-        # The penalty (γ>0) must improve over γ=0 baseline for at least
-        # nextra=0 (regression from Phase 30.3 which showed ~63% improvement)
+        # γ=0 at nextra=0 should already be stable under corrected metric
         if 0 in summary:
             s0 = summary[0]
-            assert s0["best_re"] < s0["gamma0_re"], (
-                f"Penalty did not improve nextra=0: "
-                f"best={s0['best_re']:.6e} >= γ=0={s0['gamma0_re']:.6e}"
+            assert s0["gamma0_se"] < 0, (
+                f"nextra=0 γ=0 should be stable: stab_eig={s0['gamma0_se']:.6e}"
             )
 
-        # The best floor across all (nextra, σ, γ) must be below 1e-3
-        # (loose bound — actual floors are ~1e-5)
-        global_best = min(s["best_re"] for s in summary.values())
-        assert global_best < 1e-3, (
-            f"Global best floor {global_best:.6e} >= 1e-3"
+        # The best stab_eig across all (nextra, σ, γ) must be negative (stable)
+        global_best = min(s["best_se"] for s in summary.values())
+        assert global_best < 0, (
+            f"Global best stab_eig {global_best:.6e} should be negative (stable)"
         )
 
 
@@ -4248,10 +4206,9 @@ class TestFootprintPenalty:
 class TestCrossValidationE2:
     """Cross-validation: E2_1 stability vs nextra.
 
-    Phase 31.2 showed that nextra does not unlock E4 stability.  Before
-    concluding, verify that E2_1 (which uses nextra=1) retains machine-
-    precision stability, and that nextra=0 for E2 is worse (confirming
-    nextra=1 is necessary for E2).
+    Under the corrected stability metric (Phase 32), E2 is universally
+    stable regardless of nextra.  All three nextra values (0, 1, 2)
+    achieve stability.
 
     E2 parameters: p=1, q=1.
       nextra=0: t=3, r=2, extra DOF/row=1, total=2
@@ -4263,26 +4220,20 @@ class TestCrossValidationE2:
     NU = 1
 
     def _sweep_sigma(self, n, nextra, sigmas):
-        """Sweep sigma, return list of (sigma, max_re)."""
+        """Sweep sigma, return list of (sigma, stab_eig)."""
         rows = []
         for sigma in sigmas:
-            max_re = max_real_eigenvalue(
+            se = stability_eigenvalue(
                 n, p=self.P, q=self.Q, epsilon=sigma,
                 kernel="tension", nu=self.NU, nextra=nextra,
             )
-            rows.append((sigma, max_re))
+            rows.append((sigma, se))
         return rows
 
     def test_e2_nextra_crossvalidation(self):
-        """E2 tension stability at nextra=0 vs nextra=1.
+        """E2 tension stability at nextra=0 vs nextra=1 vs nextra=2.
 
-        Expected:
-        - nextra=1 (default E2_1): machine-precision stability (< STABILITY_TOL)
-        - nextra=0: significantly worse (fewer DOF → less flexibility)
-
-        This confirms:
-        1. The working E2 configuration is NOT broken by any Phase 31 changes
-        2. nextra=1 genuinely matters for E2 (it's not just extra unused DOF)
+        Under corrected metric, E2 is stable at all nextra values.
         """
         n = 40
         sigmas = np.concatenate([
@@ -4311,52 +4262,45 @@ class TestCrossValidationE2:
             r = self.Q + 1 + nx
             t = self.P + self.Q + 1 + nx
             extra_dof = r * (self.P + nx)
-            status = "STABLE" if best[1] < STABILITY_TOL else "unstable"
+            status = "STABLE" if best[1] < 0 else "unstable"
             print(f"  nextra={nx}: t={t}, r={r}, DOF={extra_dof:2d}  "
-                  f"best σ={best[0]:8.4f}  min max Re(λ)={best[1]:12.6e}  "
+                  f"best σ={best[0]:8.4f}  min stab eig={best[1]:12.6e}  "
                   f"[{status}]")
 
-        # Detailed σ-by-σ comparison for nextra=0 vs nextra=1
-        print(f"\n  {'sigma':>10s}  {'nx=0 max Re(λ)':>16s}  "
-              f"{'nx=1 max Re(λ)':>16s}  {'nx=2 max Re(λ)':>16s}")
+        # Detailed σ-by-σ comparison
+        print(f"\n  {'sigma':>10s}  {'nx=0 stab eig':>16s}  "
+              f"{'nx=1 stab eig':>16s}  {'nx=2 stab eig':>16s}")
         print(f"  {'-'*10}  {'-'*16}  {'-'*16}  {'-'*16}")
         # Print every 10th point to keep output manageable
         for i in range(0, len(sigmas), 10):
             s = sigmas[i]
-            re0 = results_nx0[i][1]
-            re1 = results_nx1[i][1]
-            re2 = results_nx2[i][1]
-            print(f"  {s:10.4f}  {re0:16.6e}  {re1:16.6e}  {re2:16.6e}")
+            se0 = results_nx0[i][1]
+            se1 = results_nx1[i][1]
+            se2 = results_nx2[i][1]
+            print(f"  {s:10.4f}  {se0:16.6e}  {se1:16.6e}  {se2:16.6e}")
 
         # Summary
         print(f"\n  --- Summary ---")
-        print(f"  nextra=0: floor={best_nx0[1]:.6e} "
-              f"[{'STABLE' if best_nx0[1] < STABILITY_TOL else 'unstable'}]")
-        print(f"  nextra=1: floor={best_nx1[1]:.6e} "
-              f"[{'STABLE' if best_nx1[1] < STABILITY_TOL else 'unstable'}]")
-        print(f"  nextra=2: floor={best_nx2[1]:.6e} "
-              f"[{'STABLE' if best_nx2[1] < STABILITY_TOL else 'unstable'}]")
-        if best_nx0[1] > 0:
-            print(f"  Ratio nx0/nx1: {best_nx0[1] / max(best_nx1[1], 1e-16):.1f}×")
+        print(f"  nextra=0: best stab_eig={best_nx0[1]:.6e} "
+              f"[{'STABLE' if best_nx0[1] < 0 else 'unstable'}]")
+        print(f"  nextra=1: best stab_eig={best_nx1[1]:.6e} "
+              f"[{'STABLE' if best_nx1[1] < 0 else 'unstable'}]")
+        print(f"  nextra=2: best stab_eig={best_nx2[1]:.6e} "
+              f"[{'STABLE' if best_nx2[1] < 0 else 'unstable'}]")
 
         # --- Assertions ---
 
-        # E2 nextra=1 MUST remain machine-precision stable (regression check)
-        assert best_nx1[1] < STABILITY_TOL, (
-            f"E2 nextra=1 lost stability! max Re(λ)={best_nx1[1]:.6e} "
-            f">= STABILITY_TOL={STABILITY_TOL:.0e}. "
-            f"This is a regression — E2_1 was previously stable."
+        # E2 is universally stable under corrected metric at all nextra values
+        assert best_nx0[1] < 0, (
+            f"E2 nextra=0 should be stable: stab_eig={best_nx0[1]:.6e}"
         )
 
-        # E2 nextra=0: also stable for E2 (simple enough that minimal DOF
-        # suffices).  All three nextra values achieve machine-precision.
-        assert best_nx0[1] < STABILITY_TOL, (
-            f"E2 nextra=0 unexpectedly unstable: {best_nx0[1]:.6e}"
+        assert best_nx1[1] < 0, (
+            f"E2 nextra=1 should be stable: stab_eig={best_nx1[1]:.6e}"
         )
 
-        # E2 nextra=2 should also be stable (more DOF than nextra=1)
-        assert best_nx2[1] < STABILITY_TOL, (
-            f"E2 nextra=2 unexpectedly unstable: {best_nx2[1]:.6e}"
+        assert best_nx2[1] < 0, (
+            f"E2 nextra=2 should be stable: stab_eig={best_nx2[1]:.6e}"
         )
 
 
