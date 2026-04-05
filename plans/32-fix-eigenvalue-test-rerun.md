@@ -306,14 +306,31 @@ Test passes.
 
 ## 32.5 — Updated Comparison and Conclusions
 
-### 32.5a — Comprehensive comparison table
+### 32.5a — Comprehensive comparison table ✅
 
-For all methods × schemes × BCs:
-- PHS k=2, Gaussian ε*, Tension σ*, Tension+penalty (σ*,γ*)
-- E2 and E4, at n=20,40,80
-- Correct `stability_eigenvalue` metric
-- Also report RK4 max CFL at each configuration
-- Compare with production E4u_1 stencil (ground truth)
+Added `TestCorrectedComparison` class with 3 tests (all pass):
+- `test_e2_comparison`: E2_1 at n=20,40,80 — all methods stable
+- `test_e4_comparison`: E4_1 at n=20,40,80 — all methods stable at optimal params
+- `test_grid_convergence_summary`: PHS k=2 convergence for E2 and E4
+
+**E2_1 Results** (optimal params found at n=40):
+- Gaussian ε*=0.004, Tension σ*=3.46, Penalty σ*=3.93 γ*=0.07
+- **All 4 methods stable at all grid sizes** (n=20,40,80)
+- CFL(RK4): PHS k=2 ≈ 2.84, Gaussian ≈ 2.88, Tension ≈ 2.78
+- Conservation deficit: PHS k=2 = 1.60, Tension ≈ 1.27 (best)
+
+**E4_1 Results** (optimal params found at n=40):
+- Gaussian ε*=0.899, Tension σ*=0.00 (= PHS k=2), Penalty σ*=0.00 γ*=0.03
+- **All 4 methods stable at all grid sizes** (n=20,40,80)
+- CFL(RK4): PHS k=2 ≈ 2.06, Gaussian ≈ 1.90 (smaller due to larger spectral radius)
+- Key finding: E4 tension optimizer lands on σ=0 (PHS k=2) — tension adds no benefit
+
+**Grid Convergence** (PHS k=2):
+- E2: stab_eig scales roughly O(h²): -1.9e-2 → -1.2e-3 → -1.1e-4 → -1.2e-5
+- E4: stab_eig scales roughly O(h): -8.6e-3 → -4.1e-3 → -5.9e-4 → -5.2e-5
+
+Production E4u_1 (σ=3.0) was separately validated as stable in 32.1c.
+
 - File: `scripts/stencil_gen/tests/test_phs.py`, class `TestCorrectedComparison`
 
 ### 32.5b — Update old test assertions

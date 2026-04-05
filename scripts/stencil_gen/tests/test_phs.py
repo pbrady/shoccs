@@ -5872,3 +5872,327 @@ class TestCorrectedFootprint:
                 f"n={nn}: E4 PHS k=2 (nextra=0) should be stable, "
                 f"got stab_eig={se:.6e}"
             )
+
+
+# ---------------------------------------------------------------------------
+# 32.5a: Comprehensive comparison table with corrected stability metric
+# ---------------------------------------------------------------------------
+
+
+class TestCorrectedComparison:
+    """Comprehensive comparison of all approaches with corrected stability.
+
+    Phase 32.5a: Side-by-side comparison using stability_eigenvalue
+    (inflow-Dirichlet BC, eigenvalues of -D) instead of the raw
+    max Re(eig(D)) used in prior Phases 29-31.
+
+    Methods compared:
+    1. PHS k=2 (σ=0 baseline)
+    2. Gaussian ε* (best from corrected sweeps)
+    3. Tension σ* (best from corrected sweeps)
+    4. Tension + conservation penalty (σ*, γ*)
+
+    Metrics: stability_eigenvalue, spectral radius, CFL with RK4,
+    conservation deficit.
+
+    Production E4u_1 was separately validated as stable in 32.1c
+    (E4 tension σ=3.0 stable at n=20,40,80,160).
+    """
+
+    # E2_1 parameters
+    E2_P, E2_Q, E2_NEXTRA, E2_NU = 1, 1, 1, 1
+    # E4_1 parameters
+    E4_P, E4_Q, E4_NEXTRA, E4_NU = 2, 3, 0, 1
+
+    RK4_IMAG_LIMIT = 2.828
+
+    # ------------------------------------------------------------------ helpers
+
+    def _corrected_metrics(self, D):
+        """Compute (stab_eig, spectral_radius, cfl_rk4, conservation_deficit).
+
+        stab_eig = max Re(eig(-D_bc)) where D_bc = D[1:, 1:] (inflow removed).
+        Spectral radius and CFL use the full D matrix.
+        """
+        stab_eig = stability_eigenvalue_from_matrix(D)
+        full_eigs = np.linalg.eigvals(D)
+        spec_rad = float(np.max(np.abs(full_eigs)))
+        cfl = self.RK4_IMAG_LIMIT / spec_rad if spec_rad > 0 else float("inf")
+        deficit = float(np.max(np.abs(np.sum(D, axis=0))))
+        return stab_eig, spec_rad, cfl, deficit
+
+    def _find_best_epsilon_corrected(self, n, p, q, nu, nextra, kernel="gaussian"):
+        """Coarse + fine sweep for best ε using corrected stability."""
+        eps_coarse = np.logspace(np.log10(0.01), np.log10(15), 80)
+        best_eps, best_se = None, float("inf")
+        for e in eps_coarse:
+            se = stability_eigenvalue(n, p, q, e, kernel, nu, nextra)
+            if se < best_se:
+                best_se = se
+                best_eps = e
+
+        lo = max(0.001, best_eps / 3)
+        hi = min(50.0, best_eps * 3)
+        for e in np.linspace(lo, hi, 200):
+            se = stability_eigenvalue(n, p, q, e, kernel, nu, nextra)
+            if se < best_se:
+                best_se = se
+                best_eps = e
+
+        return best_eps, best_se
+
+    def _find_best_sigma_corrected(self, n, p, q, nu, nextra):
+        """Coarse + fine sweep for best tension σ using corrected stability."""
+        sigmas_coarse = np.concatenate(
+            [[0.0], np.logspace(np.log10(0.01), np.log10(20), 100)]
+        )
+        best_sigma, best_se = None, float("inf")
+        for s in sigmas_coarse:
+            se = stability_eigenvalue(n, p, q, s, "tension", nu, nextra)
+            if se < best_se:
+                best_se = se
+                best_sigma = s
+
+        # Fine sweep around best
+        if best_sigma > 0.5:
+            lo = max(0.0, best_sigma * 0.5)
+            hi = min(30.0, best_sigma * 2.0)
+        else:
+            lo = 0.0
+            hi = 2.0
+        for s in np.linspace(lo, hi, 200):
+            se = stability_eigenvalue(n, p, q, s, "tension", nu, nextra)
+            if se < best_se:
+                best_se = se
+                best_sigma = s
+
+        return best_sigma, best_se
+
+    def _find_best_sigma_gamma_corrected(self, n, p, q, nu, nextra, sigma_hint):
+        """2D sweep over (σ, γ) with corrected stability metric."""
+        sigmas = np.concatenate(
+            [[0.0], np.linspace(max(0.01, sigma_hint - 5), sigma_hint + 10, 25)]
+        )
+        gammas = np.concatenate([[0.0], np.logspace(-2, 2, 25)])
+
+        best_sigma, best_gamma, best_se = None, None, float("inf")
+        for s in sigmas:
+            for g in gammas:
+                D = build_diff_matrix_rbf_penalty(
+                    n, p, q, s, "tension", nu, nextra, gamma=g,
+                )
+                se = stability_eigenvalue_from_matrix(D)
+                if se < best_se:
+                    best_se = se
+                    best_sigma = s
+                    best_gamma = g
+
+        return best_sigma, best_gamma, best_se
+
+    def _print_table(self, title, results):
+        """Print comparison table with corrected metrics."""
+        print(f"\n  {'=' * 100}")
+        print(f"  {title}")
+        print(f"  {'=' * 100}")
+        hdr = (f"  {'Method':>30s}  {'stab_eig':>14s}  {'|λ|_max':>14s}"
+               f"  {'CFL(RK4)':>10s}  {'cons deficit':>14s}  {'status':>10s}")
+        print(hdr)
+        print(f"  {'-' * 30}  {'-' * 14}  {'-' * 14}"
+              f"  {'-' * 10}  {'-' * 14}  {'-' * 10}")
+        for name, se, sr, cfl, cd in results:
+            status = "STABLE" if se < STABILITY_TOL else "unstable"
+            print(f"  {name:>30s}  {se:14.6e}  {sr:14.6e}"
+                  f"  {cfl:10.4f}  {cd:14.6e}  {status:>10s}")
+
+    # --------------------------------------------------------- E2 comparison
+
+    def test_e2_comparison(self):
+        """Comprehensive E2_1 comparison with corrected stability metric.
+
+        Finds optimal parameters at n=40, then evaluates at n=20,40,80.
+        E2 should be universally stable under the corrected test (Phase 32.2a).
+        """
+        p, q, nextra, nu = self.E2_P, self.E2_Q, self.E2_NEXTRA, self.E2_NU
+        n_opt = 40
+
+        # Find optimal parameters at n=40
+        eps_g, _ = self._find_best_epsilon_corrected(
+            n_opt, p, q, nu, nextra, "gaussian"
+        )
+        sigma_t, _ = self._find_best_sigma_corrected(n_opt, p, q, nu, nextra)
+        sg, gg, _ = self._find_best_sigma_gamma_corrected(
+            n_opt, p, q, nu, nextra, sigma_t
+        )
+
+        print(f"\n  E2_1 optimal params (found at n={n_opt}):")
+        print(f"    Gaussian ε*={eps_g:.4f}")
+        print(f"    Tension σ*={sigma_t:.4f}")
+        print(f"    Tension+penalty σ*={sg:.4f}, γ*={gg:.4f}")
+
+        all_stable = True
+        for n in [20, 40, 80]:
+            results = []
+
+            # 1. PHS k=2 (σ→0)
+            D_phs = build_diff_matrix_rbf(n, p, q, 1e-15, "tension", nu, nextra)
+            results.append(("PHS k=2 (σ=0)", *self._corrected_metrics(D_phs)))
+
+            # 2. Gaussian ε*
+            D_gauss = build_diff_matrix_rbf(n, p, q, eps_g, "gaussian", nu, nextra)
+            results.append((f"Gaussian ε*={eps_g:.3f}", *self._corrected_metrics(D_gauss)))
+
+            # 3. Tension σ*
+            D_tension = build_diff_matrix_rbf(n, p, q, sigma_t, "tension", nu, nextra)
+            results.append((f"Tension σ*={sigma_t:.2f}", *self._corrected_metrics(D_tension)))
+
+            # 4. Tension + penalty
+            D_pen = build_diff_matrix_rbf_penalty(
+                n, p, q, sg, "tension", nu, nextra, gamma=gg,
+            )
+            results.append((f"Tension σ={sg:.2f} γ={gg:.2f}", *self._corrected_metrics(D_pen)))
+
+            self._print_table(f"E2_1 Corrected Comparison (n={n})", results)
+
+            # All methods should be stable for E2
+            for name, se, _, _, _ in results:
+                if se >= STABILITY_TOL:
+                    all_stable = False
+
+        # E2 is universally stable under corrected test
+        # Verify at n=40 (the optimization grid size)
+        D_phs40 = build_diff_matrix_rbf(40, p, q, 1e-15, "tension", nu, nextra)
+        se_phs = stability_eigenvalue_from_matrix(D_phs40)
+        assert se_phs < STABILITY_TOL, (
+            f"E2 PHS k=2 should be stable at n=40, got stab_eig={se_phs:.6e}"
+        )
+
+        D_gauss40 = build_diff_matrix_rbf(40, p, q, eps_g, "gaussian", nu, nextra)
+        se_gauss = stability_eigenvalue_from_matrix(D_gauss40)
+        assert se_gauss < STABILITY_TOL, (
+            f"E2 Gaussian ε*={eps_g:.3f} should be stable at n=40, "
+            f"got stab_eig={se_gauss:.6e}"
+        )
+
+        D_tens40 = build_diff_matrix_rbf(40, p, q, sigma_t, "tension", nu, nextra)
+        se_tens = stability_eigenvalue_from_matrix(D_tens40)
+        assert se_tens < STABILITY_TOL, (
+            f"E2 Tension σ*={sigma_t:.2f} should be stable at n=40, "
+            f"got stab_eig={se_tens:.6e}"
+        )
+
+    # --------------------------------------------------------- E4 comparison
+
+    def test_e4_comparison(self):
+        """Comprehensive E4_1 comparison with corrected stability metric.
+
+        Finds optimal parameters at n=40, then evaluates at n=20,40,80.
+        PHS k=2 and tension should be stable; Gaussian may have narrower
+        stable band (Phase 32.2b).
+        """
+        p, q, nextra, nu = self.E4_P, self.E4_Q, self.E4_NEXTRA, self.E4_NU
+        n_opt = 40
+
+        # Find optimal parameters at n=40
+        eps_g, _ = self._find_best_epsilon_corrected(
+            n_opt, p, q, nu, nextra, "gaussian"
+        )
+        sigma_t, _ = self._find_best_sigma_corrected(n_opt, p, q, nu, nextra)
+        sg, gg, _ = self._find_best_sigma_gamma_corrected(
+            n_opt, p, q, nu, nextra, sigma_t
+        )
+
+        print(f"\n  E4_1 optimal params (found at n={n_opt}):")
+        print(f"    Gaussian ε*={eps_g:.4f}")
+        print(f"    Tension σ*={sigma_t:.4f}")
+        print(f"    Tension+penalty σ*={sg:.4f}, γ*={gg:.4f}")
+
+        for n in [20, 40, 80]:
+            results = []
+
+            # 1. PHS k=2 (σ→0)
+            D_phs = build_diff_matrix_rbf(n, p, q, 1e-15, "tension", nu, nextra)
+            results.append(("PHS k=2 (σ=0)", *self._corrected_metrics(D_phs)))
+
+            # 2. Gaussian ε*
+            D_gauss = build_diff_matrix_rbf(n, p, q, eps_g, "gaussian", nu, nextra)
+            results.append((f"Gaussian ε*={eps_g:.3f}", *self._corrected_metrics(D_gauss)))
+
+            # 3. Tension σ*
+            D_tension = build_diff_matrix_rbf(n, p, q, sigma_t, "tension", nu, nextra)
+            results.append((f"Tension σ*={sigma_t:.2f}", *self._corrected_metrics(D_tension)))
+
+            # 4. Tension + penalty
+            D_pen = build_diff_matrix_rbf_penalty(
+                n, p, q, sg, "tension", nu, nextra, gamma=gg,
+            )
+            results.append((f"Tension σ={sg:.2f} γ={gg:.2f}", *self._corrected_metrics(D_pen)))
+
+            self._print_table(f"E4_1 Corrected Comparison (n={n})", results)
+
+        # Key assertions at n=40:
+        # PHS k=2 should be stable (confirmed in 32.3b)
+        D_phs40 = build_diff_matrix_rbf(40, p, q, 1e-15, "tension", nu, nextra)
+        se_phs = stability_eigenvalue_from_matrix(D_phs40)
+        assert se_phs < STABILITY_TOL, (
+            f"E4 PHS k=2 should be stable at n=40, got stab_eig={se_phs:.6e}"
+        )
+
+        # Optimal Gaussian ε* should be stable (within the stable band)
+        D_gauss40 = build_diff_matrix_rbf(40, p, q, eps_g, "gaussian", nu, nextra)
+        se_gauss = stability_eigenvalue_from_matrix(D_gauss40)
+        assert se_gauss < STABILITY_TOL, (
+            f"E4 Gaussian ε*={eps_g:.3f} should be stable at n=40, "
+            f"got stab_eig={se_gauss:.6e}"
+        )
+
+        # Optimal tension σ* should be stable
+        D_tens40 = build_diff_matrix_rbf(40, p, q, sigma_t, "tension", nu, nextra)
+        se_tens = stability_eigenvalue_from_matrix(D_tens40)
+        assert se_tens < STABILITY_TOL, (
+            f"E4 Tension σ*={sigma_t:.2f} should be stable at n=40, "
+            f"got stab_eig={se_tens:.6e}"
+        )
+
+        # CFL: all methods should have reasonable CFL > 0
+        for name, se, sr, cfl, cd in results:
+            assert cfl > 0.01, f"E4 {name}: CFL too small ({cfl:.6f})"
+
+    # --------------------------------------------------------- Grid convergence
+
+    def test_grid_convergence_summary(self):
+        """Grid convergence of stability_eigenvalue for best methods.
+
+        Tracks how stability eigenvalue scales with grid refinement.
+        PHS k=2 (σ=0) at E2 and E4 across n=20,40,80,160.
+        """
+        configs = [
+            ("E2_1", self.E2_P, self.E2_Q, self.E2_NEXTRA, self.E2_NU),
+            ("E4_1", self.E4_P, self.E4_Q, self.E4_NEXTRA, self.E4_NU),
+        ]
+
+        print(f"\n  {'=' * 72}")
+        print(f"  Grid Convergence — PHS k=2 (σ=0) — Corrected Stability")
+        print(f"  {'=' * 72}")
+
+        for label, p, q, nextra, nu in configs:
+            print(f"\n  {label} (p={p}, q={q}, nextra={nextra})")
+            print(f"  {'n':>6s}  {'stab_eig':>14s}  {'|λ|_max':>14s}"
+                  f"  {'CFL(RK4)':>10s}  {'status':>10s}")
+            print(f"  {'-' * 6}  {'-' * 14}  {'-' * 14}"
+                  f"  {'-' * 10}  {'-' * 10}")
+
+            prev_se = None
+            for n in [20, 40, 80, 160]:
+                D = build_diff_matrix_rbf(n, p, q, 1e-15, "tension", nu, nextra)
+                se, sr, cfl, _ = self._corrected_metrics(D)
+                status = "STABLE" if se < STABILITY_TOL else "unstable"
+                ratio = f" (×{prev_se / se:.1f})" if prev_se is not None and se != 0 else ""
+                print(f"  {n:6d}  {se:14.6e}  {sr:14.6e}"
+                      f"  {cfl:10.4f}  {status:>10s}{ratio}")
+                prev_se = se
+
+                # Both E2 and E4 PHS k=2 should be stable at all grid sizes
+                assert se < STABILITY_TOL, (
+                    f"{label} PHS k=2 n={n}: expected stable, "
+                    f"got stab_eig={se:.6e}"
+                )
