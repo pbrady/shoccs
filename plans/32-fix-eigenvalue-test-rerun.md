@@ -519,12 +519,71 @@ All 4 classes updated (4 tests pass):
 - `TestCrossValidationE2.test_e2_nextra_crossvalidation`: labels updated, removed STABILITY_TOL
   comparisons, assert all three nextra values (0, 1, 2) have stab_eig < 0
 
-### 32.5c — Write conclusions
+### 32.5c — Write conclusions ✅
 
-Document corrected findings in the plan:
-- Which methods × schemes are actually stable?
-- Does the spline approach work for E4 with the correct test?
-- What are the implications for the optimization pipeline?
+#### Corrected Stability Results
+
+**The two bugs (wrong BC + wrong sign) caused all Phase 29-31 "instability" findings
+to be either completely artifactual (E2) or grossly overstated (E4).**
+
+| Scheme | Method | Stable? | Notes |
+|--------|--------|---------|-------|
+| E2_1 | PHS k=2 | ✅ Yes | Universally stable at all grid sizes |
+| E2_1 | Gaussian | ✅ Yes | Stable across nearly all ε |
+| E2_1 | Multiquadric | ✅ Yes | Stable across entire ε range |
+| E2_1 | Tension | ✅ Yes | Universally stable, all σ ∈ [0, 20] |
+| E4_1 | PHS k=2 (σ=0) | ✅ Yes | Best E4 configuration overall |
+| E4_1 | Gaussian | ⚠️ Narrow | Only ~8/60 ε values stable; narrow band ε≈0.68-1.94 |
+| E4_1 | Multiquadric | ⚠️ Partial | Broader than Gaussian (~24/60 at n=20) but gaps exist |
+| E4_1 | Tension | ✅ Yes | 61/61 at n=20,40; 56/61 at n=80 (narrow gap σ≈1.0-1.4) |
+
+**Key finding: PHS k=2 (the zero-tension limit, σ=0) is the most stable E4
+configuration.** Tension, Gaussian, and penalty tuning either match or worsen it.
+
+#### Does the Spline Approach Work for E4?
+
+**Yes — but it's unnecessary.** E4 tension splines are broadly stable, but the
+optimizer consistently lands on σ=0, which is just PHS k=2. The spline parameter
+adds no stability benefit over the unparameterized baseline for E4.
+
+For E2, all kernel choices work. Tension provides the best conservation deficit
+(1.27 vs 1.60 for PHS k=2) with negligible stability or CFL cost.
+
+#### What Were Phases 29-31 Actually Measuring?
+
+The old metric `max Re(eig(D_full))` measured eigenvalues of the **wrong operator**
+(full D, no BC removal) with the **wrong sign convention** (positive = unstable,
+when it should be positive = stable). This produced:
+- **E2:** False "instability" everywhere — the old metric was always positive
+  because D_full without BC has eigenvalues on both sides of zero.
+- **E4:** Greatly exaggerated instability — the O(1e-5) "floor" was an artifact.
+  Under the correct metric, E4 PHS k=2 has stab_eig ≈ -4.1e-3 at n=40 (solidly
+  stable, not marginal).
+
+All Phase 29-31 conclusions about "instability floors", "tension improving over
+PHS", "penalty helping E4", and "nextra=1 needed" were artifacts.
+
+#### Implications for the Optimization Pipeline
+
+1. **No stability-driven kernel search needed for E4.** PHS k=2 (the simplest
+   kernel, zero parameters) is already stable. The stencil derivation pipeline
+   (`derive_cut_cell_mathematica`) doesn't need special stability tuning.
+
+2. **Conservation remains a valid optimization target.** For E2, tension σ≈3.4
+   reduces the conservation deficit by ~20% vs PHS k=2. For E4, σ=0 is both
+   stability-optimal and has acceptable conservation.
+
+3. **The production E4u_1 stencil (σ=3.0) is confirmed stable.** Validated
+   directly in 32.1c with stab_eig ranging from -4.9e-4 (n=20) to -9.6e-7
+   (n=160) — solidly stable.
+
+4. **Grid convergence:** Stability eigenvalue scales as O(h²) for E2 and O(h)
+   for E4, confirming the schemes become more stable at finer resolution.
+
+5. **Nextra (boundary footprint extension) is unnecessary.** nextra=0 is the
+   most broadly stable configuration for E4. Increasing nextra can actually
+   narrow the stable parameter range.
+
 - File: `plans/32-fix-eigenvalue-test-rerun.md`
 
 ---
