@@ -466,10 +466,6 @@ def _phi_val(r, m: int):
     """Compute |r|^m for a potentially symbolic r, with m odd."""
     if r == 0:
         return S.Zero
-    if isinstance(r, (int, float)) or r.is_number:
-        # Numeric: use Abs
-        return Abs(r) ** m
-    # Symbolic: |r|^m.  For signed values, Abs(r)^m.
     return Abs(r) ** m
 
 

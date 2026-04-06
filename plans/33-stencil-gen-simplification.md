@@ -88,26 +88,26 @@ cd scripts/stencil_gen && uv run pytest tests/ -x -q -k "not TestMathematicaWork
 
 ### 33.3 — Minor source cleanup
 
-- [ ] **33.3a** Simplify `_phi_val` redundant branch in `phs.py`:
-  - Both the numeric and symbolic branches at lines 573-581 compute `Abs(r) ** m`. Collapse into a single return after the `r == 0` check.
+- [x] **33.3a** Simplify `_phi_val` redundant branch in `phs.py`:
+  - Both the numeric and symbolic branches computed `Abs(r) ** m`. Collapsed into a single return after the `r == 0` check.
   - File: `scripts/stencil_gen/stencil_gen/phs.py`
-  - Test: `uv run pytest tests/test_phs.py -x -q`
+  - Test: 481 passed, 1 xfailed (fast subset)
 
-- [ ] **33.3b** Fix no-op `* 1` multiplication in `boundary.py`:
-  - Line 119: `n_alpha = (r - 2) * 1 + n_active_penultimate` — remove the `* 1`.
+- [x] **33.3b** Fix no-op `* 1` multiplication in `boundary.py`:
+  - Removed `* 1` from `n_alpha = (r - 2) * 1 + n_active_penultimate`.
   - File: `scripts/stencil_gen/stencil_gen/boundary.py`
-  - Test: `uv run pytest tests/test_boundary.py -x -q`
+  - Test: 481 passed, 1 xfailed (fast subset)
 
-- [ ] **33.3c** Remove redundant `isinstance` filter in `conservation.py`:
-  - Line 66: `[s for s in boundary_rows[r-1].free_params if isinstance(s, Symbol)]` — `free_params` is already filtered to Symbol instances in `boundary.py`.
+- [x] **33.3c** Remove redundant `isinstance` filter in `conservation.py`:
+  - `free_params` is already `list[Symbol]` from `boundary.py`. Replaced filtering comprehension with `list()`.
   - File: `scripts/stencil_gen/stencil_gen/conservation.py`
-  - Test: `uv run pytest tests/test_boundary.py -x -q`
+  - Test: 481 passed, 1 xfailed (fast subset)
 
-- [ ] **33.3d** Clean up `_symbols` alias and hoist inner imports in `temo.py`:
-  - `conservation.py` line 10: `symbols as _symbols` alias is unnecessary.
-  - `temo.py`: hoist repeated inner imports of `linear_eq_to_matrix`, `linsolve`, `symbols` to module level.
+- [x] **33.3d** Clean up `_symbols` alias and hoist inner imports in `temo.py`:
+  - `conservation.py`: removed `symbols as _symbols` alias, use `symbols` directly.
+  - `temo.py`: hoisted `linear_eq_to_matrix`, `linsolve`, `QQ`, `symbols` to module-level import; removed 4 inner `from sympy import` blocks; replaced `sym_solve`/`sym_symbols` aliases with direct `solve`/`symbols` calls.
   - Files: `conservation.py`, `temo.py`
-  - Test: `uv run pytest tests/ -x -q -k "not TestMathematicaWorkflow and not TestPolynomialFullStencil and not TestE4CodeGeneration"`
+  - Test: 481 passed, 1 xfailed (fast subset)
 
 ### 33.4 — Test infrastructure: create conftest.py and shared helpers
 

@@ -7,7 +7,7 @@ Provides:
   last-row placeholder symbols.
 """
 
-from sympy import Expr, Rational, S, Symbol, cancel, expand, linear_eq_to_matrix, symbols as _symbols
+from sympy import Expr, Rational, S, Symbol, cancel, expand, linear_eq_to_matrix, symbols
 
 from stencil_gen._util import solve_linear
 
@@ -62,10 +62,10 @@ def build_conservation_system(
         last_row_free_symbols: placeholder symbols from the last boundary row
     """
     # Quadrature weight symbols
-    w_syms = list(_symbols(f"w_0:{r}"))
+    w_syms = list(symbols(f"w_0:{r}"))
 
     # Placeholder symbols from the last row
-    last_row_free = [s for s in boundary_rows[r - 1].free_params if isinstance(s, Symbol)]
+    last_row_free = list(boundary_rows[r - 1].free_params)
 
     equations = []
     for j in range(t - 1):
@@ -131,7 +131,7 @@ def solve_conservation(
 
     # Linearize: substitute w_{r-1} * phi_k -> theta_k
     w_last = w_symbols[r - 1]
-    theta_syms = list(_symbols(f"theta_0:{n_phi}"))
+    theta_syms = list(symbols(f"theta_0:{n_phi}"))
     sub_dict = {w_last * phi: theta for phi, theta in zip(last_row_free, theta_syms)}
 
     lin_eqs = [expand(eq).subs(sub_dict) for eq in equations]

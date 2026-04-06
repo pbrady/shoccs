@@ -11,6 +11,7 @@ from sympy import (
     Expr,
     Matrix,
     Poly,
+    QQ,
     Rational,
     S,
     Symbol,
@@ -18,8 +19,10 @@ from sympy import (
     expand,
     factorial,
     fraction,
+    linear_eq_to_matrix,
+    linsolve,
     solve,
-    symbols as _symbols,
+    symbols,
 )
 
 from stencil_gen.conservation import _interior_contribution
@@ -419,9 +422,7 @@ def derive_uniform_boundary_for_temo(
             alpha_idx += n_free_per_row
             free_per_row.append(free)
         # Last row: phi placeholders (will be resolved by conservation)
-        from sympy import symbols as sym_symbols
-
-        phi_syms = list(sym_symbols(f"phi_0:{n_free_per_row}"))
+        phi_syms = list(symbols(f"phi_0:{n_free_per_row}"))
         free_per_row.append(phi_syms)
 
     # --- Solve each row's Taylor system ---
@@ -473,13 +474,10 @@ def derive_uniform_boundary_for_temo(
     elim_subs = None
     build_symbols = None
     if conserve and nextra == 0 and n_free_per_row > 0 and n_constraints > 0:
-        from sympy import expand, fraction, linear_eq_to_matrix
-        from sympy import solve as sym_solve
-
         build_symbols = list(_build)
         elim_subs = {}
 
-        w_syms = list(_symbols(f"w_0:{r_eff}"))
+        w_syms = list(symbols(f"w_0:{r_eff}"))
 
         # Build conservation equations: Σ_i w_i B_u[i,j] + IC(j) = target(j)
         cons_eqs = []
@@ -507,7 +505,7 @@ def derive_uniform_boundary_for_temo(
                 continue
             # Eliminate the first last-row symbol that appears linearly
             for sym_to_elim in last_row_build:
-                sols = sym_solve(numer, sym_to_elim)
+                sols = solve(numer, sym_to_elim)
                 if sols:
                     elim_subs[sym_to_elim] = sols[0]
                     B_u = B_u.subs(sym_to_elim, sols[0])
@@ -720,8 +718,6 @@ def make_psi_field(psi: Symbol):
     (K, psi_elem)
         K is the QQ(psi) fraction field, psi_elem is psi as a field element.
     """
-    from sympy import QQ
-
     K = QQ.frac_field(psi)
     psi_elem = K.from_sympy(psi)
     return K, psi_elem
@@ -1070,11 +1066,9 @@ def _solve_with_linearization(equations, w_syms, bilinear_syms, theta_prefix="_t
     Returns a dict mapping every symbol in *w_syms* and *bilinear_syms* to its
     solved expression.
     """
-    from sympy import linear_eq_to_matrix, linsolve
-
     if bilinear_syms:
         w_last = w_syms[-1]
-        theta_syms = list(_symbols(f"{theta_prefix}_0:{len(bilinear_syms)}"))
+        theta_syms = list(symbols(f"{theta_prefix}_0:{len(bilinear_syms)}"))
         sub_dict = {
             w_last * s: theta
             for s, theta in zip(bilinear_syms, theta_syms)
@@ -1144,7 +1138,7 @@ def solve_uniform_conservation_direct(
     last_row_free = sorted(all_syms - early_syms, key=lambda s: s.name)
 
     # Weight symbols
-    w_syms = list(_symbols(f"w_0:{r}"))
+    w_syms = list(symbols(f"w_0:{r}"))
 
     # Build conservation equations matching Mathematica conservationCutCell.
     #
@@ -1633,7 +1627,7 @@ def derive_cut_cell_mathematica(
 
     # Step 5: Cut-cell conservation on the blended stencil.
     # Now entries only depend on (psi, alpha_0..alpha_3, gamma_near_int).
-    w_syms = list(_symbols(f"w_1:{R + 1}"))  # w_1..w_R (all R weights)
+    w_syms = list(symbols(f"w_1:{R + 1}"))  # w_1..w_R (all R weights)
 
     cc_equations = []
     # Eq 0: B_l[0,0]*w_1 + 1 = 0 (special first equation)
@@ -2287,7 +2281,7 @@ def build_cut_cell_conservation_system(
             w_0 = psi is fixed)
     """
     # Weight unknowns: w_1 .. w_{R-1} (w_0 = psi is fixed, not an unknown)
-    w_syms = list(_symbols(f"w_1:{R}"))
+    w_syms = list(symbols(f"w_1:{R}"))
 
     # Grid-point columns: T-frame cols 1..T-2 (grid points 0..T-3).
     # Skip col 0 (wall) and col T-1 (last grid-point column, analogous to

@@ -115,7 +115,7 @@ def derive_boundary(
 
     # Total number of free alpha parameters
     n_active_penultimate = min(n_free_per_row, 2)
-    n_alpha = (r - 2) * 1 + n_active_penultimate
+    n_alpha = (r - 2) + n_active_penultimate
 
     # Create global alpha symbols
     all_alphas = list(symbols(f"alpha_0:{n_alpha}"))
