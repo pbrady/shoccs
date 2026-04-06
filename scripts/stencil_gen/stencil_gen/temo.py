@@ -1058,6 +1058,49 @@ def zeroed_col_aza(i: int, r: int, nu: int) -> int:
 # ---------------------------------------------------------------------------
 
 
+def _solve_with_linearization(equations, w_syms, bilinear_syms, theta_prefix="_theta"):
+    """Solve a linear system, linearizing any bilinear terms w_last * sym.
+
+    When *bilinear_syms* is non-empty, the system contains products of
+    ``w_syms[-1]`` with each symbol in *bilinear_syms*.  These are linearized
+    via the substitution ``theta_k = w_last * bilinear_k``, the resulting
+    linear system is solved, and the original symbols are recovered as
+    ``bilinear_k = theta_k / w_last``.
+
+    Returns a dict mapping every symbol in *w_syms* and *bilinear_syms* to its
+    solved expression.
+    """
+    from sympy import linear_eq_to_matrix, linsolve
+
+    if bilinear_syms:
+        w_last = w_syms[-1]
+        theta_syms = list(_symbols(f"{theta_prefix}_0:{len(bilinear_syms)}"))
+        sub_dict = {
+            w_last * s: theta
+            for s, theta in zip(bilinear_syms, theta_syms)
+        }
+        lin_eqs = [expand(eq).subs(sub_dict) for eq in equations]
+        lin_unknowns = list(w_syms) + theta_syms
+        A, b = linear_eq_to_matrix(lin_eqs, lin_unknowns)
+        sol_set = linsolve((A, b), *lin_unknowns)
+        sol_tuple = list(sol_set)[0]
+        lin_sol = {sym: cancel(val) for sym, val in zip(lin_unknowns, sol_tuple)}
+
+        w_last_val = lin_sol[w_last]
+        solution: dict = {}
+        for w in w_syms:
+            solution[w] = lin_sol[w]
+        for s, theta in zip(bilinear_syms, theta_syms):
+            solution[s] = cancel(lin_sol[theta] / w_last_val)
+    else:
+        A, b = linear_eq_to_matrix(equations, w_syms)
+        sol_set = linsolve((A, b), *w_syms)
+        sol_tuple = list(sol_set)[0]
+        solution = {sym: cancel(val) for sym, val in zip(w_syms, sol_tuple)}
+
+    return solution
+
+
 def solve_uniform_conservation_direct(
     B_u: Matrix,
     interior_coeffs: list,
@@ -1127,42 +1170,9 @@ def solve_uniform_conservation_direct(
         col_sum += ic
         equations.append(expand(col_sum))
 
-    # Solve for all weights + last-row free params
-    solve_for = list(w_syms) + list(last_row_free)
-
-    # The system may contain bilinear terms (w_{r-1} * phi_k).
-    # Use the linearization trick: theta_k = w_{r-1} * phi_k.
-    if last_row_free:
-        w_last = w_syms[r - 1]
-        theta_syms = list(_symbols(f"_theta_0:{len(last_row_free)}"))
-        sub_dict = {
-            w_last * phi: theta
-            for phi, theta in zip(last_row_free, theta_syms)
-        }
-        lin_eqs = [expand(eq).subs(sub_dict) for eq in equations]
-        lin_unknowns = list(w_syms) + theta_syms
-
-        from sympy import linear_eq_to_matrix, linsolve
-
-        A, b = linear_eq_to_matrix(lin_eqs, lin_unknowns)
-        sol_set = linsolve((A, b), *lin_unknowns)
-        sol_tuple = list(sol_set)[0]
-        lin_sol = {sym: cancel(val) for sym, val in zip(lin_unknowns, sol_tuple)}
-
-        # Recover phi_k = theta_k / w_{r-1}
-        w_last_val = lin_sol[w_last]
-        solution_dict: dict = {}
-        for w in w_syms:
-            solution_dict[w] = lin_sol[w]
-        for phi, theta in zip(last_row_free, theta_syms):
-            solution_dict[phi] = cancel(lin_sol[theta] / w_last_val)
-    else:
-        from sympy import linear_eq_to_matrix, linsolve
-
-        A, b = linear_eq_to_matrix(equations, w_syms)
-        sol_set = linsolve((A, b), *w_syms)
-        sol_tuple = list(sol_set)[0]
-        solution_dict = {sym: cancel(val) for sym, val in zip(w_syms, sol_tuple)}
+    solution_dict = _solve_with_linearization(
+        equations, w_syms, list(last_row_free), theta_prefix="_theta"
+    )
 
     weight_exprs = [solution_dict[w] for w in w_syms]
     return solution_dict, weight_exprs
@@ -1623,8 +1633,6 @@ def derive_cut_cell_mathematica(
 
     # Step 5: Cut-cell conservation on the blended stencil.
     # Now entries only depend on (psi, alpha_0..alpha_3, gamma_near_int).
-    from sympy import linear_eq_to_matrix, linsolve
-
     w_syms = list(_symbols(f"w_1:{R + 1}"))  # w_1..w_R (all R weights)
 
     cc_equations = []
@@ -1639,32 +1647,9 @@ def derive_cut_cell_mathematica(
         col_sum += ic
         cc_equations.append(expand(col_sum))
 
-    # Linearize bilinear terms: w_R * gamma_near_int → theta
-    if near_int_gammas:
-        w_last = w_syms[-1]
-        theta_syms = list(_symbols(f"_cc_theta_0:{len(near_int_gammas)}"))
-        lin_sub = {
-            w_last * g: theta
-            for g, theta in zip(near_int_gammas, theta_syms)
-        }
-        lin_eqs = [expand(eq).subs(lin_sub) for eq in cc_equations]
-        lin_unknowns = list(w_syms) + theta_syms
-        A, b = linear_eq_to_matrix(lin_eqs, lin_unknowns)
-        sol_set = linsolve((A, b), *lin_unknowns)
-        sol_tuple = list(sol_set)[0]
-        lin_sol = {sym: cancel(val) for sym, val in zip(lin_unknowns, sol_tuple)}
-
-        w_last_val = lin_sol[w_last]
-        cc_sol: dict = {}
-        for w in w_syms:
-            cc_sol[w] = lin_sol[w]
-        for g, theta in zip(near_int_gammas, theta_syms):
-            cc_sol[g] = cancel(lin_sol[theta] / w_last_val)
-    else:
-        A, b = linear_eq_to_matrix(cc_equations, w_syms)
-        sol_set = linsolve((A, b), *w_syms)
-        sol_tuple = list(sol_set)[0]
-        cc_sol = {sym: cancel(val) for sym, val in zip(w_syms, sol_tuple)}
+    cc_sol = _solve_with_linearization(
+        cc_equations, w_syms, near_int_gammas, theta_prefix="_cc_theta"
+    )
 
     # Step 6: Weight constraint: w_1 = psi * uniform_w_1
     w1_uniform = uniform_weights[0]

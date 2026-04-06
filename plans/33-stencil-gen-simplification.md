@@ -80,11 +80,11 @@ cd scripts/stencil_gen && uv run pytest tests/ -x -q -k "not TestMathematicaWork
   - File: `scripts/stencil_gen/stencil_gen/phs.py`
   - Test: 131 passed
 
-- [ ] **33.2d** Extract bilinear linearization helper in `temo.py`:
-  - The ~35-line pattern (introduce theta symbols, substitute, `linear_eq_to_matrix`/`linsolve`, recover originals by dividing theta by weight) is duplicated at `temo.py:1135-1170` and `temo.py:1644-1669`.
-  - Extract a `_solve_linearized_bilinear(equations, w_syms, bilinear_syms)` helper.
+- [x] **33.2d** Extract bilinear linearization helper in `temo.py`:
+  - Extracted `_solve_with_linearization(equations, w_syms, bilinear_syms, theta_prefix)` helper.
+  - Replaced 2 call sites: `solve_uniform_conservation_direct` and `derive_cut_cell_mathematica`.
   - File: `scripts/stencil_gen/stencil_gen/temo.py`
-  - Test: `uv run pytest tests/test_temo.py tests/test_e4_cut_cell.py -x -q`
+  - Test: 257 passed, 1 xfailed
 
 ### 33.3 — Minor source cleanup
 
