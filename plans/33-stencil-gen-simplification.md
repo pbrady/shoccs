@@ -119,12 +119,14 @@ cd scripts/stencil_gen && uv run pytest tests/ -x -q -k "not TestMathematicaWork
   - Files: `tests/conftest.py` (new), `tests/test_boundary.py`, `tests/test_codegen_e4u.py`
   - Test: 481 passed, 1 xfailed (fast subset)
 
-- [ ] **33.4b** Add `assert_taylor_accuracy` shared helper to conftest:
-  - The Taylor accuracy check (compute moment sums, assert against expected derivative) is copy-pasted across 8 locations in `test_boundary.py`, `test_temo.py`, `test_e4_cut_cell.py`, `test_phs.py`.
-  - Create `assert_taylor_accuracy(B_u, q, nu)` in `conftest.py`.
-  - Update all 8 call sites to use it.
-  - Files: `tests/conftest.py`, `test_boundary.py`, `test_temo.py`, `test_e4_cut_cell.py`, `test_phs.py`
-  - Test: `uv run pytest tests/ -x -q -k "not TestMathematicaWorkflow and not TestPolynomialFullStencil and not TestE4CodeGeneration"`
+- [x] **33.4b** Add `assert_taylor_accuracy` shared helper to conftest:
+  - Created `_check_taylor_accuracy(B_u, q, nu)` in `conftest.py` with a session-scoped `assert_taylor_accuracy` fixture returning it.
+  - The helper checks: `sum_j c_j * (j - i)^m = m! * delta_{m, nu}` for `m = 0..max(q, nu)`.
+  - Updated 5 call sites (not 8 as originally estimated — `test_boundary.py` and `test_phs.py` use different patterns):
+    - `test_e4_cut_cell.py`: `TestE4UniformBoundary.test_taylor_accuracy`, `TestE4UniformConservation.test_taylor_accuracy`
+    - `test_temo.py`: `TestUniformBoundary.test_e2_1_taylor_accuracy_per_row`, `TestUniformBoundary.test_e2_2_taylor_accuracy`, `TestDeriveUniformBoundaryForTemo.test_e2_1_taylor_accuracy`
+  - Files: `tests/conftest.py`, `test_e4_cut_cell.py`, `test_temo.py`
+  - Test: 481 passed, 1 xfailed (fast subset)
 
 - [ ] **33.4c** Import `_interior_contribution` from source instead of re-implementing:
   - `test_boundary.py:35-43` re-implements `_interior_contribution` locally. `test_e4_cut_cell.py` already imports it from `stencil_gen.conservation`.

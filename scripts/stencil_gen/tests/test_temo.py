@@ -177,30 +177,15 @@ class TestUniformBoundary:
         with pytest.raises(ValueError, match="4 alpha symbols"):
             derive_e2_uniform_boundary(nu=1, alpha_symbols=[Symbol("a")])
 
-    def test_e2_1_taylor_accuracy_per_row(self):
+    def test_e2_1_taylor_accuracy_per_row(self, assert_taylor_accuracy):
         """Each row of B_u satisfies the Taylor system (q+1=2 equations)."""
         result = derive_e2_uniform_boundary(nu=1)
-        B_u = result.B_u
-        t = B_u.cols
-        for i in range(B_u.rows):
-            row = B_u.row(i)
-            # k=0: sum of row = 0 (zeroth moment for 1st derivative)
-            assert simplify(sum(row)) == 0
-            # k=1: sum_j alpha_j * (j - i) = 1 (first moment)
-            moment1 = sum(row[j] * (j - i) for j in range(t))
-            assert simplify(moment1) == 1
+        assert_taylor_accuracy(result.B_u, q=1, nu=1)
 
-    def test_e2_2_taylor_accuracy(self):
+    def test_e2_2_taylor_accuracy(self, assert_taylor_accuracy):
         """E2_2 single row satisfies max(q+1, nu+1)=3 Taylor equations."""
         result = derive_e2_uniform_boundary(nu=2)
-        row = result.B_u.row(0)
-        t = result.B_u.cols
-        # k=0: sum = 0
-        assert sum(row) == 0
-        # k=1: sum_j alpha_j * (j - 0) = 0
-        assert sum(row[j] * j for j in range(t)) == 0
-        # k=2: sum_j alpha_j * j^2 / 2 = 1
-        assert sum(row[j] * Rational(j**2, 2) for j in range(t)) == 1
+        assert_taylor_accuracy(result.B_u, q=1, nu=2)
 
     def test_e2_1_p_q_nu(self):
         """UniformResult carries correct scheme parameters."""
@@ -258,16 +243,10 @@ class TestDeriveUniformBoundaryForTemo:
             col_sum = sum(B_u[i, j] for i in range(B_u.rows))
             assert simplify(col_sum) == 0, f"Conservation failed for column {j}"
 
-    def test_e2_1_taylor_accuracy(self):
+    def test_e2_1_taylor_accuracy(self, assert_taylor_accuracy):
         """Each row satisfies Taylor matching for q+1=2 equations."""
         result = derive_uniform_boundary_for_temo(E2_1)
-        B_u = result.B_u
-        t = B_u.cols
-        for i in range(B_u.rows):
-            row = B_u.row(i)
-            assert simplify(sum(row)) == 0
-            moment1 = sum(row[j] * (j - i) for j in range(t))
-            assert simplify(moment1) == 1
+        assert_taylor_accuracy(result.B_u, q=1, nu=1)
 
     def test_wrong_alpha_count_raises(self):
         """Wrong number of alpha symbols raises ValueError."""

@@ -1,6 +1,32 @@
 """Shared fixtures for stencil_gen tests."""
 
 import pytest
+from math import factorial
+
+
+def _check_taylor_accuracy(B_u, q, nu):
+    """Assert each row of B_u satisfies Taylor moment conditions.
+
+    For a nu-th derivative operator accurate to order q, each row i must satisfy:
+        sum_j c_j * (j - i)^m = m! * delta_{m, nu}   for m = 0, ..., max(q, nu).
+    """
+    from sympy import simplify
+
+    r, t = B_u.shape
+    n_moments = max(q + 1, nu + 1)
+    for i in range(r):
+        for m in range(n_moments):
+            moment = sum(B_u[i, j] * (j - i) ** m for j in range(t))
+            expected = factorial(nu) if m == nu else 0
+            assert simplify(moment - expected) == 0, (
+                f"Row {i}, moment {m}: got {simplify(moment)}, expected {expected}"
+            )
+
+
+@pytest.fixture(scope="session")
+def assert_taylor_accuracy():
+    """Fixture providing Taylor accuracy assertion for uniform B_u matrices."""
+    return _check_taylor_accuracy
 
 
 def run_pipeline(p, nu=1, s=0):

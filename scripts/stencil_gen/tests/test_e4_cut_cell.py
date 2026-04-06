@@ -139,28 +139,9 @@ class TestE4UniformBoundary:
                 f"Row 1, col {j}: B_u={B_u[1,j]}, expected={row1_expected[j]}"
             )
 
-    def test_taylor_accuracy(self, e4_result):
-        """Each row satisfies Taylor matching for q+1=4 equations (polynomials up to degree 3).
-
-        For first derivative (nu=1), row i should exactly differentiate
-        monomials x^m for m = 0, 1, ..., q=3:
-            sum_j c_j * (j - i)^m = delta_{m,1} * m!  (= delta_{m,1})
-        """
-        B_u = e4_result.B_u
-        t = B_u.cols
-        q = e4_result.q  # q=3
-
-        for i in range(B_u.rows):
-            row = B_u.row(i)
-            for m in range(q + 1):
-                moment = sum(row[j] * (j - i) ** m for j in range(t))
-                if m == 1:
-                    expected = 1
-                else:
-                    expected = 0
-                assert simplify(moment - expected) == 0, (
-                    f"Row {i}, moment {m}: got {simplify(moment)}, expected {expected}"
-                )
+    def test_taylor_accuracy(self, e4_result, assert_taylor_accuracy):
+        """Each row satisfies Taylor matching for q+1=4 equations (polynomials up to degree 3)."""
+        assert_taylor_accuracy(e4_result.B_u, e4_result.q, nu=1)
 
     def test_no_conservation_constraint(self, e4_result):
         """E4_1 (nextra=0) has no column-sum conservation constraint.
@@ -1735,17 +1716,9 @@ class TestE4UniformConservation:
                 f"Conservation violated at col {j}: residual={cancel(total - target)}"
             )
 
-    def test_taylor_accuracy(self, conserved):
+    def test_taylor_accuracy(self, conserved, assert_taylor_accuracy):
         """Each row still satisfies Taylor matching for q+1=4 equations."""
-        B_u = conserved.B_u
-        r, t = B_u.shape
-        for i in range(r):
-            for m in range(4):
-                moment = sum(B_u[i, j] * (j - i) ** m for j in range(t))
-                expected = 1 if m == 1 else 0
-                assert simplify(moment - expected) == 0, (
-                    f"Row {i}, moment {m}: got {simplify(moment)}, expected {expected}"
-                )
+        assert_taylor_accuracy(conserved.B_u, q=3, nu=1)
 
     def test_rows_0_2_unchanged(self, conserved):
         """Rows 0-2 are identical to the non-conservative result."""
