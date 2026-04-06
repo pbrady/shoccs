@@ -69,11 +69,11 @@ cd scripts/stencil_gen && uv run pytest tests/ -x -q -k "not TestMathematicaWork
   - Files: `scripts/stencil_gen/stencil_gen/taylor_system.py`, `scripts/stencil_gen/stencil_gen/temo.py`
   - Test: 481 passed, 1 xfailed (fast subset)
 
-- [ ] **33.2b** Extract `solve_linear(A, b, unknowns)` helper:
-  - The `linsolve` + unpack + dict-comprehension + `cancel()` pattern is repeated at `interior.py:198-200`, `conservation.py:127-129`, and `conservation.py:143-145`.
-  - Create a shared helper (e.g., in a new `scripts/stencil_gen/stencil_gen/_util.py` or in `interior.py` and import elsewhere). Replace all 3 call sites.
-  - Files: `interior.py`, `conservation.py`
-  - Test: `uv run pytest tests/test_interior.py tests/test_boundary.py -x -q`
+- [x] **33.2b** Extract `solve_linear(A, b, unknowns)` helper:
+  - Created `scripts/stencil_gen/stencil_gen/_util.py` with `solve_linear()` (linsolve + unpack + cancel).
+  - Replaced 3 call sites: `interior.py:197-199`, `conservation.py:127-129`, `conservation.py:143-145`.
+  - Files: `_util.py` (new), `interior.py`, `conservation.py`
+  - Test: 481 passed, 1 xfailed (fast subset)
 
 - [ ] **33.2c** Use `temo.compute_dimensions` in `phs.py` instead of inlined formulas:
   - The `t` and `r` computation from `(p, q, nu, nextra)` is inlined in 3 places in `phs.py` (`build_diff_matrix_rbf`, `build_diff_matrix_mixed_epsilon`, `build_diff_matrix_rbf_penalty`).

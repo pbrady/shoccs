@@ -7,7 +7,9 @@ matching using SymPy linear algebra.
 
 from dataclasses import dataclass
 
-from sympy import Matrix, Rational, factorial, linsolve, symbols
+from sympy import Matrix, Rational, factorial, symbols
+
+from stencil_gen._util import solve_linear
 
 
 @dataclass(frozen=True)
@@ -194,9 +196,7 @@ def derive_interior(s: int, p: int, nu: int) -> InteriorCoefficients:
 
     A = Matrix(A_rows)
     b = Matrix(b_vals)
-    sol_set = linsolve((A, b), *unknowns)
-    sol_tuple = list(sol_set)[0]
-    sol = {sym: val for sym, val in zip(unknowns, sol_tuple)}
+    sol = solve_linear(A, b, unknowns)
 
     gamma_dict = {j: sol[gamma_syms[j - 1]] for j in range(1, p + 1)}
     delta_dict = {k: sol[delta_syms[k - 1]] for k in range(1, s + 1)}

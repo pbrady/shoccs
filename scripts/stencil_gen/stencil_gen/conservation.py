@@ -7,7 +7,9 @@ Provides:
   last-row placeholder symbols.
 """
 
-from sympy import Expr, Rational, S, Symbol, cancel, expand, linear_eq_to_matrix, linsolve, symbols as _symbols
+from sympy import Expr, Rational, S, Symbol, cancel, expand, linear_eq_to_matrix, symbols as _symbols
+
+from stencil_gen._util import solve_linear
 
 from stencil_gen.boundary import BoundaryRow
 
@@ -124,9 +126,7 @@ def solve_conservation(
     if n_phi == 0:
         # No placeholder symbols, straightforward linear solve
         A, b = linear_eq_to_matrix(equations, w_symbols)
-        sol_set = linsolve((A, b), *w_symbols)
-        sol_tuple = list(sol_set)[0]
-        solution_dict = {sym: cancel(val) for sym, val in zip(w_symbols, sol_tuple)}
+        solution_dict = solve_linear(A, b, w_symbols)
         return solution_dict, list(boundary_rows)
 
     # Linearize: substitute w_{r-1} * phi_k -> theta_k
@@ -140,9 +140,7 @@ def solve_conservation(
     lin_unknowns = list(w_symbols) + theta_syms
     A, b = linear_eq_to_matrix(lin_eqs, lin_unknowns)
 
-    sol_set = linsolve((A, b), *lin_unknowns)
-    sol_tuple = list(sol_set)[0]
-    lin_solution = {sym: cancel(val) for sym, val in zip(lin_unknowns, sol_tuple)}
+    lin_solution = solve_linear(A, b, lin_unknowns)
 
     # Recover phi_k = theta_k / w_{r-1}
     w_last_val = lin_solution[w_last]
