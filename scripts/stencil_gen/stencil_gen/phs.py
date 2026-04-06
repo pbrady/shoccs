@@ -662,16 +662,10 @@ def build_diff_matrix_rbf(
         n×n differentiation matrix.
     """
     from stencil_gen.interior import derive_interior, full_gamma_array
+    from stencil_gen.temo import compute_dimensions
 
-    # Compute boundary dimensions (same formula as temo.compute_dimensions)
-    if nu == 1:
-        t = p + q + 1 + nextra  # boundary stencil width
-        r = q + 1 + nextra  # number of boundary rows per side
-    elif nu == 2:
-        t = p + 2 + nextra
-        r = p + 1 + nextra
-    else:
-        raise NotImplementedError(f"build_diff_matrix_rbf: nu={nu} not supported")
+    dims = compute_dimensions(p, q, 0, nextra, nu)
+    r, t = dims.r, dims.t
 
     if n < 2 * r:
         raise ValueError(f"Grid too small: n={n} < 2*r={2*r}")
@@ -747,16 +741,10 @@ def build_diff_matrix_mixed_epsilon(
         n×n differentiation matrix.
     """
     from stencil_gen.interior import derive_interior, full_gamma_array
+    from stencil_gen.temo import compute_dimensions
 
-    # Compute boundary dimensions
-    if nu == 1:
-        t = p + q + 1 + nextra
-        r = q + 1 + nextra
-    elif nu == 2:
-        t = p + 2 + nextra
-        r = p + 1 + nextra
-    else:
-        raise NotImplementedError(f"build_diff_matrix_mixed_epsilon: nu={nu}")
+    dims = compute_dimensions(p, q, 0, nextra, nu)
+    r, t = dims.r, dims.t
 
     if len(epsilons) != r:
         raise ValueError(f"epsilons has length {len(epsilons)}, expected r={r}")
@@ -909,15 +897,10 @@ def build_diff_matrix_rbf_penalty(
     if gamma <= 0:
         return D_std
 
-    # Compute boundary dimensions (same as build_diff_matrix_rbf)
-    if nu == 1:
-        t = p + q + 1 + nextra
-        r = q + 1 + nextra
-    elif nu == 2:
-        t = p + 2 + nextra
-        r = p + 1 + nextra
-    else:
-        raise NotImplementedError(f"build_diff_matrix_rbf_penalty: nu={nu}")
+    from stencil_gen.temo import compute_dimensions
+
+    dims = compute_dimensions(p, q, 0, nextra, nu)
+    r, t = dims.r, dims.t
 
     # Extract standard left boundary weights: B_std ∈ R^{r×t}
     B_std = D_std[:r, :t].copy()

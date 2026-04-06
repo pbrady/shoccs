@@ -75,11 +75,10 @@ cd scripts/stencil_gen && uv run pytest tests/ -x -q -k "not TestMathematicaWork
   - Files: `_util.py` (new), `interior.py`, `conservation.py`
   - Test: 481 passed, 1 xfailed (fast subset)
 
-- [ ] **33.2c** Use `temo.compute_dimensions` in `phs.py` instead of inlined formulas:
-  - The `t` and `r` computation from `(p, q, nu, nextra)` is inlined in 3 places in `phs.py` (`build_diff_matrix_rbf`, `build_diff_matrix_mixed_epsilon`, `build_diff_matrix_rbf_penalty`).
-  - Replace with calls to `temo.compute_dimensions` (or equivalent).
+- [x] **33.2c** Use `temo.compute_dimensions` in `phs.py` instead of inlined formulas:
+  - Replaced 3 inlined dimension computations in `build_diff_matrix_rbf`, `build_diff_matrix_mixed_epsilon`, `build_diff_matrix_rbf_penalty` with calls to `temo.compute_dimensions(p, q, 0, nextra, nu)`.
   - File: `scripts/stencil_gen/stencil_gen/phs.py`
-  - Test: `uv run pytest tests/test_phs.py -x -q`
+  - Test: 131 passed
 
 - [ ] **33.2d** Extract bilinear linearization helper in `temo.py`:
   - The ~35-line pattern (introduce theta symbols, substitute, `linear_eq_to_matrix`/`linsolve`, recover originals by dividing theta by weight) is duplicated at `temo.py:1135-1170` and `temo.py:1644-1669`.
