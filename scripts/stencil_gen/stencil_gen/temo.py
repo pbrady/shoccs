@@ -9,7 +9,6 @@ from typing import NamedTuple
 
 from sympy import (
     Expr,
-    Integer,
     Matrix,
     Poly,
     Rational,

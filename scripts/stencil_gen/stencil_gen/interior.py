@@ -7,7 +7,7 @@ matching using SymPy linear algebra.
 
 from dataclasses import dataclass
 
-from sympy import Matrix, Rational, factorial, linsolve, symbols, zeros
+from sympy import Matrix, Rational, factorial, linsolve, symbols
 
 
 @dataclass(frozen=True)
@@ -118,7 +118,6 @@ def derive_interior(s: int, p: int, nu: int) -> InteriorCoefficients:
 
     # Build Taylor matching equations for m = 0 .. 2(p+s)-1.
     # Collect only non-trivial equations.
-    equations_lhs = []  # list of (symbolic_expr, constant) pairs: expr = const
     A_rows = []
     b_vals = []
 
