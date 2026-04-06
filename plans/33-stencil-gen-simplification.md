@@ -128,11 +128,10 @@ cd scripts/stencil_gen && uv run pytest tests/ -x -q -k "not TestMathematicaWork
   - Files: `tests/conftest.py`, `test_e4_cut_cell.py`, `test_temo.py`
   - Test: 481 passed, 1 xfailed (fast subset)
 
-- [ ] **33.4c** Import `_interior_contribution` from source instead of re-implementing:
-  - `test_boundary.py:35-43` re-implements `_interior_contribution` locally. `test_e4_cut_cell.py` already imports it from `stencil_gen.conservation`.
-  - Replace the local copy with the import.
+- [x] **33.4c** Import `_interior_contribution` from source instead of re-implementing:
+  - Replaced local re-implementation in `test_boundary.py` (9 lines) with `from stencil_gen.conservation import _interior_contribution`.
   - File: `tests/test_boundary.py`
-  - Test: `uv run pytest tests/test_boundary.py -x -q`
+  - Test: 41 passed
 
 ### 33.5 — Test deduplication
 

@@ -14,22 +14,7 @@ from sympy import Matrix, Rational, S, Symbol, cancel, symbols
 
 from stencil_gen.taylor_system import build_taylor_system
 from stencil_gen.boundary import solve_boundary_row, BoundaryRow
-
-
-# ---------------------------------------------------------------------------
-# Pipeline helper (deferred imports for isolation)
-# ---------------------------------------------------------------------------
-
-
-def _interior_contribution(j, r, p, interior_coeffs):
-    """Compute the sum of interior stencil contributions to column j."""
-    ic = S.Zero
-    for m in range(max(0, j - r - p), j - r + p + 1):
-        if m >= 0:
-            idx = j - (r + m) + p
-            if 0 <= idx <= 2 * p:
-                ic += interior_coeffs[idx]
-    return ic
+from stencil_gen.conservation import _interior_contribution
 
 
 # ---------------------------------------------------------------------------
