@@ -135,10 +135,10 @@ cd scripts/stencil_gen && uv run pytest tests/ -x -q -k "not TestMathematicaWork
 
 ### 33.5 — Test deduplication
 
-- [ ] **33.5a** Remove duplicate cross-validation tests in `test_interior.py`:
-  - "Test group 5: Cross-validation" (lines ~165-186) asserts the exact same gamma values as "Test group 3" above it. Delete group 5.
+- [x] **33.5a** Remove duplicate cross-validation tests in `test_interior.py`:
+  - Deleted "Test group 5: Cross-validation" (3 tests) — exact duplicates of test group 3.
   - File: `tests/test_interior.py`
-  - Test: `uv run pytest tests/test_interior.py -x -q`
+  - Test: 29 passed
 
 - [ ] **33.5b** Extract shared base class for epsilon sweep tests in `test_phs.py`:
   - `TestEpsilonSweepE2` and `TestEpsilonSweepE4` have identical `_sweep`, `_print_table`, and sweep test method implementations. Only the class constants (P, Q, NEXTRA, NU) differ.

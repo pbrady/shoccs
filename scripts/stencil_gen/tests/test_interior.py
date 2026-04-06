@@ -162,30 +162,6 @@ def test_polynomial_exactness(s, p, nu):
     assert rhs != lhs, f"Stencil is unexpectedly exact at degree {d}"
 
 
-# ── Test group 5: Cross-validation against C++ interior() ────────────
-
-
-def test_cross_validate_E4u_1():
-    coeffs = derive_interior(0, 2, 1)
-    gamma = full_gamma_array(coeffs)
-    expected = [R(1, 12), R(-2, 3), R(0), R(2, 3), R(-1, 12)]
-    assert gamma == expected
-
-
-def test_cross_validate_E2_2():
-    coeffs = derive_interior(0, 1, 2)
-    gamma = full_gamma_array(coeffs)
-    expected = [R(1), R(-2), R(1)]
-    assert gamma == expected
-
-
-def test_cross_validate_E4_2():
-    coeffs = derive_interior(0, 2, 2)
-    gamma = full_gamma_array(coeffs)
-    expected = [R(-1, 12), R(4, 3), R(-5, 2), R(4, 3), R(-1, 12)]
-    assert gamma == expected
-
-
 # ── Test group 6: Input validation ────────────────────────────────────
 
 
