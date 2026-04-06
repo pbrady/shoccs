@@ -146,12 +146,12 @@ cd scripts/stencil_gen && uv run pytest tests/ -x -q -k "not TestMathematicaWork
   - File: `tests/test_phs.py`
   - Test: 131 passed
 
-- [ ] **33.5c** Cache `derive_e2_uniform_boundary` results in `test_temo.py`:
-  - Multiple test classes independently call `derive_e2_uniform_boundary(nu=1)` and `derive_e2_uniform_boundary(nu=2)` — at least 18 times total with no caching.
-  - Add `@pytest.fixture(scope="module")` fixtures for E2_1 and E2_2 uniform results in `conftest.py` or at the top of `test_temo.py`.
-  - Update test classes to use the fixtures.
-  - File: `tests/test_temo.py` (and optionally `tests/conftest.py`)
-  - Test: `uv run pytest tests/test_temo.py -x -q`
+- [x] **33.5c** Cache `derive_e2_uniform_boundary` results in `test_temo.py`:
+  - Added `e2_1_uniform` and `e2_2_uniform` module-scoped fixtures to `conftest.py`.
+  - Updated ~48 call sites across 11 test classes in `test_temo.py` to use the fixtures.
+  - Only 3 special-case calls remain (custom alpha_symbols, error tests) — these can't be cached.
+  - Files: `tests/conftest.py`, `tests/test_temo.py`
+  - Test: 202 passed (test_temo.py + test_boundary.py + test_codegen_e4u.py + test_interior.py)
 
 - [ ] **33.5d** Replace element-wise assertion loops with `pytest.approx`:
   - Multiple tests use `for i, (got, want) in enumerate(zip(vals, ref)): assert abs(got - want) < tol` — this should be `assert vals == pytest.approx(ref, abs=tol)`.

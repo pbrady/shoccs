@@ -45,6 +45,22 @@ def run_pipeline(p, nu=1, s=0):
 
 
 @pytest.fixture(scope="module")
+def e2_1_uniform():
+    """Cache derive_e2_uniform_boundary(nu=1) once per module."""
+    from stencil_gen.temo import derive_e2_uniform_boundary
+
+    return derive_e2_uniform_boundary(nu=1)
+
+
+@pytest.fixture(scope="module")
+def e2_2_uniform():
+    """Cache derive_e2_uniform_boundary(nu=2) once per module."""
+    from stencil_gen.temo import derive_e2_uniform_boundary
+
+    return derive_e2_uniform_boundary(nu=2)
+
+
+@pytest.fixture(scope="module")
 def e4u_pipeline():
     """Run E4u pipeline once per module."""
     return run_pipeline(p=2)
