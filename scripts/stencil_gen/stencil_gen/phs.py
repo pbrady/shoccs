@@ -1128,3 +1128,149 @@ def cut_cell_weights(
     points = [-psi] + [Rational(j) for j in range(T - 1)]
     x_eval = Rational(i)
     return phs_stencil_weights(points, x_eval, nu, q, k)
+
+
+# ---------------------------------------------------------------------------
+# B-spline knot-parameterized FD weights
+# ---------------------------------------------------------------------------
+
+
+def bspline_fd_weights(
+    x: np.ndarray,
+    x_eval: float,
+    nu: int,
+    k: int,
+    interior_knots: np.ndarray,
+) -> np.ndarray:
+    """Compute FD weights from B-spline interpolation with given knots.
+
+    Builds a B-spline space of degree k with a clamped knot vector
+    (k+1 repeated knots at each end, plus the given interior knots),
+    forms the collocation matrix at the data sites x, evaluates the
+    derivative of the basis functions at x_eval, and solves for the
+    FD weights.
+
+    Parameters
+    ----------
+    x : array_like, shape (n,)
+        Data sites (grid points), must be sorted.
+    x_eval : float
+        Point at which to approximate the derivative.
+    nu : int
+        Derivative order (1, 2, ...).
+    k : int
+        B-spline degree.  Must satisfy k >= nu.  Polynomial reproduction
+        is exact up to degree k.
+    interior_knots : array_like, shape (n - k - 1,)
+        Interior knot positions.  Must be sorted and lie strictly inside
+        (x[0], x[-1]).  The number of interior knots must equal n - k - 1
+        so that the B-spline space has dimension n (one basis function per
+        data point).
+
+    Returns
+    -------
+    np.ndarray, shape (n,)
+        FD weights w such that f^(nu)(x_eval) ≈ Σ w_j f(x_j).
+    """
+    from scipy.interpolate import BSpline
+
+    x = np.asarray(x, dtype=float)
+    interior_knots = np.asarray(interior_knots, dtype=float)
+    n = len(x)
+
+    # Build clamped knot vector: k+1 copies of x[0], interior, k+1 copies of x[-1]
+    t = np.concatenate([
+        np.full(k + 1, x[0]),
+        interior_knots,
+        np.full(k + 1, x[-1]),
+    ])
+
+    # Identity coefficients: column j gives basis function B_j
+    c = np.eye(n)
+    spl = BSpline(t, c, k, extrapolate=True)
+
+    # Collocation matrix A[i,j] = B_j(x[i])
+    A = spl(x)  # (n, n)
+
+    # Derivative vector d[j] = D^nu B_j(x_eval)
+    d = spl(np.atleast_1d(x_eval), nu=nu).ravel()  # (n,)
+
+    # Weights: A^T w = d
+    return np.linalg.solve(A.T, d)
+
+
+def bspline_boundary_weights(
+    i: int,
+    t: int,
+    nu: int,
+    k: int,
+    interior_knots: np.ndarray,
+) -> np.ndarray:
+    """Boundary row i FD weights using B-spline interpolation.
+
+    Convenience wrapper for uniform grid {0, 1, ..., t-1}.
+    """
+    x = np.arange(t, dtype=float)
+    return bspline_fd_weights(x, float(i), nu, k, interior_knots)
+
+
+def build_diff_matrix_bspline(
+    n: int,
+    p: int,
+    q: int,
+    interior_knots: np.ndarray,
+    nu: int = 1,
+) -> np.ndarray:
+    """Build n×n differentiation matrix with B-spline boundary stencils.
+
+    Left and right boundary closures use B-spline interpolation with the
+    given interior knots.  The interior uses the standard 2p+1-point
+    centered FD stencil.
+
+    Parameters
+    ----------
+    n : int
+        Grid size.
+    p : int
+        Interior half-width.
+    q : int
+        B-spline degree (= polynomial reproduction order).
+    interior_knots : array_like
+        Interior knots for the boundary B-spline.  Length must be
+        t - q - 1 where t = 2p + 1 (the boundary stencil width matching
+        the interior stencil width).
+    nu : int
+        Derivative order.
+    """
+    from stencil_gen.interior import derive_interior, full_gamma_array
+
+    t = 2 * p + 1  # boundary width = interior width
+    r = p + 1      # number of boundary rows
+
+    interior_knots = np.asarray(interior_knots, dtype=float)
+    x_bdy = np.arange(t, dtype=float)
+
+    # Boundary stencils
+    bdy = []
+    for i in range(r):
+        w = bspline_fd_weights(x_bdy, float(i), nu, q, interior_knots)
+        bdy.append(w)
+
+    # Interior stencil
+    int_result = derive_interior(0, p, nu)
+    int_coeffs = [float(c) for c in full_gamma_array(int_result)]
+
+    # Assemble
+    D = np.zeros((n, n))
+    for i in range(r):
+        for j in range(t):
+            D[i, j] = bdy[i][j]
+    for i in range(r, n - r):
+        for j_off in range(-p, p + 1):
+            D[i, i + j_off] = int_coeffs[j_off + p]
+    sign = (-1) ** nu
+    for i in range(r):
+        for j in range(t):
+            D[n - 1 - i, n - 1 - j] = sign * bdy[i][j]
+
+    return D
