@@ -140,11 +140,11 @@ cd scripts/stencil_gen && uv run pytest tests/ -x -q -k "not TestMathematicaWork
   - File: `tests/test_interior.py`
   - Test: 29 passed
 
-- [ ] **33.5b** Extract shared base class for epsilon sweep tests in `test_phs.py`:
-  - `TestEpsilonSweepE2` and `TestEpsilonSweepE4` have identical `_sweep`, `_print_table`, and sweep test method implementations. Only the class constants (P, Q, NEXTRA, NU) differ.
-  - Extract a `_EpsilonSweepBase` class with the shared methods; have both inherit from it and set only class-level constants.
+- [x] **33.5b** Extract shared base class for epsilon sweep tests in `test_phs.py`:
+  - Extracted `_EpsilonSweepBase` with `_sweep`, `_print_table`, `_params_str`, and all three test methods.
+  - `TestEpsilonSweepE2` and `TestEpsilonSweepE4` now inherit from it and set only P, Q, NEXTRA, NU, LABEL.
   - File: `tests/test_phs.py`
-  - Test: `uv run pytest tests/test_phs.py -x -q -k "EpsilonSweep"`
+  - Test: 131 passed
 
 - [ ] **33.5c** Cache `derive_e2_uniform_boundary` results in `test_temo.py`:
   - Multiple test classes independently call `derive_e2_uniform_boundary(nu=1)` and `derive_e2_uniform_boundary(nu=2)` — at least 18 times total with no caching.

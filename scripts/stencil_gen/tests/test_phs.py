@@ -599,18 +599,17 @@ class TestGaussianRBF:
 # ---------------------------------------------------------------------------
 
 
-class TestEpsilonSweepE2:
-    """Sweep epsilon for E2_1 boundary stencils and report stability.
+class _EpsilonSweepBase:
+    """Base class for epsilon sweep tests.
 
-    E2_1 parameters: p=1, q=1, nextra=1.
-    Sweeps Gaussian and Multiquadric kernels over epsilon in [0.01, 10].
+    Subclasses set P, Q, NEXTRA, NU, and LABEL class constants.
     """
 
-    # E2_1 parameters
-    P = 1
-    Q = 1
-    NEXTRA = 1
-    NU = 1
+    P: int
+    Q: int
+    NEXTRA: int
+    NU: int
+    LABEL: str
 
     def _sweep(self, kernel: str, n_values, epsilons):
         """Run epsilon sweep, return dict {n: list of (eps, stab_eig, spec_rad)}."""
@@ -647,12 +646,15 @@ class TestEpsilonSweepE2:
             stable = "STABLE" if best[1] < 0 else "unstable"
             print(f"  n={n:3d}: eps={best[0]:.4f}, stab_eig={best[1]:.6e} [{stable}]")
 
+    def _params_str(self):
+        return f"p={self.P}, q={self.Q}, nextra={self.NEXTRA}"
+
     def test_gaussian_sweep(self):
-        """Sweep Gaussian kernel epsilon for E2_1."""
+        """Sweep Gaussian kernel epsilon."""
         epsilons = np.logspace(np.log10(0.01), np.log10(10), 60)
         n_values = [20, 40, 80]
         results = self._sweep("gaussian", n_values, epsilons)
-        self._print_table("E2_1 Gaussian RBF Epsilon Sweep (p=1, q=1, nextra=1)", results)
+        self._print_table(f"{self.LABEL} Gaussian RBF Epsilon Sweep ({self._params_str()})", results)
 
         # Find if any epsilon gives stability
         for n, rows in results.items():
@@ -661,11 +663,11 @@ class TestEpsilonSweepE2:
                 print(f"\n  *** STABLE epsilon found for n={n}: eps={best[0]:.6f} ***")
 
     def test_multiquadric_sweep(self):
-        """Sweep Multiquadric kernel epsilon for E2_1."""
+        """Sweep Multiquadric kernel epsilon."""
         epsilons = np.logspace(np.log10(0.01), np.log10(10), 60)
         n_values = [20, 40, 80]
         results = self._sweep("multiquadric", n_values, epsilons)
-        self._print_table("E2_1 Multiquadric RBF Epsilon Sweep (p=1, q=1, nextra=1)", results)
+        self._print_table(f"{self.LABEL} Multiquadric RBF Epsilon Sweep ({self._params_str()})", results)
 
         for n, rows in results.items():
             best = min(rows, key=lambda r: r[1])
@@ -704,7 +706,7 @@ class TestEpsilonSweepE2:
             fine.append((eps, se))
 
         best_fine = min(fine, key=lambda r: r[1])
-        print(f"\n  E2_1 Gaussian fine sweep (n={n}):")
+        print(f"\n  {self.LABEL} Gaussian fine sweep (n={n}):")
         print(f"  Coarse best: eps={best_coarse[0]:.6f}, stab_eig={best_coarse[1]:.6e}")
         print(f"  Fine best:   eps={best_fine[0]:.6f}, stab_eig={best_fine[1]:.6e}")
 
@@ -720,6 +722,20 @@ class TestEpsilonSweepE2:
                 kernel="gaussian", nu=self.NU, nextra=self.NEXTRA,
             )
             print(f"    n={nn:4d}: stab_eig={se:.6e}")
+
+
+class TestEpsilonSweepE2(_EpsilonSweepBase):
+    """Sweep epsilon for E2_1 boundary stencils and report stability.
+
+    E2_1 parameters: p=1, q=1, nextra=1.
+    Sweeps Gaussian and Multiquadric kernels over epsilon in [0.01, 10].
+    """
+
+    P = 1
+    Q = 1
+    NEXTRA = 1
+    NU = 1
+    LABEL = "E2_1"
 
 
 # ---------------------------------------------------------------------------
@@ -727,7 +743,7 @@ class TestEpsilonSweepE2:
 # ---------------------------------------------------------------------------
 
 
-class TestEpsilonSweepE4:
+class TestEpsilonSweepE4(_EpsilonSweepBase):
     """Sweep epsilon for E4_1 boundary stencils and report stability.
 
     E4_1 parameters: p=2, q=3, nextra=0.
@@ -735,120 +751,11 @@ class TestEpsilonSweepE4:
     is the key result.
     """
 
-    # E4_1 parameters
     P = 2
     Q = 3
     NEXTRA = 0
     NU = 1
-
-    def _sweep(self, kernel: str, n_values, epsilons):
-        """Run epsilon sweep, return dict {n: list of (eps, stab_eig, spec_rad)}."""
-        results = {}
-        for n in n_values:
-            rows = []
-            for eps in epsilons:
-                D = build_diff_matrix_rbf(
-                    n, p=self.P, q=self.Q, epsilon=eps,
-                    kernel=kernel, nu=self.NU, nextra=self.NEXTRA,
-                )
-                stab_eig = stability_eigenvalue_from_matrix(D)
-                spec_rad = float(np.max(np.abs(np.linalg.eigvals(D))))
-                rows.append((eps, stab_eig, spec_rad))
-            results[n] = rows
-        return results
-
-    def _print_table(self, label, results):
-        """Print formatted sweep table."""
-        print(f"\n{'='*72}")
-        print(f"  {label}")
-        print(f"{'='*72}")
-        for n, rows in sorted(results.items()):
-            print(f"\n  n = {n}")
-            print(f"  {'epsilon':>10s}  {'stab eig':>14s}  {'spec radius':>14s}")
-            print(f"  {'-'*10}  {'-'*14}  {'-'*14}")
-            for eps, stab_eig, spec_rad in rows:
-                print(f"  {eps:10.4f}  {stab_eig:14.6e}  {spec_rad:14.6e}")
-
-        # Summary: best epsilon per n (most negative stab_eig = most stable)
-        print(f"\n  --- Best epsilon (min stab eig) ---")
-        for n, rows in sorted(results.items()):
-            best = min(rows, key=lambda r: r[1])
-            stable = "STABLE" if best[1] < 0 else "unstable"
-            print(f"  n={n:3d}: eps={best[0]:.4f}, stab_eig={best[1]:.6e} [{stable}]")
-
-    def test_gaussian_sweep(self):
-        """Sweep Gaussian kernel epsilon for E4_1."""
-        epsilons = np.logspace(np.log10(0.01), np.log10(10), 60)
-        n_values = [20, 40, 80]
-        results = self._sweep("gaussian", n_values, epsilons)
-        self._print_table("E4_1 Gaussian RBF Epsilon Sweep (p=2, q=3, nextra=0)", results)
-
-        # Find if any epsilon gives stability
-        for n, rows in results.items():
-            best = min(rows, key=lambda r: r[1])
-            if best[1] < 0:
-                print(f"\n  *** STABLE epsilon found for n={n}: eps={best[0]:.6f} ***")
-
-    def test_multiquadric_sweep(self):
-        """Sweep Multiquadric kernel epsilon for E4_1."""
-        epsilons = np.logspace(np.log10(0.01), np.log10(10), 60)
-        n_values = [20, 40, 80]
-        results = self._sweep("multiquadric", n_values, epsilons)
-        self._print_table("E4_1 Multiquadric RBF Epsilon Sweep (p=2, q=3, nextra=0)", results)
-
-        for n, rows in results.items():
-            best = min(rows, key=lambda r: r[1])
-            if best[1] < 0:
-                print(f"\n  *** STABLE epsilon found for n={n}: eps={best[0]:.6f} ***")
-
-    def test_gaussian_fine_sweep_near_best(self):
-        """Fine sweep around the best Gaussian epsilon from coarse sweep.
-
-        Uses n=40 for the coarse pass, then refines near the minimum.
-        """
-        n = 40
-        # Coarse sweep
-        epsilons_coarse = np.logspace(np.log10(0.01), np.log10(10), 60)
-        coarse = []
-        for eps in epsilons_coarse:
-            se = stability_eigenvalue(
-                n, p=self.P, q=self.Q, epsilon=eps,
-                kernel="gaussian", nu=self.NU, nextra=self.NEXTRA,
-            )
-            coarse.append((eps, se))
-
-        best_coarse = min(coarse, key=lambda r: r[1])
-        eps_best = best_coarse[0]
-
-        # Fine sweep: ±1 decade around best
-        lo = max(0.001, eps_best / 10)
-        hi = min(100, eps_best * 10)
-        epsilons_fine = np.linspace(lo, hi, 200)
-        fine = []
-        for eps in epsilons_fine:
-            se = stability_eigenvalue(
-                n, p=self.P, q=self.Q, epsilon=eps,
-                kernel="gaussian", nu=self.NU, nextra=self.NEXTRA,
-            )
-            fine.append((eps, se))
-
-        best_fine = min(fine, key=lambda r: r[1])
-        print(f"\n  E4_1 Gaussian fine sweep (n={n}):")
-        print(f"  Coarse best: eps={best_coarse[0]:.6f}, stab_eig={best_coarse[1]:.6e}")
-        print(f"  Fine best:   eps={best_fine[0]:.6f}, stab_eig={best_fine[1]:.6e}")
-
-        stable = best_fine[1] < 0
-        print(f"  Stable: {stable}")
-
-        # Verify at multiple grid sizes
-        eps_star = best_fine[0]
-        print(f"\n  Checking eps*={eps_star:.6f} across grid sizes:")
-        for nn in [20, 40, 80, 160]:
-            se = stability_eigenvalue(
-                nn, p=self.P, q=self.Q, epsilon=eps_star,
-                kernel="gaussian", nu=self.NU, nextra=self.NEXTRA,
-            )
-            print(f"    n={nn:4d}: stab_eig={se:.6e}")
+    LABEL = "E4_1"
 
 
 # ---------------------------------------------------------------------------
