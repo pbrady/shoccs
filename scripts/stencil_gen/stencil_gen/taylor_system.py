@@ -7,6 +7,11 @@ for a single boundary row of an SBP finite difference operator.
 from sympy import Matrix, Rational, factorial
 
 
+def _unit_rhs(n_eqs: int, nu: int) -> Matrix:
+    """Column vector with 1 at row *nu* and 0 elsewhere (derivative RHS)."""
+    return Matrix(n_eqs, 1, lambda k, _: Rational(1) if k == nu else Rational(0))
+
+
 def build_taylor_system(
     i: int,
     t: int,
@@ -32,12 +37,10 @@ def build_taylor_system(
     """
     n_rows = q + 1
     V = Matrix.zeros(n_rows, t)
-    rhs = Matrix.zeros(n_rows, 1)
 
     for k in range(n_rows):
         inv_fact = Rational(1, factorial(k))
         for j in range(t):
             V[k, j] = Rational((j - i) ** k) * inv_fact
-        rhs[k] = Rational(1) if k == nu else Rational(0)
 
-    return V, rhs
+    return V, _unit_rhs(n_rows, nu)

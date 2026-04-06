@@ -23,6 +23,7 @@ from sympy import (
 )
 
 from stencil_gen.conservation import _interior_contribution
+from stencil_gen.taylor_system import _unit_rhs
 from sympy.polys.matrices import DomainMatrix
 
 
@@ -201,7 +202,7 @@ def _build_uniform_vandermonde(
         t,
         lambda k, j: Rational((j - i) ** k, factorial(k)),
     )
-    rhs = Matrix(n_eqs, 1, lambda k, _: Rational(1) if k == nu else Rational(0))
+    rhs = _unit_rhs(n_eqs, nu)
     return V, rhs
 
 
@@ -661,9 +662,7 @@ def build_degenerate_stencil(
         unknown_cols = [j for j in range(T) if j not in known_cols]
         n_unk = len(unknown_cols)
 
-        rhs = Matrix(
-            n_eqs, 1, lambda k, _: Rational(1) if k == nu else Rational(0)
-        )
+        rhs = _unit_rhs(n_eqs, nu)
         for k in range(n_eqs):
             for j in known_cols:
                 rhs[k, 0] -= Rational(deltas[j] ** k, factorial(k)) * B_d[r, j]
@@ -961,7 +960,7 @@ def build_temo_vandermonde(i: int, T: int, q: int, nu: int, psi) -> tuple:
         T,
         lambda k, j: deltas[j] ** k / factorial(k),
     )
-    rhs = Matrix(n_eqs, 1, lambda k, _: Rational(1) if k == nu else Rational(0))
+    rhs = _unit_rhs(n_eqs, nu)
     return V, rhs
 
 
@@ -1761,9 +1760,7 @@ def solve_uniform_limit(
                 n_eqs, T,
                 lambda k, j: Rational(deltas_i[j] ** k, factorial(k)),
             )
-            rhs_i = Matrix(
-                n_eqs, 1, lambda k, _: Rational(1) if k == nu else Rational(0)
-            )
+            rhs_i = _unit_rhs(n_eqs, nu)
             # Move wall column to RHS
             rhs_adj = rhs_i.copy()
             for k in range(n_eqs):
@@ -1804,9 +1801,7 @@ def solve_uniform_limit(
             T,
             lambda k, j: Rational(deltas[j] ** k, factorial(k)),
         )
-        rhs_full = Matrix(
-            n_eqs, 1, lambda k, _: Rational(1) if k == nu else Rational(0)
-        )
+        rhs_full = _unit_rhs(n_eqs, nu)
 
         # Conservation at psi=1 (all weights = 1).
         # sum_{i=0}^{R-1} B_l(1)[i, j] = 0 for interior columns.
@@ -2551,9 +2546,7 @@ def derive_uniform_neumann(
             deltas[j] ** k / factorial(k) if j < t
             else (delta_wall ** (k - 1) / factorial(k - 1) if k >= 1 else Rational(0))
         ))
-        rhs = Matrix(
-            n_eqs, 1, lambda k, _: Rational(1) if k == nu else Rational(0)
-        )
+        rhs = _unit_rhs(n_eqs, nu)
 
         # Conservation: for uniform Neumann, the last column (j=t-1) should be 0
         # because the interior stencil doesn't reach that far.
@@ -2625,7 +2618,7 @@ def build_neumann_vandermonde(
         deltas[j] ** k / factorial(k) if j < T
         else (delta_wall ** (k - 1) / factorial(k - 1) if k >= 1 else Rational(0))
     ))
-    rhs = Matrix(n_eqs, 1, lambda k, _: Rational(1) if k == nu else Rational(0))
+    rhs = _unit_rhs(n_eqs, nu)
     return V_aug, rhs
 
 
@@ -2689,9 +2682,7 @@ def solve_neumann_uniform_limit(
                       else Rational(0))
             ),
         )
-        rhs_i = Matrix(
-            n_eqs, 1, lambda k, _: Rational(1) if k == nu else Rational(0)
-        )
+        rhs_i = _unit_rhs(n_eqs, nu)
 
         # Prescribe eta = eta_u[i] and c[T-1] = 0 (conservation at rightmost col)
         fixed_i: dict[int, Rational] = {T: eta_u[i], T - 1: Rational(0)}
@@ -2723,9 +2714,7 @@ def solve_neumann_uniform_limit(
             else (Rational(_dw ** (k - 1), factorial(k - 1)) if k >= 1 else Rational(0))
         ),
     )
-    rhs_r = Matrix(
-        n_eqs, 1, lambda k, _: Rational(1) if k == nu else Rational(0)
-    )
+    rhs_r = _unit_rhs(n_eqs, nu)
 
     # Step 3: Conservation at psi=1 for interior stencil columns.
     fixed_cols: set[int] = set()
@@ -2951,9 +2940,7 @@ def _build_neumann_degenerate(
             else (Rational(_dw ** (k - 1), factorial(k - 1)) if k >= 1 else Rational(0))
         ),
     )
-    rhs_r = Matrix(
-        n_eqs, 1, lambda k, _: Rational(1) if k == nu else Rational(0)
-    )
+    rhs_r = _unit_rhs(n_eqs, nu)
 
     # Neumann variant for near-interior row (i >= 1): wall zeroed
     B_d_N[r, 0] = Rational(0)

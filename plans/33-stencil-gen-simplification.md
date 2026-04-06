@@ -61,11 +61,13 @@ cd scripts/stencil_gen && uv run pytest tests/ -x -q -k "not TestMathematicaWork
 
 ### 33.2 — Extract shared helpers (source)
 
-- [ ] **33.2a** Extract `_unit_rhs(n_eqs, nu)` helper in `temo.py`:
-  - The pattern `Matrix(n_eqs, 1, lambda k, _: Rational(1) if k == nu else Rational(0))` appears 11 times in `temo.py` plus once in `taylor_system.py`.
-  - Create a module-level helper and replace all 12 call sites.
-  - Files: `scripts/stencil_gen/stencil_gen/temo.py`, `scripts/stencil_gen/stencil_gen/taylor_system.py`
-  - Test: `uv run pytest tests/ -x -q -k "not TestMathematicaWorkflow and not TestPolynomialFullStencil and not TestE4CodeGeneration"`
+- [x] **33.2a** Extract `_unit_rhs(n_eqs, nu)` helper:
+  - Defined in `taylor_system.py` (leaf of the dependency chain, no internal imports).
+  - Imported into `temo.py` and used at all 10 former call sites.
+  - `taylor_system.py` itself also uses the helper (1 call site).
+  - Total: 11 duplicated expressions replaced with 11 calls to a single helper.
+  - Files: `scripts/stencil_gen/stencil_gen/taylor_system.py`, `scripts/stencil_gen/stencil_gen/temo.py`
+  - Test: 481 passed, 1 xfailed (fast subset)
 
 - [ ] **33.2b** Extract `solve_linear(A, b, unknowns)` helper:
   - The `linsolve` + unpack + dict-comprehension + `cancel()` pattern is repeated at `interior.py:198-200`, `conservation.py:127-129`, and `conservation.py:143-145`.
