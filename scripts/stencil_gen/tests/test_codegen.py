@@ -1,5 +1,6 @@
 """Tests for stencil_gen.codegen module."""
 
+import pytest
 from sympy import Integer, Rational, Symbol, symbols
 
 from stencil_gen.codegen import (
@@ -540,9 +541,7 @@ def test_compute_test_values_floating():
         0.13076243615365518,
         0.00897605762825287,
     ]
-    assert len(values) == len(reference)
-    for got, want in zip(values, reference):
-        assert abs(got - want) < 1e-8, f"got {got}, want {want}"
+    assert values == pytest.approx(reference, abs=1e-8)
 
 
 def test_compute_test_values_dirichlet():
@@ -565,6 +564,4 @@ def test_compute_test_values_dirichlet():
         0.5230497446146207,
         0.03590423051301148,
     ]
-    assert len(values) == len(reference)
-    for got, want in zip(values, reference):
-        assert abs(got - want) < 1e-8, f"got {got}, want {want}"
+    assert values == pytest.approx(reference, abs=1e-8)

@@ -68,8 +68,7 @@ def test_e4u_floating_numerical(e4u_data):
         0.13076243615365518, 0.00897605762825287,
     ]
 
-    for i, (got, want) in enumerate(zip(values, reference)):
-        assert abs(got - want) < 1e-8, f"Floating coeff {i}: got {got}, want {want}"
+    assert values == pytest.approx(reference, abs=1e-8)
 
 
 def test_e4u_dirichlet_numerical(e4u_data):
@@ -93,8 +92,7 @@ def test_e4u_dirichlet_numerical(e4u_data):
         0.5230497446146207, 0.03590423051301148,
     ]
 
-    for i, (got, want) in enumerate(zip(values, reference)):
-        assert abs(got - want) < 1e-8, f"Dirichlet coeff {i}: got {got}, want {want}"
+    assert values == pytest.approx(reference, abs=1e-8)
 
 
 def test_e4u_full_pipeline(e4u_data):

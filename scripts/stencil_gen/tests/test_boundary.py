@@ -260,9 +260,7 @@ def test_E4u_numerical_floating(e4u_pipeline):
         for coeff in row.coefficients:
             val = float(coeff.xreplace(_alpha_vals_e4)) / h
             computed.append(val)
-    assert len(computed) == len(expected_float)
-    for i, (got, exp) in enumerate(zip(computed, expected_float)):
-        assert abs(got - exp) < 1e-12, f"Floating coeff {i}: {got} != {exp}"
+    assert computed == pytest.approx(expected_float, abs=1e-12)
 
 
 def test_E4u_numerical_dirichlet(e4u_pipeline):
@@ -281,9 +279,7 @@ def test_E4u_numerical_dirichlet(e4u_pipeline):
         for coeff in row.coefficients:
             val = float(coeff.xreplace(_alpha_vals_e4)) / h
             computed.append(val)
-    assert len(computed) == len(expected_dirichlet)
-    for i, (got, exp) in enumerate(zip(computed, expected_dirichlet)):
-        assert abs(got - exp) < 1e-12, f"Dirichlet coeff {i}: {got} != {exp}"
+    assert computed == pytest.approx(expected_dirichlet, abs=1e-12)
 
 
 def test_E4u_conservation_column_sums(e4u_pipeline):
@@ -462,9 +458,7 @@ def test_E6u_numerical_floating(e6u_pipeline):
         for coeff in row.coefficients:
             val = float(coeff.xreplace(_alpha_vals_e6)) / h
             computed.append(val)
-    assert len(computed) == len(expected_float)
-    for i, (got, exp) in enumerate(zip(computed, expected_float)):
-        assert abs(got - exp) < 1e-10, f"Floating coeff {i}: {got} != {exp}"
+    assert computed == pytest.approx(expected_float, abs=1e-10)
 
 
 def test_E6u_numerical_dirichlet(e6u_pipeline):
@@ -488,9 +482,7 @@ def test_E6u_numerical_dirichlet(e6u_pipeline):
         for coeff in row.coefficients:
             val = float(coeff.xreplace(_alpha_vals_e6)) / h
             computed.append(val)
-    assert len(computed) == len(expected_dirichlet)
-    for i, (got, exp) in enumerate(zip(computed, expected_dirichlet)):
-        assert abs(got - exp) < 1e-10, f"Dirichlet coeff {i}: {got} != {exp}"
+    assert computed == pytest.approx(expected_dirichlet, abs=1e-10)
 
 
 def test_E6u_polynomial_exactness(e6u_pipeline):
@@ -746,9 +738,7 @@ def test_E8u_numerical_floating(e8u_pipeline):
         for coeff in row.coefficients:
             val = float(coeff.xreplace(_alpha_vals_e8)) / h
             computed.append(val)
-    assert len(computed) == len(expected_float)
-    for i, (got, exp) in enumerate(zip(computed, expected_float)):
-        assert abs(got - exp) < 1e-10, f"Floating coeff {i}: {got} != {exp}"
+    assert computed == pytest.approx(expected_float, abs=1e-10)
 
 
 def test_E8u_numerical_dirichlet(e8u_pipeline):
@@ -783,9 +773,7 @@ def test_E8u_numerical_dirichlet(e8u_pipeline):
         for coeff in row.coefficients:
             val = float(coeff.xreplace(_alpha_vals_e8)) / h
             computed.append(val)
-    assert len(computed) == len(expected_dirichlet)
-    for i, (got, exp) in enumerate(zip(computed, expected_dirichlet)):
-        assert abs(got - exp) < 1e-10, f"Dirichlet coeff {i}: {got} != {exp}"
+    assert computed == pytest.approx(expected_dirichlet, abs=1e-10)
 
 
 def test_E8u_conservation_column_sums(e8u_pipeline):

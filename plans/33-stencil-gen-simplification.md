@@ -153,11 +153,13 @@ cd scripts/stencil_gen && uv run pytest tests/ -x -q -k "not TestMathematicaWork
   - Files: `tests/conftest.py`, `tests/test_temo.py`
   - Test: 202 passed (test_temo.py + test_boundary.py + test_codegen_e4u.py + test_interior.py)
 
-- [ ] **33.5d** Replace element-wise assertion loops with `pytest.approx`:
-  - Multiple tests use `for i, (got, want) in enumerate(zip(vals, ref)): assert abs(got - want) < tol` — this should be `assert vals == pytest.approx(ref, abs=tol)`.
-  - Locations: `test_codegen_e4u.py:85-86`, `test_codegen.py:544-545`, `test_codegen.py:569-570`, and similar patterns in `test_boundary.py`.
+- [x] **33.5d** Replace element-wise assertion loops with `pytest.approx`:
+  - Replaced 10 element-wise assertion loops with `assert vals == pytest.approx(ref, abs=tol)`.
+  - `test_codegen_e4u.py`: 2 locations (floating + dirichlet).
+  - `test_codegen.py`: 2 locations (floating + dirichlet); added `import pytest`.
+  - `test_boundary.py`: 6 locations (E4u/E6u/E8u × floating/dirichlet).
   - Files: `test_codegen_e4u.py`, `test_codegen.py`, `test_boundary.py`
-  - Test: `uv run pytest tests/test_codegen_e4u.py tests/test_codegen.py tests/test_boundary.py -x -q`
+  - Test: 75 passed
 
 ### 33.6 — Final verification
 
