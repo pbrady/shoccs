@@ -111,12 +111,13 @@ cd scripts/stencil_gen && uv run pytest tests/ -x -q -k "not TestMathematicaWork
 
 ### 33.4 — Test infrastructure: create conftest.py and shared helpers
 
-- [ ] **33.4a** Create `tests/conftest.py` with shared pipeline fixture:
-  - Extract `_run_pipeline(p, nu, s)` from `test_boundary.py:23-32` (identical to `test_codegen_e4u.py:27-36`) into a shared fixture/helper in `conftest.py`.
-  - Add module-scoped fixtures for `e4u_pipeline` (p=2, nu=1, s=0) and common schemes.
-  - Update `test_boundary.py` and `test_codegen_e4u.py` to use the shared fixture.
+- [x] **33.4a** Create `tests/conftest.py` with shared pipeline fixture:
+  - Extracted `run_pipeline(p, nu, s)` into `conftest.py` with module-scoped `e4u_pipeline`, `e6u_pipeline`, `e8u_pipeline` fixtures.
+  - Removed `_run_pipeline` and fixture defs from `test_boundary.py`.
+  - Removed `_run_e4u_pipeline` from `test_codegen_e4u.py`; `e4u_data` now depends on shared `e4u_pipeline` fixture.
+  - Cleaned unused imports (`derive_boundary`, `build_conservation_system`, `solve_conservation`, `Symbol`, `symbols`) from `test_codegen_e4u.py`.
   - Files: `tests/conftest.py` (new), `tests/test_boundary.py`, `tests/test_codegen_e4u.py`
-  - Test: `uv run pytest tests/test_boundary.py tests/test_codegen_e4u.py -x -q`
+  - Test: 481 passed, 1 xfailed (fast subset)
 
 - [ ] **33.4b** Add `assert_taylor_accuracy` shared helper to conftest:
   - The Taylor accuracy check (compute moment sums, assert against expected derivative) is copy-pasted across 8 locations in `test_boundary.py`, `test_temo.py`, `test_e4_cut_cell.py`, `test_phs.py`.

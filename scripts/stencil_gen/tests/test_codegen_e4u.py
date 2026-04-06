@@ -9,11 +9,9 @@ import subprocess
 from pathlib import Path
 
 import pytest
-from sympy import Rational, Symbol, symbols
+from sympy import Rational
 
 from stencil_gen.interior import derive_interior, full_gamma_array
-from stencil_gen.boundary import derive_boundary
-from stencil_gen.conservation import build_conservation_system, solve_conservation
 from stencil_gen.codegen import (
     StencilGenSpec,
     compute_test_values,
@@ -24,22 +22,10 @@ from stencil_gen.codegen import (
 ALPHA = [-0.7733323791884821, 0.1623961700641681]
 
 
-def _run_e4u_pipeline():
-    """Run derive_boundary + conservation for E4u (p=2, nu=1, s=0)."""
-    result = derive_boundary(p=2, nu=1, s=0)
-    equations, w_syms, last_free = build_conservation_system(
-        result.r, result.t, 2, result.rows, result.interior_coeffs
-    )
-    _, updated_rows = solve_conservation(
-        equations, w_syms, last_free, result.all_free_params, result.rows
-    )
-    return updated_rows, result
-
-
 @pytest.fixture(scope="module")
-def e4u_data():
+def e4u_data(e4u_pipeline):
     """Run pipeline once, reuse across tests."""
-    updated_rows, result = _run_e4u_pipeline()
+    updated_rows, _solution_dict, _w_syms, result = e4u_pipeline
     # Flatten row coefficients into a single list
     floating_coeffs = []
     for row in updated_rows:

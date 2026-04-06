@@ -17,19 +17,8 @@ from stencil_gen.boundary import solve_boundary_row, BoundaryRow
 
 
 # ---------------------------------------------------------------------------
-# Pipeline helper and fixtures (deferred imports for isolation)
+# Pipeline helper (deferred imports for isolation)
 # ---------------------------------------------------------------------------
-
-def _run_pipeline(p, nu=1, s=0):
-    """Run derive_boundary + conservation, return full pipeline results."""
-    from stencil_gen.boundary import derive_boundary
-    from stencil_gen.conservation import build_conservation_system, solve_conservation
-    result = derive_boundary(p=p, nu=nu, s=s)
-    equations, w_syms, last_free = build_conservation_system(
-        result.r, result.t, p, result.rows, result.interior_coeffs)
-    solution_dict, updated_rows = solve_conservation(
-        equations, w_syms, last_free, result.all_free_params, result.rows)
-    return updated_rows, solution_dict, w_syms, result
 
 
 def _interior_contribution(j, r, p, interior_coeffs):
@@ -41,22 +30,6 @@ def _interior_contribution(j, r, p, interior_coeffs):
             if 0 <= idx <= 2 * p:
                 ic += interior_coeffs[idx]
     return ic
-
-
-@pytest.fixture(scope="module")
-def e4u_pipeline():
-    """Run E4u pipeline once, reuse across all test_E4u_* functions."""
-    return _run_pipeline(p=2)
-
-
-@pytest.fixture(scope="module")
-def e6u_pipeline():
-    return _run_pipeline(p=3)
-
-
-@pytest.fixture(scope="module")
-def e8u_pipeline():
-    return _run_pipeline(p=4)
 
 
 # ---------------------------------------------------------------------------
