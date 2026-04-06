@@ -163,9 +163,9 @@ cd scripts/stencil_gen && uv run pytest tests/ -x -q -k "not TestMathematicaWork
 
 ### 33.6 — Final verification
 
-- [ ] **33.6a** Run full test suite:
+- [x] **33.6a** Run full test suite:
   - `cd scripts/stencil_gen && SYMPY_CACHE_SIZE=50000 uv run pytest tests/ -x -q`
-  - All tests must pass. No behavior changes.
+  - Result: 505 passed, 1 xfailed in 667s. All tests pass. No behavior changes.
 
 ---
 
