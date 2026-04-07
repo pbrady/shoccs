@@ -24,9 +24,9 @@ cd scripts/stencil_gen && uv run pytest tests/test_group_velocity.py -x -q -k "T
 
 **Background (from the papers):**
 
-For the model equation u_t + u_x = 0 with semi-discrete spatial operator, the
-modified wavenumber kappa*(xi) relates to the dispersion relation via
-omega = -kappa*(xi). The group velocity is C(xi) = d(omega)/d(xi) = -d(kappa*)/d(xi).
+For the model equation u_t + u_x = 0 semi-discretized as du/dt = -D*u, where D
+approximates d/dx with modified wavenumber kappa*(xi), the dispersion relation is
+omega = Im(kappa*(xi)).  The group velocity is C(xi) = d(omega)/d(xi) = d(Im(kappa*))/d(xi).
 For a perfect scheme, C(xi) = 1 for all xi. The group velocity error is
 (2p-1) times the phase velocity error for a 2p-order scheme (Trefethen 1982,
 Section 2). Parasitic modes near xi = pi/h can have reversed group velocity,
@@ -72,6 +72,14 @@ Trefethen 1983).
   - Added `test_interior_group_velocity_e2` in `TestCoreGroupVelocity`.
   - Verifies: `GroupVelocityProfile` type, `order=2`, `group_velocity == cos(xi)`, `cutoff_xi ≈ pi/2`.
   - 5 tests passing.
+  - File: `scripts/stencil_gen/tests/test_group_velocity.py`
+
+### 34.1-followup-2 — Stale sign-convention comments in test file
+
+- [ ] **34.1-fix-c** Fix stale sign-convention comments in `tests/test_group_velocity.py`:
+  - Lines 25-26: `# so C = -d(Im(kappa*))/d(xi)` should use positive sign.
+  - Lines 40-41: `# The plan says C(xi) = -d(Im(kappa*))/d(xi)` should use positive sign.
+  - These are in the `test_exact_scheme_unity_group_velocity` comment block; the assertions are correct but the working-through comments propagate the old wrong sign.
   - File: `scripts/stencil_gen/tests/test_group_velocity.py`
 
 ### 34.2 — Interior Scheme Group Velocity Analysis
