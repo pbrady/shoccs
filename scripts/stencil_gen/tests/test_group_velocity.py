@@ -8,12 +8,15 @@ from stencil_gen.group_velocity import (
     GroupVelocityProfile,
     boundary_group_velocity,
     boundary_group_velocity_classical,
+    cut_cell_group_velocity,
     gks_group_velocity_check,
     group_velocity,
     group_velocity_error,
     group_velocity_exact,
+    group_velocity_exact_nonuniform,
     interior_group_velocity,
     modified_wavenumber,
+    modified_wavenumber_nonuniform,
     phase_velocity,
 )
 
@@ -588,3 +591,188 @@ class TestGKSDiagnostic:
             f"Mode Re(lambda) = {mode.eigenvalue.real:.6e} should be negative "
             f"(damped, not growing)"
         )
+
+
+class TestNonuniformModWavenumber:
+    """Tests for modified_wavenumber_nonuniform and group_velocity_exact_nonuniform (35.1b)."""
+
+    N_XI = 500
+
+    def test_nonuniform_mod_wavenumber(self):
+        """With integer offsets, nonuniform version matches uniform version exactly."""
+        weights = [-0.5, 0.0, 0.5]
+        nodes = [-1, 0, 1]
+        i_eval = 0
+        offsets = [n - i_eval for n in nodes]  # [-1, 0, 1]
+        xi = np.linspace(0, np.pi, self.N_XI)
+
+        kstar_uniform = modified_wavenumber(weights, i_eval, nodes, xi)
+        kstar_nonuniform = modified_wavenumber_nonuniform(weights, offsets, xi)
+
+        assert np.allclose(kstar_uniform, kstar_nonuniform, atol=1e-14), (
+            f"Nonuniform should match uniform for integer offsets, "
+            f"max diff = {np.max(np.abs(kstar_uniform - kstar_nonuniform)):.2e}"
+        )
+
+    def test_nonuniform_gv_matches_uniform(self):
+        """With integer offsets, nonuniform GV matches uniform GV exactly."""
+        weights = [-0.5, 0.0, 0.5]
+        nodes = [-1, 0, 1]
+        i_eval = 0
+        offsets = [n - i_eval for n in nodes]
+        xi = np.linspace(0, np.pi, self.N_XI)
+
+        C_uniform = group_velocity_exact(weights, i_eval, nodes, xi)
+        C_nonuniform = group_velocity_exact_nonuniform(weights, offsets, xi)
+
+        assert np.allclose(C_uniform, C_nonuniform, atol=1e-14), (
+            f"Nonuniform GV should match uniform for integer offsets, "
+            f"max diff = {np.max(np.abs(C_uniform - C_nonuniform)):.2e}"
+        )
+
+    def test_nonuniform_fractional_offset_bounded(self):
+        """Nonuniform with fractional offsets produces bounded, finite results."""
+        # Simulate a cut-cell-like stencil with wall at -0.3
+        weights = [-0.3, 0.7, 0.1, -0.5]
+        offsets = [-0.3, 0.0, 1.0, 2.0]
+        xi = np.linspace(0.01, np.pi, self.N_XI)
+
+        kstar = modified_wavenumber_nonuniform(weights, offsets, xi)
+        C = group_velocity_exact_nonuniform(weights, offsets, xi)
+
+        assert np.all(np.isfinite(kstar)), "kappa* should be finite"
+        assert np.all(np.isfinite(C)), "Group velocity should be finite"
+        assert np.max(np.abs(C)) < 100, f"|C| blow-up: max={np.max(np.abs(C)):.2e}"
+
+
+class TestCutCellGroupVelocity:
+    """Cut-cell group velocity analysis (35.1c)."""
+
+    N_XI = 1000
+
+    @pytest.fixture(scope="class")
+    def e2_1_cut_cell(self):
+        """Derive E2_1 cut-cell stencil (symbolic in psi and alpha)."""
+        from sympy import Symbol
+
+        from stencil_gen.temo import E2_1, derive_cut_cell_scheme
+
+        psi = Symbol("psi")
+        result = derive_cut_cell_scheme(E2_1, psi)
+        return result, psi
+
+    def test_psi_1_matches_uniform(self, e2_1_cut_cell):
+        """At psi=1, cut-cell group velocity matches uniform boundary GV.
+
+        By TEMO construction, B(psi=1) = B_u (the uniform boundary stencil).
+        At psi=1 the wall is at position -1 (uniform spacing), so the cut-cell
+        stencil effectively reduces to a uniform-grid boundary stencil.
+
+        We compare by evaluating the TEMO's own B_u at alpha=0 and verifying
+        the group velocity profiles agree at resolved wavenumbers.
+        """
+        from stencil_gen.group_velocity import _build_profile
+        from stencil_gen.temo import E2_1 as scheme, derive_uniform_boundary_for_temo
+
+        result, psi = e2_1_cut_cell
+        xi = np.linspace(0.01, np.pi, self.N_XI)
+        alpha_vals = {s: 0 for s in result.alpha_symbols}
+
+        cc_profiles = cut_cell_group_velocity(
+            result, psi, psi_val=1.0, alpha_values=alpha_vals, xi_array=xi,
+        )
+
+        # At psi=1, all rows should give well-behaved GV
+        for i, prof in cc_profiles.items():
+            assert np.all(np.isfinite(prof.group_velocity)), (
+                f"Row {i}: non-finite GV at psi=1"
+            )
+            # At low xi, C should be near 1 (consistent scheme)
+            low_xi = xi < 0.3
+            C_low = prof.group_velocity[low_xi]
+            assert abs(C_low[0] - 1.0) < 0.5, (
+                f"Row {i}: C at low xi = {C_low[0]:.4f}, expected ~1"
+            )
+
+        # Get the TEMO uniform boundary B_u and compute its GV.
+        # At psi=1, the wall column coefficient is zero for rows 0..r-1,
+        # so the cut-cell stencil exactly matches the uniform one.
+        ur = derive_uniform_boundary_for_temo(scheme)
+        B_u = ur.B_u
+        u_alpha_vals = {s: 0 for s in ur.alpha_symbols}
+        t = B_u.cols
+        nodes = list(range(t))
+
+        for i in range(B_u.rows):
+            w_uni = [float(B_u[i, j].xreplace(u_alpha_vals))
+                     if hasattr(B_u[i, j], 'xreplace') else float(B_u[i, j])
+                     for j in range(t)]
+            uni_prof = _build_profile(w_uni, i, nodes, xi, order=scheme.q)
+            max_diff = np.max(np.abs(
+                cc_profiles[i].group_velocity - uni_prof.group_velocity
+            ))
+            assert max_diff < 1e-10, (
+                f"Row {i}: psi=1 cut-cell GV should match TEMO uniform "
+                f"exactly (wall coeff=0), diff = {max_diff:.2e}"
+            )
+
+    def test_psi_0_degenerate_bounded(self, e2_1_cut_cell):
+        """At psi=0 (degenerate mesh), group velocity is bounded and finite.
+
+        The degenerate point collocates the wall with grid point 0, so the
+        stencil degenerates gracefully (by TEMO design principle).
+        """
+        result, psi = e2_1_cut_cell
+        xi = np.linspace(0.01, np.pi - 0.01, self.N_XI)
+        alpha_vals = {s: 0 for s in result.alpha_symbols}
+
+        profiles = cut_cell_group_velocity(
+            result, psi, psi_val=0.0, alpha_values=alpha_vals, xi_array=xi,
+        )
+
+        for i, prof in profiles.items():
+            C = prof.group_velocity
+            assert np.all(np.isfinite(C)), (
+                f"Row {i}: non-finite GV at psi=0"
+            )
+            assert np.max(np.abs(C)) < 100, (
+                f"Row {i}: |C| blow-up at psi=0, max={np.max(np.abs(C)):.2e}"
+            )
+
+    def test_e2_1_cut_cell_gv_smooth_in_psi(self, e2_1_cut_cell):
+        """E2_1 group velocity varies smoothly with psi (no discontinuous jumps).
+
+        Compute C(xi) at 11 evenly spaced psi values in [0, 1] and verify
+        that the group velocity profile at resolved wavenumbers changes
+        smoothly between adjacent values (bounded derivative dC/dpsi).
+        """
+        result, psi = e2_1_cut_cell
+        xi = np.linspace(0.01, np.pi / 2, self.N_XI)
+        alpha_vals = {s: 0 for s in result.alpha_symbols}
+
+        psi_values = np.linspace(0.0, 1.0, 11)
+        all_profiles = {}
+        for pv in psi_values:
+            all_profiles[pv] = cut_cell_group_velocity(
+                result, psi, psi_val=float(pv), alpha_values=alpha_vals,
+                xi_array=xi,
+            )
+
+        # For each row, check that adjacent psi values give bounded dC/dpsi
+        R = result.floating.rows
+        for i in range(R):
+            for k in range(len(psi_values) - 1):
+                pv0, pv1 = float(psi_values[k]), float(psi_values[k + 1])
+                C0 = all_profiles[pv0][i].group_velocity
+                C1 = all_profiles[pv1][i].group_velocity
+                dpsi = pv1 - pv0
+                max_deriv = np.max(np.abs(C1 - C0)) / dpsi
+                # dC/dpsi should be finite (no discontinuity).  A smooth
+                # rational function in psi can have large but bounded
+                # derivatives, especially near psi=0 where the stencil
+                # degenerates.  Threshold of 200 catches genuine
+                # discontinuities while allowing smooth variation.
+                assert max_deriv < 200, (
+                    f"Row {i}: dC/dpsi too large between psi={pv0:.2f} and "
+                    f"psi={pv1:.2f}, max|dC/dpsi| = {max_deriv:.1f}"
+                )

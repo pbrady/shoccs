@@ -102,6 +102,69 @@ def group_velocity_exact(
     return np.real(phase @ (w * offsets))
 
 
+def modified_wavenumber_nonuniform(
+    weights,
+    offsets,
+    xi_array: np.ndarray,
+) -> np.ndarray:
+    """Compute modified wavenumber for non-uniformly spaced stencil nodes.
+
+    Generalization of :func:`modified_wavenumber` for real-valued offsets
+    (e.g. cut-cell stencils where the wall position is at a fractional
+    distance from the evaluation point).
+
+    Parameters
+    ----------
+    weights : array-like
+        Stencil coefficients w_j.
+    offsets : array-like of float
+        Normalized distances (x_j - x_i)/h from the evaluation point.
+        May be non-integer for cut-cell grids.
+    xi_array : np.ndarray
+        Wavenumber values xi in [0, pi].
+
+    Returns
+    -------
+    np.ndarray (complex)
+        kappa*(xi) = sum_j w_j exp(i * offset_j * xi)
+    """
+    w = np.asarray(weights, dtype=complex)
+    d = np.asarray(offsets, dtype=float)
+    phase = np.exp(1j * np.outer(xi_array, d))
+    return phase @ w
+
+
+def group_velocity_exact_nonuniform(
+    weights,
+    offsets,
+    xi_array: np.ndarray,
+) -> np.ndarray:
+    """Compute group velocity analytically for non-uniform offsets.
+
+    C(xi) = Re(sum_j w_j * offset_j * exp(i * offset_j * xi))
+
+    Generalization of :func:`group_velocity_exact` for real-valued offsets.
+
+    Parameters
+    ----------
+    weights : array-like
+        Stencil coefficients w_j.
+    offsets : array-like of float
+        Normalized distances (x_j - x_i)/h from the evaluation point.
+    xi_array : np.ndarray
+        Wavenumber values xi in [0, pi].
+
+    Returns
+    -------
+    np.ndarray (real)
+        Group velocity C(xi).
+    """
+    w = np.asarray(weights, dtype=complex)
+    d = np.asarray(offsets, dtype=float)
+    phase = np.exp(1j * np.outer(xi_array, d))
+    return np.real(phase @ (w * d))
+
+
 def phase_velocity(kappa_star: np.ndarray, xi_array: np.ndarray) -> np.ndarray:
     """Compute phase velocity c(xi) = Im(kappa*(xi)) / xi.
 
@@ -200,6 +263,38 @@ def _build_profile(
     # Find cutoff: first xi beyond which C stays non-positive.
     # Scan from high end to handle non-monotonic boundary stencils where
     # C(xi) may dip below zero briefly then recover.
+    last_positive_idx = 0
+    for idx in range(1, len(xi_array)):
+        if C[idx] > 0.0:
+            last_positive_idx = idx
+    if last_positive_idx + 1 < len(xi_array):
+        cutoff = float(xi_array[last_positive_idx + 1])
+    else:
+        cutoff = float(xi_array[-1])
+
+    return GroupVelocityProfile(
+        xi=xi_array,
+        kappa_star=kstar,
+        phase_velocity=c,
+        group_velocity=C,
+        gv_error=gv_err,
+        order=order,
+        cutoff_xi=cutoff,
+    )
+
+
+def _build_profile_nonuniform(
+    weights,
+    offsets,
+    xi_array: np.ndarray,
+    order: int,
+) -> GroupVelocityProfile:
+    """Build a GroupVelocityProfile from stencil weights with non-uniform offsets."""
+    kstar = modified_wavenumber_nonuniform(weights, offsets, xi_array)
+    C = group_velocity_exact_nonuniform(weights, offsets, xi_array)
+    c = phase_velocity(kstar, xi_array)
+    gv_err = group_velocity_error(C)
+
     last_positive_idx = 0
     for idx in range(1, len(xi_array)):
         if C[idx] > 0.0:
@@ -340,6 +435,67 @@ def boundary_group_velocity_classical(
                    if hasattr(c, 'xreplace') else float(c)
                    for c in row.coefficients]
         profiles[i] = _build_profile(w_float, i, nodes, xi_array, order=order)
+
+    return profiles
+
+
+def cut_cell_group_velocity(
+    cut_cell_result,
+    psi_sym,
+    psi_val: float,
+    alpha_values: dict,
+    xi_array: np.ndarray,
+    order: int | None = None,
+) -> dict[int, GroupVelocityProfile]:
+    """Compute group velocity profiles for all rows of a cut-cell stencil.
+
+    Evaluates the symbolic psi-dependent stencil coefficients at a specific
+    ``psi_val`` and ``alpha_values``, then computes group velocity profiles
+    using the non-uniform offsets from the cut-cell grid geometry.
+
+    Parameters
+    ----------
+    cut_cell_result : CutCellResult
+        Precomputed symbolic cut-cell stencil (from ``derive_cut_cell_mathematica``
+        or ``derive_cut_cell_scheme``).
+    psi_sym : Symbol
+        The SymPy symbol for psi used in ``cut_cell_result``.
+    psi_val : float
+        Numeric psi value in [0, 1].
+    alpha_values : dict
+        Mapping from alpha symbols to numeric values.
+    xi_array : np.ndarray
+        Wavenumber values xi in [0, pi].
+    order : int, optional
+        Polynomial accuracy order.  Defaults to the scheme's boundary
+        accuracy ``q`` inferred from the dimensions.
+
+    Returns
+    -------
+    dict[int, GroupVelocityProfile]
+        Keyed by row index (0 to R-1) of the floating stencil.
+    """
+    F = cut_cell_result.floating
+    dims = cut_cell_result.dims
+    R, T = F.rows, F.cols
+
+    if order is None:
+        # dims.r = q + 1 + nextra, but nextra is not recoverable from dims
+        # alone, so this overestimates q when nextra > 0.  Callers with
+        # nextra > 0 should pass order explicitly.
+        order = max(1, dims.r - 1)
+
+    subs = {psi_sym: psi_val, **alpha_values}
+
+    profiles: dict[int, GroupVelocityProfile] = {}
+    for i in range(R):
+        # Evaluate symbolic coefficients numerically
+        w = [float(F[i, j].xreplace(subs)) for j in range(T)]
+
+        # Non-uniform offsets: wall at -(psi_val + i), grid points at j - i
+        offsets = [-(psi_val + i)] + [j - i for j in range(T - 1)]
+
+        profiles[i] = _build_profile_nonuniform(w, offsets, xi_array, order=order)
 
     return profiles
 
