@@ -28,8 +28,9 @@ For the model equation u_t + u_x = 0 semi-discretized as du/dt = -D*u, where D
 approximates d/dx with modified wavenumber kappa*(xi), the dispersion relation is
 omega = Im(kappa*(xi)).  The group velocity is C(xi) = d(omega)/d(xi) = d(Im(kappa*))/d(xi).
 For a perfect scheme, C(xi) = 1 for all xi. The group velocity error is
-(2p-1) times the phase velocity error for a 2p-order scheme (Trefethen 1982,
-Section 2). Parasitic modes near xi = pi/h can have reversed group velocity,
+(2p+1) times the phase velocity error for a 2p-order scheme (corrected from
+Trefethen 1982 Section 2's informal statement; the Taylor expansion gives 2p+1,
+verified numerically in 34.2b). Parasitic modes near xi = pi/h can have reversed group velocity,
 causing energy to propagate in the wrong direction. At boundaries, this
 manifests as spontaneous radiation of energy into the domain (GKS instability,
 Trefethen 1983).
@@ -150,7 +151,7 @@ Trefethen 1983).
 ## Completion Criteria
 
 - `group_velocity.py` module exists with core functions and is importable.
-- Interior group velocity matches analytical expectations (cos(xi) for E2, (2p-1)x error amplification).
+- Interior group velocity matches analytical expectations (cos(xi) for E2, (2p+1)x error amplification).
 - Boundary group velocity is computed for both RBF/tension and classical stencils.
 - GKS-inspired diagnostic connects per-stencil analysis to full-operator modes.
 - All new tests pass: `cd scripts/stencil_gen && uv run pytest tests/test_group_velocity.py -x -q`
