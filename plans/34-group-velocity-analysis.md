@@ -76,10 +76,9 @@ Trefethen 1983).
 
 ### 34.1-followup-2 — Stale sign-convention comments in test file
 
-- [ ] **34.1-fix-c** Fix stale sign-convention comments in `tests/test_group_velocity.py`:
-  - Lines 25-26: `# so C = -d(Im(kappa*))/d(xi)` should use positive sign.
-  - Lines 40-41: `# The plan says C(xi) = -d(Im(kappa*))/d(xi)` should use positive sign.
-  - These are in the `test_exact_scheme_unity_group_velocity` comment block; the assertions are correct but the working-through comments propagate the old wrong sign.
+- [x] **34.1-fix-c** Fix stale sign-convention comments in `tests/test_group_velocity.py`: ✅
+  - Replaced the stream-of-consciousness comment block in `test_exact_scheme_unity_group_velocity` with a concise, correct explanation using the positive sign convention: `C(xi) = d(Im(kappa*))/d(xi)`.
+  - 5 tests passing.
   - File: `scripts/stencil_gen/tests/test_group_velocity.py`
 
 ### 34.2 — Interior Scheme Group Velocity Analysis
@@ -91,17 +90,19 @@ Trefethen 1983).
   - File: `scripts/stencil_gen/stencil_gen/group_velocity.py`
   - Test: `cd scripts/stencil_gen && uv run pytest tests/test_group_velocity.py -x -q -k "TestInterior"`
 
-- [ ] **34.2b** Add `TestInteriorGroupVelocity` test class:
-  - Test `test_e2_group_velocity_is_cos_xi` -- E2 (p=1): C(xi) = cos(xi*h), exact.
-  - Test `test_error_amplification_factor` -- verify group velocity error is (2p-1) times phase velocity error to leading order. For E2 (p=1): factor 1 (trivially, since C = cos(xi) and c = sin(xi)/xi, so C_err/c_err -> 3 at leading order). For E4 (p=2): factor 5. For E6 (p=3): factor 7. Check at small xi (xi < 0.3) where Taylor expansion dominates.
-  - Test `test_cutoff_wavenumber` -- for each scheme E2-E8, verify cutoff_xi (where C = 0) decreases as order increases (higher-order schemes resolve more wavenumbers but have a sharper cutoff).
-  - Test `test_group_velocity_sign_reversal` -- verify C(xi) < 0 for xi > cutoff_xi (parasitic regime where energy propagates backwards).
+- [x] **34.2b** Add `TestInteriorGroupVelocity` test class: ✅
+  - Test `test_e2_group_velocity_is_cos_xi` -- E2 (p=1): C(xi) = cos(xi), exact.
+  - Test `test_error_amplification_factor` -- verify group velocity error is **(2p+1)** times phase velocity error to leading order (corrected from plan's (2p-1); the Taylor expansion of Im(kappa*) = xi - a*xi^(2p+1)+... gives ratio (2p+1)). E2: factor 3, E4: factor 5, E6: factor 7, E8: factor 9.
+  - Test `test_cutoff_wavenumber` -- for each scheme E2-E8, verify cutoff_xi (where C = 0) **increases** with order (corrected from plan's "decreases"; higher-order schemes resolve more wavenumbers before reversal). E2: pi/2, E4: ~1.80, E6: ~1.94, E8: ~2.03.
+  - Test `test_group_velocity_sign_reversal` -- verify C(xi) ≤ 0 for all xi beyond cutoff_xi (parasitic regime where energy propagates backwards).
+  - 9 tests passing (5 core + 4 interior).
   - File: `scripts/stencil_gen/tests/test_group_velocity.py`
   - Test: `cd scripts/stencil_gen && uv run pytest tests/test_group_velocity.py -x -q -k "TestInterior"`
 
-- [ ] **34.2c** Add `test_group_velocity_comparison_table` -- print a formatted table comparing E2/E4/E6/E8 interior schemes:
-  - Columns: scheme, order, cutoff xi/pi, max |C_err| at xi=pi/4, max |C_err| at xi=pi/2, min C (most negative).
-  - This is a diagnostic/documentation test (always passes, prints useful data).
+- [x] **34.2c** Add `test_group_velocity_comparison_table` -- print a formatted table comparing E2/E4/E6/E8 interior schemes: ✅
+  - Columns: scheme, order, cutoff xi/pi, |C_err| at xi=pi/4, |C_err| at xi=pi/2, min C (most negative).
+  - Diagnostic/documentation test (always passes, prints useful data with -s).
+  - 10 tests passing.
   - File: `scripts/stencil_gen/tests/test_group_velocity.py`
   - Test: `cd scripts/stencil_gen && uv run pytest tests/test_group_velocity.py -x -q -k "test_group_velocity_comparison_table" -s`
 
