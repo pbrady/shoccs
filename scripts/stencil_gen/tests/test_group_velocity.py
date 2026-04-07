@@ -5,6 +5,7 @@ import pytest
 
 from stencil_gen.group_velocity import (
     GroupVelocityProfile,
+    boundary_group_velocity,
     group_velocity,
     group_velocity_error,
     group_velocity_exact,
@@ -218,3 +219,58 @@ class TestInteriorGroupVelocity:
                 f"E{2*p:<6} {2*p:>5} {profile.cutoff_xi/np.pi:>12.4f} "
                 f"{err_q:>16.6e} {err_h:>16.6e} {min_C:>8.4f}"
             )
+
+
+class TestBoundaryGroupVelocity:
+    """Boundary closure group velocity analysis (34.3)."""
+
+    N_XI = 1000
+
+    def test_boundary_gv_returns_all_rows(self):
+        """boundary_group_velocity returns a profile for each boundary row."""
+        xi = np.linspace(0, np.pi, self.N_XI)
+        # E2, q=1, nextra=0, tension kernel with small sigma
+        profiles = boundary_group_velocity(
+            p=1, q=1, nextra=0, nu=1, sigma=0.1, kernel="tension", xi_array=xi,
+        )
+        # For E2 nu=1: r = q+1+nextra = 2
+        assert len(profiles) == 2
+        for i in range(2):
+            assert i in profiles
+            assert isinstance(profiles[i], GroupVelocityProfile)
+            assert len(profiles[i].xi) == self.N_XI
+            assert profiles[i].order == 1  # boundary accuracy order = q
+
+    def test_boundary_gv_bounded(self):
+        """For E2/E4 at small sigma, |C(xi)| is bounded (no blow-up)."""
+        xi = np.linspace(0.01, np.pi - 0.01, self.N_XI)
+        configs = [
+            (1, 1, 0, 0.1),  # E2, q=1
+            (2, 3, 0, 0.1),  # E4, q=3
+        ]
+        for p, q, nextra, sigma in configs:
+            profiles = boundary_group_velocity(
+                p=p, q=q, nextra=nextra, nu=1, sigma=sigma,
+                kernel="tension", xi_array=xi,
+            )
+            for i, prof in profiles.items():
+                C = prof.group_velocity
+                assert np.all(np.isfinite(C)), (
+                    f"p={p}, row {i}: non-finite group velocity"
+                )
+                assert np.max(np.abs(C)) < 100, (
+                    f"p={p}, row {i}: |C| blow-up, max={np.max(np.abs(C)):.2e}"
+                )
+
+    def test_boundary_row0_low_xi_near_unity(self):
+        """Boundary row 0 group velocity should approach 1 at low xi (consistent scheme)."""
+        xi = np.linspace(0.01, 0.3, self.N_XI)
+        profiles = boundary_group_velocity(
+            p=2, q=3, nextra=0, nu=1, sigma=0.1, kernel="tension", xi_array=xi,
+        )
+        # Row 0 evaluates derivative at grid point 0 using a one-sided stencil.
+        # At low xi, if the scheme is consistent, C should be near 1.
+        C = profiles[0].group_velocity
+        assert abs(C[0] - 1.0) < 0.5, (
+            f"Boundary row 0 C at xi={xi[0]:.3f} = {C[0]:.4f}, expected ~1"
+        )

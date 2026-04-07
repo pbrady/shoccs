@@ -165,6 +165,40 @@ class GroupVelocityProfile:
     cutoff_xi: float  # xi where C first goes to zero or negative
 
 
+def _build_profile(
+    weights,
+    i_eval: int,
+    node_indices,
+    xi_array: np.ndarray,
+    order: int,
+) -> GroupVelocityProfile:
+    """Build a GroupVelocityProfile from stencil weights."""
+    w = list(weights)
+    nodes = list(node_indices)
+
+    kstar = modified_wavenumber(w, i_eval, nodes, xi_array)
+    C = group_velocity_exact(w, i_eval, nodes, xi_array)
+    c = phase_velocity(kstar, xi_array)
+    gv_err = group_velocity_error(C)
+
+    # Find cutoff: first xi where C <= 0 (skip xi=0)
+    cutoff = float(xi_array[-1])
+    for idx in range(1, len(xi_array)):
+        if C[idx] <= 0.0:
+            cutoff = float(xi_array[idx])
+            break
+
+    return GroupVelocityProfile(
+        xi=xi_array,
+        kappa_star=kstar,
+        phase_velocity=c,
+        group_velocity=C,
+        gv_error=gv_err,
+        order=order,
+        cutoff_xi=cutoff,
+    )
+
+
 def interior_group_velocity(
     p: int,
     nu: int,
@@ -191,24 +225,55 @@ def interior_group_velocity(
     w = [float(c) for c in full_gamma_array(coeffs)]
     nodes = list(range(-p, p + 1))
 
-    kstar = modified_wavenumber(w, 0, nodes, xi_array)
-    C = group_velocity_exact(w, 0, nodes, xi_array)
-    c = phase_velocity(kstar, xi_array)
-    gv_err = group_velocity_error(C)
+    return _build_profile(w, 0, nodes, xi_array, order=2 * p)
 
-    # Find cutoff: first xi where C <= 0 (skip xi=0)
-    cutoff = float(xi_array[-1])  # default: no cutoff found
-    for idx in range(1, len(xi_array)):
-        if C[idx] <= 0.0:
-            cutoff = float(xi_array[idx])
-            break
 
-    return GroupVelocityProfile(
-        xi=xi_array,
-        kappa_star=kstar,
-        phase_velocity=c,
-        group_velocity=C,
-        gv_error=gv_err,
-        order=2 * p,
-        cutoff_xi=cutoff,
-    )
+def boundary_group_velocity(
+    p: int,
+    q: int,
+    nextra: int,
+    nu: int,
+    sigma: float,
+    kernel: str,
+    xi_array: np.ndarray,
+) -> dict[int, GroupVelocityProfile]:
+    """Compute group velocity profiles for all boundary rows.
+
+    Uses RBF/tension boundary weights from :func:`uniform_boundary_weights_rbf`.
+
+    Parameters
+    ----------
+    p : int
+        Interior half-bandwidth.
+    q : int
+        Polynomial degree for boundary RBF augmentation.
+    nextra : int
+        Extra boundary rows/columns.
+    nu : int
+        Derivative order (1 or 2).
+    sigma : float
+        RBF shape / tension parameter.
+    kernel : str
+        RBF kernel type (``"tension"``, ``"gaussian"``, ``"multiquadric"``).
+    xi_array : np.ndarray
+        Wavenumber values xi in [0, pi].
+
+    Returns
+    -------
+    dict[int, GroupVelocityProfile]
+        Keyed by boundary row index (0 to r-1).
+    """
+    from stencil_gen.phs import uniform_boundary_weights_rbf
+    from stencil_gen.temo import compute_dimensions
+
+    dims = compute_dimensions(p, q, 0, nextra, nu)
+    r, t = dims.r, dims.t
+    nodes = list(range(t))
+
+    profiles: dict[int, GroupVelocityProfile] = {}
+    for i in range(r):
+        w = uniform_boundary_weights_rbf(i, t, nu, q, sigma, kernel=kernel)
+        w_float = [float(c) for c in w]
+        profiles[i] = _build_profile(w_float, i, nodes, xi_array, order=q)
+
+    return profiles

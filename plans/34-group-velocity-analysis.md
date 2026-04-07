@@ -109,10 +109,12 @@ Trefethen 1983).
 
 ### 34.3 — Boundary Closure Group Velocity Analysis
 
-- [ ] **34.3a** Add `boundary_group_velocity(p, q, nextra, nu, sigma, kernel, xi_array)` to `group_velocity.py`:
-  - For each boundary row i in [0, r), computes weights via `uniform_boundary_weights_rbf()` (tension kernel) or `uniform_boundary_weights()` (classical).
-  - Computes kappa*(xi) and C(xi) for each row.
-  - Returns `dict[int, GroupVelocityProfile]` keyed by row index.
+- [x] **34.3a** Add `boundary_group_velocity(p, q, nextra, nu, sigma, kernel, xi_array)` to `group_velocity.py`: ✅
+  - For each boundary row i in [0, r), computes weights via `uniform_boundary_weights_rbf()` with given kernel/sigma.
+  - Uses `compute_dimensions()` to get r and t, then `_build_profile()` (refactored shared helper) for each row.
+  - Returns `dict[int, GroupVelocityProfile]` keyed by row index, with `order=q`.
+  - Smoke tests: `test_boundary_gv_returns_all_rows`, `test_boundary_gv_bounded`, `test_boundary_row0_low_xi_near_unity` (3 tests in `TestBoundaryGroupVelocity`).
+  - 13 tests passing (10 existing + 3 new).
   - File: `scripts/stencil_gen/stencil_gen/group_velocity.py`
   - Test: `cd scripts/stencil_gen && uv run pytest tests/test_group_velocity.py -x -q -k "TestBoundary"`
 
