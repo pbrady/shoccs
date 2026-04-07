@@ -144,6 +144,12 @@ Trefethen 1983).
   - File: `scripts/stencil_gen/stencil_gen/group_velocity.py` (lines 184-192)
   - File: `scripts/stencil_gen/tests/test_group_velocity.py`
 
+### 34.3-followup-2 — Review fixes (from Ralph Wiggum review of 3844807)
+
+- [ ] **34.3-fix-b** Fix stale `cutoff_xi` comment in `GroupVelocityProfile` dataclass:
+  - Line 165 of `group_velocity.py` still says `# xi where C first goes to zero or negative`, but the semantics changed in 34.3-fix-a to mean the first xi beyond which C stays permanently non-positive. Update the comment to match.
+  - File: `scripts/stencil_gen/stencil_gen/group_velocity.py` (line 165)
+
 - [ ] **34.3d** Add GKS-inspired diagnostic `gks_group_velocity_check(D, xi_array)`:
   - Given the full N x N differentiation matrix D, compute eigenvalues and eigenvectors.
   - For each eigenmode with Re(lambda) near zero, estimate the local wavenumber content near the boundary (FFT of eigenvector's first few components).
