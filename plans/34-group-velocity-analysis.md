@@ -40,8 +40,8 @@ Trefethen 1983).
 | Section | Plan File | Status | Summary |
 |---------|-----------|--------|---------|
 | 34.1 | (inline below) | **Complete** | Core group velocity module |
-| 34.2 | (inline below) | Partially done (34.2a complete) | Interior scheme analysis |
-| 34.3 | (inline below) | Partially done (34.3a-d complete) | Boundary closure analysis |
+| 34.2 | (inline below) | **Complete** | Interior scheme analysis |
+| 34.3 | (inline below) | **Complete** | Boundary closure analysis |
 | 34.4 | `35-group-velocity-cut-cell.md` | Not started | Cut-cell psi-dependent analysis |
 | 34.5 | `36-group-velocity-2d.md` | Not started | 2D/3D extension and varying coefficients |
 
@@ -165,11 +165,13 @@ Trefethen 1983).
   - File: `scripts/stencil_gen/stencil_gen/group_velocity.py`
   - Test: `cd scripts/stencil_gen && uv run pytest tests/test_group_velocity.py -x -q -k "TestGKS"`
 
-- [ ] **34.3e** Add `TestGKSDiagnostic` test class:
-  - Test `test_stable_scheme_no_outgoing_modes` -- for E2 at optimal sigma (known stable), verify no outgoing boundary modes.
-  - Test `test_known_unstable_extrapolation` -- construct a simple case with extrapolation BC (known GKS-unstable for leapfrog per Trefethen 1983). Verify the diagnostic detects the outgoing mode. (This uses a time-discrete analysis -- we may need a helper for leapfrog dispersion relation. If the semi-discrete framework doesn't capture this, document the limitation and mark as a future extension.)
+- [x] **34.3e** Add `TestGKSDiagnostic` test class: ✅
+  - Test `test_stable_scheme_no_outgoing_modes` -- E2 at sigma=10 (known stable), verify 0 modes total and 0 outgoing boundary modes.
+  - Test `test_known_unstable_extrapolation` -- Semi-discrete framework cannot capture the time-discrete leapfrog+extrapolation instability (Trefethen 1983); documented as future extension. Instead tests E4 PHS (sigma=0), which reliably produces a boundary-localized nearly-neutral eigenmode with parasitic-regime wavenumber (xi > pi/2) and negative group velocity (C ~ -1.7), correctly flagged as outgoing. Mode is slightly damped (Re ~ -0.007), confirming the diagnostic detects suspicious group velocity direction even in stable schemes.
+  - 23 tests passing (21 existing + 2 new).
   - File: `scripts/stencil_gen/tests/test_group_velocity.py`
   - Test: `cd scripts/stencil_gen && uv run pytest tests/test_group_velocity.py -x -q -k "TestGKS"`
+  - **Future extension:** Time-discrete (leapfrog) dispersion relation support for detecting GKS instability from Trefethen 1983.
 
 ---
 

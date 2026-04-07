@@ -4,9 +4,11 @@ import numpy as np
 import pytest
 
 from stencil_gen.group_velocity import (
+    GKSModeInfo,
     GroupVelocityProfile,
     boundary_group_velocity,
     boundary_group_velocity_classical,
+    gks_group_velocity_check,
     group_velocity,
     group_velocity_error,
     group_velocity_exact,
@@ -496,3 +498,93 @@ class TestBoundaryClassical:
                 f"Classical E4 row {i}: C < 0 at resolved xi "
                 f"(min={np.min(C_resolved):.4e}), parasitic sign reversal"
             )
+
+
+class TestGKSDiagnostic:
+    """GKS group velocity diagnostic tests (34.3e).
+
+    Tests for :func:`gks_group_velocity_check`, which bridges per-stencil
+    group velocity analysis with full-operator eigenvalue analysis by
+    identifying boundary-localized, nearly-neutral eigenmodes whose group
+    velocity radiates energy into the domain (GKS instability signature).
+    """
+
+    N_XI = 1000
+
+    def test_stable_scheme_no_outgoing_modes(self):
+        """Stable E2 scheme: no boundary modes radiate energy into the domain.
+
+        E2 with tension kernel (universally stable for all sigma) produces no
+        boundary-localized nearly-neutral eigenmodes at sigma=10, confirming
+        the diagnostic returns clean results for a well-behaved scheme.
+        """
+        from stencil_gen.phs import build_diff_matrix_rbf
+
+        n = 40
+        xi = np.linspace(0, np.pi, self.N_XI)
+        D = build_diff_matrix_rbf(
+            n, p=1, q=1, epsilon=10.0, kernel="tension", nu=1, nextra=0,
+        )
+        modes = gks_group_velocity_check(D, xi)
+
+        outgoing = [m for m in modes if m.is_outgoing]
+        assert len(outgoing) == 0, (
+            f"Stable E2 has {len(outgoing)} outgoing modes: "
+            + "; ".join(
+                f"lam={m.eigenvalue:.4f}, xi={m.boundary_wavenumber:.3f}, "
+                f"C={m.group_velocity:.3f}"
+                for m in outgoing
+            )
+        )
+
+    def test_known_unstable_extrapolation(self):
+        """GKS diagnostic detects parasitic boundary mode in E4 PHS.
+
+        The original plan aimed to test with extrapolation outflow BC (known
+        GKS-unstable for leapfrog, Trefethen 1983).  However, the leapfrog
+        instability is time-discrete: the fully-discrete dispersion relation
+        differs from the semi-discrete one, and the semi-discrete eigenvalue
+        framework used here cannot capture that effect.  A time-discrete
+        extension using the leapfrog dispersion relation is future work.
+
+        Instead, we test with E4 PHS (sigma=0), which reliably produces a
+        boundary-localized, nearly-neutral eigenmode whose dominant wavenumber
+        is in the parasitic regime (xi near pi).  The interior group velocity
+        at that wavenumber is strongly negative (C ~ -1.7), meaning energy
+        flows from the right boundary into the domain.  The mode is slightly
+        damped (Re ~ -0.007), so it doesn't cause exponential growth, but the
+        diagnostic correctly flags the suspicious group velocity direction.
+        """
+        from stencil_gen.phs import build_diff_matrix_rbf
+
+        n = 40
+        xi = np.linspace(0, np.pi, self.N_XI)
+        D = build_diff_matrix_rbf(
+            n, p=2, q=3, epsilon=0.0, kernel="tension", nu=1, nextra=0,
+        )
+        modes = gks_group_velocity_check(D, xi)
+
+        # E4 PHS produces at least one outgoing boundary mode
+        outgoing = [m for m in modes if m.is_outgoing]
+        assert len(outgoing) >= 1, (
+            f"Expected at least 1 outgoing mode for E4 PHS, got {len(modes)} "
+            f"total modes with 0 outgoing"
+        )
+
+        # The outgoing mode should be in the parasitic regime (high xi)
+        # where interior group velocity is negative
+        mode = outgoing[0]
+        assert isinstance(mode, GKSModeInfo)
+        assert mode.boundary_wavenumber > np.pi / 2, (
+            f"Outgoing mode wavenumber {mode.boundary_wavenumber:.3f} should be "
+            f"in parasitic regime (> pi/2)"
+        )
+        assert mode.group_velocity < 0, (
+            f"Outgoing mode group velocity {mode.group_velocity:.3f} should be "
+            f"negative (energy flowing into domain from right boundary)"
+        )
+        # Mode is nearly-neutral (slightly damped, not growing)
+        assert mode.eigenvalue.real < 0, (
+            f"Mode Re(lambda) = {mode.eigenvalue.real:.6e} should be negative "
+            f"(damped, not growing)"
+        )
