@@ -2,9 +2,9 @@
 
 Provides tools for computing modified wavenumber, phase velocity, and group
 velocity from stencil coefficients.  For the model equation u_t + u_x = 0
-with semi-discrete spatial operator, the modified wavenumber kappa*(xi)
-relates to the dispersion relation via omega = -kappa*(xi).  The group
-velocity is C(xi) = d(omega)/d(xi) = -d(kappa*)/d(xi).
+semi-discretized as du/dt = -D*u, the modified wavenumber kappa*(xi) of D
+gives the dispersion relation omega = Im(kappa*(xi)).  The group velocity
+is C(xi) = d(omega)/d(xi) = d(Im(kappa*))/d(xi).
 
 References:
   Trefethen, "Group velocity in finite difference schemes", 1982.
@@ -47,7 +47,7 @@ def modified_wavenumber(
 
 
 def group_velocity(kappa_star: np.ndarray, xi_array: np.ndarray) -> np.ndarray:
-    """Compute group velocity C(xi) = -d(Im(kappa*))/d(xi) numerically.
+    """Compute group velocity C(xi) = d(Im(kappa*))/d(xi) numerically.
 
     Uses numpy.gradient for the numerical differentiation.
 
@@ -98,7 +98,7 @@ def group_velocity_exact(
     offsets = np.asarray(node_indices) - i_eval
     phase = np.exp(1j * np.outer(xi_array, offsets))
     # d(kappa*)/d(xi) = sum_j w_j * i*(j-i_eval) * exp(i*(j-i_eval)*xi)
-    # C = -d(Im(kappa*))/d(xi) = Re(sum_j w_j * (j-i_eval) * exp(...))
+    # C = d(Im(kappa*))/d(xi) = Re(sum_j w_j * (j-i_eval) * exp(...))
     return np.real(phase @ (w * offsets))
 
 

@@ -4,9 +4,11 @@ import numpy as np
 import pytest
 
 from stencil_gen.group_velocity import (
+    GroupVelocityProfile,
     group_velocity,
     group_velocity_error,
     group_velocity_exact,
+    interior_group_velocity,
     modified_wavenumber,
     phase_velocity,
 )
@@ -130,3 +132,18 @@ class TestCoreGroupVelocity:
         # kappa* = i*sin(xi), so Im(kappa*) = sin(xi)
         assert np.allclose(np.imag(kstar), np.sin(xi), atol=1e-14)
         assert np.allclose(np.real(kstar), 0.0, atol=1e-14)
+
+    def test_interior_group_velocity_e2(self):
+        """Smoke test for interior_group_velocity(): E2 (p=1) returns correct profile."""
+        xi = np.linspace(0, np.pi, self.N_XI)
+        profile = interior_group_velocity(p=1, nu=1, xi_array=xi)
+
+        # Correct type and order
+        assert isinstance(profile, GroupVelocityProfile)
+        assert profile.order == 2
+
+        # E2 group velocity is cos(xi)
+        assert np.allclose(profile.group_velocity, np.cos(xi), atol=1e-14)
+
+        # Cutoff where C first goes to zero: cos(xi)=0 at xi=pi/2
+        assert abs(profile.cutoff_xi - np.pi / 2) < 2 * np.pi / self.N_XI

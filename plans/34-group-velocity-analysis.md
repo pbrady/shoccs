@@ -38,7 +38,7 @@ Trefethen 1983).
 
 | Section | Plan File | Status | Summary |
 |---------|-----------|--------|---------|
-| 34.1 | (inline below) | **Review fixes pending** | Core group velocity module |
+| 34.1 | (inline below) | **Complete** | Core group velocity module |
 | 34.2 | (inline below) | Partially done (34.2a complete) | Interior scheme analysis |
 | 34.3 | (inline below) | Not started | Boundary closure analysis |
 | 34.4 | `35-group-velocity-cut-cell.md` | Not started | Cut-cell psi-dependent analysis |
@@ -62,14 +62,16 @@ Trefethen 1983).
 
 ### 34.1-followup — Review fixes (from Ralph Wiggum review of 4993b58)
 
-- [ ] **34.1-fix-a** Fix docstring sign errors in `group_velocity.py`:
-  - The module docstring (line 6-7) says `omega = -kappa*(xi)` and `C = -d(kappa*)/d(xi)`. The correct relation (as noted in 34.1a sign convention fix) is `omega = Im(kappa*)` and `C = +d(Im(kappa*))/d(xi)`.
-  - The `group_velocity()` function docstring (line 50) says `C(xi) = -d(Im(kappa*))/d(xi)` but the implementation correctly computes `+d(Im(kappa*))/d(xi)`. Update the docstring to match the code.
-  - These wrong-sign docstrings risk propagating the error into boundary/cut-cell work (34.3, 34.4).
+- [x] **34.1-fix-a** Fix docstring sign errors in `group_velocity.py`: ✅
+  - Fixed module docstring: `omega = Im(kappa*(xi))`, `C = d(Im(kappa*))/d(xi)`.
+  - Fixed `group_velocity()` docstring: positive sign.
+  - Fixed `group_velocity_exact()` inline comment: positive sign.
   - File: `scripts/stencil_gen/stencil_gen/group_velocity.py`
 
-- [ ] **34.1-fix-b** Add a smoke test for `interior_group_velocity()`:
-  - The function was implemented in 34.1a but is never imported or tested in `test_group_velocity.py`. Add a test in `TestCoreGroupVelocity` that calls `interior_group_velocity(p=1, nu=1, xi_array)` and verifies: (1) returned `GroupVelocityProfile` has correct `order=2`, (2) `group_velocity` field equals `cos(xi)` for E2, (3) `cutoff_xi` is approximately `pi/2`.
+- [x] **34.1-fix-b** Add a smoke test for `interior_group_velocity()`: ✅
+  - Added `test_interior_group_velocity_e2` in `TestCoreGroupVelocity`.
+  - Verifies: `GroupVelocityProfile` type, `order=2`, `group_velocity == cos(xi)`, `cutoff_xi ≈ pi/2`.
+  - 5 tests passing.
   - File: `scripts/stencil_gen/tests/test_group_velocity.py`
 
 ### 34.2 — Interior Scheme Group Velocity Analysis
