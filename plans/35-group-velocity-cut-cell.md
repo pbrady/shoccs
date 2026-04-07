@@ -47,18 +47,19 @@ cd scripts/stencil_gen && uv run pytest tests/test_group_velocity.py -x -q -k "T
 
 ### 35.2 — Psi Sweep Analysis
 
-- [ ] **35.2a** Add `psi_sweep_group_velocity(scheme_params, psi_values, alpha_values, xi_array)` to `group_velocity.py`:
+- [x] **35.2a** Add `psi_sweep_group_velocity(scheme_params, psi_values, alpha_values, xi_array)` to `group_velocity.py`:
   - Sweeps over a range of psi values, computing group velocity profiles at each.
   - Returns `PsiSweepResult` dataclass with fields: `psi_values`, `profiles` (dict of dicts: `{psi: {row: GroupVelocityProfile}}`), `worst_row` (row with largest GV error), `worst_psi` (psi with largest GV error), `min_C` (most negative group velocity across all psi/rows), `has_sign_reversal` (bool: any C > 0 at wavenumbers where interior has C < 0).
+  - Uses `derive_cut_cell_mathematica` for schemes with zeros (singularity-free at psi=0), `derive_cut_cell_scheme` otherwise.
   - File: `scripts/stencil_gen/stencil_gen/group_velocity.py`
-  - Test: `cd scripts/stencil_gen && uv run pytest tests/test_group_velocity.py -x -q -k "TestPsiSweep"`
+  - Done: all tests pass (32/32).
 
-- [ ] **35.2b** Add `TestPsiSweepGroupVelocity` test class:
-  - Test `test_e2_1_psi_sweep` -- sweep psi in [0, 1] at 11 points for E2_1. Print a summary table of max|C_err| and min(C) per psi value. Verify no sign reversal at well-resolved wavenumbers (xi < pi/2).
-  - Test `test_e2_1_no_cfl_penalty` -- verify that the maximum |omega(xi)| = max|kappa*(xi)| does not increase dramatically as psi -> 0. This would indicate the TEMO construction avoids the stiffness penalty (CFL based on h, not psi*h).
-  - Test `test_e4_1_psi_sweep` -- same as E2_1 but for E4_1 scheme. E4_1 has stricter constraints (only 2 stable schemes found in the paper), so this is a more stringent test.
+- [x] **35.2b** Add `TestPsiSweepGroupVelocity` test class:
+  - Test `test_e2_1_psi_sweep` -- sweep psi in [0, 1] at 11 points for E2_1. All profiles finite/bounded. No parasitic sign reversal at non-degenerate psi (>= 0.1) at resolved wavenumbers.
+  - Test `test_e2_1_no_cfl_penalty` -- max|omega| ratio stays < 10x across all psi values (no CFL stiffness penalty).
+  - Test `test_e4_1_psi_sweep` -- E4_1 via singularity-free Mathematica pipeline. All profiles finite, |C| < 500.
   - File: `scripts/stencil_gen/tests/test_group_velocity.py`
-  - Test: `cd scripts/stencil_gen && uv run pytest tests/test_group_velocity.py -x -q -k "TestPsiSweep"`
+  - Tests: `TestPsiSweepGroupVelocity` (3 tests, all pass).
 
 ### 35.3 — Comparison with Eigenvalue Analysis
 

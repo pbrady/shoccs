@@ -500,6 +500,133 @@ def cut_cell_group_velocity(
     return profiles
 
 
+@dataclass
+class PsiSweepResult:
+    """Results from sweeping psi across the cut-cell parameter range.
+
+    Attributes
+    ----------
+    psi_values : np.ndarray
+        Array of psi values swept.
+    profiles : dict[float, dict[int, GroupVelocityProfile]]
+        Nested dict: ``{psi_val: {row_index: GroupVelocityProfile}}``.
+    worst_row : int
+        Row index with the largest group velocity error across all psi values.
+    worst_psi : float
+        Psi value with the largest group velocity error.
+    min_C : float
+        Most negative group velocity across all psi values and rows.
+    has_sign_reversal : bool
+        True if any boundary row has C > 0 at wavenumbers where the interior
+        stencil has C < 0 (parasitic energy reversal).
+    """
+
+    psi_values: np.ndarray
+    profiles: dict[float, dict[int, GroupVelocityProfile]]
+    worst_row: int
+    worst_psi: float
+    min_C: float
+    has_sign_reversal: bool
+
+
+def psi_sweep_group_velocity(
+    scheme_params,
+    psi_values: np.ndarray,
+    alpha_values: dict,
+    xi_array: np.ndarray,
+    order: int | None = None,
+) -> PsiSweepResult:
+    """Sweep psi across the cut-cell parameter range, computing group velocity.
+
+    Derives the symbolic cut-cell stencil once from ``scheme_params``, then
+    evaluates group velocity profiles at each psi value.  Also computes the
+    interior group velocity to detect sign reversals.
+
+    Parameters
+    ----------
+    scheme_params : SchemeParams
+        Scheme parameters (p, q, s, nextra, nu).
+    psi_values : np.ndarray
+        Array of psi values in [0, 1] to sweep.
+    alpha_values : dict
+        Mapping from alpha symbols to numeric values.
+    xi_array : np.ndarray
+        Wavenumber values xi in [0, pi].
+    order : int, optional
+        Polynomial accuracy order passed to :func:`cut_cell_group_velocity`.
+
+    Returns
+    -------
+    PsiSweepResult
+    """
+    from sympy import Symbol
+
+    from stencil_gen.temo import derive_cut_cell_mathematica, derive_cut_cell_scheme
+
+    psi_sym = Symbol("psi")
+    # Use singularity-free Mathematica workflow for schemes with zeros;
+    # otherwise use the standard pipeline.
+    if scheme_params.zeros:
+        cc_result = derive_cut_cell_mathematica(scheme_params, psi_sym)
+    else:
+        cc_result = derive_cut_cell_scheme(scheme_params, psi_sym)
+
+    # Map caller's alpha_values (which may use their own symbols) to the
+    # result's alpha_symbols.  If the caller passes an empty dict or uses
+    # symbols that already match, this is a no-op.
+    if not alpha_values:
+        alpha_values = {s: 0 for s in cc_result.alpha_symbols}
+
+    # Compute interior group velocity for sign reversal detection
+    interior = interior_group_velocity(
+        p=scheme_params.p, nu=scheme_params.nu, xi_array=xi_array,
+    )
+    C_int = interior.group_velocity
+
+    profiles: dict[float, dict[int, GroupVelocityProfile]] = {}
+    worst_row = 0
+    worst_psi = float(psi_values[0])
+    worst_err = 0.0
+    global_min_C = float("inf")
+    has_sign_reversal = False
+
+    for pv in psi_values:
+        pv_f = float(pv)
+        profs = cut_cell_group_velocity(
+            cc_result, psi_sym, pv_f, alpha_values, xi_array, order=order,
+        )
+        profiles[pv_f] = profs
+
+        for row_idx, prof in profs.items():
+            C = prof.group_velocity
+
+            # Track worst group velocity error
+            max_err = float(np.max(np.abs(prof.gv_error)))
+            if max_err > worst_err:
+                worst_err = max_err
+                worst_row = row_idx
+                worst_psi = pv_f
+
+            # Track most negative C
+            row_min = float(np.min(C))
+            if row_min < global_min_C:
+                global_min_C = row_min
+
+            # Detect sign reversal: boundary C > 0 where interior C < 0
+            reversal_mask = (C > 0) & (C_int < 0)
+            if np.any(reversal_mask):
+                has_sign_reversal = True
+
+    return PsiSweepResult(
+        psi_values=np.asarray(psi_values),
+        profiles=profiles,
+        worst_row=worst_row,
+        worst_psi=worst_psi,
+        min_C=global_min_C,
+        has_sign_reversal=has_sign_reversal,
+    )
+
+
 def gks_group_velocity_check(
     D: np.ndarray,
     xi_array: np.ndarray,

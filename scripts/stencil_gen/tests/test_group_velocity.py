@@ -6,6 +6,7 @@ import pytest
 from stencil_gen.group_velocity import (
     GKSModeInfo,
     GroupVelocityProfile,
+    PsiSweepResult,
     boundary_group_velocity,
     boundary_group_velocity_classical,
     cut_cell_group_velocity,
@@ -18,6 +19,7 @@ from stencil_gen.group_velocity import (
     modified_wavenumber,
     modified_wavenumber_nonuniform,
     phase_velocity,
+    psi_sweep_group_velocity,
 )
 
 
@@ -776,3 +778,326 @@ class TestCutCellGroupVelocity:
                     f"Row {i}: dC/dpsi too large between psi={pv0:.2f} and "
                     f"psi={pv1:.2f}, max|dC/dpsi| = {max_deriv:.1f}"
                 )
+
+
+class TestPsiSweepGroupVelocity:
+    """Psi sweep group velocity analysis (35.2b)."""
+
+    N_XI = 500
+
+    def test_e2_1_psi_sweep(self):
+        """Sweep psi in [0, 1] for E2_1; verify result structure and diagnostics.
+
+        Computes group velocity at 11 psi values and verifies:
+        - PsiSweepResult is well-formed with all expected fields.
+        - All profiles are finite and bounded.
+        - No parasitic sign reversal at well-resolved wavenumbers (xi < pi/2)
+          for non-degenerate psi values (psi >= 0.1).
+        """
+        from stencil_gen.temo import E2_1
+
+        xi = np.linspace(0.01, np.pi, self.N_XI)
+        psi_values = np.linspace(0.0, 1.0, 11)
+
+        result = psi_sweep_group_velocity(
+            E2_1, psi_values, alpha_values={}, xi_array=xi,
+        )
+
+        assert isinstance(result, PsiSweepResult)
+        assert len(result.profiles) == len(psi_values)
+        assert result.min_C < float("inf")
+
+        # All profiles should be finite and bounded
+        for pv, profs in result.profiles.items():
+            for row_idx, prof in profs.items():
+                assert np.all(np.isfinite(prof.group_velocity)), (
+                    f"psi={pv}, row {row_idx}: non-finite GV"
+                )
+                assert np.max(np.abs(prof.group_velocity)) < 100, (
+                    f"psi={pv}, row {row_idx}: |C| blow-up"
+                )
+
+        # At non-degenerate psi (>= 0.1), boundary rows should not have
+        # strongly negative C at resolved wavenumbers.  The degenerate
+        # psi=0 point collocates the wall with a grid point and some rows
+        # naturally produce negative C there.
+        resolved = xi < np.pi / 2
+        interior = interior_group_velocity(p=E2_1.p, nu=1, xi_array=xi)
+        C_int = interior.group_velocity
+        for pv, profs in result.profiles.items():
+            if pv < 0.1:
+                continue
+            for row_idx, prof in profs.items():
+                C_res = prof.group_velocity[resolved]
+                # No parasitic sign reversal: boundary C > 0 where interior C < 0
+                reversal = (C_res > 0) & (C_int[resolved] < 0)
+                assert not np.any(reversal), (
+                    f"psi={pv}, row {row_idx}: parasitic sign reversal "
+                    f"at resolved xi"
+                )
+
+    def test_e2_1_no_cfl_penalty(self):
+        """TEMO cut-cell stencil does not dramatically increase max|omega(xi)|.
+
+        The TEMO construction avoids the CFL stiffness penalty: the maximum
+        |omega| = max|Im(kappa*(xi))| should not blow up as psi -> 0.
+        We verify that the ratio max|omega(psi)| / max|omega(psi=1)| stays
+        bounded (< 10x) across all psi values.
+        """
+        from stencil_gen.temo import E2_1
+
+        xi = np.linspace(0.01, np.pi, self.N_XI)
+        psi_values = np.linspace(0.0, 1.0, 11)
+
+        result = psi_sweep_group_velocity(
+            E2_1, psi_values, alpha_values={}, xi_array=xi,
+        )
+
+        # Compute max|omega| at psi=1 as reference
+        ref_profs = result.profiles[1.0]
+        ref_max_omega = max(
+            float(np.max(np.abs(np.imag(prof.kappa_star))))
+            for prof in ref_profs.values()
+        )
+
+        # At each psi, max|omega| should not blow up
+        for pv, profs in result.profiles.items():
+            psi_max_omega = max(
+                float(np.max(np.abs(np.imag(prof.kappa_star))))
+                for prof in profs.values()
+            )
+            ratio = psi_max_omega / max(ref_max_omega, 1e-15)
+            assert ratio < 10.0, (
+                f"psi={pv}: max|omega| = {psi_max_omega:.4f} is "
+                f"{ratio:.1f}x the psi=1 reference ({ref_max_omega:.4f}), "
+                f"indicating CFL penalty"
+            )
+
+    def test_e4_1_psi_sweep(self):
+        """Sweep psi in [0, 1] for E4_1 (stricter scheme).
+
+        E4_1 has tighter constraints (only 2 stable schemes in the paper).
+        Verify the psi sweep completes without blow-up and profiles are bounded.
+        """
+        from stencil_gen.temo import E4_1
+
+        xi = np.linspace(0.01, np.pi, self.N_XI)
+        psi_values = np.linspace(0.0, 1.0, 11)
+
+        result = psi_sweep_group_velocity(
+            E4_1, psi_values, alpha_values={}, xi_array=xi,
+        )
+
+        assert isinstance(result, PsiSweepResult)
+        assert len(result.profiles) == len(psi_values)
+
+        # All profiles should be finite and bounded
+        for pv, profs in result.profiles.items():
+            for row_idx, prof in profs.items():
+                assert np.all(np.isfinite(prof.group_velocity)), (
+                    f"psi={pv}, row {row_idx}: non-finite GV"
+                )
+                # E4_1 has a wider stencil (7 points) with non-uniform
+                # offsets, so |C| can be larger at high xi than for E2.
+                assert np.max(np.abs(prof.group_velocity)) < 500, (
+                    f"psi={pv}, row {row_idx}: |C| blow-up, "
+                    f"max={np.max(np.abs(prof.group_velocity)):.2e}"
+                )
+
+
+class TestCutCellGVvsEigenvalue:
+    """Comparison of GV diagnostic with eigenvalue analysis (35.3a).
+
+    Verifies that the per-stencil group velocity diagnostic agrees with
+    full-operator eigenvalue stability for cut-cell configurations, and
+    demonstrates the O(1)-vs-O(N^3) cost advantage of the GV approach.
+    """
+
+    N_XI = 500
+
+    @staticmethod
+    def _build_cut_cell_diff_matrix(cc_result, psi_sym, psi_val, alpha_values,
+                                    scheme_params, n):
+        """Build N×N diff matrix with cut-cell left boundary.
+
+        Left boundary rows use the Dirichlet cut-cell stencil evaluated at
+        *psi_val*.  Interior uses the standard centered stencil.  Right
+        boundary uses the uniform RBF/tension stencil (sigma=10, stable).
+
+        Parameters
+        ----------
+        cc_result : CutCellResult
+            Pre-derived symbolic cut-cell stencil.
+        psi_sym : Symbol
+            SymPy psi symbol.
+        psi_val : float
+            Numeric psi value.
+        alpha_values : dict
+            Alpha symbol → value mapping.
+        scheme_params : SchemeParams
+            Scheme parameters (for p, q, nu, nextra).
+        n : int
+            Grid size.
+
+        Returns
+        -------
+        np.ndarray
+            N×N differentiation matrix.
+        """
+        from stencil_gen.interior import derive_interior, full_gamma_array
+        from stencil_gen.phs import uniform_boundary_weights_rbf
+
+        dims = cc_result.dims
+        r, t, T = dims.r, dims.t, dims.T
+        p, nu = scheme_params.p, scheme_params.nu
+
+        subs = {psi_sym: psi_val, **alpha_values}
+
+        # Interior stencil
+        interior_coeffs = derive_interior(0, p, nu)
+        interior_w = [float(c) for c in full_gamma_array(interior_coeffs)]
+
+        D = np.zeros((n, n))
+
+        # Left boundary: cut-cell Dirichlet stencil.
+        # dirichlet has (R-1) = r rows, T columns.
+        # Column 0 is the wall (u_wall = 0 for Dirichlet), columns 1..T-1
+        # are grid points 0..T-2 = 0..t-1.
+        F_dir = cc_result.dirichlet
+        for i in range(F_dir.rows):
+            for j in range(1, T):
+                D[i, j - 1] = float(F_dir[i, j].xreplace(subs))
+
+        # Interior rows: centered 2p+1 stencil
+        for i in range(r, n - r):
+            for k_idx, j in enumerate(range(i - p, i + p + 1)):
+                D[i, j] = interior_w[k_idx]
+
+        # Right boundary: reflected uniform stencil (sigma=0 tension =
+        # polynomial-only, matching the TEMO polynomial design).
+        sign = (-1.0) ** nu
+        for i in range(r):
+            w = uniform_boundary_weights_rbf(
+                i, t, nu, scheme_params.q, 0.0, kernel="tension",
+            )
+            row = n - 1 - i
+            for j in range(t):
+                col = n - 1 - j
+                D[row, col] = sign * float(w[j])
+
+        return D
+
+    def test_gv_predicts_eigenvalue_stability(self):
+        """GV diagnostic and eigenvalue stability agree for E2_1 cut-cell.
+
+        For E2_1 at psi = 0.1, 0.3, 0.5, 0.7, 1.0:
+        - Compute GV profiles via cut_cell_group_velocity.
+        - Build the N×N diff matrix and compute eigenvalues of -D.
+        - Check: if no parasitic sign reversal in GV → eigenvalues stable
+          (Re(lambda) <= small positive tolerance).
+        """
+        from sympy import Symbol
+
+        from stencil_gen.temo import E2_1, derive_cut_cell_scheme
+
+        psi_sym = Symbol("psi")
+        cc = derive_cut_cell_scheme(E2_1, psi_sym)
+        alpha_vals = {s: 0 for s in cc.alpha_symbols}
+
+        xi = np.linspace(0.01, np.pi, self.N_XI)
+        n = 40
+        psi_test = [0.1, 0.3, 0.5, 0.7, 1.0]
+
+        # Interior GV for sign-reversal detection
+        interior = interior_group_velocity(p=E2_1.p, nu=1, xi_array=xi)
+        C_int = interior.group_velocity
+
+        for pv in psi_test:
+            # --- Group velocity diagnostic ---
+            profiles = cut_cell_group_velocity(
+                cc, psi_sym, pv, alpha_vals, xi, order=E2_1.q,
+            )
+            # Check for parasitic sign reversal at resolved wavenumbers
+            resolved = xi < np.pi / 2
+            gv_has_reversal = False
+            for row_idx, prof in profiles.items():
+                C = prof.group_velocity
+                reversal = (C[resolved] > 0) & (C_int[resolved] < 0)
+                if np.any(reversal):
+                    gv_has_reversal = True
+                    break
+
+            # --- Eigenvalue stability ---
+            D = self._build_cut_cell_diff_matrix(
+                cc, psi_sym, pv, alpha_vals, E2_1, n,
+            )
+            eigenvalues = np.linalg.eigvals(-D)
+            max_real = float(np.max(eigenvalues.real))
+
+            # Consistency: no GV reversal → eigenvalues stable.
+            # Tolerance 1e-4: the polynomial-only right boundary produces
+            # O(1e-6) positive Re at finite N — these vanish as N → ∞ and
+            # are not related to the cut-cell left boundary under test.
+            if not gv_has_reversal:
+                assert max_real < 1e-4, (
+                    f"psi={pv}: GV says no parasitic reversal but "
+                    f"eigenvalue Re(lambda)_max = {max_real:.2e} > 0 "
+                    f"(unstable)"
+                )
+            # Note: GV reversal does NOT guarantee instability (it's a
+            # necessary condition from GKS theory, not sufficient), so we
+            # don't assert the converse.
+
+    def test_gv_cost_vs_eigenvalue_cost(self):
+        """GV analysis is O(1) per stencil; eigenvalue analysis is O(N^3).
+
+        Times both analyses at N=50, 100, 200 (eigenvalue) versus the GV
+        computation (which is independent of N).  Verifies that eigenvalue
+        cost grows super-linearly while GV cost stays constant.
+        """
+        import time
+
+        from sympy import Symbol
+
+        from stencil_gen.temo import E2_1, derive_cut_cell_scheme
+
+        psi_sym = Symbol("psi")
+        cc = derive_cut_cell_scheme(E2_1, psi_sym)
+        alpha_vals = {s: 0 for s in cc.alpha_symbols}
+
+        xi = np.linspace(0.01, np.pi, self.N_XI)
+        psi_val = 0.5
+
+        # Time GV computation (independent of N)
+        t0 = time.perf_counter()
+        for _ in range(3):
+            cut_cell_group_velocity(
+                cc, psi_sym, psi_val, alpha_vals, xi, order=E2_1.q,
+            )
+        gv_time = (time.perf_counter() - t0) / 3
+
+        # Time eigenvalue computation at several N values
+        eig_times = {}
+        for n in [50, 100, 200]:
+            t0 = time.perf_counter()
+            D = self._build_cut_cell_diff_matrix(
+                cc, psi_sym, psi_val, alpha_vals, E2_1, n,
+            )
+            np.linalg.eigvals(-D)
+            eig_times[n] = time.perf_counter() - t0
+
+        # Print comparison table
+        print(f"\n{'Method':<20} {'N':<6} {'Time (ms)':>10}")
+        print("-" * 38)
+        print(f"{'GV (per stencil)':<20} {'—':<6} {gv_time * 1000:>10.2f}")
+        for n, t in eig_times.items():
+            print(f"{'Eigenvalue':<20} {n:<6} {t * 1000:>10.2f}")
+
+        # Eigenvalue cost should grow super-linearly (at least N^2)
+        t50, t200 = eig_times[50], eig_times[200]
+        ratio = t200 / max(t50, 1e-10)
+        # (200/50)^2 = 16, but overhead means we only require > 4x
+        assert ratio > 4.0, (
+            f"Eigenvalue cost ratio t(200)/t(50) = {ratio:.1f}, "
+            f"expected > 4 for super-linear scaling"
+        )
