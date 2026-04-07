@@ -165,6 +165,22 @@ class GroupVelocityProfile:
     cutoff_xi: float  # first xi beyond which C stays permanently non-positive
 
 
+@dataclass
+class GKSModeInfo:
+    """Diagnostic information for a boundary-localized eigenmode.
+
+    Bridges per-stencil group velocity analysis with full-operator eigenvalue
+    analysis by identifying nearly-neutral eigenmodes concentrated near a
+    boundary and checking whether the interior stencil's group velocity at
+    the mode's dominant wavenumber directs energy into the domain.
+    """
+
+    eigenvalue: complex  # eigenvalue of -D_bc
+    boundary_wavenumber: float  # dominant xi from FFT of boundary eigenvector portion
+    group_velocity: float  # interior C(xi) at boundary_wavenumber
+    is_outgoing: bool  # True if mode radiates energy from boundary into domain
+
+
 def _build_profile(
     weights,
     i_eval: int,
@@ -326,3 +342,118 @@ def boundary_group_velocity_classical(
         profiles[i] = _build_profile(w_float, i, nodes, xi_array, order=order)
 
     return profiles
+
+
+def gks_group_velocity_check(
+    D: np.ndarray,
+    xi_array: np.ndarray,
+    neutral_tol: float = 0.1,
+    localization_tol: float = 0.3,
+) -> list[GKSModeInfo]:
+    """Identify boundary modes whose group velocity indicates GKS-type instability.
+
+    For the advection equation u_t + u_x = 0 semi-discretized as du/dt = -Du,
+    computes eigenvalues and eigenvectors of -D_bc (D with inflow row/column
+    removed).  Identifies boundary-localized, nearly-neutral eigenmodes and
+    checks whether the interior stencil's group velocity at each mode's dominant
+    wavenumber directs energy from the boundary into the domain — the hallmark
+    of GKS instability (Trefethen 1983).
+
+    Parameters
+    ----------
+    D : np.ndarray
+        Full N×N differentiation matrix (approximating d/dx).
+    xi_array : np.ndarray
+        Wavenumber array in [0, pi] for group velocity evaluation.
+    neutral_tol : float
+        Fraction of max|Re(lambda)| below which an eigenvalue is considered
+        nearly-neutral.  Default 0.1.
+    localization_tol : float
+        Minimum fraction of eigenvector energy in the boundary region
+        required to classify a mode as boundary-localized.  Default 0.3.
+
+    Returns
+    -------
+    list[GKSModeInfo]
+        One entry per boundary-localized, nearly-neutral eigenmode.
+    """
+    n = D.shape[0]
+    D_bc = D[1:, 1:]  # remove inflow row/column (Dirichlet at x=0)
+    m = D_bc.shape[0]
+
+    eigenvalues, eigenvectors = np.linalg.eig(-D_bc)
+
+    # Nearly-neutral threshold
+    max_abs_real = np.max(np.abs(eigenvalues.real))
+    threshold = max(neutral_tol * max_abs_real, 1e-10)
+
+    # Interior group velocity profile from D's middle row
+    mid = n // 2
+    row = D[mid, :]
+    cols = np.nonzero(np.abs(row) > 1e-15)[0]
+    C_profile = group_velocity_exact(row[cols], mid, cols, xi_array)
+
+    # Boundary region width: ~1/4 of domain, at least 4 points
+    bw = max(4, m // 4)
+
+    results: list[GKSModeInfo] = []
+    for idx in range(len(eigenvalues)):
+        lam = eigenvalues[idx]
+
+        # Skip conjugate duplicates: keep the positive-imaginary member
+        if lam.imag < -1e-10:
+            continue
+
+        if abs(lam.real) > threshold:
+            continue
+
+        v = eigenvectors[:, idx]
+        energy = np.abs(v) ** 2
+        total = np.sum(energy)
+        if total < 1e-30:
+            continue
+
+        # Check boundary localization
+        left_frac = np.sum(energy[:bw]) / total
+        right_frac = np.sum(energy[-bw:]) / total
+
+        if max(left_frac, right_frac) < localization_tol:
+            continue  # interior mode, not boundary-localized
+
+        # Use the side where more energy is concentrated
+        if left_frac >= right_frac:
+            portion = v[:bw]
+            side = "left"
+        else:
+            portion = v[-bw:]
+            side = "right"
+
+        # Estimate dominant wavenumber via zero-padded FFT
+        pad_len = max(256, 4 * len(portion))
+        spec = np.abs(np.fft.fft(portion, n=pad_len))
+        nyq = pad_len // 2
+        # Skip DC (k=0); search bins 1..nyq for the peak
+        peak = int(np.argmax(spec[1 : nyq + 1])) + 1
+        dom_xi = float(peak * 2 * np.pi / pad_len)
+
+        # Interpolate interior group velocity at the dominant wavenumber
+        C_val = float(np.interp(dom_xi, xi_array, C_profile))
+
+        # Outgoing = energy radiating from boundary into domain interior.
+        # Left boundary: rightward (C > 0) enters the domain.
+        # Right boundary: leftward (C < 0) enters the domain.
+        if side == "left":
+            is_out = C_val > 0
+        else:
+            is_out = C_val < 0
+
+        results.append(
+            GKSModeInfo(
+                eigenvalue=lam,
+                boundary_wavenumber=dom_xi,
+                group_velocity=C_val,
+                is_outgoing=is_out,
+            )
+        )
+
+    return results

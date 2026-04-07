@@ -41,7 +41,7 @@ Trefethen 1983).
 |---------|-----------|--------|---------|
 | 34.1 | (inline below) | **Complete** | Core group velocity module |
 | 34.2 | (inline below) | Partially done (34.2a complete) | Interior scheme analysis |
-| 34.3 | (inline below) | Not started | Boundary closure analysis |
+| 34.3 | (inline below) | Partially done (34.3a-d complete) | Boundary closure analysis |
 | 34.4 | `35-group-velocity-cut-cell.md` | Not started | Cut-cell psi-dependent analysis |
 | 34.5 | `36-group-velocity-2d.md` | Not started | 2D/3D extension and varying coefficients |
 
@@ -151,12 +151,17 @@ Trefethen 1983).
   - 21 tests passing.
   - File: `scripts/stencil_gen/stencil_gen/group_velocity.py` (line 165)
 
-- [ ] **34.3d** Add GKS-inspired diagnostic `gks_group_velocity_check(D, xi_array)`:
-  - Given the full N x N differentiation matrix D, compute eigenvalues and eigenvectors.
-  - For each eigenmode with Re(lambda) near zero, estimate the local wavenumber content near the boundary (FFT of eigenvector's first few components).
-  - Check: does this mode's dominant wavenumber have positive group velocity (outgoing)?
-  - Returns a list of `GKSModeInfo(eigenvalue, boundary_wavenumber, group_velocity, is_outgoing)`.
-  - This bridges per-stencil group velocity analysis with the full-operator eigenvalue analysis.
+- [x] **34.3d** Add GKS-inspired diagnostic `gks_group_velocity_check(D, xi_array)`: ✅
+  - Added `GKSModeInfo` dataclass with fields: `eigenvalue`, `boundary_wavenumber`, `group_velocity`, `is_outgoing`.
+  - Added `gks_group_velocity_check(D, xi_array, neutral_tol, localization_tol)`:
+    - Computes eigenvalues/eigenvectors of -D_bc (D with inflow row/column removed).
+    - Filters to nearly-neutral modes (|Re(lambda)| < neutral_tol * max|Re|).
+    - Identifies boundary-localized modes (eigenvector energy fraction > localization_tol in boundary region).
+    - Estimates dominant wavenumber via zero-padded FFT of boundary portion of eigenvector.
+    - Computes interior group velocity at that wavenumber; `is_outgoing = True` if energy radiates from boundary into domain (C > 0 for left boundary, C < 0 for right boundary).
+    - Skips conjugate duplicate eigenvalues.
+  - Smoke-tested: E2 at sigma=10 finds 1 non-outgoing boundary mode; E4 and PHS find 0 modes (all stable, no energy radiation into domain).
+  - 21 existing tests still pass.
   - File: `scripts/stencil_gen/stencil_gen/group_velocity.py`
   - Test: `cd scripts/stencil_gen && uv run pytest tests/test_group_velocity.py -x -q -k "TestGKS"`
 
