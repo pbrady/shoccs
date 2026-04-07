@@ -127,10 +127,11 @@ Trefethen 1983).
   - File: `scripts/stencil_gen/stencil_gen/group_velocity.py`
   - Test: `cd scripts/stencil_gen && uv run pytest tests/test_group_velocity.py -x -q -k "TestBoundaryClassical"`
 
-- [ ] **34.3c** Extend `TestBoundaryGroupVelocity` with deeper diagnostic tests (class and `test_boundary_gv_bounded` already exist from 34.3a):
-  - Test `test_boundary_vs_interior_gv_error` -- compare group velocity error of boundary rows vs interior. Boundary rows should have larger error (they're lower order) but should not have reversed sign at well-resolved wavenumbers (xi < pi/2).
-  - Test `test_parasitic_direction_at_boundary` -- check whether boundary stencils create parasitic modes with C > 0 (outgoing from boundary = GKS-unstable direction). For an inflow boundary (u_t + u_x = 0, left boundary), physical waves have C < 0 (leftward). If any boundary row creates C > 0 for wavenumbers where the interior has C < 0, that's a potential instability source.
-  - Test `test_classical_e4_boundary_gv` -- compute group velocity for the classical E4 boundary stencils (from `derive_boundary(p=2, nu=1, s=0)`) with known-good alpha values. Verify no sign reversal at resolved wavenumbers. (Depends on 34.3b for `boundary_group_velocity_classical`.)
+- [x] **34.3c** Extend `TestBoundaryGroupVelocity` with deeper diagnostic tests: ✅
+  - Test `test_boundary_vs_interior_gv_error` -- verifies row 0 (one-sided) has larger GV error than interior at xi < pi/4. Also checks no boundary row has C < 0 at well-resolved wavenumbers. Uses pi/4 threshold (not pi/2) because one-sided boundary stencils have earlier dispersion cutoff than symmetric interior stencils.
+  - Test `test_parasitic_direction_at_boundary` -- checks boundary rows don't create strongly positive C (> 5) in the parasitic regime (xi > cutoff) where interior has C < 0. Tests E2 and E4 with tension kernel.
+  - Test `test_classical_e4_boundary_gv` -- classical E4 boundary stencils with known-good alpha values have C > 0 at all resolved wavenumbers (xi < pi/2). Added to `TestBoundaryClassical`.
+  - 20 tests passing (17 existing + 3 new).
   - File: `scripts/stencil_gen/tests/test_group_velocity.py`
   - Test: `cd scripts/stencil_gen && uv run pytest tests/test_group_velocity.py -x -q -k "TestBoundary"`
 

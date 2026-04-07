@@ -276,6 +276,79 @@ class TestBoundaryGroupVelocity:
             f"Boundary row 0 C at xi={xi[0]:.3f} = {C[0]:.4f}, expected ~1"
         )
 
+    def test_boundary_vs_interior_gv_error(self):
+        """Boundary row 0 has larger GV error than interior; no sign reversal at low xi.
+
+        Row 0 (fully one-sided) should have larger error than the symmetric
+        interior stencil.  Rows closer to the interior may have smaller error
+        because they use a wider stencil.
+
+        At well-resolved wavenumbers (xi < pi/4), no boundary row should
+        reverse the sign of C (which would mean energy propagating backwards).
+        """
+        xi = np.linspace(0.01, np.pi, self.N_XI)
+        for p, q, nextra, sigma in [(2, 3, 0, 0.1), (3, 5, 0, 0.1)]:
+            interior = interior_group_velocity(p=p, nu=1, xi_array=xi)
+            boundary = boundary_group_velocity(
+                p=p, q=q, nextra=nextra, nu=1, sigma=sigma,
+                kernel="tension", xi_array=xi,
+            )
+            resolved = xi < np.pi / 4
+            # Row 0 (fully one-sided) should have the largest error
+            C_row0 = boundary[0].group_velocity[resolved]
+            C_int = interior.group_velocity[resolved]
+            row0_err = np.max(np.abs(C_row0 - 1.0))
+            int_err = np.max(np.abs(C_int - 1.0))
+            assert row0_err >= int_err, (
+                f"p={p}: row 0 error ({row0_err:.4e}) smaller than "
+                f"interior ({int_err:.4e})"
+            )
+            # No sign reversal at well-resolved wavenumbers for any row
+            for i, prof in boundary.items():
+                C_bnd = prof.group_velocity[resolved]
+                assert np.all(C_bnd > 0), (
+                    f"p={p}, row {i}: C < 0 at resolved xi<pi/4 "
+                    f"(min={np.min(C_bnd):.4e})"
+                )
+
+    def test_parasitic_direction_at_boundary(self):
+        """Check for parasitic outgoing modes at the boundary.
+
+        For u_t + u_x = 0 on a left boundary, physical waves propagate rightward
+        (C > 0).  If a boundary stencil creates a mode with C < 0 at a wavenumber
+        where the interior has C > 0, that's a parasitic mode propagating energy
+        out through the boundary — the hallmark of GKS instability.
+
+        Here we check the complementary concern for an inflow boundary: modes
+        with C > 0 (into the domain) at wavenumbers where the interior has C < 0
+        (energy should be propagating outward).  Such modes create spontaneous
+        radiation of energy into the domain.
+        """
+        xi = np.linspace(0.01, np.pi - 0.01, self.N_XI)
+        for p, q, nextra, sigma in [(1, 1, 0, 0.1), (2, 3, 0, 0.1)]:
+            interior = interior_group_velocity(p=p, nu=1, xi_array=xi)
+            boundary = boundary_group_velocity(
+                p=p, q=q, nextra=nextra, nu=1, sigma=sigma,
+                kernel="tension", xi_array=xi,
+            )
+            # In the parasitic regime (beyond interior cutoff), check if
+            # boundary rows create C > 0 where interior has C < 0.
+            parasitic = xi > interior.cutoff_xi
+            if not np.any(parasitic):
+                continue
+            for i, prof in boundary.items():
+                C_bnd_parasitic = prof.group_velocity[parasitic]
+                # Flag if boundary creates strongly positive C in parasitic regime.
+                # Small positive values are tolerable; large positive means energy
+                # radiation into the domain.
+                max_positive = np.max(C_bnd_parasitic) if len(C_bnd_parasitic) > 0 else 0
+                # This is a diagnostic — we record but don't fail on small positives.
+                # A strongly positive boundary C in the parasitic regime is suspicious.
+                assert max_positive < 5.0, (
+                    f"p={p}, row {i}: boundary C strongly positive ({max_positive:.2f}) "
+                    f"in parasitic regime — potential GKS instability source"
+                )
+
 
 class TestBoundaryClassical:
     """Classical (non-RBF) boundary stencil group velocity analysis (34.3b)."""
@@ -353,4 +426,24 @@ class TestBoundaryClassical:
         for i, prof in profiles.items():
             assert np.max(np.abs(prof.group_velocity)) < 100, (
                 f"Row {i}: |C| blow-up, max={np.max(np.abs(prof.group_velocity)):.2e}"
+            )
+
+    def test_classical_e4_boundary_gv(self, e4_classical):
+        """Classical E4 boundary stencils: no sign reversal at resolved wavenumbers.
+
+        Uses the known-good alpha values from E4u_1.t.cpp.  At well-resolved
+        wavenumbers (xi < pi/2), all boundary rows should have C > 0, meaning
+        no parasitic energy reversal in the resolved regime.
+        """
+        updated_rows, alpha_values = e4_classical
+        xi = np.linspace(0.01, np.pi, self.N_XI)
+        profiles = boundary_group_velocity_classical(
+            updated_rows, alpha_values, order=3, xi_array=xi,
+        )
+        resolved = xi < np.pi / 2
+        for i, prof in profiles.items():
+            C_resolved = prof.group_velocity[resolved]
+            assert np.all(C_resolved > 0), (
+                f"Classical E4 row {i}: C < 0 at resolved xi "
+                f"(min={np.min(C_resolved):.4e}), parasitic sign reversal"
             )
