@@ -277,3 +277,47 @@ def boundary_group_velocity(
         profiles[i] = _build_profile(w_float, i, nodes, xi_array, order=q)
 
     return profiles
+
+
+def boundary_group_velocity_classical(
+    boundary_rows,
+    alpha_values: dict,
+    order: int,
+    xi_array: np.ndarray,
+) -> dict[int, GroupVelocityProfile]:
+    """Compute group velocity profiles for classical (non-RBF) boundary rows.
+
+    Takes the symbolic ``BoundaryRow`` list from :func:`derive_boundary` (or the
+    conservation-updated rows from :func:`solve_conservation`) and substitutes
+    concrete alpha values to obtain numerical stencil coefficients.
+
+    Parameters
+    ----------
+    boundary_rows : list[BoundaryRow]
+        Boundary rows with symbolic coefficients in alpha parameters.
+    alpha_values : dict
+        Mapping from alpha symbols to numeric values (e.g.,
+        ``{alpha_0: -0.77, alpha_1: 0.16}``).
+    order : int
+        Polynomial accuracy order of the boundary scheme (q = 2*(p+s) - 1
+        for the classical Brady & Livescu stencils).
+    xi_array : np.ndarray
+        Wavenumber values xi in [0, pi].
+
+    Returns
+    -------
+    dict[int, GroupVelocityProfile]
+        Keyed by boundary row index.
+    """
+    t = len(boundary_rows[0].coefficients)
+    nodes = list(range(t))
+
+    profiles: dict[int, GroupVelocityProfile] = {}
+    for row in boundary_rows:
+        i = row.row_index
+        w_float = [float(c.xreplace(alpha_values))
+                   if hasattr(c, 'xreplace') else float(c)
+                   for c in row.coefficients]
+        profiles[i] = _build_profile(w_float, i, nodes, xi_array, order=order)
+
+    return profiles

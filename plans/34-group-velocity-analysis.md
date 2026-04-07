@@ -118,10 +118,12 @@ Trefethen 1983).
   - File: `scripts/stencil_gen/stencil_gen/group_velocity.py`
   - Test: `cd scripts/stencil_gen && uv run pytest tests/test_group_velocity.py -x -q -k "TestBoundary"`
 
-- [ ] **34.3b** Add `boundary_group_velocity_classical(boundary_rows, xi_array)` to `group_velocity.py`:
-  - Takes the symbolic `BoundaryRow` list from `derive_boundary()` and alpha values.
-  - Evaluates stencil coefficients numerically at given alpha, then computes C(xi).
-  - This works with the classical (non-RBF) boundary stencils from Brady & Livescu.
+- [x] **34.3b** Add `boundary_group_velocity_classical(boundary_rows, alpha_values, order, xi_array)` to `group_velocity.py`: ✅
+  - Takes the symbolic `BoundaryRow` list from `derive_boundary()` (or conservation-updated rows) and alpha values dict.
+  - Evaluates stencil coefficients numerically via `xreplace(alpha_values)`, then computes C(xi).
+  - Works with the classical (non-RBF) boundary stencils from Brady & Livescu.
+  - Tests: `test_classical_returns_all_rows`, `test_classical_coefficients_finite`, `test_classical_row0_low_xi`, `test_classical_bounded` (4 tests in `TestBoundaryClassical`).
+  - 17 tests passing (13 existing + 4 new).
   - File: `scripts/stencil_gen/stencil_gen/group_velocity.py`
   - Test: `cd scripts/stencil_gen && uv run pytest tests/test_group_velocity.py -x -q -k "TestBoundaryClassical"`
 

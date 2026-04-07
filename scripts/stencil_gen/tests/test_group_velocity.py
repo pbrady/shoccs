@@ -6,6 +6,7 @@ import pytest
 from stencil_gen.group_velocity import (
     GroupVelocityProfile,
     boundary_group_velocity,
+    boundary_group_velocity_classical,
     group_velocity,
     group_velocity_error,
     group_velocity_exact,
@@ -274,3 +275,82 @@ class TestBoundaryGroupVelocity:
         assert abs(C[0] - 1.0) < 0.5, (
             f"Boundary row 0 C at xi={xi[0]:.3f} = {C[0]:.4f}, expected ~1"
         )
+
+
+class TestBoundaryClassical:
+    """Classical (non-RBF) boundary stencil group velocity analysis (34.3b)."""
+
+    N_XI = 1000
+
+    @pytest.fixture(scope="class")
+    def e4_classical(self):
+        """Derive E4 boundary rows with conservation and known-good alpha values."""
+        from sympy import symbols
+
+        from stencil_gen.boundary import derive_boundary
+        from stencil_gen.conservation import build_conservation_system, solve_conservation
+
+        result = derive_boundary(p=2, nu=1, s=0)
+        equations, w_syms, last_free = build_conservation_system(
+            result.r, result.t, 2, result.rows, result.interior_coeffs,
+        )
+        _, updated_rows = solve_conservation(
+            equations, w_syms, last_free, result.all_free_params, result.rows,
+        )
+        # Known-good alpha values from E4u_1.t.cpp (same as test_boundary.py)
+        a0, a1 = symbols("alpha_0 alpha_1")
+        alpha_values = {a0: -0.7733323791884821, a1: 0.1623961700641681}
+        return updated_rows, alpha_values
+
+    def test_classical_returns_all_rows(self, e4_classical):
+        """boundary_group_velocity_classical returns a profile for each boundary row."""
+        updated_rows, alpha_values = e4_classical
+        xi = np.linspace(0, np.pi, self.N_XI)
+        profiles = boundary_group_velocity_classical(
+            updated_rows, alpha_values, order=3, xi_array=xi,
+        )
+        # E4 (p=2): r = 3 boundary rows
+        assert len(profiles) == 3
+        for i in range(3):
+            assert i in profiles
+            assert isinstance(profiles[i], GroupVelocityProfile)
+            assert profiles[i].order == 3
+
+    def test_classical_coefficients_finite(self, e4_classical):
+        """All evaluated coefficients are finite (no unresolved symbols)."""
+        updated_rows, alpha_values = e4_classical
+        xi = np.linspace(0.01, np.pi - 0.01, self.N_XI)
+        profiles = boundary_group_velocity_classical(
+            updated_rows, alpha_values, order=3, xi_array=xi,
+        )
+        for i, prof in profiles.items():
+            assert np.all(np.isfinite(prof.group_velocity)), (
+                f"Row {i}: non-finite group velocity"
+            )
+            assert np.all(np.isfinite(prof.kappa_star)), (
+                f"Row {i}: non-finite modified wavenumber"
+            )
+
+    def test_classical_row0_low_xi(self, e4_classical):
+        """Classical E4 row 0 group velocity near unity at low xi."""
+        updated_rows, alpha_values = e4_classical
+        xi = np.linspace(0.01, 0.3, self.N_XI)
+        profiles = boundary_group_velocity_classical(
+            updated_rows, alpha_values, order=3, xi_array=xi,
+        )
+        C = profiles[0].group_velocity
+        assert abs(C[0] - 1.0) < 0.5, (
+            f"Classical E4 row 0 C at xi={xi[0]:.3f} = {C[0]:.4f}, expected ~1"
+        )
+
+    def test_classical_bounded(self, e4_classical):
+        """Group velocity is bounded (no blow-up) for all boundary rows."""
+        updated_rows, alpha_values = e4_classical
+        xi = np.linspace(0.01, np.pi - 0.01, self.N_XI)
+        profiles = boundary_group_velocity_classical(
+            updated_rows, alpha_values, order=3, xi_array=xi,
+        )
+        for i, prof in profiles.items():
+            assert np.max(np.abs(prof.group_velocity)) < 100, (
+                f"Row {i}: |C| blow-up, max={np.max(np.abs(prof.group_velocity)):.2e}"
+            )
