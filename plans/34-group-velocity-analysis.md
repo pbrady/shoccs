@@ -137,11 +137,11 @@ Trefethen 1983).
 
 ### 34.3-followup — Review fixes (from Ralph Wiggum review of 256a730)
 
-- [ ] **34.3-fix-a** Fix `_build_profile` cutoff detection for non-monotonic boundary C(xi):
-  - The current loop `for idx ...: if C[idx] <= 0: cutoff = xi[idx]; break` finds the *first* zero-crossing, which is correct for monotonic interior stencils but wrong for boundary stencils where C(xi) can oscillate (dip below zero briefly, then recover positive values).
-  - Fix: define `cutoff_xi` as the first xi after which C stays non-positive (e.g., find the first index where C <= 0 and all subsequent values are also <= 0, or use a small-window criterion). Alternatively, scan from the high end: find the last xi where C > 0 and set cutoff to that.
-  - Add a test with a boundary stencil known to have oscillating C, verifying cutoff_xi reflects the persistent crossing, not a transient dip.
-  - File: `scripts/stencil_gen/stencil_gen/group_velocity.py` (lines 184-189)
+- [x] **34.3-fix-a** Fix `_build_profile` cutoff detection for non-monotonic boundary C(xi): ✅
+  - Changed cutoff logic to scan from the high end: finds the last xi where C > 0, then sets cutoff to the next grid point. This gives the first xi beyond which C stays permanently non-positive.
+  - Added `test_cutoff_handles_oscillating_c` in `TestBoundaryGroupVelocity`: synthetic one-sided stencil with oscillating C(xi), verifies cutoff is at the persistent crossing (not the transient dip), and C <= 0 beyond cutoff.
+  - 21 tests passing (20 existing + 1 new).
+  - File: `scripts/stencil_gen/stencil_gen/group_velocity.py` (lines 184-192)
   - File: `scripts/stencil_gen/tests/test_group_velocity.py`
 
 - [ ] **34.3d** Add GKS-inspired diagnostic `gks_group_velocity_check(D, xi_array)`:

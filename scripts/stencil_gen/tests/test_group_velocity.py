@@ -276,6 +276,55 @@ class TestBoundaryGroupVelocity:
             f"Boundary row 0 C at xi={xi[0]:.3f} = {C[0]:.4f}, expected ~1"
         )
 
+    def test_cutoff_handles_oscillating_c(self):
+        """cutoff_xi reflects persistent (not transient) sign reversal.
+
+        Boundary stencils can have C(xi) that dips below zero briefly
+        then recovers positive.  The cutoff should mark where C goes
+        *permanently* non-positive, not the first transient dip.
+        """
+        from stencil_gen.group_velocity import _build_profile
+
+        # Synthetic one-sided stencil (i_eval=0, nodes=[0..4]) whose
+        # group velocity oscillates: C = 3cos(xi) - 6cos(2xi) + 6cos(3xi) - 2cos(4xi).
+        # C(0) = 1, dips negative near xi~0.7, recovers strongly positive
+        # around xi~pi/2, then goes permanently negative near xi~2.7.
+        weights = [0.0, 3.0, -3.0, 2.0, -0.5]
+        nodes = [0, 1, 2, 3, 4]
+        xi = np.linspace(0, np.pi, 2000)
+
+        profile = _build_profile(weights, 0, nodes, xi, order=1)
+        C = profile.group_velocity
+
+        # Verify oscillation: C has a transient dip below zero AND
+        # later recovery to positive values before the final descent.
+        first_neg = None
+        for idx in range(1, len(xi)):
+            if C[idx] <= 0.0:
+                first_neg = float(xi[idx])
+                break
+        recovery = False
+        if first_neg is not None:
+            for idx in range(1, len(xi)):
+                if xi[idx] > first_neg and C[idx] > 0.0:
+                    recovery = True
+                    break
+        assert first_neg is not None, "expected a transient negative dip"
+        assert recovery, "expected C to recover positive after first dip"
+
+        # Cutoff must be beyond the transient dip (at the persistent crossing)
+        assert profile.cutoff_xi > first_neg + 0.5, (
+            f"cutoff_xi={profile.cutoff_xi:.3f} is too close to first "
+            f"transient dip at xi={first_neg:.3f}"
+        )
+
+        # Beyond cutoff, C stays non-positive
+        beyond = xi > profile.cutoff_xi
+        if np.any(beyond):
+            assert np.all(C[beyond] <= 0.0), (
+                f"C has positive values beyond cutoff_xi={profile.cutoff_xi:.3f}"
+            )
+
     def test_boundary_vs_interior_gv_error(self):
         """Boundary row 0 has larger GV error than interior; no sign reversal at low xi.
 

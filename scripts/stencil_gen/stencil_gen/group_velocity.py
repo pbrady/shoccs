@@ -181,12 +181,17 @@ def _build_profile(
     c = phase_velocity(kstar, xi_array)
     gv_err = group_velocity_error(C)
 
-    # Find cutoff: first xi where C <= 0 (skip xi=0)
-    cutoff = float(xi_array[-1])
+    # Find cutoff: first xi beyond which C stays non-positive.
+    # Scan from high end to handle non-monotonic boundary stencils where
+    # C(xi) may dip below zero briefly then recover.
+    last_positive_idx = 0
     for idx in range(1, len(xi_array)):
-        if C[idx] <= 0.0:
-            cutoff = float(xi_array[idx])
-            break
+        if C[idx] > 0.0:
+            last_positive_idx = idx
+    if last_positive_idx + 1 < len(xi_array):
+        cutoff = float(xi_array[last_positive_idx + 1])
+    else:
+        cutoff = float(xi_array[-1])
 
     return GroupVelocityProfile(
         xi=xi_array,
