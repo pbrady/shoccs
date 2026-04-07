@@ -162,7 +162,7 @@ class GroupVelocityProfile:
     group_velocity: np.ndarray
     gv_error: np.ndarray
     order: int
-    cutoff_xi: float  # xi where C first goes to zero or negative
+    cutoff_xi: float  # first xi beyond which C stays permanently non-positive
 
 
 def _build_profile(

@@ -146,8 +146,9 @@ Trefethen 1983).
 
 ### 34.3-followup-2 — Review fixes (from Ralph Wiggum review of 3844807)
 
-- [ ] **34.3-fix-b** Fix stale `cutoff_xi` comment in `GroupVelocityProfile` dataclass:
-  - Line 165 of `group_velocity.py` still says `# xi where C first goes to zero or negative`, but the semantics changed in 34.3-fix-a to mean the first xi beyond which C stays permanently non-positive. Update the comment to match.
+- [x] **34.3-fix-b** Fix stale `cutoff_xi` comment in `GroupVelocityProfile` dataclass: ✅
+  - Updated comment on line 165 of `group_velocity.py` from "xi where C first goes to zero or negative" to "first xi beyond which C stays permanently non-positive", matching the semantics from 34.3-fix-a.
+  - 21 tests passing.
   - File: `scripts/stencil_gen/stencil_gen/group_velocity.py` (line 165)
 
 - [ ] **34.3d** Add GKS-inspired diagnostic `gks_group_velocity_check(D, xi_array)`:
