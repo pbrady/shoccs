@@ -38,8 +38,8 @@ Trefethen 1983).
 
 | Section | Plan File | Status | Summary |
 |---------|-----------|--------|---------|
-| 34.1 | (inline below) | **In progress** | Core group velocity module |
-| 34.2 | (inline below) | Not started | Interior scheme analysis |
+| 34.1 | (inline below) | **Review fixes pending** | Core group velocity module |
+| 34.2 | (inline below) | Partially done (34.2a complete) | Interior scheme analysis |
 | 34.3 | (inline below) | Not started | Boundary closure analysis |
 | 34.4 | `35-group-velocity-cut-cell.md` | Not started | Cut-cell psi-dependent analysis |
 | 34.5 | `36-group-velocity-2d.md` | Not started | 2D/3D extension and varying coefficients |
@@ -60,9 +60,21 @@ Trefethen 1983).
   - File: `scripts/stencil_gen/tests/test_group_velocity.py`
   - Test: `cd scripts/stencil_gen && uv run pytest tests/test_group_velocity.py -x -q -k "TestCore"`
 
+### 34.1-followup — Review fixes (from Ralph Wiggum review of 4993b58)
+
+- [ ] **34.1-fix-a** Fix docstring sign errors in `group_velocity.py`:
+  - The module docstring (line 6-7) says `omega = -kappa*(xi)` and `C = -d(kappa*)/d(xi)`. The correct relation (as noted in 34.1a sign convention fix) is `omega = Im(kappa*)` and `C = +d(Im(kappa*))/d(xi)`.
+  - The `group_velocity()` function docstring (line 50) says `C(xi) = -d(Im(kappa*))/d(xi)` but the implementation correctly computes `+d(Im(kappa*))/d(xi)`. Update the docstring to match the code.
+  - These wrong-sign docstrings risk propagating the error into boundary/cut-cell work (34.3, 34.4).
+  - File: `scripts/stencil_gen/stencil_gen/group_velocity.py`
+
+- [ ] **34.1-fix-b** Add a smoke test for `interior_group_velocity()`:
+  - The function was implemented in 34.1a but is never imported or tested in `test_group_velocity.py`. Add a test in `TestCoreGroupVelocity` that calls `interior_group_velocity(p=1, nu=1, xi_array)` and verifies: (1) returned `GroupVelocityProfile` has correct `order=2`, (2) `group_velocity` field equals `cos(xi)` for E2, (3) `cutoff_xi` is approximately `pi/2`.
+  - File: `scripts/stencil_gen/tests/test_group_velocity.py`
+
 ### 34.2 — Interior Scheme Group Velocity Analysis
 
-- [ ] **34.2a** Add `interior_group_velocity(p, nu, xi_array)` to `group_velocity.py`:
+- [x] **34.2a** ~~Add~~ `interior_group_velocity(p, nu, xi_array)` — already implemented in 34.1a. ✅
   - Calls `derive_interior(0, p, nu)` and `full_gamma_array()` to get weights.
   - Computes kappa*(xi) and C(xi) using the exact analytical formula.
   - Returns a dataclass `GroupVelocityProfile` with fields: `xi`, `kappa_star`, `phase_velocity`, `group_velocity`, `gv_error`, `order`, `cutoff_xi` (where C first goes to zero or negative).
