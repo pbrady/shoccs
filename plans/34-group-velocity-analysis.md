@@ -135,6 +135,15 @@ Trefethen 1983).
   - File: `scripts/stencil_gen/tests/test_group_velocity.py`
   - Test: `cd scripts/stencil_gen && uv run pytest tests/test_group_velocity.py -x -q -k "TestBoundary"`
 
+### 34.3-followup — Review fixes (from Ralph Wiggum review of 256a730)
+
+- [ ] **34.3-fix-a** Fix `_build_profile` cutoff detection for non-monotonic boundary C(xi):
+  - The current loop `for idx ...: if C[idx] <= 0: cutoff = xi[idx]; break` finds the *first* zero-crossing, which is correct for monotonic interior stencils but wrong for boundary stencils where C(xi) can oscillate (dip below zero briefly, then recover positive values).
+  - Fix: define `cutoff_xi` as the first xi after which C stays non-positive (e.g., find the first index where C <= 0 and all subsequent values are also <= 0, or use a small-window criterion). Alternatively, scan from the high end: find the last xi where C > 0 and set cutoff to that.
+  - Add a test with a boundary stencil known to have oscillating C, verifying cutoff_xi reflects the persistent crossing, not a transient dip.
+  - File: `scripts/stencil_gen/stencil_gen/group_velocity.py` (lines 184-189)
+  - File: `scripts/stencil_gen/tests/test_group_velocity.py`
+
 - [ ] **34.3d** Add GKS-inspired diagnostic `gks_group_velocity_check(D, xi_array)`:
   - Given the full N x N differentiation matrix D, compute eigenvalues and eigenvectors.
   - For each eigenmode with Re(lambda) near zero, estimate the local wavenumber content near the boundary (FFT of eigenvector's first few components).
