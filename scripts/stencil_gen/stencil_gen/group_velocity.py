@@ -237,6 +237,26 @@ class GroupVelocity2DResult:
 
 
 @dataclass
+class AnisotropyResult:
+    """Anisotropy profile for a given interior scheme at fixed wavenumber magnitude.
+
+    For a wave propagating at angle theta (advection velocity (cos(theta),
+    sin(theta))) with wavenumber magnitude xi_mag, reports the numerical
+    group velocity vector and its deviation from the exact result.
+
+    The exact group velocity is (cos(theta), sin(theta)) with speed 1.
+    """
+
+    theta: np.ndarray  # propagation angle array
+    C_x: np.ndarray  # group velocity x-component
+    C_y: np.ndarray  # group velocity y-component
+    speed: np.ndarray  # group speed |C|
+    speed_ratio: np.ndarray  # |C| / |C_exact| where |C_exact| = 1
+    angle: np.ndarray  # group propagation angle atan2(C_y, C_x)
+    angle_error: np.ndarray  # angle deviation from propagation direction theta
+
+
+@dataclass
 class GroupVelocityProfile:
     """Group velocity analysis results for a single stencil row."""
 
@@ -323,6 +343,75 @@ def group_velocity_2d(
         C_x=C_x,
         C_y=C_y,
         speed=speed,
+        angle=angle,
+        angle_error=angle_error,
+    )
+
+
+def anisotropy_profile(
+    p: int,
+    nu: int,
+    theta_array: np.ndarray,
+    xi_mag: float,
+) -> AnisotropyResult:
+    """Compute group speed and angle error vs propagation angle for an interior scheme.
+
+    For the advection equation ``u_t + cos(theta)*u_x + sin(theta)*u_y = 0``
+    discretized with tensor-product stencils of half-bandwidth *p* and
+    derivative order *nu*, this function evaluates the numerical group velocity
+    at wavenumber magnitude *xi_mag* for each propagation angle in
+    *theta_array*.
+
+    The exact group velocity is ``(cos(theta), sin(theta))`` with unit speed.
+    The numerical group velocity deviates due to grid anisotropy — e.g., for
+    E2, Trefethen (1982) shows that diagonal propagation (theta = pi/4) has
+    higher group speed than axis-aligned propagation (theta = 0).
+
+    Parameters
+    ----------
+    p : int
+        Interior half-bandwidth (E2 → p=1, E4 → p=2, E6 → p=3, E8 → p=4).
+    nu : int
+        Derivative order (typically 1 for advection).
+    theta_array : np.ndarray
+        Wave propagation angles in radians.
+    xi_mag : float
+        Wavenumber magnitude |xi| in [0, pi].
+
+    Returns
+    -------
+    AnisotropyResult
+    """
+    from stencil_gen.interior import derive_interior, full_gamma_array
+
+    # Interior stencil weights
+    coeffs = derive_interior(0, p, nu)
+    w = [float(c) for c in full_gamma_array(coeffs)]
+    nodes = list(range(-p, p + 1))
+
+    # Wavenumber components (g is even, so use |cos|, |sin|)
+    xi_vals = xi_mag * np.abs(np.cos(theta_array))
+    eta_vals = xi_mag * np.abs(np.sin(theta_array))
+
+    # Evaluate 1D group velocity analytically at these wavenumbers
+    C_at_xi = group_velocity_exact(w, 0, nodes, xi_vals)
+    C_at_eta = group_velocity_exact(w, 0, nodes, eta_vals)
+
+    # 2D group velocity components: C = (a * g(xi), b * g(eta))
+    C_x = np.cos(theta_array) * C_at_xi
+    C_y = np.sin(theta_array) * C_at_eta
+
+    speed = np.sqrt(C_x**2 + C_y**2)
+    speed_ratio = speed  # exact speed = 1.0
+    angle = np.arctan2(C_y, C_x)
+    angle_error = angle - theta_array
+
+    return AnisotropyResult(
+        theta=theta_array,
+        C_x=C_x,
+        C_y=C_y,
+        speed=speed,
+        speed_ratio=speed_ratio,
         angle=angle,
         angle_error=angle_error,
     )

@@ -50,7 +50,7 @@ velocity. This is analogous to ray tracing in optics.
   - File: `scripts/stencil_gen/stencil_gen/group_velocity.py`
   - Test: `cd scripts/stencil_gen && uv run pytest tests/test_group_velocity.py -x -q -k "test_2d_basic"`
 
-- [ ] **36.1b** Add `anisotropy_profile(p, nu, theta_array, xi_mag)` to `group_velocity.py`:
+- [x] **36.1b** Add `anisotropy_profile(p, nu, theta_array, xi_mag)` to `group_velocity.py`:
   - For a given interior scheme order (E2-E8), compute the group speed and angle error as a function of wave propagation angle theta at a fixed wavenumber magnitude |xi|.
   - Uses the tensor-product dispersion relation with `a = cos(theta)`, `b = sin(theta)`.
   - Key output: speed ratio `|C|/|C_exact|` and angle deviation `theta_C - theta_wave` vs theta.

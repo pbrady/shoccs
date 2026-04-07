@@ -4,10 +4,12 @@ import numpy as np
 import pytest
 
 from stencil_gen.group_velocity import (
+    AnisotropyResult,
     GKSModeInfo,
     GroupVelocity2DResult,
     GroupVelocityProfile,
     PsiSweepResult,
+    anisotropy_profile,
     boundary_group_velocity,
     boundary_group_velocity_classical,
     cut_cell_group_velocity,
@@ -1180,3 +1182,72 @@ class Test2DGroupVelocity:
             result.C_y[0, s], b * np.cos(eta[s]), atol=1e-3,
             err_msg="C_y should scale with wave speed b",
         )
+
+    def test_anisotropy_basic(self):
+        """anisotropy_profile returns correct structure and basic properties."""
+        theta = np.linspace(0.01, np.pi / 2 - 0.01, 200)
+        xi_mag = 1.0
+
+        result = anisotropy_profile(p=1, nu=1, theta_array=theta, xi_mag=xi_mag)
+
+        # Check return type and shapes
+        assert isinstance(result, AnisotropyResult)
+        assert result.C_x.shape == theta.shape
+        assert result.C_y.shape == theta.shape
+        assert result.speed.shape == theta.shape
+        assert result.speed_ratio.shape == theta.shape
+        assert result.angle.shape == theta.shape
+        assert result.angle_error.shape == theta.shape
+
+        # For E2 (p=1), the 1D group velocity is cos(xi).
+        # At theta=0: C_x = cos(xi_mag), C_y = 0, speed = cos(xi_mag)
+        # At theta=pi/2: C_x = 0, C_y = cos(xi_mag), speed = cos(xi_mag)
+        # At theta=pi/4: speed = cos(xi_mag/sqrt(2))
+        # Since cos(xi_mag/sqrt(2)) > cos(xi_mag), diagonal is faster.
+
+        # Verify speed is in (0, 1] for moderate xi_mag
+        assert np.all(result.speed > 0), "Speed should be positive"
+        assert np.all(result.speed <= 1.0 + 1e-10), "Speed should not exceed 1"
+
+        # speed_ratio should equal speed (exact speed = 1)
+        np.testing.assert_allclose(result.speed_ratio, result.speed)
+
+        # Angle should roughly track theta (anisotropy causes deviation,
+        # up to ~0.18 rad for E2 at xi_mag=1.0 -- that's the physical effect)
+        assert np.max(np.abs(result.angle_error)) < 0.25, (
+            "Angle error should be bounded for moderate xi_mag"
+        )
+
+    def test_anisotropy_axis_vs_diagonal(self):
+        """For E2, diagonal propagation is faster than axis-aligned (Trefethen)."""
+        theta = np.array([0.01, np.pi / 4])  # near-axis and diagonal
+        xi_mag = 1.0
+
+        result = anisotropy_profile(p=1, nu=1, theta_array=theta, xi_mag=xi_mag)
+
+        speed_axis = result.speed[0]      # theta ~ 0
+        speed_diag = result.speed[1]      # theta = pi/4
+
+        assert speed_diag > speed_axis, (
+            f"E2 diagonal speed ({speed_diag:.6f}) should exceed "
+            f"axis speed ({speed_axis:.6f})"
+        )
+
+    def test_anisotropy_small_xi_near_exact(self):
+        """At small wavenumber, all schemes approach exact group velocity."""
+        theta = np.linspace(0.1, np.pi / 2 - 0.1, 100)
+        xi_mag = 0.1  # very resolved wave
+
+        # Error is O(xi^(2p)) for order-2p scheme.  At xi=0.1:
+        #   E2 (p=1): ~5e-3, E4 (p=2): ~5e-5, E6 (p=3): ~5e-7
+        tols = {1: 1e-2, 2: 1e-4, 3: 1e-6}
+        for p in [1, 2, 3]:  # E2, E4, E6
+            result = anisotropy_profile(p=p, nu=1, theta_array=theta, xi_mag=xi_mag)
+            np.testing.assert_allclose(
+                result.speed_ratio, 1.0, atol=tols[p],
+                err_msg=f"E{2*p} speed should be ~1 at xi_mag=0.1",
+            )
+            np.testing.assert_allclose(
+                result.angle_error, 0.0, atol=tols[p],
+                err_msg=f"E{2*p} angle error should be ~0 at xi_mag=0.1",
+            )
