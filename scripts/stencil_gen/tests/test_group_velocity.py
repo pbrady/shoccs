@@ -5,6 +5,7 @@ import pytest
 
 from stencil_gen.group_velocity import (
     GKSModeInfo,
+    GroupVelocity2DResult,
     GroupVelocityProfile,
     PsiSweepResult,
     boundary_group_velocity,
@@ -12,6 +13,7 @@ from stencil_gen.group_velocity import (
     cut_cell_group_velocity,
     gks_group_velocity_check,
     group_velocity,
+    group_velocity_2d,
     group_velocity_error,
     group_velocity_exact,
     group_velocity_exact_nonuniform,
@@ -1100,4 +1102,81 @@ class TestCutCellGVvsEigenvalue:
         assert ratio > 4.0, (
             f"Eigenvalue cost ratio t(200)/t(50) = {ratio:.1f}, "
             f"expected > 4 for super-linear scaling"
+        )
+
+
+class Test2DGroupVelocity:
+    """2D tensor-product group velocity tests (36.1)."""
+
+    N_XI = 500
+
+    @staticmethod
+    def _e2_kappa_star(xi: np.ndarray) -> np.ndarray:
+        """E2 (2nd-order central) modified wavenumber: kappa* = i*sin(xi)."""
+        weights = [-0.5, 0.0, 0.5]
+        nodes = [-1, 0, 1]
+        return modified_wavenumber(weights, 0, nodes, xi)
+
+    def test_2d_basic(self):
+        """group_velocity_2d returns correct result structure and values for E2."""
+        xi = np.linspace(0.01, np.pi - 0.01, self.N_XI)
+        eta = np.linspace(0.01, np.pi - 0.01, self.N_XI)
+
+        kx = self._e2_kappa_star(xi)
+        ky = self._e2_kappa_star(eta)
+
+        result = group_velocity_2d(kx, ky, xi, eta, a=1.0, b=1.0)
+
+        # Check return type and field shapes
+        assert isinstance(result, GroupVelocity2DResult)
+        assert result.C_x.shape == (len(xi), len(eta))
+        assert result.C_y.shape == (len(xi), len(eta))
+        assert result.speed.shape == (len(xi), len(eta))
+        assert result.angle.shape == (len(xi), len(eta))
+        assert result.angle_error.shape == (len(xi), len(eta))
+
+        # For E2, Im(kappa*) = sin(xi), so C_1d = cos(xi).
+        # C_x should equal cos(xi) broadcast over eta.
+        C_x_expected = np.cos(xi)
+        np.testing.assert_allclose(
+            result.C_x[:, len(eta) // 2], C_x_expected, atol=1e-3,
+            err_msg="C_x should match cos(xi) for E2 stencil",
+        )
+
+        # C_y should equal cos(eta) broadcast over xi.
+        C_y_expected = np.cos(eta)
+        np.testing.assert_allclose(
+            result.C_y[len(xi) // 2, :], C_y_expected, atol=1e-3,
+            err_msg="C_y should match cos(eta) for E2 stencil",
+        )
+
+        # Speed at (xi, eta) = sqrt(cos^2(xi) + cos^2(eta))
+        xi_2d, eta_2d = np.meshgrid(xi, eta, indexing="ij")
+        speed_expected = np.sqrt(np.cos(xi_2d)**2 + np.cos(eta_2d)**2)
+        np.testing.assert_allclose(
+            result.speed, speed_expected, atol=1e-3,
+            err_msg="Speed should be sqrt(C_x^2 + C_y^2)",
+        )
+
+    def test_2d_wave_speed_scaling(self):
+        """group_velocity_2d correctly scales by wave speed coefficients a, b."""
+        xi = np.linspace(0.1, 2.0, 200)
+        eta = np.linspace(0.1, 2.0, 200)
+
+        kx = self._e2_kappa_star(xi)
+        ky = self._e2_kappa_star(eta)
+
+        a, b = 2.0, 0.5
+        result = group_velocity_2d(kx, ky, xi, eta, a=a, b=b)
+
+        # C_x should be a*cos(xi), C_y should be b*cos(eta).
+        # Exclude endpoints where np.gradient has reduced accuracy.
+        s = slice(1, -1)
+        np.testing.assert_allclose(
+            result.C_x[s, 0], a * np.cos(xi[s]), atol=1e-3,
+            err_msg="C_x should scale with wave speed a",
+        )
+        np.testing.assert_allclose(
+            result.C_y[0, s], b * np.cos(eta[s]), atol=1e-3,
+            err_msg="C_y should scale with wave speed b",
         )

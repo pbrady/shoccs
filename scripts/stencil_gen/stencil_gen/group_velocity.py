@@ -216,6 +216,27 @@ def group_velocity_error(
 
 
 @dataclass
+class GroupVelocity2DResult:
+    """2D group velocity analysis results for tensor-product stencils.
+
+    For dimension-by-dimension operators where the 2D dispersion relation
+    factors as omega = a*kappa_x*(xi) + b*kappa_y*(eta), the group velocity
+    vector is C = (C_x, C_y) with C_x = a * d(Im(kappa_x*))/d(xi) and
+    C_y = b * d(Im(kappa_y*))/d(eta).
+
+    All 2D arrays use shape (N_xi, N_eta) with indexing='ij'.
+    """
+
+    xi: np.ndarray  # 1D wavenumber array for x-direction
+    eta: np.ndarray  # 1D wavenumber array for y-direction
+    C_x: np.ndarray  # 2D group velocity x-component
+    C_y: np.ndarray  # 2D group velocity y-component
+    speed: np.ndarray  # 2D group speed |C|
+    angle: np.ndarray  # 2D group propagation angle atan2(C_y, C_x)
+    angle_error: np.ndarray  # 2D angle deviation from wave normal
+
+
+@dataclass
 class GroupVelocityProfile:
     """Group velocity analysis results for a single stencil row."""
 
@@ -242,6 +263,69 @@ class GKSModeInfo:
     boundary_wavenumber: float  # dominant xi from FFT of boundary eigenvector portion
     group_velocity: float  # interior C(xi) at boundary_wavenumber
     is_outgoing: bool  # True if mode radiates energy from boundary into domain
+
+
+def group_velocity_2d(
+    kappa_x_star: np.ndarray,
+    kappa_y_star: np.ndarray,
+    xi_array: np.ndarray,
+    eta_array: np.ndarray,
+    a: float = 1.0,
+    b: float = 1.0,
+) -> GroupVelocity2DResult:
+    """Compute 2D group velocity for tensor-product stencils.
+
+    For dimension-by-dimension operators where the 2D dispersion relation
+    factors as ``omega = a*kappa_x*(xi) + b*kappa_y*(eta)``, the group
+    velocity vector is:
+
+    - ``C_x(xi, eta) = a * d(Im(kappa_x*))/d(xi)``  (depends only on xi)
+    - ``C_y(xi, eta) = b * d(Im(kappa_y*))/d(eta)``  (depends only on eta)
+
+    Parameters
+    ----------
+    kappa_x_star : np.ndarray (complex)
+        Modified wavenumber for x-direction stencil, shape (N_xi,).
+    kappa_y_star : np.ndarray (complex)
+        Modified wavenumber for y-direction stencil, shape (N_eta,).
+    xi_array : np.ndarray
+        Wavenumber values for x-direction, shape (N_xi,).
+    eta_array : np.ndarray
+        Wavenumber values for y-direction, shape (N_eta,).
+    a : float
+        Wave speed coefficient in x-direction (default 1.0).
+    b : float
+        Wave speed coefficient in y-direction (default 1.0).
+
+    Returns
+    -------
+    GroupVelocity2DResult
+    """
+    # 1D group velocities via numerical differentiation
+    C_x_1d = a * np.gradient(np.imag(kappa_x_star), xi_array)
+    C_y_1d = b * np.gradient(np.imag(kappa_y_star), eta_array)
+
+    # Broadcast to 2D grid with shape (N_xi, N_eta)
+    C_x = np.broadcast_to(C_x_1d[:, np.newaxis], (len(xi_array), len(eta_array))).copy()
+    C_y = np.broadcast_to(C_y_1d[np.newaxis, :], (len(xi_array), len(eta_array))).copy()
+
+    speed = np.sqrt(C_x**2 + C_y**2)
+    angle = np.arctan2(C_y, C_x)
+
+    # Wave normal angle on the 2D grid
+    xi_2d, eta_2d = np.meshgrid(xi_array, eta_array, indexing="ij")
+    theta_wave = np.arctan2(eta_2d, xi_2d)
+    angle_error = angle - theta_wave
+
+    return GroupVelocity2DResult(
+        xi=xi_array,
+        eta=eta_array,
+        C_x=C_x,
+        C_y=C_y,
+        speed=speed,
+        angle=angle,
+        angle_error=angle_error,
+    )
 
 
 def _build_profile(
