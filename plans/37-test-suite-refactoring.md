@@ -165,19 +165,20 @@ These are conservation proofs and deep `conserve=True` feature tests. The proofs
 
 After marking proofs slow (~79s saved), remaining non-slow time is ~25s. The next bottlenecks are repeated `derive_cut_cell_scheme(E4_1, psi)` calls (~0.7s each × 7+) and the code-generation test setup (5.6s).
 
-- [ ] **37.6a** Add module-scoped fixture for `derive_cut_cell_scheme(E4_1, psi)`:
-  - Called independently in `TestDeriveCutCellScheme` (6 methods × ~0.7s) and `TestE4CutCellSchemeWithZeros` (class fixture).
-  - Cache saves ~3-5s. Update these classes to use the shared fixture.
+- [x] **37.6a** Add module-scoped fixture for `derive_cut_cell_scheme(E4_1, psi)`:
+  - Called independently in `TestDeriveCutCellScheme` (5 methods × ~0.7s) and `TestE4CutCellSchemeWithZeros` (class fixture).
+  - Module-scoped `e4_1_cut_cell_scheme` fixture shared by both classes. Saved ~4s (23.4s → 19.6s for test_e4_cut_cell.py).
   - File: `scripts/stencil_gen/tests/test_e4_cut_cell.py`
-  - Test: `cd scripts/stencil_gen && uv run pytest tests/test_e4_cut_cell.py -x -q -k "not slow"`
+  - Test: `cd scripts/stencil_gen && uv run pytest tests/test_e4_cut_cell.py -x -q -k "not slow"` — 86 passed in ~20s
 
-- [ ] **37.6b** Add module-scoped fixture for `derive_cut_cell_scheme(E4_1, psi, conserve=True)`:
-  - Used by `TestE4TestFileGeneration` (5.6s setup). If shared with other tests, saves duplicate derivation.
+- [x] **37.6b** Add module-scoped fixture for `derive_cut_cell_scheme(E4_1, psi, conserve=True)`:
+  - Module-scoped `e4_1_cut_cell_scheme_conserve` fixture shared by `TestE4CodeGeneration` and `TestE4TestFileGeneration`.
+  - No default-run savings (TestE4CodeGeneration is slow), but saves ~5.6s when running `--run-slow`.
   - File: `scripts/stencil_gen/tests/test_e4_cut_cell.py`
 
 - [ ] **37.6c** (Optional) Cache `derive_uniform_boundary_for_temo(E4_1)` and `(E4_1, zeros={3,4})`:
   - Called ~8 and ~10 times, but at 60ms and 8ms respectively, total savings <1s.
-  - Only pursue if needed to reach 15s target after 37.6a-b.
+  - Skip: won't meaningfully help reach 20s target. Full suite at 28.5s — remaining bottleneck is `TestE4TestFileGeneration` (5.7s conserve=True setup).
   - File: `scripts/stencil_gen/tests/conftest.py`, `scripts/stencil_gen/tests/test_e4_cut_cell.py`
 
 ### 37.7 — Update CLAUDE.md test commands

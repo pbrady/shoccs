@@ -43,6 +43,27 @@ from stencil_gen.temo import (
 )
 
 
+@pytest.fixture(scope="module")
+def e4_1_cut_cell_scheme():
+    """Module-scoped cache for derive_cut_cell_scheme(E4_1, psi).
+
+    Shared by TestDeriveCutCellScheme and TestE4CutCellSchemeWithZeros
+    to avoid ~6 redundant derivations (~0.7s each).
+    """
+    psi = Symbol("psi")
+    return derive_cut_cell_scheme(E4_1, psi), psi
+
+
+@pytest.fixture(scope="module")
+def e4_1_cut_cell_scheme_conserve():
+    """Module-scoped cache for derive_cut_cell_scheme(E4_1, psi, conserve=True).
+
+    Shared by TestE4CodeGeneration and TestE4TestFileGeneration (~5.6s each).
+    """
+    psi = Symbol("psi")
+    return derive_cut_cell_scheme(E4_1, psi, conserve=True), psi
+
+
 class TestE4UniformBoundary:
     """Tests for derive_uniform_boundary_for_temo with E4_1 (21.1b)."""
 
@@ -522,10 +543,9 @@ class TestE4CodeGeneration:
     """Tests for E4_1 C++ code generation (21.4b, updated for 2-alpha zeros conservation)."""
 
     @pytest.fixture(scope="class")
-    def e4_spec(self):
-        """Build the full StencilGenSpec via derive_cut_cell_scheme (zeros path)."""
-        psi = Symbol("psi")
-        cc = derive_cut_cell_scheme(E4_1, psi, conserve=True)
+    def e4_spec(self, e4_1_cut_cell_scheme_conserve):
+        """Build the full StencilGenSpec from cached conserve=True derivation."""
+        cc, psi = e4_1_cut_cell_scheme_conserve
 
         # floating_coeffs: R*T = 5*7 = 35 entries, row-major from cc.floating
         floating_flat = list(cc.floating)
@@ -656,10 +676,9 @@ class TestE4TestFileGeneration:
     ALPHA_VALUES = {"alpha": [0.1, 0.7]}
 
     @pytest.fixture(scope="class")
-    def e4_spec(self):
-        """Build the full StencilGenSpec via derive_cut_cell_scheme (zeros path)."""
-        psi = Symbol("psi")
-        cc = derive_cut_cell_scheme(E4_1, psi, conserve=True)
+    def e4_spec(self, e4_1_cut_cell_scheme_conserve):
+        """Build the full StencilGenSpec from cached conserve=True derivation."""
+        cc, psi = e4_1_cut_cell_scheme_conserve
 
         floating_flat = list(cc.floating)
         dirichlet_flat = [Integer(0)] * 7 + list(cc.dirichlet)
@@ -838,32 +857,29 @@ class TestE4TestFileGeneration:
 class TestDeriveCutCellScheme:
     """Tests for derive_cut_cell_scheme high-level pipeline (21.5a)."""
 
-    def test_e4_1_shape(self):
+    def test_e4_1_shape(self, e4_1_cut_cell_scheme):
         """E4_1 via derive_cut_cell_scheme has R=5, T=7 floating matrix."""
-        psi = Symbol("psi")
-        result = derive_cut_cell_scheme(E4_1, psi)
+        result, psi = e4_1_cut_cell_scheme
         assert result.floating.shape == (5, 7)
         assert result.dirichlet.shape == (4, 7)
         assert result.dims.R == 5
         assert result.dims.T == 7
         assert result.dims.X == 0
 
-    def test_e4_1_no_neumann(self):
+    def test_e4_1_no_neumann(self, e4_1_cut_cell_scheme):
         """E4_1 (nu=1) has no Neumann stencil."""
-        psi = Symbol("psi")
-        result = derive_cut_cell_scheme(E4_1, psi)
+        result, psi = e4_1_cut_cell_scheme
         assert result.neumann is None
         assert result.eta is None
 
-    def test_e4_1_alpha_count(self):
+    def test_e4_1_alpha_count(self, e4_1_cut_cell_scheme):
         """E4_1 has 2 free alpha symbols (zeros + cut-cell conservation)."""
-        psi = Symbol("psi")
-        result = derive_cut_cell_scheme(E4_1, psi)
+        result, psi = e4_1_cut_cell_scheme
         assert len(result.alpha_symbols) == 2
 
-    def test_e4_1_matches_manual_pipeline(self):
+    def test_e4_1_matches_manual_pipeline(self, e4_1_cut_cell_scheme):
         """derive_cut_cell_scheme(E4_1) equals manual zeros + cut-cell conservation pipeline."""
-        psi = Symbol("psi")
+        auto, psi = e4_1_cut_cell_scheme
 
         # Manual zeros pipeline (polynomial boundary rows + fraction-free conservation)
         ur = derive_uniform_boundary_for_temo(E4_1, zeros={3, 4})
@@ -894,9 +910,6 @@ class TestDeriveCutCellScheme:
         rename = {ur.alpha_symbols[2]: Symbol("alpha_0"), w_syms[3]: Symbol("alpha_1")}
         floating = floating.xreplace(rename)
 
-        # High-level pipeline
-        auto = derive_cut_cell_scheme(E4_1, psi)
-
         # Zeros path has no conservation_subs
         assert auto.conservation_subs is None
 
@@ -907,10 +920,9 @@ class TestDeriveCutCellScheme:
                     f"Floating mismatch at [{i},{j}]"
                 )
 
-    def test_e4_1_taylor_accuracy(self):
+    def test_e4_1_taylor_accuracy(self, e4_1_cut_cell_scheme):
         """E4_1 result satisfies Taylor accuracy at psi=1/2."""
-        psi = Symbol("psi")
-        result = derive_cut_cell_scheme(E4_1, psi)
+        result, psi = e4_1_cut_cell_scheme
         m = result.floating.subs(psi, Rational(1, 2))
         R, T = m.shape
         psi_val = Rational(1, 2)
@@ -1015,29 +1027,24 @@ class TestDeriveCutCellScheme:
 class TestE4CutCellSchemeWithZeros:
     """Integration tests for derive_cut_cell_scheme(E4_1) with zeros path (26.5c)."""
 
-    @pytest.fixture(scope="class")
-    def e4_result(self):
-        psi = Symbol("psi")
-        return derive_cut_cell_scheme(E4_1, psi), psi
-
-    def test_alpha_count(self, e4_result):
-        result, _ = e4_result
+    def test_alpha_count(self, e4_1_cut_cell_scheme):
+        result, _ = e4_1_cut_cell_scheme
         assert len(result.alpha_symbols) == 2
 
-    def test_shape(self, e4_result):
-        result, _ = e4_result
+    def test_shape(self, e4_1_cut_cell_scheme):
+        result, _ = e4_1_cut_cell_scheme
         assert result.floating.shape == (5, 7)
         assert result.dirichlet.shape == (4, 7)
 
-    def test_free_symbols(self, e4_result):
-        result, psi = e4_result
+    def test_free_symbols(self, e4_1_cut_cell_scheme):
+        result, psi = e4_1_cut_cell_scheme
         expected = {psi} | set(result.alpha_symbols)
         assert result.floating.free_symbols <= expected, (
             f"Unexpected symbols: {result.floating.free_symbols - expected}"
         )
 
-    def test_weights_present(self, e4_result):
-        result, psi = e4_result
+    def test_weights_present(self, e4_1_cut_cell_scheme):
+        result, psi = e4_1_cut_cell_scheme
         assert result.weights is not None
         assert len(result.weights) == 5  # R=5
         # At least one weight should depend on psi
@@ -1046,9 +1053,9 @@ class TestE4CutCellSchemeWithZeros:
             for w in result.weights
         )
 
-    def test_taylor_accuracy(self, e4_result):
+    def test_taylor_accuracy(self, e4_1_cut_cell_scheme):
         """All rows satisfy q+1=4 Taylor equations at psi=1/2."""
-        result, psi = e4_result
+        result, psi = e4_1_cut_cell_scheme
         m = result.floating
         R, T = m.shape
         # Use non-zero alpha values (alpha_1 maps to w_4 quadrature weight)
@@ -1066,9 +1073,9 @@ class TestE4CutCellSchemeWithZeros:
                     f"Row {i}, moment k={k}: got {cancel(moment)}"
                 )
 
-    def test_conservation_holds(self, e4_result):
+    def test_conservation_holds(self, e4_1_cut_cell_scheme):
         """Weighted column sums using result.weights satisfy conservation."""
-        result, psi = e4_result
+        result, psi = e4_1_cut_cell_scheme
         m = result.floating
         R, T = m.shape
         weights = result.weights
@@ -1084,14 +1091,14 @@ class TestE4CutCellSchemeWithZeros:
                 f"Conservation violated at grid point {g}: residual={residual}"
             )
 
-    def test_custom_alphas(self, e4_result):
-        _, psi = e4_result
+    def test_custom_alphas(self, e4_1_cut_cell_scheme):
+        _, psi = e4_1_cut_cell_scheme
         syms = [Symbol("a"), Symbol("b")]
         result = derive_cut_cell_scheme(E4_1, psi, alpha_symbols=syms)
         assert result.alpha_symbols == syms
         assert result.floating.free_symbols <= {psi} | set(syms)
 
-    def test_no_singularities(self, e4_result):
+    def test_no_singularities(self, e4_1_cut_cell_scheme):
         """All floating/dirichlet entries and weights are finite at ψ=0 and ψ=1
         with representative alpha values.  Regression guard (27.4b).
 
@@ -1101,7 +1108,7 @@ class TestE4CutCellSchemeWithZeros:
         that exact ψ=0 and ψ=1 evaluation blows up for entries depending on
         the solved-for alpha solutions.
         """
-        result, psi = e4_result
+        result, psi = e4_1_cut_cell_scheme
         m = result.floating
         R, T = m.shape
         alpha_vals = dict(
