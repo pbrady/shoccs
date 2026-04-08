@@ -105,7 +105,7 @@ The regression tests in `test_phs.py` (`TestRegressionE2Stability`, etc.) then l
 
 ### 38.3 — Tension Sweep Scripts
 
-- [ ] **38.3a** Create `sweeps/tension_sweep.py` — extract from `TestCorrectedTensionE2`, `TestCorrectedTensionE4`, `TestTensionSweepE2`, `TestTensionSweepE4`:
+- [x] **38.3a** Create `sweeps/tension_sweep.py` — extract from `TestCorrectedTensionE2`, `TestCorrectedTensionE4`, `TestTensionSweepE2`, `TestTensionSweepE4`:
   - Functions: `run_tension_sweep(scheme, n_values, n_sigma)` — coarse + fine sweep
   - CLI: `--scheme E2/E4`, `--n-sigma 61`, `--sigma-max 20`
   - Output: sigma stability table, best sigma, stable count

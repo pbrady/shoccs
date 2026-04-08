@@ -29,8 +29,10 @@ def main() -> int:
 
     sub_tension = subparsers.add_parser("tension", help="Tension spline sigma sweep")
     sub_tension.add_argument("--scheme", choices=["E2", "E4"], required=True)
+    sub_tension.add_argument("--n-values", default="20,40,80", help="Comma-separated grid sizes")
     sub_tension.add_argument("--n-sigma", type=int, default=61, help="Number of sigma sample points")
     sub_tension.add_argument("--sigma-max", type=float, default=20.0)
+    sub_tension.add_argument("--update-known-values", action="store_true", help="Update known_values.json with discovered optimal sigma")
 
     sub_tension_pen = subparsers.add_parser("tension-penalty", help="Tension + conservation penalty sweep")
     sub_tension_pen.add_argument("--scheme", choices=["E2", "E4"], required=True)
@@ -70,6 +72,17 @@ def main() -> int:
             "--kernel", args.kernel,
             "--n-values", args.n_values,
             "--n-eps", str(args.n_eps),
+            *(["--update-known-values"] if args.update_known_values else []),
+        ])
+
+    if args.command == "tension":
+        from .tension_sweep import main as tension_main
+
+        return tension_main([
+            "--scheme", args.scheme,
+            "--n-values", args.n_values,
+            "--n-sigma", str(args.n_sigma),
+            "--sigma-max", str(args.sigma_max),
             *(["--update-known-values"] if args.update_known_values else []),
         ])
 
