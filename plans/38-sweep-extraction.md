@@ -20,7 +20,7 @@ cd scripts/stencil_gen && uv run pytest tests/ -x -q
 cd scripts/stencil_gen && uv run python -m sweeps.epsilon_sweep --scheme E2
 
 # Run all sweeps and update known values
-cd scripts/stencil_gen && uv run python -m sweeps.run_all
+cd scripts/stencil_gen && uv run python -m sweeps all
 
 # Verify known values haven't drifted
 cd scripts/stencil_gen && uv run pytest tests/test_phs.py -x -q -k "TestRegression"
@@ -172,7 +172,7 @@ The regression tests in `test_phs.py` (`TestRegressionE2Stability`, etc.) then l
 
 - [ ] **38.7b** Verify sweep scripts reproduce the known values:
   - Run each sweep script with reduced resolution and confirm it finds values near the known optima.
-  - Run: `cd scripts/stencil_gen && uv run python -m sweeps.run_all --quick`
+  - Run: `cd scripts/stencil_gen && uv run python -m sweeps all --quick`
   - File: N/A (verification only)
 
 - [ ] **38.7c** Update CLAUDE.md with sweep script documentation:
