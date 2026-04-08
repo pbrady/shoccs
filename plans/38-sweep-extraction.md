@@ -157,10 +157,11 @@ The regression tests in `test_phs.py` (`TestRegressionE2Stability`, etc.) then l
   - Verified: 82 passed, 23 skipped in 2.05s; ~2950 lines removed across 5 contiguous blocks
   - Note: `_bisect_threshold` and `_dense_sweep_min` were inside a removed block and are gone too (38.6c is effectively done)
 
-- [ ] **38.6b** Remove Phase 32 slow test classes from `test_phs.py` (now extracted to sweep scripts):
+- [x] **38.6b** Remove Phase 32 slow test classes from `test_phs.py` (now extracted to sweep scripts):
   - Remove: `TestCorrectedSweepE2`, `TestCorrectedSweepE4`, `TestCorrectedTensionE2`, `TestCorrectedTensionE4`, `TestCorrectedTensionPenaltyE4`, `TestCorrectedFootprint`, `TestCorrectedComparison`
   - File: `scripts/stencil_gen/tests/test_phs.py`
   - Test: `cd scripts/stencil_gen && uv run pytest tests/test_phs.py -x -q`
+  - Verified: 82 passed in 1.96s; ~1586 lines removed (7 classes + comment blocks)
 
 - [x] **38.6c** Remove `_dense_sweep_min` and `_bisect_threshold` module-level helpers from `test_phs.py`:
   - These were inside the TestTensionOptimalSigma block and were removed in 38.6a.
