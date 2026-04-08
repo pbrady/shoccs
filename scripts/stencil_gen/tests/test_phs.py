@@ -724,6 +724,7 @@ class _EpsilonSweepBase:
             print(f"    n={nn:4d}: stab_eig={se:.6e}")
 
 
+@pytest.mark.slow
 class TestEpsilonSweepE2(_EpsilonSweepBase):
     """Sweep epsilon for E2_1 boundary stencils and report stability.
 
@@ -743,6 +744,7 @@ class TestEpsilonSweepE2(_EpsilonSweepBase):
 # ---------------------------------------------------------------------------
 
 
+@pytest.mark.slow
 class TestEpsilonSweepE4(_EpsilonSweepBase):
     """Sweep epsilon for E4_1 boundary stencils and report stability.
 
@@ -763,6 +765,7 @@ class TestEpsilonSweepE4(_EpsilonSweepBase):
 # ---------------------------------------------------------------------------
 
 
+@pytest.mark.slow
 class TestMixedEpsilon:
     """Try mixed epsilon (different per boundary row) for E4_1.
 
@@ -1030,6 +1033,7 @@ class TestMixedEpsilon:
 # ---------------------------------------------------------------------------
 
 
+@pytest.mark.slow
 class TestStableEpsilonAlphas:
     """Extract alpha values implied by the stable Gaussian ε for E2_1.
 
@@ -1333,6 +1337,7 @@ class TestStableEpsilonAlphas:
 # ---------------------------------------------------------------------------
 
 
+@pytest.mark.slow
 class TestComparisonTable:
     """Side-by-side comparison of PHS k=2, Gaussian RBF, Multiquadric RBF,
     and mixed-ε configurations for E2_1 and E4_1.
@@ -1812,6 +1817,7 @@ class TestTensionSpline:
 # ---------------------------------------------------------------------------
 
 
+@pytest.mark.slow
 class TestTensionSweepE2:
     """Sweep σ for E2_1 boundary stencils using tension spline kernel.
 
@@ -2007,6 +2013,7 @@ class TestTensionSweepE2:
 # ---------------------------------------------------------------------------
 
 
+@pytest.mark.slow
 class TestTensionSweepE4:
     """Sweep σ for E4_1 boundary stencils using tension spline kernel.
 
@@ -2305,6 +2312,7 @@ def _dense_sweep_min(f, sigmas):
     return best[0], best[1], results
 
 
+@pytest.mark.slow
 class TestTensionOptimalSigma:
     """Fine-grained search for optimal σ.
 
@@ -2687,6 +2695,7 @@ class TestConservationPenalty:
 # ---------------------------------------------------------------------------
 
 
+@pytest.mark.slow
 class TestTensionConservationE2:
     """Joint (σ, γ) sweep for E2_1 boundary stencils (Phase 30.3b).
 
@@ -2933,6 +2942,7 @@ class TestTensionConservationE2:
 # ---------------------------------------------------------------------------
 
 
+@pytest.mark.slow
 class TestTensionConservationE4:
     """Joint (σ, γ) sweep for E4_1 boundary stencils (Phase 30.3c).
 
@@ -3135,6 +3145,7 @@ class TestTensionConservationE4:
 # ---------------------------------------------------------------------------
 
 
+@pytest.mark.slow
 class TestTensionComparison:
     """Comprehensive comparison of all approaches for E2 and E4 (Phase 30.4a).
 
@@ -3752,6 +3763,7 @@ class TestModifiedWavenumber:
 # ---------------------------------------------------------------------------
 
 
+@pytest.mark.slow
 class TestFootprintE4Quick:
     """Quick diagnostic: nextra=0 vs nextra=1 for E4 tension stability.
 
@@ -3842,6 +3854,7 @@ class TestFootprintE4Quick:
 # ---------------------------------------------------------------------------
 
 
+@pytest.mark.slow
 class TestFootprintSweep:
     """Full nextra × σ sweep for E4 with tension kernel.
 
@@ -3960,6 +3973,7 @@ class TestFootprintSweep:
 # ---------------------------------------------------------------------------
 
 
+@pytest.mark.slow
 class TestFootprintPenalty:
     """Nextra sweep for E4 tension with soft conservation penalty.
 
@@ -4110,6 +4124,7 @@ class TestFootprintPenalty:
 # ---------------------------------------------------------------------------
 
 
+@pytest.mark.slow
 class TestCrossValidationE2:
     """Cross-validation: E2_1 stability vs nextra.
 
@@ -4304,6 +4319,7 @@ class TestStabilityInfrastructure:
 # ---------------------------------------------------------------------------
 
 
+@pytest.mark.slow
 class TestCorrectedSweepE2:
     """Re-run Phase 29 E2 sweeps with the corrected stability metric.
 
@@ -4521,6 +4537,7 @@ class TestCorrectedSweepE2:
 # ---------------------------------------------------------------------------
 
 
+@pytest.mark.slow
 class TestCorrectedSweepE4:
     """Re-run Phase 29 E4 sweeps with the corrected stability metric.
 
@@ -4754,6 +4771,7 @@ class TestCorrectedSweepE4:
 # ---------------------------------------------------------------------------
 
 
+@pytest.mark.slow
 class TestCorrectedTensionE2:
     """Re-run Phase 30 E2 tension sweeps with the corrected stability metric.
 
@@ -4959,6 +4977,7 @@ class TestCorrectedTensionE2:
 # ---------------------------------------------------------------------------
 
 
+@pytest.mark.slow
 class TestCorrectedTensionE4:
     """Re-run Phase 30 E4 tension sweeps with the corrected stability metric.
 
@@ -5192,6 +5211,7 @@ class TestCorrectedTensionE4:
 # ---------------------------------------------------------------------------
 
 
+@pytest.mark.slow
 class TestCorrectedTensionPenaltyE4:
     """Re-run Phase 30.3c joint (σ, γ) sweep for E4 with corrected stability.
 
@@ -5378,6 +5398,7 @@ class TestCorrectedTensionPenaltyE4:
 # ---------------------------------------------------------------------------
 
 
+@pytest.mark.slow
 class TestCorrectedFootprint:
     """Re-run Phase 31 nextra × σ sweep for E4 with corrected stability.
 
@@ -5600,6 +5621,7 @@ class TestCorrectedFootprint:
 # ---------------------------------------------------------------------------
 
 
+@pytest.mark.slow
 class TestCorrectedComparison:
     """Comprehensive comparison of all approaches with corrected stability.
 

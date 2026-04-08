@@ -517,6 +517,7 @@ class TestE4TEMOConstruction:
                 )
 
 
+@pytest.mark.slow
 class TestE4CodeGeneration:
     """Tests for E4_1 C++ code generation (21.4b, updated for 2-alpha zeros conservation)."""
 
@@ -1501,6 +1502,7 @@ class TestBuildCutCellConservationSystem:
         )
 
 
+@pytest.mark.slow
 def test_e4_1_conservation_constant_weights_infeasible_r5():
     """E4_1 conservation with constant weights is infeasible at R=5 (23.3a).
 
@@ -2365,6 +2367,7 @@ class TestApproachAInfeasibility:
         )
 
 
+@pytest.mark.slow
 class TestPolynomialFullStencil:
     """Validate the full E4_1 stencil from the polynomial construction pipeline (27.4b).
 
@@ -2656,6 +2659,7 @@ def mathematica_result():
     return derive_cut_cell_mathematica(E4_1, psi)
 
 
+@pytest.mark.slow
 class TestMathematicaWorkflow:
     """Test the full Mathematica-aligned cut-cell workflow."""
 
