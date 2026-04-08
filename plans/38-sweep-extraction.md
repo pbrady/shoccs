@@ -112,11 +112,12 @@ The regression tests in `test_phs.py` (`TestRegressionE2Stability`, etc.) then l
   - File: `scripts/stencil_gen/sweeps/tension_sweep.py`
   - Test: `cd scripts/stencil_gen && uv run python -m sweeps.tension_sweep --scheme E2 --n-sigma 10`
 
-- [ ] **38.3b** Create `sweeps/tension_penalty_sweep.py` — extract from `TestCorrectedTensionPenaltyE4`, `TestTensionConservationE2`, `TestTensionConservationE4`:
+- [x] **38.3b** Create `sweeps/tension_penalty_sweep.py` — extract from `TestCorrectedTensionPenaltyE4`, `TestTensionConservationE2`, `TestTensionConservationE4`:
   - Functions: `run_tension_penalty_sweep(scheme, n_sigma, n_gamma)` — 2D (sigma, gamma) joint sweep
   - Output: stability/conservation landscape, best (sigma*, gamma*) pairs
   - File: `scripts/stencil_gen/sweeps/tension_penalty_sweep.py`
   - Test: `cd scripts/stencil_gen && uv run python -m sweeps.tension_penalty_sweep --scheme E4 --n-sigma 5 --n-gamma 5`
+  - Verified: E2 and E4 both produce valid output; dispatcher wired with --update-known-values
 
 ### 38.4 — Footprint and Comparison Scripts
 

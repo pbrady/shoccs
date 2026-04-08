@@ -36,8 +36,10 @@ def main() -> int:
 
     sub_tension_pen = subparsers.add_parser("tension-penalty", help="Tension + conservation penalty sweep")
     sub_tension_pen.add_argument("--scheme", choices=["E2", "E4"], required=True)
-    sub_tension_pen.add_argument("--n-sigma", type=int, default=20)
-    sub_tension_pen.add_argument("--n-gamma", type=int, default=20)
+    sub_tension_pen.add_argument("--n-sigma", type=int, default=25)
+    sub_tension_pen.add_argument("--n-gamma", type=int, default=25)
+    sub_tension_pen.add_argument("--sigma-max", type=float, default=20.0)
+    sub_tension_pen.add_argument("--update-known-values", action="store_true", help="Update known_values.json")
 
     sub_footprint = subparsers.add_parser("footprint", help="Stencil footprint (nextra) sweep")
     sub_footprint.add_argument("--n-sigma", type=int, default=20)
@@ -93,6 +95,17 @@ def main() -> int:
             "--scheme", args.scheme,
             "--kernel", args.kernel,
             "--n-eps", str(args.n_eps),
+            *(["--update-known-values"] if args.update_known_values else []),
+        ])
+
+    if args.command == "tension-penalty":
+        from .tension_penalty_sweep import main as tp_main
+
+        return tp_main([
+            "--scheme", args.scheme,
+            "--n-sigma", str(args.n_sigma),
+            "--n-gamma", str(args.n_gamma),
+            "--sigma-max", str(args.sigma_max),
             *(["--update-known-values"] if args.update_known_values else []),
         ])
 
