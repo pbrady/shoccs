@@ -29,6 +29,7 @@ cd scripts/stencil_gen && uv run pytest tests/ --durations=10 -q
 
 | File | Time | Tests | Problem |
 |------|------|-------|---------|
+| `test_group_velocity.py` | ~350s | 52 | 344s E4 psi sweep (added Phase 36, not in original plan) |
 | `test_e4_cut_cell.py` | ~300s | 131 | 197s Groebner proof + 18 duplicate pipeline calls |
 | `test_phs.py` | ~27s | 131 | ~30,000 eigenvalue decomps in parameter sweeps |
 | Everything else | ~7s | 265 | Fine |
@@ -122,6 +123,15 @@ Each slow sweep class should have a fast regression equivalent that verifies the
   - Already skipped in CLAUDE.md, formalize with marker.
   - File: `scripts/stencil_gen/tests/test_e4_cut_cell.py`
 
+### 37.4d — Mark slow tests in `test_group_velocity.py`
+
+This file was added in Phase 36 (after the original plan) and contains a 344-second psi sweep that was not marked slow.
+
+- [ ] **37.4d** Mark `TestPsiSweepGroupVelocity::test_e4_1_psi_sweep` as `@pytest.mark.slow`:
+  - This 344-second E4_1 psi sweep (11 psi values × 500 xi points, each requiring symbolic stencil derivation) is a research exploration, not a regression check. The E2 sweep in the same class is fast (~1s) and provides adequate default coverage.
+  - File: `scripts/stencil_gen/tests/test_group_velocity.py`
+  - Test: `cd scripts/stencil_gen && uv run pytest tests/test_group_velocity.py -x -q`
+
 ### 37.5 — Cache expensive derivations in `test_e4_cut_cell.py`
 
 - [ ] **37.5a** Add module-scoped fixtures for repeated `derive_uniform_boundary_for_temo(E4_1)` calls:
@@ -171,6 +181,7 @@ Each slow sweep class should have a fast regression equivalent that verifies the
 37.2a-b (mark sweep classes) — independent of 37.3, can do in parallel
 37.3a-d (fast replacements) — can start after 37.1a
 37.4a-c (mark e4 slow tests) — independent of 37.2-37.3
+37.4d (mark group velocity slow test) — independent of 37.2-37.3, blocks 37.7a
 37.5a-b (cache derivations) — independent of 37.2-37.4
 37.6a (update docs) — do after 37.2-37.5 are done
 37.7a (verify timing) — do last
