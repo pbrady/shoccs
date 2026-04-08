@@ -222,4 +222,4 @@ After marking proofs slow (~79s saved), remaining non-slow time is ~25s. The nex
 - [x] `uv run pytest tests/ -x -q --run-slow` still runs all research sweeps (no tests deleted).
 - [x] Fast regression tests verify all known-good values that the slow sweeps originally discovered.
 - [x] No production/research sweep runs during default CI testing.
-- [ ] All existing tests still pass when `--run-slow` is used. (Not verified in this phase — requires ~6 min run.)
+- [x] All existing tests still pass when `--run-slow` is used. Verified: 579 passed, 1 xfailed in 1192s (~20 min).
