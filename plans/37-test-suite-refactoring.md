@@ -205,8 +205,8 @@ After marking proofs slow (~79s saved), remaining non-slow time is ~25s. The nex
 37.2a-b (mark PHS sweep classes) — done
 37.3a-d (fast PHS replacements) — done
 37.4a-d (mark e4/group-velocity slow tests) — done
-37.5a-c (mark conservation proofs slow) — next, saves ~79s
-37.6a-c (cache derivation fixtures) — after 37.5, saves ~5-10s
+37.5a-c (mark conservation proofs slow) — done
+37.6a-c (cache derivation fixtures) — next, saves ~5-10s
 37.7a (update docs) — do after 37.5-37.6 are done
 37.8a (verify timing) — do last
 ```
