@@ -5898,3 +5898,263 @@ class TestCorrectedComparison:
                     f"{label} PHS k=2 n={n}: expected stable, "
                     f"got stab_eig={se:.6e}"
                 )
+
+
+# ---------------------------------------------------------------------------
+# 37.3a: Fast regression tests for E2 stability (replaces swept classes)
+# ---------------------------------------------------------------------------
+
+
+class TestRegressionE2Stability:
+    """Fast regression spot-checks for E2 stability with known-good parameters.
+
+    Replaces the dense sweeps in TestCorrectedSweepE2, TestCorrectedTensionE2,
+    TestTensionOptimalSigma (E2 part), and TestTensionConservationE2 with
+    O(1) eigendecompositions at known-good parameter values.
+
+    E2_1 parameters: p=1, q=1, nextra=1, nu=1.
+    Key finding: E2 is universally stable under the corrected metric —
+    all tension sigmas and nearly all Gaussian epsilons are stable.
+    """
+
+    # E2_1 scheme parameters
+    P = 1
+    Q = 1
+    NEXTRA = 1
+    NU = 1
+
+    def test_e2_tension_optimal_sigma(self):
+        """E2_1 tension at σ=6.0 is stable (known-good from Phase 30.3b)."""
+        se = stability_eigenvalue(
+            40, p=self.P, q=self.Q, epsilon=6.0,
+            kernel="tension", nu=self.NU, nextra=self.NEXTRA,
+        )
+        assert se < STABILITY_TOL, (
+            f"E2_1 tension σ=6.0 n=40: expected stable, got {se:.6e}"
+        )
+
+    def test_e2_gaussian_optimal_epsilon(self):
+        """E2_1 Gaussian at ε=2.0 is stable (near optimal ε*≈1.83)."""
+        se = stability_eigenvalue(
+            40, p=self.P, q=self.Q, epsilon=2.0,
+            kernel="gaussian", nu=self.NU, nextra=self.NEXTRA,
+        )
+        assert se < STABILITY_TOL, (
+            f"E2_1 Gaussian ε=2.0 n=40: expected stable, got {se:.6e}"
+        )
+
+    def test_e2_stable_at_multiple_grid_sizes(self):
+        """E2_1 tension σ=6.0 and PHS k=2 (σ=0) are stable at n=20,40,80."""
+        for sigma, label in [(0.0, "PHS k=2"), (6.0, "tension σ=6.0")]:
+            for n in [20, 40, 80]:
+                se = stability_eigenvalue(
+                    n, p=self.P, q=self.Q, epsilon=sigma,
+                    kernel="tension", nu=self.NU, nextra=self.NEXTRA,
+                )
+                assert se < STABILITY_TOL, (
+                    f"E2_1 {label} n={n}: expected stable, got {se:.6e}"
+                )
+
+
+# ---------------------------------------------------------------------------
+# 37.3b: Fast regression tests for E4 stability (replaces swept classes)
+# ---------------------------------------------------------------------------
+
+
+class TestRegressionE4Stability:
+    """Fast regression spot-checks for E4 stability with known-good parameters.
+
+    Replaces the dense sweeps in TestCorrectedSweepE4, TestCorrectedTensionE4,
+    TestCorrectedTensionPenaltyE4, TestTensionSweepE4, TestTensionConservationE4,
+    and TestMixedEpsilon with O(1) eigendecompositions at known-good values.
+
+    E4_1 parameters: p=2, q=3, nextra=0, nu=1.
+    Key findings:
+    - PHS k=2 (σ=0) is the most stable E4 configuration.
+    - Tension σ=3.0 is stable at all grid sizes.
+    - Gaussian has a narrow stable band around ε≈0.9.
+    - Multiquadric has a broader stable region.
+    """
+
+    P = 2
+    Q = 3
+    NEXTRA = 0
+    NU = 1
+
+    def test_e4_tension_known_sigma(self):
+        """E4_1 tension at σ=3.0 is stable (known-good from Phase 32.1)."""
+        se = stability_eigenvalue(
+            40, p=self.P, q=self.Q, epsilon=3.0,
+            kernel="tension", nu=self.NU, nextra=self.NEXTRA,
+        )
+        assert se < STABILITY_TOL, (
+            f"E4_1 tension σ=3.0 n=40: expected stable, got {se:.6e}"
+        )
+
+    def test_e4_gaussian_known_epsilon(self):
+        """E4_1 Gaussian at ε=0.9 is stable (near optimal band center)."""
+        se = stability_eigenvalue(
+            40, p=self.P, q=self.Q, epsilon=0.9,
+            kernel="gaussian", nu=self.NU, nextra=self.NEXTRA,
+        )
+        assert se < STABILITY_TOL, (
+            f"E4_1 Gaussian ε=0.9 n=40: expected stable, got {se:.6e}"
+        )
+
+    def test_e4_multiquadric_known_epsilon(self):
+        """E4_1 multiquadric at ε=1.0 is stable (broad stable region)."""
+        se = stability_eigenvalue(
+            40, p=self.P, q=self.Q, epsilon=1.0,
+            kernel="multiquadric", nu=self.NU, nextra=self.NEXTRA,
+        )
+        assert se < STABILITY_TOL, (
+            f"E4_1 multiquadric ε=1.0 n=40: expected stable, got {se:.6e}"
+        )
+
+    def test_e4_stable_at_multiple_grid_sizes(self):
+        """E4_1 tension σ=3.0 and PHS k=2 (σ=0) are stable at n=20,40,80,160."""
+        for sigma, label in [(0.0, "PHS k=2"), (3.0, "tension σ=3.0")]:
+            for n in [20, 40, 80, 160]:
+                se = stability_eigenvalue(
+                    n, p=self.P, q=self.Q, epsilon=sigma,
+                    kernel="tension", nu=self.NU, nextra=self.NEXTRA,
+                )
+                assert se < STABILITY_TOL, (
+                    f"E4_1 {label} n={n}: expected stable, got {se:.6e}"
+                )
+
+    def test_e4_unstable_detected(self):
+        """Known-unstable E4_1 Gaussian at ε=0.1 should be detected."""
+        se = stability_eigenvalue(
+            20, p=self.P, q=self.Q, epsilon=0.1,
+            kernel="gaussian", nu=self.NU, nextra=self.NEXTRA,
+        )
+        assert se > STABILITY_TOL, (
+            f"E4_1 Gaussian ε=0.1 n=20: expected unstable, got {se:.6e}"
+        )
+
+
+# ---------------------------------------------------------------------------
+# 37.3c: Fast regression tests for footprint/nextra (replaces swept classes)
+# ---------------------------------------------------------------------------
+
+
+class TestRegressionFootprint:
+    """Fast regression spot-checks for E4 nextra stability.
+
+    Replaces the dense sweeps in TestCorrectedFootprint, TestFootprintE4Quick,
+    TestFootprintSweep, and TestFootprintPenalty with O(1) checks.
+
+    Key finding: E4 PHS k=2 (σ=0, nextra=0) is unconditionally stable.
+    Higher nextra values are also stable but not needed.
+    """
+
+    P = 2
+    Q = 3
+    NU = 1
+
+    def test_nextra0_phs_k2_grid_independence(self):
+        """E4 nextra=0, σ=0 (PHS k=2) is stable at n=20,40,80,160."""
+        for n in [20, 40, 80, 160]:
+            se = stability_eigenvalue(
+                n, p=self.P, q=self.Q, epsilon=0.0,
+                kernel="tension", nu=self.NU, nextra=0,
+            )
+            assert se < STABILITY_TOL, (
+                f"E4 PHS k=2 nextra=0 n={n}: expected stable, got {se:.6e}"
+            )
+
+    def test_nextra0_tension_sigma3(self):
+        """E4 nextra=0, tension σ=3.0 is stable at n=40."""
+        se = stability_eigenvalue(
+            40, p=self.P, q=self.Q, epsilon=3.0,
+            kernel="tension", nu=self.NU, nextra=0,
+        )
+        assert se < STABILITY_TOL, (
+            f"E4 nextra=0 tension σ=3.0 n=40: expected stable, got {se:.6e}"
+        )
+
+    def test_nextra1_has_stable_sigma(self):
+        """E4 nextra=1 has a stable σ (PHS k=2 at σ=0)."""
+        se = stability_eigenvalue(
+            40, p=self.P, q=self.Q, epsilon=0.0,
+            kernel="tension", nu=self.NU, nextra=1,
+        )
+        assert se < STABILITY_TOL, (
+            f"E4 nextra=1 PHS k=2 n=40: expected stable, got {se:.6e}"
+        )
+
+    def test_nextra2_has_stable_sigma(self):
+        """E4 nextra=2 has a stable σ (PHS k=2 at σ=0)."""
+        se = stability_eigenvalue(
+            40, p=self.P, q=self.Q, epsilon=0.0,
+            kernel="tension", nu=self.NU, nextra=2,
+        )
+        assert se < STABILITY_TOL, (
+            f"E4 nextra=2 PHS k=2 n=40: expected stable, got {se:.6e}"
+        )
+
+
+# ---------------------------------------------------------------------------
+# 37.3d: Fast regression tests for comparison table (replaces swept class)
+# ---------------------------------------------------------------------------
+
+
+class TestRegressionComparison:
+    """Fast regression spot-checks for the comprehensive comparison.
+
+    Replaces the dense sweeps in TestCorrectedComparison with spot-checks
+    at known-good parameter values for each method.
+
+    Key findings:
+    - E2_1 (p=1, q=1, nextra=1): all methods stable, broad stable region.
+    - E4_1 (p=2, q=3, nextra=0): all methods stable, PHS k=2 most stable.
+    """
+
+    def test_e2_all_methods_stable(self):
+        """E2_1: PHS k=2, Gaussian, tension, and multiquadric all stable at n=40."""
+        p, q, nextra, nu = 1, 1, 1, 1
+        configs = [
+            ("PHS k=2", "tension", 0.0),
+            ("Gaussian", "gaussian", 2.0),
+            ("tension", "tension", 6.0),
+            ("multiquadric", "multiquadric", 1.0),
+        ]
+        for label, kernel, eps in configs:
+            se = stability_eigenvalue(
+                40, p=p, q=q, epsilon=eps,
+                kernel=kernel, nu=nu, nextra=nextra,
+            )
+            assert se < STABILITY_TOL, (
+                f"E2_1 {label} n=40: expected stable, got {se:.6e}"
+            )
+
+    def test_e4_all_methods_stable(self):
+        """E4_1: PHS k=2, Gaussian, tension, and multiquadric all stable at n=40."""
+        p, q, nextra, nu = 2, 3, 0, 1
+        configs = [
+            ("PHS k=2", "tension", 0.0),
+            ("Gaussian", "gaussian", 0.9),
+            ("tension", "tension", 3.0),
+            ("multiquadric", "multiquadric", 1.0),
+        ]
+        for label, kernel, eps in configs:
+            se = stability_eigenvalue(
+                40, p=p, q=q, epsilon=eps,
+                kernel=kernel, nu=nu, nextra=nextra,
+            )
+            assert se < STABILITY_TOL, (
+                f"E4_1 {label} n=40: expected stable, got {se:.6e}"
+            )
+
+    def test_phs_k2_grid_convergence(self):
+        """PHS k=2 is stable at n=20,40,80,160 for both E2 and E4."""
+        for label, p, q, nextra in [("E2_1", 1, 1, 1), ("E4_1", 2, 3, 0)]:
+            for n in [20, 40, 80, 160]:
+                se = stability_eigenvalue(
+                    n, p=p, q=q, epsilon=0.0,
+                    kernel="tension", nu=1, nextra=nextra,
+                )
+                assert se < STABILITY_TOL, (
+                    f"{label} PHS k=2 n={n}: expected stable, got {se:.6e}"
+                )

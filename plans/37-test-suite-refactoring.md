@@ -83,25 +83,25 @@ The following test classes are parameter space explorations, not regression test
 
 Each slow sweep class should have a fast regression equivalent that verifies the known-good result with 1-3 spot checks instead of a 60-200 point sweep.
 
-- [ ] **37.3a** Add `TestRegressionE2Stability` (fast) to replace swept E2 stability verification:
+- [x] **37.3a** Add `TestRegressionE2Stability` (fast) to replace swept E2 stability verification:
   - Test `test_e2_tension_optimal_sigma` — verify `stability_eigenvalue(40, 1, 1, sigma_known, "tension", 1, 1) <= 0` for the known optimal sigma. One eigendecomp instead of 300.
   - Test `test_e2_gaussian_optimal_epsilon` — same for known Gaussian epsilon. One eigendecomp.
   - Test `test_e2_stable_at_multiple_grid_sizes` — verify stability at n=20,40,80 with known-good params. Three eigendecomps instead of 180.
   - File: `scripts/stencil_gen/tests/test_phs.py`
   - Test: `cd scripts/stencil_gen && uv run pytest tests/test_phs.py -x -q -k "TestRegressionE2"`
 
-- [ ] **37.3b** Add `TestRegressionE4Stability` (fast) — same pattern for E4:
+- [x] **37.3b** Add `TestRegressionE4Stability` (fast) — same pattern for E4:
   - Verify known-good tension sigma, Gaussian epsilon, and multiquadric epsilon each produce stability eigenvalue <= 0 at 2-3 grid sizes.
   - Total: ~10 eigendecomps instead of ~5,000.
   - File: `scripts/stencil_gen/tests/test_phs.py`
   - Test: `cd scripts/stencil_gen && uv run pytest tests/test_phs.py -x -q -k "TestRegressionE4"`
 
-- [ ] **37.3c** Add `TestRegressionFootprint` (fast) — verify known-good nextra/sigma/gamma values:
+- [x] **37.3c** Add `TestRegressionFootprint` (fast) — verify known-good nextra/sigma/gamma values:
   - One stability check per known-good (nextra, sigma, gamma) triple. ~5 eigendecomps instead of 4,000.
   - File: `scripts/stencil_gen/tests/test_phs.py`
   - Test: `cd scripts/stencil_gen && uv run pytest tests/test_phs.py -x -q -k "TestRegressionFootprint"`
 
-- [ ] **37.3d** Add `TestRegressionComparison` (fast) — verify comparison table values:
+- [x] **37.3d** Add `TestRegressionComparison` (fast) — verify comparison table values:
   - Hard-code the expected comparison table values and verify they still match. No sweeps needed.
   - File: `scripts/stencil_gen/tests/test_phs.py`
   - Test: `cd scripts/stencil_gen && uv run pytest tests/test_phs.py -x -q -k "TestRegressionComparison"`
