@@ -149,19 +149,22 @@ The regression tests in `test_phs.py` (`TestRegressionE2Stability`, etc.) then l
 
 ### 38.6 — Remove Extracted Sweep Tests
 
-- [ ] **38.6a** Remove Phase 29/30/31 slow test classes from `test_phs.py` (fully superseded by Phase 32 + now extracted):
+- [x] **38.6a** Remove Phase 29/30/31 slow test classes from `test_phs.py` (fully superseded by Phase 32 + now extracted):
   - Remove: `TestEpsilonSweepE2`, `TestEpsilonSweepE4`, `TestMixedEpsilon`, `TestStableEpsilonAlphas`, `TestComparisonTable`, `TestTensionSweepE2`, `TestTensionSweepE4`, `TestTensionOptimalSigma`, `TestTensionConservationE2`, `TestTensionConservationE4`, `TestTensionComparison`, `TestFootprintE4Quick`, `TestFootprintSweep`, `TestFootprintPenalty`, `TestCrossValidationE2`
   - Also remove `_EpsilonSweepBase` base class (only used by removed subclasses)
   - File: `scripts/stencil_gen/tests/test_phs.py`
   - Test: `cd scripts/stencil_gen && uv run pytest tests/test_phs.py -x -q`
+  - Verified: 82 passed, 23 skipped in 2.05s; ~2950 lines removed across 5 contiguous blocks
+  - Note: `_bisect_threshold` and `_dense_sweep_min` were inside a removed block and are gone too (38.6c is effectively done)
 
 - [ ] **38.6b** Remove Phase 32 slow test classes from `test_phs.py` (now extracted to sweep scripts):
   - Remove: `TestCorrectedSweepE2`, `TestCorrectedSweepE4`, `TestCorrectedTensionE2`, `TestCorrectedTensionE4`, `TestCorrectedTensionPenaltyE4`, `TestCorrectedFootprint`, `TestCorrectedComparison`
   - File: `scripts/stencil_gen/tests/test_phs.py`
   - Test: `cd scripts/stencil_gen && uv run pytest tests/test_phs.py -x -q`
 
-- [ ] **38.6c** Remove `_dense_sweep_min` and `_bisect_threshold` module-level helpers from `test_phs.py`:
-  - These are only used by slow classes (now removed). Move to `sweeps/_common.py` if the sweep scripts need them.
+- [x] **38.6c** Remove `_dense_sweep_min` and `_bisect_threshold` module-level helpers from `test_phs.py`:
+  - These were inside the TestTensionOptimalSigma block and were removed in 38.6a.
+  - The sweep scripts have their own implementations and don't need these.
   - File: `scripts/stencil_gen/tests/test_phs.py`
   - Test: `cd scripts/stencil_gen && uv run pytest tests/test_phs.py -x -q`
 
