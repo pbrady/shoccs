@@ -1251,3 +1251,126 @@ class Test2DGroupVelocity:
                 result.angle_error, 0.0, atol=tols[p],
                 err_msg=f"E{2*p} angle error should be ~0 at xi_mag=0.1",
             )
+
+    def test_axis_aligned_reduces_to_1d(self):
+        """For theta=0 (wave along x-axis), 2D group velocity reduces to 1D."""
+        xi = np.linspace(0.01, np.pi - 0.01, self.N_XI)
+        eta = np.linspace(0.01, np.pi - 0.01, self.N_XI)
+
+        kx = self._e2_kappa_star(xi)
+        ky = self._e2_kappa_star(eta)
+
+        # Advection purely in x: a=1, b=0
+        result = group_velocity_2d(kx, ky, xi, eta, a=1.0, b=0.0)
+
+        # C_x should match 1D group velocity cos(xi) for E2
+        C_x_expected = np.cos(xi)
+        np.testing.assert_allclose(
+            result.C_x[:, len(eta) // 2], C_x_expected, atol=1e-3,
+            err_msg="C_x should match 1D group velocity when b=0",
+        )
+
+        # C_y should be 0 everywhere since b=0
+        np.testing.assert_allclose(
+            result.C_y, 0.0, atol=1e-15,
+            err_msg="C_y should be 0 for axis-aligned propagation (b=0)",
+        )
+
+        # Speed should equal |C_x| = |cos(xi)|
+        np.testing.assert_allclose(
+            result.speed[:, len(eta) // 2], np.abs(C_x_expected), atol=1e-3,
+            err_msg="Speed should reduce to |C_x| = 1D speed when b=0",
+        )
+
+    def test_diagonal_propagation(self):
+        """For theta=pi/4 (diagonal), C_x = C_y by symmetry."""
+        # Use the anisotropy_profile which parameterizes by propagation angle
+        theta = np.array([np.pi / 4])
+        xi_mag = 1.0
+
+        result = anisotropy_profile(p=1, nu=1, theta_array=theta, xi_mag=xi_mag)
+
+        # At theta = pi/4: cos(theta) = sin(theta), and the 1D wavenumber
+        # components are equal, so C_x == C_y
+        np.testing.assert_allclose(
+            result.C_x, result.C_y, atol=1e-14,
+            err_msg="C_x should equal C_y at theta=pi/4 by symmetry",
+        )
+
+        # Group propagation angle should be exactly pi/4
+        np.testing.assert_allclose(
+            result.angle, np.pi / 4, atol=1e-14,
+            err_msg="Group angle should be pi/4 for diagonal propagation",
+        )
+
+    def test_anisotropy_e4_reduced(self):
+        """E4 has less grid anisotropy than E2 at the same wavenumber."""
+        theta = np.linspace(0.01, np.pi / 2 - 0.01, 200)
+        xi_mag = 1.0
+
+        result_e2 = anisotropy_profile(p=1, nu=1, theta_array=theta, xi_mag=xi_mag)
+        result_e4 = anisotropy_profile(p=2, nu=1, theta_array=theta, xi_mag=xi_mag)
+
+        # Measure anisotropy as max-min speed variation over theta
+        aniso_e2 = np.max(result_e2.speed) - np.min(result_e2.speed)
+        aniso_e4 = np.max(result_e4.speed) - np.min(result_e4.speed)
+
+        assert aniso_e4 < aniso_e2, (
+            f"E4 anisotropy ({aniso_e4:.6f}) should be less than "
+            f"E2 anisotropy ({aniso_e2:.6f})"
+        )
+
+        # Also check angle deviation is reduced
+        max_angle_err_e2 = np.max(np.abs(result_e2.angle_error))
+        max_angle_err_e4 = np.max(np.abs(result_e4.angle_error))
+
+        assert max_angle_err_e4 < max_angle_err_e2, (
+            f"E4 angle error ({max_angle_err_e4:.6f}) should be less than "
+            f"E2 angle error ({max_angle_err_e2:.6f})"
+        )
+
+    def test_angle_deviation_bounded(self):
+        """Group propagation angle deviation < 5 degrees for well-resolved waves.
+
+        At xi_mag = 0.7 (~9 points per wavelength), E2 has ~4 deg deviation
+        while E4 and E6 have much less.  All are bounded below 5 degrees.
+        """
+        theta = np.linspace(0.05, np.pi / 2 - 0.05, 200)
+        xi_mag = 0.7  # ~9 points per wavelength
+
+        for p in [1, 2, 3]:  # E2, E4, E6
+            result = anisotropy_profile(
+                p=p, nu=1, theta_array=theta, xi_mag=xi_mag,
+            )
+
+            max_deviation_rad = np.max(np.abs(result.angle_error))
+            max_deviation_deg = np.degrees(max_deviation_rad)
+
+            assert max_deviation_deg < 5.0, (
+                f"E{2*p} angle deviation ({max_deviation_deg:.2f} deg) "
+                f"exceeds 5 deg bound at xi_mag={xi_mag}"
+            )
+
+    def test_trefethen_eq_4_8a(self):
+        """For E2, group speed matches the leading-order expansion.
+
+        The tensor-product E2 group speed in 2D satisfies:
+            |C| ~ 1 - |xi|^2 * (3 + cos(4*theta)) / 8
+        to leading order in |xi|.  This is verified by Taylor-expanding
+        cos(|xi|*cos(theta)) and cos(|xi|*sin(theta)) through the
+        group velocity formula.
+        """
+        theta = np.linspace(0.05, np.pi / 2 - 0.05, 200)
+        xi_mag = 0.15  # small enough for leading-order accuracy
+
+        result = anisotropy_profile(p=1, nu=1, theta_array=theta, xi_mag=xi_mag)
+
+        # Analytical prediction: |C| ~ 1 - xi^2*(3+cos(4*theta))/8
+        predicted = 1 - xi_mag**2 * (3 + np.cos(4 * theta)) / 8
+
+        # At xi=0.15, the next-order term is O(xi^4) ~ 5e-5.
+        # The leading-order formula should match to ~1e-4.
+        np.testing.assert_allclose(
+            result.speed, predicted, atol=1e-4,
+            err_msg="E2 group speed should match leading-order expansion",
+        )
