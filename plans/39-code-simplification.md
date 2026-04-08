@@ -69,7 +69,7 @@ cd scripts/stencil_gen && uv run pytest tests/test_phs.py -x -q -k "TestRegressi
   - File: `scripts/stencil_gen/stencil_gen/group_velocity.py`
   - Test: `cd scripts/stencil_gen && uv run pytest tests/test_group_velocity.py -x -q -k "TestCore"`
 
-- [ ] **39.3b** Merge `_build_profile` and `_build_profile_nonuniform` into one function:
+- [x] **39.3b** Merge `_build_profile` and `_build_profile_nonuniform` into one function:
   - Both have identical cutoff scan logic (7 lines copy-pasted). The only difference is how kstar and C are computed.
   - New signature: `_build_profile(weights, offsets, xi_array, order)` using the nonuniform path.
   - Update callers to pass `np.asarray(nodes) - i_eval` as offsets.

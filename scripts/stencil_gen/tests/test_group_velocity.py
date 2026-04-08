@@ -309,7 +309,7 @@ class TestBoundaryGroupVelocity:
         nodes = [0, 1, 2, 3, 4]
         xi = np.linspace(0, np.pi, 2000)
 
-        profile = _build_profile(weights, 0, nodes, xi, order=1)
+        profile = _build_profile(weights, np.asarray(nodes), xi, order=1)
         C = profile.group_velocity
 
         # Verify oscillation: C has a transient dip below zero AND
@@ -712,13 +712,13 @@ class TestCutCellGroupVelocity:
         B_u = ur.B_u
         u_alpha_vals = {s: 0 for s in ur.alpha_symbols}
         t = B_u.cols
-        nodes = list(range(t))
+        nodes = np.arange(t)
 
         for i in range(B_u.rows):
             w_uni = [float(B_u[i, j].xreplace(u_alpha_vals))
                      if hasattr(B_u[i, j], 'xreplace') else float(B_u[i, j])
                      for j in range(t)]
-            uni_prof = _build_profile(w_uni, i, nodes, xi, order=scheme.q)
+            uni_prof = _build_profile(w_uni, nodes - i, xi, order=scheme.q)
             max_diff = np.max(np.abs(
                 cc_profiles[i].group_velocity - uni_prof.group_velocity
             ))

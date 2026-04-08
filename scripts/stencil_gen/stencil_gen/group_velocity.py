@@ -482,55 +482,19 @@ def boundary_group_velocity_2d(
 
 def _build_profile(
     weights,
-    i_eval: int,
-    node_indices,
+    offsets,
     xi_array: np.ndarray,
     order: int,
 ) -> GroupVelocityProfile:
-    """Build a GroupVelocityProfile from stencil weights."""
-    w = list(weights)
-    nodes = list(node_indices)
-
-    kstar = modified_wavenumber(w, i_eval, nodes, xi_array)
-    C = group_velocity_exact(w, i_eval, nodes, xi_array)
+    """Build a GroupVelocityProfile from stencil weights and node offsets."""
+    kstar = modified_wavenumber_nonuniform(weights, offsets, xi_array)
+    C = group_velocity_exact_nonuniform(weights, offsets, xi_array)
     c = phase_velocity(kstar, xi_array)
     gv_err = group_velocity_error(C)
 
     # Find cutoff: first xi beyond which C stays non-positive.
     # Scan from high end to handle non-monotonic boundary stencils where
     # C(xi) may dip below zero briefly then recover.
-    last_positive_idx = 0
-    for idx in range(1, len(xi_array)):
-        if C[idx] > 0.0:
-            last_positive_idx = idx
-    if last_positive_idx + 1 < len(xi_array):
-        cutoff = float(xi_array[last_positive_idx + 1])
-    else:
-        cutoff = float(xi_array[-1])
-
-    return GroupVelocityProfile(
-        xi=xi_array,
-        kappa_star=kstar,
-        phase_velocity=c,
-        group_velocity=C,
-        gv_error=gv_err,
-        order=order,
-        cutoff_xi=cutoff,
-    )
-
-
-def _build_profile_nonuniform(
-    weights,
-    offsets,
-    xi_array: np.ndarray,
-    order: int,
-) -> GroupVelocityProfile:
-    """Build a GroupVelocityProfile from stencil weights with non-uniform offsets."""
-    kstar = modified_wavenumber_nonuniform(weights, offsets, xi_array)
-    C = group_velocity_exact_nonuniform(weights, offsets, xi_array)
-    c = phase_velocity(kstar, xi_array)
-    gv_err = group_velocity_error(C)
-
     last_positive_idx = 0
     for idx in range(1, len(xi_array)):
         if C[idx] > 0.0:
@@ -577,7 +541,7 @@ def interior_group_velocity(
     w = [float(c) for c in full_gamma_array(coeffs)]
     nodes = list(range(-p, p + 1))
 
-    return _build_profile(w, 0, nodes, xi_array, order=2 * p)
+    return _build_profile(w, np.asarray(nodes), xi_array, order=2 * p)
 
 
 def boundary_group_velocity(
@@ -620,13 +584,13 @@ def boundary_group_velocity(
 
     dims = compute_dimensions(p, q, 0, nextra, nu)
     r, t = dims.r, dims.t
-    nodes = list(range(t))
+    nodes = np.arange(t)
 
     profiles: dict[int, GroupVelocityProfile] = {}
     for i in range(r):
         w = uniform_boundary_weights_rbf(i, t, nu, q, sigma, kernel=kernel)
         w_float = [float(c) for c in w]
-        profiles[i] = _build_profile(w_float, i, nodes, xi_array, order=q)
+        profiles[i] = _build_profile(w_float, nodes - i, xi_array, order=q)
 
     return profiles
 
@@ -662,7 +626,7 @@ def boundary_group_velocity_classical(
         Keyed by boundary row index.
     """
     t = len(boundary_rows[0].coefficients)
-    nodes = list(range(t))
+    nodes = np.arange(t)
 
     profiles: dict[int, GroupVelocityProfile] = {}
     for row in boundary_rows:
@@ -670,7 +634,7 @@ def boundary_group_velocity_classical(
         w_float = [float(c.xreplace(alpha_values))
                    if hasattr(c, 'xreplace') else float(c)
                    for c in row.coefficients]
-        profiles[i] = _build_profile(w_float, i, nodes, xi_array, order=order)
+        profiles[i] = _build_profile(w_float, nodes - i, xi_array, order=order)
 
     return profiles
 
@@ -731,7 +695,7 @@ def cut_cell_group_velocity(
         # Non-uniform offsets: wall at -(psi_val + i), grid points at j - i
         offsets = [-(psi_val + i)] + [j - i for j in range(T - 1)]
 
-        profiles[i] = _build_profile_nonuniform(w, offsets, xi_array, order=order)
+        profiles[i] = _build_profile(w, offsets, xi_array, order=order)
 
     return profiles
 
