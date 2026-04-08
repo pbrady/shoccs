@@ -90,7 +90,7 @@ The regression tests in `test_phs.py` (`TestRegressionE2Stability`, etc.) then l
   - File: `scripts/stencil_gen/sweeps/epsilon_sweep.py`
   - Test: `cd scripts/stencil_gen && uv run python -m sweeps.epsilon_sweep --scheme E2 --kernel gaussian --n-eps 10` (quick smoke test with few points)
 
-- [ ] **38.2a-fix** Wire `--update-known-values` through the `__main__.py` dispatcher for the `epsilon` subcommand:
+- [x] **38.2a-fix** Wire `--update-known-values` through the `__main__.py` dispatcher for the `epsilon` subcommand:
   - Add `sub_eps.add_argument("--update-known-values", action="store_true")` to the epsilon subparser.
   - Pass `*(["--update-known-values"] if args.update_known_values else [])` in the dispatch call to `eps_main`.
   - Apply the same pattern to each future sweep subcommand as it is wired in.
