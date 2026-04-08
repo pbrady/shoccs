@@ -85,11 +85,17 @@ The codebase was migrated from range-v3 to Kokkos. The `plans/` directory contai
 The `scripts/stencil_gen/` directory contains a SymPy-based pipeline for deriving finite difference stencil coefficients symbolically. Managed by `uv`.
 
 ```bash
-# Run stencil_gen tests (from repo root; slow research sweeps are skipped by default)
+# Run stencil_gen tests (from repo root)
 cd scripts/stencil_gen && SYMPY_CACHE_SIZE=50000 uv run pytest tests/ -x -q
 
-# Run all tests including slow research sweeps and proofs
-cd scripts/stencil_gen && SYMPY_CACHE_SIZE=50000 uv run pytest tests/ -x -q --run-slow
+# Run a specific sweep (epsilon, tension, tension-penalty, footprint, comparison, alpha, mixed-epsilon)
+cd scripts/stencil_gen && uv run python -m sweeps epsilon --scheme E2
+
+# Run all sweeps with reduced resolution for quick verification
+cd scripts/stencil_gen && uv run python -m sweeps all --quick
+
+# Run all sweeps at full resolution and update known values
+cd scripts/stencil_gen && uv run python -m sweeps all
 ```
 
 - **SYMPY_CACHE_SIZE=50000** is essential for performance — default 1000 causes severe slowdowns with large symbolic expressions.
@@ -97,3 +103,4 @@ cd scripts/stencil_gen && SYMPY_CACHE_SIZE=50000 uv run pytest tests/ -x -q --ru
 - Reference Mathematica code in `mathematica-files/finitedifferences/` (`taylor.wl` for functions, `explicitr-E4d1.nb.pdf` for workflow).
 - Key entry points: `derive_cut_cell_mathematica()` (singularity-free), `derive_cut_cell_scheme()` (legacy with psi-clamping).
 - Generated C++ goes to `scripts/stencil_gen/output/` and replaces files in `src/stencils/`.
+- **Sweep workflow:** Parameter-space explorations live in `scripts/stencil_gen/sweeps/` as standalone scripts. Sweeps discover optimal parameters and write results to `sweeps/known_values.json`. Regression tests in `test_phs.py` load from `known_values.json` to verify stability at those values. To update known values after a sweep: `uv run python -m sweeps epsilon --scheme E2 --update-known-values`.

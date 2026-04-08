@@ -140,7 +140,81 @@ def main() -> int:
 
         return alpha_main(["--scheme", args.scheme])
 
-    print(f"sweeps: command '{args.command}' recognized (implementation pending)")
+    if args.command == "all":
+        return _run_all(quick=args.quick)
+
+    print(f"sweeps: command '{args.command}' not recognized")
+    return 1
+
+
+def _run_all(*, quick: bool) -> int:
+    """Run all sweeps sequentially. --quick reduces resolution for fast verification."""
+    from .alpha_extraction import main as alpha_main
+    from .comparison import main as comp_main
+    from .epsilon_sweep import main as eps_main
+    from .footprint_sweep import main as fp_main
+    from .mixed_epsilon_sweep import main as mixed_main
+    from .tension_penalty_sweep import main as tp_main
+    from .tension_sweep import main as tension_main
+
+    quick_n_eps = "10" if quick else "60"
+    quick_n_sigma = "10" if quick else "61"
+    quick_n_gamma = "5" if quick else "25"
+    quick_n_values = "20,40" if quick else "20,40,80"
+    quick_mixed_n_eps = "5" if quick else "20"
+    quick_fp_n_sigma = "10" if quick else "20"
+    quick_fp_n_gamma = "10" if quick else "20"
+    quick_tp_n_sigma = "5" if quick else "25"
+
+    sweeps: list[tuple[str, callable, list[str]]] = [
+        ("Epsilon sweep E2 (gaussian)", eps_main,
+         ["--scheme", "E2", "--kernel", "gaussian", "--n-eps", quick_n_eps, "--n-values", quick_n_values]),
+        ("Epsilon sweep E4 (gaussian)", eps_main,
+         ["--scheme", "E4", "--kernel", "gaussian", "--n-eps", quick_n_eps, "--n-values", quick_n_values]),
+        ("Epsilon sweep E2 (multiquadric)", eps_main,
+         ["--scheme", "E2", "--kernel", "multiquadric", "--n-eps", quick_n_eps, "--n-values", quick_n_values]),
+        ("Epsilon sweep E4 (multiquadric)", eps_main,
+         ["--scheme", "E4", "--kernel", "multiquadric", "--n-eps", quick_n_eps, "--n-values", quick_n_values]),
+        ("Mixed epsilon sweep E4", mixed_main,
+         ["--scheme", "E4", "--n-eps", quick_mixed_n_eps]),
+        ("Tension sweep E2", tension_main,
+         ["--scheme", "E2", "--n-sigma", quick_n_sigma, "--n-values", quick_n_values]),
+        ("Tension sweep E4", tension_main,
+         ["--scheme", "E4", "--n-sigma", quick_n_sigma, "--n-values", quick_n_values]),
+        ("Tension-penalty sweep E2", tp_main,
+         ["--scheme", "E2", "--n-sigma", quick_tp_n_sigma, "--n-gamma", quick_n_gamma]),
+        ("Tension-penalty sweep E4", tp_main,
+         ["--scheme", "E4", "--n-sigma", quick_tp_n_sigma, "--n-gamma", quick_n_gamma]),
+        ("Footprint sweep", fp_main,
+         ["--n-sigma", quick_fp_n_sigma, "--n-gamma", quick_fp_n_gamma]),
+        ("Comparison (all schemes)", comp_main,
+         ["--n-values", quick_n_values]),
+        ("Alpha extraction E2", alpha_main, ["--scheme", "E2"]),
+    ]
+
+    failures: list[str] = []
+    for label, fn, argv in sweeps:
+        print(f"\n{'=' * 60}")
+        print(f"  {label}")
+        print(f"{'=' * 60}\n")
+        try:
+            rc = fn(argv)
+            if rc != 0:
+                print(f"\n*** {label} returned exit code {rc}")
+                failures.append(label)
+        except Exception as exc:
+            print(f"\n*** {label} failed: {exc}")
+            failures.append(label)
+
+    print(f"\n{'=' * 60}")
+    if failures:
+        print(f"  {len(failures)} sweep(s) failed:")
+        for f in failures:
+            print(f"    - {f}")
+        print(f"{'=' * 60}")
+        return 1
+    print(f"  All {len(sweeps)} sweeps completed successfully")
+    print(f"{'=' * 60}")
     return 0
 
 

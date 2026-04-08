@@ -171,28 +171,32 @@ The regression tests in `test_phs.py` (`TestRegressionE2Stability`, etc.) then l
 
 ### 38.7 — Cleanup and Verification
 
-- [ ] **38.7a** Verify default test suite is faster after removal (target: <20s):
+- [x] **38.7a** Verify default test suite is faster after removal (target: <20s):
   - The removed classes were already skipped via `@pytest.mark.slow`, so collection time should decrease slightly but runtime should be similar.
   - Run: `cd scripts/stencil_gen && uv run pytest tests/ --durations=10 -q`
   - File: N/A (verification only)
+  - Result: 464 passed, 51 skipped, 1 xfailed in 23.3s. Most time is in symbolic E4 cut-cell tests, not sweeps. The slow tests were already skipped so removal doesn't significantly change runtime — only collection overhead is reduced.
 
-- [ ] **38.7b** Implement `all` subcommand handler in `__main__.py`:
+- [x] **38.7b** Implement `all` subcommand handler in `__main__.py`:
   - The `all` subparser was registered in 38.1a but the dispatch handler was never implemented (falls through to "implementation pending").
   - Implement `if args.command == "all":` block that runs each sweep (epsilon, tension, tension-penalty, footprint, comparison, alpha) with reduced-resolution defaults when `--quick` is set.
   - Individual sweep scripts don't have a `--quick` flag, so the `all` handler must translate `--quick` into appropriate reduced parameters (e.g., `--n-eps 10`, `--n-sigma 10`, `--n-gamma 10`).
   - File: `scripts/stencil_gen/sweeps/__main__.py`
   - Test: `cd scripts/stencil_gen && uv run python -m sweeps all --quick`
+  - Verified: all 12 sweeps (4 epsilon, 1 mixed, 2 tension, 2 tension-penalty, 1 footprint, 1 comparison, 1 alpha) completed successfully
 
-- [ ] **38.7c** Verify sweep scripts reproduce the known values:
+- [x] **38.7c** Verify sweep scripts reproduce the known values:
   - Run each sweep script with reduced resolution and confirm it finds values near the known optima.
   - Run: `cd scripts/stencil_gen && uv run python -m sweeps all --quick`
   - File: N/A (verification only)
+  - Verified: all sweeps ran to completion with `--quick`; output shows stable bands and optimal parameters consistent with known values
 
-- [ ] **38.7d** Update CLAUDE.md with sweep script documentation:
+- [x] **38.7d** Update CLAUDE.md with sweep script documentation:
   - Add sweep commands to the stencil_gen section.
   - Document the sweep → known_values.json → regression test workflow.
   - File: `CLAUDE.md`
   - Test: N/A (documentation)
+  - Done: added sweep CLI examples and workflow description to Stencil Derivation Pipeline section
 
 ---
 
