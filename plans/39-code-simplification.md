@@ -63,7 +63,7 @@ cd scripts/stencil_gen && uv run pytest tests/test_phs.py -x -q -k "TestRegressi
 
 ### 39.3 — Merge near-duplicate functions in `group_velocity.py`
 
-- [ ] **39.3a** Make `modified_wavenumber` delegate to `modified_wavenumber_nonuniform`:
+- [x] **39.3a** Make `modified_wavenumber` delegate to `modified_wavenumber_nonuniform`:
   - The uniform version just computes `offsets = node_indices - i_eval` then does the same `exp(1j * outer) @ w`. Make it a one-line delegate.
   - Same for `group_velocity_exact` → delegate to `group_velocity_exact_nonuniform`.
   - File: `scripts/stencil_gen/stencil_gen/group_velocity.py`

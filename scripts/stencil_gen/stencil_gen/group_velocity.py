@@ -40,10 +40,8 @@ def modified_wavenumber(
     np.ndarray (complex)
         kappa*(xi) = sum_j w_j exp(i (j - i_eval) xi)
     """
-    w = np.asarray(weights, dtype=complex)
     offsets = np.asarray(node_indices) - i_eval
-    phase = np.exp(1j * np.outer(xi_array, offsets))
-    return phase @ w
+    return modified_wavenumber_nonuniform(weights, offsets, xi_array)
 
 
 def group_velocity(kappa_star: np.ndarray, xi_array: np.ndarray) -> np.ndarray:
@@ -94,12 +92,8 @@ def group_velocity_exact(
     np.ndarray (real)
         Group velocity C(xi).
     """
-    w = np.asarray(weights, dtype=complex)
     offsets = np.asarray(node_indices) - i_eval
-    phase = np.exp(1j * np.outer(xi_array, offsets))
-    # d(kappa*)/d(xi) = sum_j w_j * i*(j-i_eval) * exp(i*(j-i_eval)*xi)
-    # C = d(Im(kappa*))/d(xi) = Re(sum_j w_j * (j-i_eval) * exp(...))
-    return np.real(phase @ (w * offsets))
+    return group_velocity_exact_nonuniform(weights, offsets, xi_array)
 
 
 def modified_wavenumber_nonuniform(
