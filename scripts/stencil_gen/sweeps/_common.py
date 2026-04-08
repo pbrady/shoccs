@@ -73,14 +73,48 @@ def save_known_values(data: dict) -> None:
         f.write("\n")
 
 
-def dense_sweep_min(f, params):
-    """Evaluate f at each param value, return (best_param, best_val, all_results).
+def print_sweep_table(
+    label: str,
+    results: dict[int, list[tuple[float, float]]],
+    *,
+    param_label: str = "param",
+) -> None:
+    """Print formatted sweep table with stability classification."""
+    print(f"\n{'='*72}")
+    print(f"  {label}")
+    print(f"{'='*72}")
+    for n, rows in sorted(results.items()):
+        print(f"\n  n = {n}")
+        print(f"  {param_label:>10s}  {'stab_eig':>14s}  {'status':>10s}")
+        print(f"  {'-'*10}  {'-'*14}  {'-'*10}")
+        for val, se in rows:
+            status = "STABLE" if se < STABILITY_TOL else "unstable"
+            print(f"  {val:10.4f}  {se:14.6e}  {status:>10s}")
 
-    Finds the parameter that minimizes f(param).
-    """
-    results = [(p, f(p)) for p in params]
-    best_param, best_val = min(results, key=lambda x: x[1])
-    return best_param, best_val, results
+    # Summary: best value per n
+    print(f"\n  --- Best {param_label} (min stability eigenvalue) ---")
+    for n, rows in sorted(results.items()):
+        best = min(rows, key=lambda r: r[1])
+        stable = "STABLE" if best[1] < STABILITY_TOL else "unstable"
+        print(f"  n={n:3d}: {param_label}={best[0]:.4f}, stab_eig={best[1]:.6e} [{stable}]")
+
+
+def report_stable_ranges(
+    results: dict[int, list[tuple[float, float]]],
+    *,
+    param_label: str = "param",
+) -> None:
+    """Print stable parameter ranges and counts per grid size."""
+    for n, rows in sorted(results.items()):
+        stable_vals = [v for v, se in rows if se < STABILITY_TOL]
+        n_stable = len(stable_vals)
+        if stable_vals:
+            print(f"  n={n}: {n_stable}/{len(rows)} stable, "
+                  f"{param_label} range [{min(stable_vals):.4f}, {max(stable_vals):.4f}]")
+        else:
+            best = min(rows, key=lambda r: r[1])
+            print(f"  n={n}: no stable {param_label} found, "
+                  f"best stab_eig={best[1]:.6e} at {param_label}={best[0]:.4f}")
 
 
 def bisect_threshold(f, a, b, threshold, *, tol=1e-4, maxiter=60):

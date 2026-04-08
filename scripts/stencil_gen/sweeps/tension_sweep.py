@@ -22,7 +22,14 @@ import numpy as np
 
 from stencil_gen.phs import stability_eigenvalue
 
-from ._common import SCHEME_PARAMS, STABILITY_TOL, load_known_values, save_known_values
+from ._common import (
+    SCHEME_PARAMS,
+    STABILITY_TOL,
+    load_known_values,
+    print_sweep_table,
+    report_stable_ranges,
+    save_known_values,
+)
 
 # Floating-point eigenvalue solvers return tiny positive real parts (~1e-14)
 # for genuinely stable operators.  Use this threshold to distinguish true
@@ -52,41 +59,6 @@ def sweep_stability(
             rows.append((float(sigma), se))
         results[n] = rows
     return results
-
-
-def print_sweep_table(label: str, results: dict[int, list[tuple[float, float]]]) -> None:
-    """Print formatted sweep table with stability classification."""
-    print(f"\n{'='*72}")
-    print(f"  {label}")
-    print(f"{'='*72}")
-    for n, rows in sorted(results.items()):
-        print(f"\n  n = {n}")
-        print(f"  {'sigma':>10s}  {'stab_eig':>14s}  {'status':>10s}")
-        print(f"  {'-'*10}  {'-'*14}  {'-'*10}")
-        for sigma, se in rows:
-            status = "STABLE" if se < STABILITY_TOL else "unstable"
-            print(f"  {sigma:10.4f}  {se:14.6e}  {status:>10s}")
-
-    # Summary: best sigma per n
-    print(f"\n  --- Best sigma (min stability eigenvalue) ---")
-    for n, rows in sorted(results.items()):
-        best = min(rows, key=lambda r: r[1])
-        stable = "STABLE" if best[1] < STABILITY_TOL else "unstable"
-        print(f"  n={n:3d}: sigma={best[0]:.4f}, stab_eig={best[1]:.6e} [{stable}]")
-
-
-def report_stable_ranges(results: dict[int, list[tuple[float, float]]]) -> None:
-    """Print stable sigma ranges and counts per grid size."""
-    for n, rows in sorted(results.items()):
-        stable_sigmas = [s for s, se in rows if se < STABILITY_TOL]
-        n_stable = len(stable_sigmas)
-        if stable_sigmas:
-            print(f"  n={n}: {n_stable}/{len(rows)} stable, "
-                  f"sigma range [{min(stable_sigmas):.4f}, {max(stable_sigmas):.4f}]")
-        else:
-            best = min(rows, key=lambda r: r[1])
-            print(f"  n={n}: no stable sigma found, "
-                  f"best stab_eig={best[1]:.6e} at sigma={best[0]:.4f}")
 
 
 def fine_sweep(
@@ -160,9 +132,10 @@ def run_tension_sweep(
     print_sweep_table(
         f"{label} Tension Spline — Stability Sweep (p={p}, q={q}, nextra={nextra})",
         results,
+        param_label="sigma",
     )
     print()
-    report_stable_ranges(results)
+    report_stable_ranges(results, param_label="sigma")
 
     # Fine sweep at n=40 (or largest available)
     n_fine_grid = 40 if 40 in n_values else max(n_values)

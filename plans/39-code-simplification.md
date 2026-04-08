@@ -122,11 +122,10 @@ cd scripts/stencil_gen && uv run pytest tests/test_phs.py -x -q -k "TestRegressi
   - File: `scripts/stencil_gen/sweeps/_common.py`, and all 6 sweep scripts
   - Test: `cd scripts/stencil_gen && uv run python -m sweeps epsilon --scheme E2 --n-eps 5` — verified OK
 
-- [ ] **39.5b** Extract shared `print_sweep_table` and `report_stable_ranges` to `_common.py`:
-  - Nearly identical between `epsilon_sweep.py` and `tension_sweep.py`. Parameterize with `param_label` argument.
-  - Remove or wire in the unused `dense_sweep_min` helper already in `_common.py`.
+- [x] **39.5b** Extract shared `print_sweep_table` and `report_stable_ranges` to `_common.py`:
+  - Moved both functions to `_common.py` with `param_label` keyword argument. Removed local copies from `epsilon_sweep.py` (passes `param_label="epsilon"`) and `tension_sweep.py` (passes `param_label="sigma"`). Removed unused `dense_sweep_min` helper.
   - File: `scripts/stencil_gen/sweeps/_common.py`, `sweeps/epsilon_sweep.py`, `sweeps/tension_sweep.py`
-  - Test: `cd scripts/stencil_gen && uv run python -m sweeps epsilon --scheme E2 --n-eps 5`
+  - Test: `cd scripts/stencil_gen && uv run python -m sweeps epsilon --scheme E2 --n-eps 5` — verified OK
 
 - [ ] **39.5c** Fix `callable` annotation in `__main__.py`:
   - Line 169: `callable` (lowercase builtin) → `Callable` from `collections.abc`.
