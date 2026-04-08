@@ -76,19 +76,19 @@ cd scripts/stencil_gen && uv run pytest tests/test_phs.py -x -q -k "TestRegressi
   - File: `scripts/stencil_gen/stencil_gen/group_velocity.py`
   - Test: `cd scripts/stencil_gen && uv run pytest tests/test_group_velocity.py -x -q`
 
-- [ ] **39.3c** Remove redundant `speed_ratio` field from `AnisotropyResult`:
+- [x] **39.3c** Remove redundant `speed_ratio` field from `AnisotropyResult`:
   - Always set to `speed` (exact speed = 1.0). The field is definitionally identical to `speed`.
   - Remove from dataclass, update the one test that asserts on it.
   - File: `scripts/stencil_gen/stencil_gen/group_velocity.py`, `scripts/stencil_gen/tests/test_group_velocity.py`
   - Test: `cd scripts/stencil_gen && uv run pytest tests/test_group_velocity.py -x -q -k "Test2D"`
 
-- [ ] **39.3d** Rename `group_velocity()` to `group_velocity_numerical()`:
+- [x] **39.3d** Rename `group_velocity()` to `group_velocity_numerical()`:
   - The numerical-diff version is strictly inferior to `group_velocity_exact()`. Rename to make the relationship explicit.
   - Update the one test that calls it (`test_numerical_vs_analytical_gradient`).
   - File: `scripts/stencil_gen/stencil_gen/group_velocity.py`, `scripts/stencil_gen/tests/test_group_velocity.py`
   - Test: `cd scripts/stencil_gen && uv run pytest tests/test_group_velocity.py -x -q -k "TestCore"`
 
-- [ ] **39.3e** Extract shared `AnisotropyResult` construction into `_make_anisotropy_result(theta, C_x, C_y)`:
+- [x] **39.3e** Extract shared `AnisotropyResult` construction into `_make_anisotropy_result(theta, C_x, C_y)`:
   - Duplicated in `anisotropy_profile()` and `boundary_group_velocity_2d()`.
   - File: `scripts/stencil_gen/stencil_gen/group_velocity.py`
   - Test: `cd scripts/stencil_gen && uv run pytest tests/test_group_velocity.py -x -q -k "Test2D"`

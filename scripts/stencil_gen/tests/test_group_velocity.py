@@ -15,7 +15,7 @@ from stencil_gen.group_velocity import (
     boundary_group_velocity_classical,
     cut_cell_group_velocity,
     gks_group_velocity_check,
-    group_velocity,
+    group_velocity_numerical,
     group_velocity_2d,
     group_velocity_error,
     group_velocity_exact,
@@ -62,14 +62,14 @@ class TestCoreGroupVelocity:
         )
 
     def test_numerical_vs_analytical_gradient(self):
-        """group_velocity() and group_velocity_exact() agree within numerical tolerance."""
+        """group_velocity_numerical() and group_velocity_exact() agree within numerical tolerance."""
         # Use E2 interior stencil: weights [-1/2, 0, 1/2]
         weights = [-0.5, 0.0, 0.5]
         nodes = [-1, 0, 1]
         xi = np.linspace(0.01, np.pi - 0.01, self.N_XI)
 
         kstar = modified_wavenumber(weights, 0, nodes, xi)
-        C_numerical = group_velocity(kstar, xi)
+        C_numerical = group_velocity_numerical(kstar, xi)
         C_analytical = group_velocity_exact(weights, 0, nodes, xi)
 
         # Numerical differentiation (2nd-order central diff) agrees to ~O(h^2)
@@ -1201,7 +1201,6 @@ class Test2DGroupVelocity:
         assert result.C_x.shape == theta.shape
         assert result.C_y.shape == theta.shape
         assert result.speed.shape == theta.shape
-        assert result.speed_ratio.shape == theta.shape
         assert result.angle.shape == theta.shape
         assert result.angle_error.shape == theta.shape
 
@@ -1214,9 +1213,6 @@ class Test2DGroupVelocity:
         # Verify speed is in (0, 1] for moderate xi_mag
         assert np.all(result.speed > 0), "Speed should be positive"
         assert np.all(result.speed <= 1.0 + 1e-10), "Speed should not exceed 1"
-
-        # speed_ratio should equal speed (exact speed = 1)
-        np.testing.assert_allclose(result.speed_ratio, result.speed)
 
         # Angle should roughly track theta (anisotropy causes deviation,
         # up to ~0.18 rad for E2 at xi_mag=1.0 -- that's the physical effect)
@@ -1250,7 +1246,7 @@ class Test2DGroupVelocity:
         for p in [1, 2, 3]:  # E2, E4, E6
             result = anisotropy_profile(p=p, nu=1, theta_array=theta, xi_mag=xi_mag)
             np.testing.assert_allclose(
-                result.speed_ratio, 1.0, atol=tols[p],
+                result.speed, 1.0, atol=tols[p],
                 err_msg=f"E{2*p} speed should be ~1 at xi_mag=0.1",
             )
             np.testing.assert_allclose(

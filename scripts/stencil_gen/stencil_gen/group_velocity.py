@@ -44,7 +44,7 @@ def modified_wavenumber(
     return modified_wavenumber_nonuniform(weights, offsets, xi_array)
 
 
-def group_velocity(kappa_star: np.ndarray, xi_array: np.ndarray) -> np.ndarray:
+def group_velocity_numerical(kappa_star: np.ndarray, xi_array: np.ndarray) -> np.ndarray:
     """Compute group velocity C(xi) = d(Im(kappa*))/d(xi) numerically.
 
     Uses numpy.gradient for the numerical differentiation.
@@ -244,10 +244,22 @@ class AnisotropyResult:
     theta: np.ndarray  # propagation angle array
     C_x: np.ndarray  # group velocity x-component
     C_y: np.ndarray  # group velocity y-component
-    speed: np.ndarray  # group speed |C|
-    speed_ratio: np.ndarray  # |C| / |C_exact| where |C_exact| = 1
+    speed: np.ndarray  # group speed |C| (equals speed ratio since exact speed = 1)
     angle: np.ndarray  # group propagation angle atan2(C_y, C_x)
     angle_error: np.ndarray  # angle deviation from propagation direction theta
+
+
+def _make_anisotropy_result(
+    theta: np.ndarray, C_x: np.ndarray, C_y: np.ndarray,
+) -> "AnisotropyResult":
+    """Construct AnisotropyResult from 2D group velocity components."""
+    speed = np.sqrt(C_x**2 + C_y**2)
+    angle = np.arctan2(C_y, C_x)
+    angle_error = angle - theta
+    return AnisotropyResult(
+        theta=theta, C_x=C_x, C_y=C_y,
+        speed=speed, angle=angle, angle_error=angle_error,
+    )
 
 
 @dataclass
@@ -395,20 +407,7 @@ def anisotropy_profile(
     C_x = np.cos(theta_array) * C_at_xi
     C_y = np.sin(theta_array) * C_at_eta
 
-    speed = np.sqrt(C_x**2 + C_y**2)
-    speed_ratio = speed  # exact speed = 1.0
-    angle = np.arctan2(C_y, C_x)
-    angle_error = angle - theta_array
-
-    return AnisotropyResult(
-        theta=theta_array,
-        C_x=C_x,
-        C_y=C_y,
-        speed=speed,
-        speed_ratio=speed_ratio,
-        angle=angle,
-        angle_error=angle_error,
-    )
+    return _make_anisotropy_result(theta_array, C_x, C_y)
 
 
 def boundary_group_velocity_2d(
@@ -462,20 +461,7 @@ def boundary_group_velocity_2d(
         C_x = np.cos(theta_array) * C_x_1d
         C_y = np.sin(theta_array) * C_y_1d
 
-        speed = np.sqrt(C_x**2 + C_y**2)
-        speed_ratio = speed  # exact speed = 1.0
-        angle = np.arctan2(C_y, C_x)
-        angle_error = angle - theta_array
-
-        results[row_idx] = AnisotropyResult(
-            theta=theta_array,
-            C_x=C_x,
-            C_y=C_y,
-            speed=speed,
-            speed_ratio=speed_ratio,
-            angle=angle,
-            angle_error=angle_error,
-        )
+        results[row_idx] = _make_anisotropy_result(theta_array, C_x, C_y)
 
     return results
 
