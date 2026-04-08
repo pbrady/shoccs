@@ -1064,6 +1064,7 @@ class TestModifiedWavenumber:
 
     # ---------------------------------------------- E2 boundary analysis
 
+    @pytest.mark.slow
     def test_e2_boundary_at_optimal_sigma(self):
         """Modified wavenumber profile of E2 boundary rows at optimal tension σ*.
 
@@ -1141,6 +1142,7 @@ class TestModifiedWavenumber:
 
     # ---------------------------------------------- E4 boundary analysis
 
+    @pytest.mark.slow
     def test_e4_boundary_at_optimal_sigma(self):
         """Modified wavenumber profile of E4 boundary rows at optimal tension σ*.
 
@@ -1224,6 +1226,7 @@ class TestModifiedWavenumber:
 
     # ---------------------------------------------- dispersion comparison
 
+    @pytest.mark.slow
     def test_dispersion_comparison(self):
         """Compare boundary vs interior dispersion for E2 and E4.
 
