@@ -50,6 +50,8 @@ def main() -> int:
 
     sub_comparison = subparsers.add_parser("comparison", help="Multi-method comparison table")
     sub_comparison.add_argument("--scheme", choices=["E2", "E4"], default=None)
+    sub_comparison.add_argument("--n-values", default="20,40,80", help="Comma-separated grid sizes")
+    sub_comparison.add_argument("--update-known-values", action="store_true", help="Update known_values.json")
 
     sub_alpha = subparsers.add_parser("alpha", help="Boundary alpha extraction at optimal epsilon")
     sub_alpha.add_argument("--scheme", choices=["E2", "E4"], required=True)
@@ -121,6 +123,15 @@ def main() -> int:
             "--n-gamma", str(args.n_gamma),
             "--sigma-max", str(args.sigma_max),
             "--nextra-values", args.nextra_values,
+            *(["--update-known-values"] if args.update_known_values else []),
+        ])
+
+    if args.command == "comparison":
+        from .comparison import main as comp_main
+
+        return comp_main([
+            *(["--scheme", args.scheme] if args.scheme else []),
+            "--n-values", args.n_values,
             *(["--update-known-values"] if args.update_known_values else []),
         ])
 

@@ -128,12 +128,13 @@ The regression tests in `test_phs.py` (`TestRegressionE2Stability`, etc.) then l
   - Test: `cd scripts/stencil_gen && uv run python -m sweeps.footprint_sweep --n-sigma 10`
   - Verified: 3 phases (nextra×sigma, penalty, grid independence); dispatcher wired with --update-known-values
 
-- [ ] **38.4b** Create `sweeps/comparison.py` — extract from `TestCorrectedComparison`, `TestComparisonTable`, `TestTensionComparison`, `TestTensionOptimalSigma`:
+- [x] **38.4b** Create `sweeps/comparison.py` — extract from `TestCorrectedComparison`, `TestComparisonTable`, `TestTensionComparison`, `TestTensionOptimalSigma`:
   - Functions: `run_comparison(schemes, methods, n_values)` — multi-method comparison at each scheme
   - Runs: find best epsilon (Gaussian, MQ), best sigma (tension), best (sigma,gamma), PHS k=2 baseline
   - Output: formatted comparison tables matching the paper's format
   - File: `scripts/stencil_gen/sweeps/comparison.py`
   - Test: `cd scripts/stencil_gen && uv run python -m sweeps.comparison --scheme E2`
+  - Verified: E2 all-methods comparison table with corrected metrics; dispatcher wired with --update-known-values and --n-values
 
 ### 38.5 — Alpha Extraction Script
 
