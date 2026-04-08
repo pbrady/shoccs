@@ -138,12 +138,14 @@ The regression tests in `test_phs.py` (`TestRegressionE2Stability`, etc.) then l
 
 ### 38.5 — Alpha Extraction Script
 
-- [ ] **38.5a** Create `sweeps/alpha_extraction.py` — extract from `TestStableEpsilonAlphas`:
+- [x] **38.5a** Create `sweeps/alpha_extraction.py` — extract from `TestStableEpsilonAlphas`:
   - Functions: `extract_alphas(scheme, kernel, epsilon)` — compute boundary stencil coefficients at optimal epsilon
   - Compares extracted alphas with production values from `src/operators/gradient.t.cpp`
   - Output: alpha values, conservation deficit, comparison with production
+  - Uses generic sympy linear solver for alpha extraction (works for any scheme)
   - File: `scripts/stencil_gen/sweeps/alpha_extraction.py`
   - Test: `cd scripts/stencil_gen && uv run python -m sweeps.alpha_extraction --scheme E2`
+  - Verified: E2 extracts alphas with row residuals ~1e-16; E4 runs but shows poor TEMO fit (expected — original test was E2-only); dispatcher wired
 
 ### 38.6 — Remove Extracted Sweep Tests
 

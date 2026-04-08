@@ -135,6 +135,11 @@ def main() -> int:
             *(["--update-known-values"] if args.update_known_values else []),
         ])
 
+    if args.command == "alpha":
+        from .alpha_extraction import main as alpha_main
+
+        return alpha_main(["--scheme", args.scheme])
+
     print(f"sweeps: command '{args.command}' recognized (implementation pending)")
     return 0
 
