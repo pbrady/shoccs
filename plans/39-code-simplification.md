@@ -135,8 +135,14 @@ cd scripts/stencil_gen && uv run pytest tests/test_phs.py -x -q -k "TestRegressi
 
 ### 39.6 — Final Timing Verification
 
-- [ ] **39.6a** Verify default test suite is under 15 seconds:
-  - After fixing the missed slow markers (39.1a), the 900+ eigendecomps in `TestModifiedWavenumber` will be skipped.
+- [ ] **39.6a** Mark slow tests in `test_e4_cut_cell.py` with `@pytest.mark.slow`:
+  - `test_e4_cut_cell.py` has 0 slow markers but dominates the default suite at ~26s (the rest runs in ~6s).
+  - All `TestDeriveCutCellScheme`, `TestE4CutCellSchemeWithZeros`, `TestE4CutCellConservationSolution`, `TestFractionFreeConservation`, and `TestE4TEMOConstruction` tests involve symbolic derivation and should be marked slow.
+  - File: `scripts/stencil_gen/tests/test_e4_cut_cell.py`
+  - Test: `cd scripts/stencil_gen && uv run pytest tests/ -x -q` (should drop to ~6s)
+
+- [ ] **39.6b** Verify default test suite is under 15 seconds:
+  - After 39.1a and 39.6a, both eigendecomp and symbolic-derivation tests will be skipped by default.
   - Run: `cd scripts/stencil_gen && uv run pytest tests/ --durations=10 -q`
   - File: N/A (verification only)
 
@@ -150,7 +156,8 @@ cd scripts/stencil_gen && uv run pytest tests/test_phs.py -x -q -k "TestRegressi
 39.3a-e (group_velocity merges) — independent of 39.1-39.2
 39.4a-d (test_group_velocity cleanup) — independent of 39.3
 39.5a-c (sweeps DRY) — independent of 39.1-39.4
-39.6a (timing verification) — do last
+39.6a (slow-mark test_e4_cut_cell) — before timing verification
+39.6b (timing verification) — do last
 ```
 
 ---
