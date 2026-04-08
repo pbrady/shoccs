@@ -869,6 +869,154 @@ def psi_sweep_group_velocity(
     )
 
 
+def local_group_velocity(
+    weights_func,
+    x: np.ndarray,
+    xi_array: np.ndarray,
+) -> np.ndarray:
+    """Compute local group velocity for a varying-coefficient problem.
+
+    For a varying-coefficient problem ``u_t + a(x)*u_x = 0``, the stencil
+    coefficients may be x-dependent (e.g., through ``a(x)`` scaling or
+    through ``psi(x)`` for cut cells).  At each grid point,
+    ``weights_func(x)`` returns the local stencil weights and offsets, and
+    the group velocity is computed from those.
+
+    Parameters
+    ----------
+    weights_func : callable
+        ``weights_func(x_val) -> (weights, offsets)`` where *weights* is a
+        1-D array of stencil coefficients and *offsets* is a 1-D array of
+        (possibly non-integer) grid offsets from the evaluation point.
+    x : np.ndarray
+        Grid point coordinates, shape ``(N_x,)``.
+    xi_array : np.ndarray
+        Wavenumber values xi in ``[0, pi]``, shape ``(N_xi,)``.
+
+    Returns
+    -------
+    np.ndarray, shape ``(N_x, N_xi)``
+        Local group velocity ``C[i_x, i_xi]`` at each grid point and
+        wavenumber.
+    """
+    N_x = len(x)
+    N_xi = len(xi_array)
+    C = np.empty((N_x, N_xi))
+
+    for i in range(N_x):
+        weights, offsets = weights_func(x[i])
+        C[i, :] = group_velocity_exact_nonuniform(weights, offsets, xi_array)
+
+    return C
+
+
+@dataclass
+class RayTraceResult:
+    """Trajectory of a ray traced through a group velocity field.
+
+    Attributes
+    ----------
+    t : np.ndarray
+        Time array, shape ``(N_t,)``.
+    x : np.ndarray
+        Position trajectory, shape ``(N_t,)``.
+    xi : np.ndarray
+        Wavenumber trajectory, shape ``(N_t,)``.
+    """
+
+    t: np.ndarray
+    x: np.ndarray
+    xi: np.ndarray
+
+
+def ray_trace_group_velocity(
+    C_field: np.ndarray,
+    x_grid: np.ndarray,
+    xi_array: np.ndarray,
+    xi_0: float,
+    x_0: float,
+    t_final: float,
+    dt: float,
+) -> RayTraceResult:
+    """Trace a ray through a spatially varying group velocity field.
+
+    Integrates the ray equations:
+
+    - ``dx/dt = C(x, xi)``   (group velocity)
+    - ``dxi/dt = -dC/dx``    (refraction; Trefethen 1982, Eq. 4.9b)
+
+    using classical RK4, with bilinear interpolation of the group velocity
+    field ``C_field`` (from :func:`local_group_velocity`).
+
+    Parameters
+    ----------
+    C_field : np.ndarray, shape ``(N_x, N_xi)``
+        Local group velocity field ``C[i_x, i_xi]``.
+    x_grid : np.ndarray, shape ``(N_x,)``
+        Grid point coordinates corresponding to axis 0 of *C_field*.
+    xi_array : np.ndarray, shape ``(N_xi,)``
+        Wavenumber values corresponding to axis 1 of *C_field*.
+    xi_0 : float
+        Initial wavenumber.
+    x_0 : float
+        Initial position.
+    t_final : float
+        Final integration time.
+    dt : float
+        Time step.
+
+    Returns
+    -------
+    RayTraceResult
+    """
+    from scipy.interpolate import RegularGridInterpolator
+
+    # Build interpolators for C and dC/dx
+    interp_C = RegularGridInterpolator(
+        (x_grid, xi_array), C_field, method="linear", bounds_error=False,
+        fill_value=None,
+    )
+
+    # dC/dx via finite differences along the x-axis
+    dCdx = np.gradient(C_field, x_grid, axis=0)
+    interp_dCdx = RegularGridInterpolator(
+        (x_grid, xi_array), dCdx, method="linear", bounds_error=False,
+        fill_value=None,
+    )
+
+    # RK4 integration
+    n_steps = max(1, int(np.ceil(t_final / dt)))
+    dt_actual = t_final / n_steps
+
+    t_arr = np.empty(n_steps + 1)
+    x_arr = np.empty(n_steps + 1)
+    xi_arr = np.empty(n_steps + 1)
+
+    t_arr[0] = 0.0
+    x_arr[0] = x_0
+    xi_arr[0] = xi_0
+
+    def rhs(x_val, xi_val):
+        pt = np.array([[x_val, xi_val]])
+        dx_dt = float(interp_C(pt)[0])
+        dxi_dt = -float(interp_dCdx(pt)[0])
+        return dx_dt, dxi_dt
+
+    for n in range(n_steps):
+        x_n, xi_n = x_arr[n], xi_arr[n]
+
+        k1x, k1xi = rhs(x_n, xi_n)
+        k2x, k2xi = rhs(x_n + 0.5 * dt_actual * k1x, xi_n + 0.5 * dt_actual * k1xi)
+        k3x, k3xi = rhs(x_n + 0.5 * dt_actual * k2x, xi_n + 0.5 * dt_actual * k2xi)
+        k4x, k4xi = rhs(x_n + dt_actual * k3x, xi_n + dt_actual * k3xi)
+
+        x_arr[n + 1] = x_n + (dt_actual / 6.0) * (k1x + 2 * k2x + 2 * k3x + k4x)
+        xi_arr[n + 1] = xi_n + (dt_actual / 6.0) * (k1xi + 2 * k2xi + 2 * k3xi + k4xi)
+        t_arr[n + 1] = t_arr[n] + dt_actual
+
+    return RayTraceResult(t=t_arr, x=x_arr, xi=xi_arr)
+
+
 def gks_group_velocity_check(
     D: np.ndarray,
     xi_array: np.ndarray,
