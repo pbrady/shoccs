@@ -183,11 +183,10 @@ After marking proofs slow (~79s saved), remaining non-slow time is ~25s. The nex
 
 ### 37.7 — Update CLAUDE.md test commands
 
-- [ ] **37.7a** Update CLAUDE.md test commands to use the new default (slow tests skipped):
-  - Replace the long `-k "not TestMathematicaWorkflow and ..."` exclusion with the simple default behavior.
-  - Add `--run-slow` documentation for when full sweeps are needed.
+- [x] **37.7a** Update CLAUDE.md test commands to use the new default (slow tests skipped):
+  - Replaced `-k "not TestMathematicaWorkflow ..."` with simple default (slow tests auto-skipped).
+  - Added `--run-slow` command for full research sweep runs.
   - File: `CLAUDE.md`
-  - Test: N/A (documentation)
 
 ### 37.8 — Verify final timing
 

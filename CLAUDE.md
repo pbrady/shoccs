@@ -85,11 +85,11 @@ The codebase was migrated from range-v3 to Kokkos. The `plans/` directory contai
 The `scripts/stencil_gen/` directory contains a SymPy-based pipeline for deriving finite difference stencil coefficients symbolically. Managed by `uv`.
 
 ```bash
-# Run stencil_gen tests (from repo root)
+# Run stencil_gen tests (from repo root; slow research sweeps are skipped by default)
 cd scripts/stencil_gen && SYMPY_CACHE_SIZE=50000 uv run pytest tests/ -x -q
 
-# Run only fast tests (skip slow full-pipeline E4 tests)
-cd scripts/stencil_gen && uv run pytest tests/ -x -q -k "not TestMathematicaWorkflow and not TestPolynomialFullStencil and not TestE4CodeGeneration"
+# Run all tests including slow research sweeps and proofs
+cd scripts/stencil_gen && SYMPY_CACHE_SIZE=50000 uv run pytest tests/ -x -q --run-slow
 ```
 
 - **SYMPY_CACHE_SIZE=50000** is essential for performance — default 1000 causes severe slowdowns with large symbolic expressions.
