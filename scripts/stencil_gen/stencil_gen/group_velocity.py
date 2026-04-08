@@ -417,6 +417,75 @@ def anisotropy_profile(
     )
 
 
+def boundary_group_velocity_2d(
+    boundary_rows_x: dict[int, "GroupVelocityProfile"],
+    interior_y: "GroupVelocityProfile",
+    theta_array: np.ndarray,
+    xi_mag: float,
+) -> dict[int, AnisotropyResult]:
+    """Compute 2D group velocity at a boundary using boundary x-stencils and interior y.
+
+    At a boundary in x (left wall), the x-direction uses boundary stencils
+    while the y-direction uses interior stencils.  The 2D dispersion relation
+    near the boundary is ``omega = a*kappa_x_bdy*(xi) + b*kappa_y_int*(eta)``
+    where ``a = cos(theta)``, ``b = sin(theta)`` for a wave propagating at
+    angle *theta*.
+
+    This reveals whether the boundary distorts the group velocity angle,
+    bending waves toward or away from the boundary.
+
+    Parameters
+    ----------
+    boundary_rows_x : dict[int, GroupVelocityProfile]
+        Boundary group velocity profiles for the x-direction (from
+        :func:`boundary_group_velocity` or similar).
+    interior_y : GroupVelocityProfile
+        Interior group velocity profile for the y-direction.
+    theta_array : np.ndarray
+        Wave propagation angles in radians.
+    xi_mag : float
+        Wavenumber magnitude |xi| in [0, pi].
+
+    Returns
+    -------
+    dict[int, AnisotropyResult]
+        Keyed by boundary row index.  Each entry gives the 2D group velocity
+        at that boundary row for all propagation angles.
+    """
+    # Wavenumber components along each direction
+    xi_vals = xi_mag * np.abs(np.cos(theta_array))
+    eta_vals = xi_mag * np.abs(np.sin(theta_array))
+
+    # Interior y-direction group velocity interpolated at eta_vals
+    C_y_1d = np.interp(eta_vals, interior_y.xi, interior_y.group_velocity)
+
+    results: dict[int, AnisotropyResult] = {}
+    for row_idx, prof in boundary_rows_x.items():
+        # Boundary x-direction group velocity interpolated at xi_vals
+        C_x_1d = np.interp(xi_vals, prof.xi, prof.group_velocity)
+
+        # 2D group velocity components
+        C_x = np.cos(theta_array) * C_x_1d
+        C_y = np.sin(theta_array) * C_y_1d
+
+        speed = np.sqrt(C_x**2 + C_y**2)
+        speed_ratio = speed  # exact speed = 1.0
+        angle = np.arctan2(C_y, C_x)
+        angle_error = angle - theta_array
+
+        results[row_idx] = AnisotropyResult(
+            theta=theta_array,
+            C_x=C_x,
+            C_y=C_y,
+            speed=speed,
+            speed_ratio=speed_ratio,
+            angle=angle,
+            angle_error=angle_error,
+        )
+
+    return results
+
+
 def _build_profile(
     weights,
     i_eval: int,

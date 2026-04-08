@@ -11,6 +11,7 @@ from stencil_gen.group_velocity import (
     PsiSweepResult,
     anisotropy_profile,
     boundary_group_velocity,
+    boundary_group_velocity_2d,
     boundary_group_velocity_classical,
     cut_cell_group_velocity,
     gks_group_velocity_check,
@@ -1373,4 +1374,63 @@ class Test2DGroupVelocity:
         np.testing.assert_allclose(
             result.speed, predicted, atol=1e-4,
             err_msg="E2 group speed should match leading-order expansion",
+        )
+
+    def test_2d_boundary_basic(self):
+        """boundary_group_velocity_2d returns per-row AnisotropyResult dicts."""
+        xi = np.linspace(0, np.pi, self.N_XI)
+        theta = np.linspace(0.05, np.pi / 2 - 0.05, 200)
+        xi_mag = 0.7
+
+        # Boundary stencils in x-direction (E2, q=1)
+        bdy_x = boundary_group_velocity(
+            p=1, q=1, nextra=0, nu=1, sigma=0.1,
+            kernel="tension", xi_array=xi,
+        )
+        # Interior stencil in y-direction
+        int_y = interior_group_velocity(p=1, nu=1, xi_array=xi)
+
+        result = boundary_group_velocity_2d(bdy_x, int_y, theta, xi_mag)
+
+        # Should return one AnisotropyResult per boundary row
+        assert len(result) == len(bdy_x)
+        for row_idx in bdy_x:
+            assert row_idx in result
+            r = result[row_idx]
+            assert isinstance(r, AnisotropyResult)
+            assert r.C_x.shape == theta.shape
+            assert r.C_y.shape == theta.shape
+            assert r.speed.shape == theta.shape
+
+        # At moderate xi_mag, speed should be bounded and finite
+        for row_idx, r in result.items():
+            assert np.all(np.isfinite(r.speed)), (
+                f"Row {row_idx}: non-finite speed"
+            )
+            assert np.all(r.speed < 10), (
+                f"Row {row_idx}: speed blow-up, max={np.max(r.speed):.2f}"
+            )
+
+    def test_2d_boundary_interior_matches_anisotropy(self):
+        """Far from boundary, 2D boundary GV should approach interior anisotropy."""
+        xi = np.linspace(0, np.pi, 1000)
+        theta = np.linspace(0.1, np.pi / 2 - 0.1, 100)
+        xi_mag = 0.5
+
+        # E4 boundary stencils -- the last (highest-index) boundary row
+        # transitions toward the interior behavior
+        bdy_x = boundary_group_velocity(
+            p=2, q=3, nextra=0, nu=1, sigma=0.1,
+            kernel="tension", xi_array=xi,
+        )
+        int_y = interior_group_velocity(p=2, nu=1, xi_array=xi)
+
+        result_bdy = boundary_group_velocity_2d(bdy_x, int_y, theta, xi_mag)
+        result_int = anisotropy_profile(p=2, nu=1, theta_array=theta, xi_mag=xi_mag)
+
+        # The y-component should match interior exactly (same stencil)
+        last_row = max(bdy_x.keys())
+        np.testing.assert_allclose(
+            result_bdy[last_row].C_y, result_int.C_y, atol=1e-3,
+            err_msg="C_y should match interior (same y-direction stencil)",
         )

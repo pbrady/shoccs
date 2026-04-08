@@ -70,13 +70,14 @@ velocity. This is analogous to ray tracing in optics.
 
 ### 36.2 — 2D Boundary Group Velocity
 
-- [ ] **36.2a** Add `boundary_group_velocity_2d(p_x, p_y, boundary_rows_x, interior_y, theta_array, xi_mag)` to `group_velocity.py`:
+- [x] **36.2a** Add `boundary_group_velocity_2d(boundary_rows_x, interior_y, theta_array, xi_mag)` to `group_velocity.py`:
   - At a boundary in x (left wall), the x-direction uses boundary stencils while y-direction uses interior stencils.
   - The 2D dispersion relation near the boundary is: `omega = a*kappa_x_bdy*(xi) + b*kappa_y_int*(eta)`.
   - Computes the 2D group velocity vector using boundary kappa_x* and interior kappa_y*.
-  - Key question: does the boundary distort the group velocity angle, causing waves to be "bent" toward or away from the boundary?
+  - Takes pre-computed `dict[int, GroupVelocityProfile]` for x-boundary and `GroupVelocityProfile` for y-interior; interpolates at wavenumber components from propagation angle.
+  - Returns `dict[int, AnisotropyResult]` keyed by boundary row index.
   - File: `scripts/stencil_gen/stencil_gen/group_velocity.py`
-  - Test: `cd scripts/stencil_gen && uv run pytest tests/test_group_velocity.py -x -q -k "test_2d_boundary"`
+  - Test: `cd scripts/stencil_gen && uv run pytest tests/test_group_velocity.py -x -q -k "test_2d_boundary"` -- 2 tests pass.
 
 - [ ] **36.2b** Add `Test2DBoundaryGroupVelocity` test class:
   - Test `test_boundary_angle_distortion` -- for E2/E4 at a left boundary, compare group velocity angle at boundary rows vs interior. Quantify how much the boundary bends wave propagation.
