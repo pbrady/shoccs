@@ -172,12 +172,19 @@ The regression tests in `test_phs.py` (`TestRegressionE2Stability`, etc.) then l
   - Run: `cd scripts/stencil_gen && uv run pytest tests/ --durations=10 -q`
   - File: N/A (verification only)
 
-- [ ] **38.7b** Verify sweep scripts reproduce the known values:
+- [ ] **38.7b** Implement `all` subcommand handler in `__main__.py`:
+  - The `all` subparser was registered in 38.1a but the dispatch handler was never implemented (falls through to "implementation pending").
+  - Implement `if args.command == "all":` block that runs each sweep (epsilon, tension, tension-penalty, footprint, comparison, alpha) with reduced-resolution defaults when `--quick` is set.
+  - Individual sweep scripts don't have a `--quick` flag, so the `all` handler must translate `--quick` into appropriate reduced parameters (e.g., `--n-eps 10`, `--n-sigma 10`, `--n-gamma 10`).
+  - File: `scripts/stencil_gen/sweeps/__main__.py`
+  - Test: `cd scripts/stencil_gen && uv run python -m sweeps all --quick`
+
+- [ ] **38.7c** Verify sweep scripts reproduce the known values:
   - Run each sweep script with reduced resolution and confirm it finds values near the known optima.
   - Run: `cd scripts/stencil_gen && uv run python -m sweeps all --quick`
   - File: N/A (verification only)
 
-- [ ] **38.7c** Update CLAUDE.md with sweep script documentation:
+- [ ] **38.7d** Update CLAUDE.md with sweep script documentation:
   - Add sweep commands to the stencil_gen section.
   - Document the sweep → known_values.json → regression test workflow.
   - File: `CLAUDE.md`
@@ -191,7 +198,7 @@ The regression tests in `test_phs.py` (`TestRegressionE2Stability`, etc.) then l
 38.1a-c (infrastructure + known_values.json) — do first
 38.2a-b, 38.3a-b, 38.4a-b, 38.5a (sweep scripts) — independent, can parallelize
 38.6a-c (remove old tests) — do after 38.2-38.5 are verified
-38.7a-c (cleanup) — do last
+38.7a (verify test speed), 38.7b (implement `all` handler), 38.7c-d (verify + docs) — do last
 ```
 
 ---
@@ -203,5 +210,5 @@ The regression tests in `test_phs.py` (`TestRegressionE2Stability`, etc.) then l
 - Regression tests in `test_phs.py` load from `known_values.json`, not hard-coded values.
 - All 22 slow test classes in `test_phs.py` are removed (functionality lives in sweep scripts).
 - Default test suite runs in <20s (no slow tests to even skip/collect).
-- `uv run python -m sweeps.run_all --quick` reproduces known values.
+- `uv run python -m sweeps all --quick` reproduces known values.
 - Sweep scripts have `--help` with clear usage documentation.
