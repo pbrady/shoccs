@@ -670,6 +670,7 @@ class TestE4CodeGeneration:
         assert output_path.stat().st_size > 0
 
 
+@pytest.mark.slow
 class TestE4TestFileGeneration:
     """Tests for E4_1 C++ test file generation (21.4c, updated for 2-alpha zeros conservation)."""
 
