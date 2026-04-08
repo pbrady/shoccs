@@ -41,22 +41,22 @@ cd scripts/stencil_gen && uv run pytest tests/test_phs.py -x -q -k "TestRegressi
 
 ### 39.2 — Clean up `test_phs.py` imports and artifacts
 
-- [ ] **39.2a** Remove unused `Symbol` and `symbols` imports:
+- [x] **39.2a** Remove unused `Symbol` and `symbols` imports:
   - Line 4: `from sympy import Rational, S, Symbol, cancel, symbols` → remove `Symbol` and `symbols`.
   - File: `scripts/stencil_gen/tests/test_phs.py`
   - Test: `cd scripts/stencil_gen && uv run pytest tests/test_phs.py -x -q -k "TestPHSCore"`
 
-- [ ] **39.2b** Remove 8 redundant `import numpy as np` inside `TestTensionSpline` methods:
+- [x] **39.2b** Remove 8 redundant `import numpy as np` inside `TestTensionSpline` methods:
   - `np` is already imported at module level. The local re-imports are copy-paste artifacts.
   - File: `scripts/stencil_gen/tests/test_phs.py`
   - Test: `cd scripts/stencil_gen && uv run pytest tests/test_phs.py -x -q -k "TestTensionSpline"`
 
-- [ ] **39.2c** Move deferred `import json as _json` and `from pathlib import Path as _Path` to top of file:
+- [x] **39.2c** Move deferred `import json as _json` and `from pathlib import Path as _Path` to top of file:
   - Drop the private aliases — `json` and `Path` don't conflict with anything.
   - File: `scripts/stencil_gen/tests/test_phs.py`
   - Test: `cd scripts/stencil_gen && uv run pytest tests/test_phs.py -x -q -k "TestRegression"`
 
-- [ ] **39.2d** Add graceful fallback for `_load_known_values()`:
+- [x] **39.2d** Add graceful fallback for `_load_known_values()`:
   - Currently a missing `known_values.json` kills all test collection. Wrap with try/except and skip regression tests if file is absent.
   - File: `scripts/stencil_gen/tests/test_phs.py`
   - Test: `cd scripts/stencil_gen && uv run pytest tests/test_phs.py -x -q`
