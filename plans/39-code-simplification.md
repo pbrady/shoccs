@@ -127,23 +127,21 @@ cd scripts/stencil_gen && uv run pytest tests/test_phs.py -x -q -k "TestRegressi
   - File: `scripts/stencil_gen/sweeps/_common.py`, `sweeps/epsilon_sweep.py`, `sweeps/tension_sweep.py`
   - Test: `cd scripts/stencil_gen && uv run python -m sweeps epsilon --scheme E2 --n-eps 5` — verified OK
 
-- [ ] **39.5c** Fix `callable` annotation in `__main__.py`:
-  - Line 169: `callable` (lowercase builtin) → `Callable` from `collections.abc`.
+- [x] **39.5c** Fix `callable` annotation in `__main__.py`:
+  - Changed `callable` → `Callable[[list[str]], int]` from `collections.abc`.
   - File: `scripts/stencil_gen/sweeps/__main__.py`
-  - Test: `cd scripts/stencil_gen && uv run python -m sweeps --help`
+  - Test: `cd scripts/stencil_gen && uv run python -m sweeps --help` — verified OK
 
 ### 39.6 — Final Timing Verification
 
-- [ ] **39.6a** Mark slow tests in `test_e4_cut_cell.py` with `@pytest.mark.slow`:
-  - `test_e4_cut_cell.py` has 0 slow markers but dominates the default suite at ~26s (the rest runs in ~6s).
-  - All `TestDeriveCutCellScheme`, `TestE4CutCellSchemeWithZeros`, `TestE4CutCellConservationSolution`, `TestFractionFreeConservation`, and `TestE4TEMOConstruction` tests involve symbolic derivation and should be marked slow.
+- [x] **39.6a** Mark slow tests in `test_e4_cut_cell.py` with `@pytest.mark.slow`:
+  - Added `@pytest.mark.slow` to 8 classes (`TestDeriveCutCellScheme`, `TestE4CutCellSchemeWithZeros`, `TestE4CutCellConservationSolution`, `TestFractionFreeConservation`, `TestE4TEMOConstruction`, `TestPolynomialStructure`, `TestPolynomialBoundaryRows`, `TestApproachAInfeasibility`) and 3 standalone functions (`test_e4_1_conservation_with_zeros`, `test_e4_1_conservative_taylor_accuracy`, `test_e4_1_conservative_psi_interior`).
   - File: `scripts/stencil_gen/tests/test_e4_cut_cell.py`
-  - Test: `cd scripts/stencil_gen && uv run pytest tests/ -x -q` (should drop to ~6s)
+  - Test: all 130 tests pass with `--run-slow`
 
-- [ ] **39.6b** Verify default test suite is under 15 seconds:
-  - After 39.1a and 39.6a, both eigendecomp and symbolic-derivation tests will be skipped by default.
-  - Run: `cd scripts/stencil_gen && uv run pytest tests/ --durations=10 -q`
-  - File: N/A (verification only)
+- [x] **39.6b** Verify default test suite is under 15 seconds:
+  - `cd scripts/stencil_gen && uv run pytest tests/ --durations=10 -q` — 403 passed, 105 skipped in 7.35s
+  - Well under the 15s target.
 
 ---
 

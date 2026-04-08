@@ -308,6 +308,7 @@ class TestE4ZeroConstrainedCutCell:
                 )
 
 
+@pytest.mark.slow
 class TestE4CutCellConservationSolution:
     """Tests for solve_cut_cell_conservation with E4_1 zero-constrained stencil (26.3b)."""
 
@@ -394,6 +395,7 @@ class TestE4CutCellConservationSolution:
             )
 
 
+@pytest.mark.slow
 class TestE4TEMOConstruction:
     """Tests for E4_1 full TEMO pipeline (21.3a)."""
 
@@ -855,6 +857,7 @@ class TestE4TestFileGeneration:
         assert output_path.stat().st_size > 0
 
 
+@pytest.mark.slow
 class TestDeriveCutCellScheme:
     """Tests for derive_cut_cell_scheme high-level pipeline (21.5a)."""
 
@@ -1025,6 +1028,7 @@ class TestDeriveCutCellScheme:
             )
 
 
+@pytest.mark.slow
 class TestE4CutCellSchemeWithZeros:
     """Integration tests for derive_cut_cell_scheme(E4_1) with zeros path (26.5c)."""
 
@@ -1178,6 +1182,7 @@ def test_e4_1_conservation_fails_without_zeros():
         )
 
 
+@pytest.mark.slow
 def test_e4_1_conservation_with_zeros():
     """E4_1 cut-cell conservation IS feasible with alpha_3=alpha_4=0 (26.4a).
 
@@ -1254,6 +1259,7 @@ def test_e4_1_conservation_with_zeros():
             )
 
 
+@pytest.mark.slow
 def test_e4_1_conservative_taylor_accuracy():
     """Conservative E4_1 stencil preserves Taylor accuracy (26.4b).
 
@@ -1297,6 +1303,7 @@ def test_e4_1_conservative_taylor_accuracy():
                 )
 
 
+@pytest.mark.slow
 def test_e4_1_conservative_psi_interior():
     """Conservative E4_1 stencil is well-defined for psi in (0, 1) (26.4c).
 
@@ -1840,6 +1847,7 @@ class TestCutCellConservationAfterUniform:
         )
 
 
+@pytest.mark.slow
 class TestPolynomialStructure:
     """Diagnostic: verify boundary rows are polynomial after QQ(ψ) solve (27.1a).
 
@@ -1951,6 +1959,7 @@ class TestPolynomialStructure:
                     )
 
 
+@pytest.mark.slow
 class TestPolynomialBoundaryRows:
     """Tests for solve_temo_row_polynomial applied to E4_1 boundary rows (27.2b).
 
@@ -2076,6 +2085,7 @@ class TestPolynomialBoundaryRows:
                     )
 
 
+@pytest.mark.slow
 class TestFractionFreeConservation:
     """Tests for solve_conservation_fraction_free with E4_1 (27.3b)."""
 
@@ -2183,6 +2193,7 @@ class TestFractionFreeConservation:
         assert len(sol) == 5
 
 
+@pytest.mark.slow
 class TestApproachAInfeasibility:
     """Tests that weights-only conservation is infeasible with polynomial boundary rows (27.3d).
 

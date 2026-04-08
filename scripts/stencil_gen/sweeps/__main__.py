@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import argparse
 import sys
+from collections.abc import Callable
 
 
 def main() -> int:
@@ -166,7 +167,7 @@ def _run_all(*, quick: bool) -> int:
     quick_fp_n_gamma = "10" if quick else "20"
     quick_tp_n_sigma = "5" if quick else "25"
 
-    sweeps: list[tuple[str, callable, list[str]]] = [
+    sweeps: list[tuple[str, Callable[[list[str]], int], list[str]]] = [
         ("Epsilon sweep E2 (gaussian)", eps_main,
          ["--scheme", "E2", "--kernel", "gaussian", "--n-eps", quick_n_eps, "--n-values", quick_n_values]),
         ("Epsilon sweep E4 (gaussian)", eps_main,
