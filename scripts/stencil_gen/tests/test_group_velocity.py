@@ -882,6 +882,7 @@ class TestPsiSweepGroupVelocity:
                 f"indicating CFL penalty"
             )
 
+    @pytest.mark.slow
     def test_e4_1_psi_sweep(self):
         """Sweep psi in [0, 1] for E4_1 (stricter scheme).
 

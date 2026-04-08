@@ -1603,6 +1603,7 @@ def test_e4_1_conservation_constant_weights_infeasible_r5():
             )
 
 
+@pytest.mark.slow
 def test_e4_1_psi_dependent_conservation_infeasible(
     e4_1_cut_cell_conservation,
 ):
@@ -1675,6 +1676,7 @@ def e4_1_cut_cell_conservation():
     return eqs, w_syms, alpha_syms, psi
 
 
+@pytest.mark.slow
 class TestE4UniformConservation:
     """Tests for derive_uniform_boundary_for_temo(E4_1, conserve=True) (23.3a)."""
 
@@ -1752,6 +1754,7 @@ class TestE4UniformConservation:
         assert ur.weights is None  # nextra=1 conservation is inline, no explicit weights
 
 
+@pytest.mark.slow
 class TestCutCellConservationAfterUniform:
     """Tests for 24.3a: does cut-cell conservation follow from uniform conservation?
 
