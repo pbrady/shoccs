@@ -83,7 +83,7 @@ The regression tests in `test_phs.py` (`TestRegressionE2Stability`, etc.) then l
 
 ### 38.2 — Epsilon Sweep Scripts
 
-- [ ] **38.2a** Create `sweeps/epsilon_sweep.py` — extract from `TestCorrectedSweepE2`, `TestCorrectedSweepE4`, `TestEpsilonSweepE2`, `TestEpsilonSweepE4`:
+- [x] **38.2a** Create `sweeps/epsilon_sweep.py` — extract from `TestCorrectedSweepE2`, `TestCorrectedSweepE4`, `TestEpsilonSweepE2`, `TestEpsilonSweepE4`:
   - Functions: `run_epsilon_sweep(scheme, kernel, n_values, n_eps)` — the core sweep logic
   - CLI: `--scheme E2/E4`, `--kernel gaussian/multiquadric`, `--n-values 20,40,80`, `--n-eps 60`
   - Output: prints stability table, identifies stable band, writes best epsilon to `known_values.json`

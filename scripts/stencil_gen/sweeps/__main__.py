@@ -59,6 +59,16 @@ def main() -> int:
         return 1
 
     # Dispatch to sweep modules (imported lazily to avoid loading numpy/sympy at parse time)
+    if args.command == "epsilon":
+        from .epsilon_sweep import main as eps_main
+
+        return eps_main([
+            "--scheme", args.scheme,
+            "--kernel", args.kernel,
+            "--n-values", args.n_values,
+            "--n-eps", str(args.n_eps),
+        ])
+
     print(f"sweeps: command '{args.command}' recognized (implementation pending)")
     return 0
 
