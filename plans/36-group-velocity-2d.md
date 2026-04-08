@@ -79,12 +79,12 @@ velocity. This is analogous to ray tracing in optics.
   - File: `scripts/stencil_gen/stencil_gen/group_velocity.py`
   - Test: `cd scripts/stencil_gen && uv run pytest tests/test_group_velocity.py -x -q -k "test_2d_boundary"` -- 2 tests pass.
 
-- [ ] **36.2b** Add `Test2DBoundaryGroupVelocity` test class:
+- [x] **36.2b** Add `Test2DBoundaryGroupVelocity` test class:
   - Test `test_boundary_angle_distortion` -- for E2/E4 at a left boundary, compare group velocity angle at boundary rows vs interior. Quantify how much the boundary bends wave propagation.
   - Test `test_corner_region` -- at a corner (boundary in both x and y), both directions use boundary stencils. Compute 2D group velocity and check for anomalous behavior.
   - Test `test_no_outgoing_2d` -- verify no 2D modes have group velocity pointing into the domain (C dot n > 0 where n is the outward normal) at wavenumbers where the interior doesn't.
   - File: `scripts/stencil_gen/tests/test_group_velocity.py`
-  - Test: `cd scripts/stencil_gen && uv run pytest tests/test_group_velocity.py -x -q -k "Test2DBoundary"`
+  - Test: `cd scripts/stencil_gen && uv run pytest tests/test_group_velocity.py -x -q -k "Test2DBoundary"` -- 3 tests pass.
 
 ### 36.3 — Varying Coefficient Analysis
 

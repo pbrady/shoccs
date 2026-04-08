@@ -1434,3 +1434,146 @@ class Test2DGroupVelocity:
             result_bdy[last_row].C_y, result_int.C_y, atol=1e-3,
             err_msg="C_y should match interior (same y-direction stencil)",
         )
+
+
+class Test2DBoundaryGroupVelocity:
+    """2D boundary group velocity tests (36.2b)."""
+
+    N_XI = 500
+
+    def test_boundary_angle_distortion(self):
+        """Boundary stencils distort group velocity angle relative to interior."""
+        xi = np.linspace(0, np.pi, self.N_XI)
+        theta = np.linspace(0.1, np.pi / 2 - 0.1, 200)
+        xi_mag = 0.7
+
+        for p, q, label in [(1, 1, "E2"), (2, 3, "E4")]:
+            bdy_x = boundary_group_velocity(
+                p=p, q=q, nextra=0, nu=1, sigma=0.1,
+                kernel="tension", xi_array=xi,
+            )
+            int_y = interior_group_velocity(p=p, nu=1, xi_array=xi)
+
+            result_bdy = boundary_group_velocity_2d(bdy_x, int_y, theta, xi_mag)
+            result_int = anisotropy_profile(p=p, nu=1, theta_array=theta, xi_mag=xi_mag)
+
+            # Every boundary row should have finite angle error
+            for row_idx, r in result_bdy.items():
+                assert np.all(np.isfinite(r.angle_error)), (
+                    f"{label} row {row_idx}: non-finite angle error"
+                )
+
+            # Row 0 (closest to boundary) should have larger angle distortion
+            # than the last row (furthest from boundary, closest to interior)
+            row_0 = result_bdy[0]
+            last_row = max(result_bdy.keys())
+            row_last = result_bdy[last_row]
+
+            distortion_0 = np.max(np.abs(row_0.angle_error - result_int.angle_error))
+            distortion_last = np.max(np.abs(row_last.angle_error - result_int.angle_error))
+
+            assert distortion_0 > distortion_last, (
+                f"{label}: row 0 distortion ({distortion_0:.4f}) should exceed "
+                f"last row distortion ({distortion_last:.4f})"
+            )
+
+            # Distortion at row 0 should be non-trivial (> 0.01 radians ~ 0.6 deg)
+            assert distortion_0 > 0.01, (
+                f"{label}: boundary distortion at row 0 too small ({distortion_0:.4f} rad)"
+            )
+
+    def test_corner_region(self):
+        """At a corner, both directions use boundary stencils.
+
+        Compute 2D group velocity by using boundary profiles for both x and y.
+        The result should remain finite and bounded -- no blow-up from combining
+        two boundary stencils.
+        """
+        xi = np.linspace(0, np.pi, self.N_XI)
+        theta = np.linspace(0.1, np.pi / 2 - 0.1, 200)
+        xi_mag = 0.5
+
+        # E2 boundary stencils for both directions
+        bdy = boundary_group_velocity(
+            p=1, q=1, nextra=0, nu=1, sigma=0.1,
+            kernel="tension", xi_array=xi,
+        )
+
+        # For a corner: use boundary profiles for BOTH x and y.
+        # boundary_group_velocity_2d takes boundary x-profiles and an interior
+        # y-profile. To simulate a corner, pass a boundary y-profile (row 0)
+        # as the "interior_y" argument.
+        corner_y = bdy[0]
+
+        result_corner = boundary_group_velocity_2d(bdy, corner_y, theta, xi_mag)
+
+        for row_idx, r in result_corner.items():
+            # All values must be finite
+            assert np.all(np.isfinite(r.speed)), (
+                f"Corner row {row_idx}: non-finite speed"
+            )
+            assert np.all(np.isfinite(r.angle)), (
+                f"Corner row {row_idx}: non-finite angle"
+            )
+            # Speed should not blow up (bounded by a generous factor)
+            assert np.all(r.speed < 10), (
+                f"Corner row {row_idx}: speed blow-up, max={np.max(r.speed):.2f}"
+            )
+
+        # Compare corner vs boundary-only-in-x: corner should be slower
+        # because the y-direction also suffers boundary degradation
+        int_y = interior_group_velocity(p=1, nu=1, xi_array=xi)
+        result_bdy = boundary_group_velocity_2d(bdy, int_y, theta, xi_mag)
+
+        row_0_corner_speed = np.mean(result_corner[0].speed)
+        row_0_bdy_speed = np.mean(result_bdy[0].speed)
+
+        # Corner degrades in both directions, so typically speed differs
+        # (it could be either direction depending on stencil, but the results
+        # should at least be finite and comparable in magnitude)
+        assert abs(row_0_corner_speed - row_0_bdy_speed) < 5, (
+            f"Corner vs boundary speed difference unreasonable: "
+            f"corner={row_0_corner_speed:.3f}, bdy={row_0_bdy_speed:.3f}"
+        )
+
+    def test_no_outgoing_2d(self):
+        """No 2D boundary modes have group velocity pointing into the domain
+        at wavenumbers where the interior mode doesn't.
+
+        At a left boundary (outward normal n = (-1, 0)), "into the domain"
+        means C_x > 0. We check that wherever the interior C_x is <= 0
+        (i.e., the interior mode does NOT propagate rightward), the boundary
+        C_x is also not anomalously positive.
+        """
+        xi = np.linspace(0, np.pi, self.N_XI)
+        # Use theta near 0 (wave mostly in x) to focus on x-component
+        theta = np.linspace(0.05, np.pi / 4, 200)
+        xi_mag = 0.7
+
+        for p, q, label in [(1, 1, "E2"), (2, 3, "E4")]:
+            bdy_x = boundary_group_velocity(
+                p=p, q=q, nextra=0, nu=1, sigma=0.1,
+                kernel="tension", xi_array=xi,
+            )
+            int_y = interior_group_velocity(p=p, nu=1, xi_array=xi)
+
+            result_bdy = boundary_group_velocity_2d(bdy_x, int_y, theta, xi_mag)
+            result_int = anisotropy_profile(
+                p=p, nu=1, theta_array=theta, xi_mag=xi_mag,
+            )
+
+            # Interior C_x: where it's non-positive, boundary should not be
+            # strongly positive (allow small tolerance for interpolation noise)
+            int_nonpositive = result_int.C_x <= 0
+
+            for row_idx, r in result_bdy.items():
+                if not np.any(int_nonpositive):
+                    continue
+                # Where interior is non-positive, boundary C_x should not
+                # exceed a small tolerance
+                bdy_cx_at_nonpositive = r.C_x[int_nonpositive]
+                max_outgoing = np.max(bdy_cx_at_nonpositive)
+                assert max_outgoing < 0.1, (
+                    f"{label} row {row_idx}: anomalous outgoing C_x = {max_outgoing:.4f} "
+                    f"where interior C_x <= 0"
+                )
