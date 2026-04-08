@@ -29,8 +29,6 @@ from stencil_gen.group_velocity import (
     ray_trace_group_velocity,
 )
 
-import time
-
 
 class TestCoreGroupVelocity:
     """Core group velocity computation tests (34.1b)."""
@@ -139,12 +137,6 @@ class TestInteriorGroupVelocity:
 
     N_XI = 2000
 
-    def test_e2_group_velocity_is_cos_xi(self):
-        """E2 (p=1) interior scheme: C(xi) = cos(xi) exactly."""
-        xi = np.linspace(0, np.pi, self.N_XI)
-        profile = interior_group_velocity(p=1, nu=1, xi_array=xi)
-        assert np.allclose(profile.group_velocity, np.cos(xi), atol=1e-14)
-
     def test_error_amplification_factor(self):
         """Group velocity error is (2p+1) times phase velocity error at leading order.
 
@@ -203,40 +195,6 @@ class TestInteriorGroupVelocity:
                 f"E{2*p}: found positive C beyond cutoff, "
                 f"max = {np.max(C_beyond):.4e}"
             )
-
-    def test_group_velocity_comparison_table(self, capsys):
-        """Print formatted comparison table for E2/E4/E6/E8 interior schemes.
-
-        Diagnostic test -- always passes, prints useful data with -s flag.
-        """
-        xi = np.linspace(0, np.pi, 2000)
-        xi_quarter = np.pi / 4
-        xi_half = np.pi / 2
-
-        header = (
-            f"{'Scheme':<8} {'Order':>5} {'Cutoff xi/pi':>12} "
-            f"{'|C_err| xi=pi/4':>16} {'|C_err| xi=pi/2':>16} {'min C':>8}"
-        )
-        print()
-        print(header)
-        print("-" * len(header))
-
-        for p in [1, 2, 3, 4]:
-            profile = interior_group_velocity(p=p, nu=1, xi_array=xi)
-            C = profile.group_velocity
-
-            # Interpolate C at specific xi values
-            idx_q = np.argmin(np.abs(xi - xi_quarter))
-            idx_h = np.argmin(np.abs(xi - xi_half))
-            err_q = abs(C[idx_q] - 1.0)
-            err_h = abs(C[idx_h] - 1.0)
-            min_C = np.min(C)
-
-            print(
-                f"E{2*p:<6} {2*p:>5} {profile.cutoff_xi/np.pi:>12.4f} "
-                f"{err_q:>16.6e} {err_h:>16.6e} {min_C:>8.4f}"
-            )
-
 
 class TestBoundaryGroupVelocity:
     """Boundary closure group velocity analysis (34.3)."""
@@ -1058,61 +1016,6 @@ class TestCutCellGVvsEigenvalue:
             # necessary condition from GKS theory, not sufficient), so we
             # don't assert the converse.
 
-    def test_gv_cost_vs_eigenvalue_cost(self):
-        """GV analysis is O(1) per stencil; eigenvalue analysis is O(N^3).
-
-        Times both analyses at N=50, 100, 200 (eigenvalue) versus the GV
-        computation (which is independent of N).  Verifies that eigenvalue
-        cost grows super-linearly while GV cost stays constant.
-        """
-        import time
-
-        from sympy import Symbol
-
-        from stencil_gen.temo import E2_1, derive_cut_cell_scheme
-
-        psi_sym = Symbol("psi")
-        cc = derive_cut_cell_scheme(E2_1, psi_sym)
-        alpha_vals = {s: 0 for s in cc.alpha_symbols}
-
-        xi = np.linspace(0.01, np.pi, self.N_XI)
-        psi_val = 0.5
-
-        # Time GV computation (independent of N)
-        t0 = time.perf_counter()
-        for _ in range(3):
-            cut_cell_group_velocity(
-                cc, psi_sym, psi_val, alpha_vals, xi, order=E2_1.q,
-            )
-        gv_time = (time.perf_counter() - t0) / 3
-
-        # Time eigenvalue computation at several N values
-        eig_times = {}
-        for n in [50, 100, 200]:
-            t0 = time.perf_counter()
-            D = self._build_cut_cell_diff_matrix(
-                cc, psi_sym, psi_val, alpha_vals, E2_1, n,
-            )
-            np.linalg.eigvals(-D)
-            eig_times[n] = time.perf_counter() - t0
-
-        # Print comparison table
-        print(f"\n{'Method':<20} {'N':<6} {'Time (ms)':>10}")
-        print("-" * 38)
-        print(f"{'GV (per stencil)':<20} {'—':<6} {gv_time * 1000:>10.2f}")
-        for n, t in eig_times.items():
-            print(f"{'Eigenvalue':<20} {n:<6} {t * 1000:>10.2f}")
-
-        # Eigenvalue cost should grow super-linearly (at least N^2)
-        t50, t200 = eig_times[50], eig_times[200]
-        ratio = t200 / max(t50, 1e-10)
-        # (200/50)^2 = 16, but overhead means we only require > 4x
-        assert ratio > 4.0, (
-            f"Eigenvalue cost ratio t(200)/t(50) = {ratio:.1f}, "
-            f"expected > 4 for super-linear scaling"
-        )
-
-
 class Test2DGroupVelocity:
     """2D tensor-product group velocity tests (36.1)."""
 
@@ -1613,42 +1516,6 @@ class TestVaryingCoefficientGroupVelocity:
         C_interior = group_velocity_exact(w, 0, nodes, xi_array)
         np.testing.assert_allclose(C[0], C_interior, atol=1e-14)
 
-    def test_ray_trace(self):
-        """In a uniform medium, rays are straight lines at constant xi."""
-        from stencil_gen.interior import derive_interior, full_gamma_array
-
-        p = 1  # E2
-        coeffs = derive_interior(0, p, 1)
-        w = [float(c) for c in full_gamma_array(coeffs)]
-        nodes = list(range(-p, p + 1))
-
-        xi_array = np.linspace(0.01, np.pi, self.N_XI)
-        x = np.linspace(-1, 2, 50)
-
-        def weights_func(x_val):
-            return w, nodes
-
-        C_field = local_group_velocity(weights_func, x, xi_array)
-
-        # Choose a wavenumber with non-trivial group velocity
-        xi_0 = 1.0
-        x_0 = 0.0
-        t_final = 0.5
-        dt = 0.01
-
-        result = ray_trace_group_velocity(
-            C_field, x, xi_array, xi_0, x_0, t_final, dt,
-        )
-
-        # In uniform medium, xi should stay constant
-        np.testing.assert_allclose(result.xi, xi_0, atol=1e-10)
-
-        # x should advance linearly: x(t) = x_0 + C(xi_0) * t
-        C_at_xi0 = float(np.interp(xi_0, xi_array,
-                                    group_velocity_exact(w, 0, nodes, xi_array)))
-        x_expected = x_0 + C_at_xi0 * result.t
-        np.testing.assert_allclose(result.x, x_expected, atol=1e-6)
-
     def test_constant_coefficient_uniform_gv(self):
         """With a(x) = 1 everywhere, local GV equals interior GV at all x."""
         from stencil_gen.interior import derive_interior, full_gamma_array
@@ -1845,164 +1712,3 @@ class TestVaryingCoefficientGroupVelocity:
         assert np.all(dxi < 0), "xi should decrease monotonically for eps > 0"
 
 
-class TestScalingComparison:
-    """Compare GV analysis scaling vs eigenvalue analysis (36.4)."""
-
-    def _build_1d_operator(self, N, p):
-        """Build a 1D differentiation matrix for an N-point grid using E{2p}."""
-        from stencil_gen.interior import derive_interior, full_gamma_array
-
-        coeffs = derive_interior(0, p, 1)
-        w = [float(c) for c in full_gamma_array(coeffs)]
-
-        D = np.zeros((N, N))
-        for i in range(N):
-            for k, offset in enumerate(range(-p, p + 1)):
-                j = i + offset
-                if 0 <= j < N:
-                    D[i, j] = w[k]
-        return D
-
-    def test_1d_scaling(self):
-        """GV analysis is O(1) per stencil; eigenvalue analysis is O(N^3).
-
-        Times both approaches for increasing N and verifies they give
-        consistent stability conclusions.  Prints a comparison table.
-        """
-        from stencil_gen.interior import derive_interior, full_gamma_array
-
-        p = 1  # E2
-        coeffs = derive_interior(0, p, 1)
-        w = [float(c) for c in full_gamma_array(coeffs)]
-        nodes = list(range(-p, p + 1))
-
-        N_xi = 200
-        xi_array = np.linspace(0, np.pi, N_xi)
-
-        sizes = [50, 100, 200, 400]
-        gv_times = []
-        eig_times = []
-
-        for N in sizes:
-            # GV analysis: O(1) -- just the stencil, independent of N
-            t0 = time.perf_counter()
-            for _ in range(10):
-                C = group_velocity_exact(w, 0, nodes, xi_array)
-            gv_t = (time.perf_counter() - t0) / 10
-            gv_times.append(gv_t)
-
-            # Eigenvalue analysis: O(N^3)
-            D = self._build_1d_operator(N, p)
-            t0 = time.perf_counter()
-            eigenvalues = np.linalg.eigvals(-D[1:, 1:])
-            eig_t = time.perf_counter() - t0
-            eig_times.append(eig_t)
-
-            # Both should agree on stability: max Re(eigenvalue) <= 0
-            # for the semi-discrete system (may not hold with simple BCs,
-            # but the important thing is that GV gives useful info).
-            max_re = np.max(eigenvalues.real)
-            # GV > 0 everywhere means all modes propagate correctly
-            gv_positive = np.all(C[1:-1] > 0)  # exclude endpoints
-
-            # Just record -- the real test is scaling, not exact agreement
-            assert C.shape == (N_xi,)
-
-        # Verify eigenvalue time grows faster than GV time
-        # eig_time[last] / eig_time[first] should be >> gv_time[last] / gv_time[first]
-        eig_ratio = eig_times[-1] / max(eig_times[0], 1e-10)
-        gv_ratio = gv_times[-1] / max(gv_times[0], 1e-10)
-        assert eig_ratio > gv_ratio, (
-            f"Eigenvalue scaling ({eig_ratio:.1f}x) should grow faster "
-            f"than GV scaling ({gv_ratio:.1f}x)"
-        )
-
-    def test_2d_scaling_projection(self):
-        """For 2D on NxN grid, eigenvalue is O(N^6); GV is O(1).
-
-        Times 1D eigenvalue analysis at a few grid sizes and projects the
-        cost of the full 2D eigenvalue problem.  Compares to the constant
-        cost of GV analysis.
-        """
-        from stencil_gen.interior import derive_interior, full_gamma_array
-
-        p = 1
-        coeffs = derive_interior(0, p, 1)
-        w = [float(c) for c in full_gamma_array(coeffs)]
-        nodes = list(range(-p, p + 1))
-
-        xi_array = np.linspace(0, np.pi, 200)
-
-        # GV analysis cost: compute once, independent of grid size
-        t0 = time.perf_counter()
-        C = group_velocity_exact(w, 0, nodes, xi_array)
-        gv_time = time.perf_counter() - t0
-
-        # 1D eigenvalue costs for projecting to 2D
-        sizes_2d = [20, 40, 80]
-        eig_1d_times = []
-
-        for N in sizes_2d:
-            D = self._build_1d_operator(N, p)
-            t0 = time.perf_counter()
-            _ = np.linalg.eigvals(-D[1:, 1:])
-            eig_1d_times.append(time.perf_counter() - t0)
-
-        # In 2D, the operator is N^2 x N^2, so eigenvalue cost is O(N^6)
-        # while the 1D cost is O(N^3).  Projected 2D cost = 1D_cost * N^3.
-        projected_2d = [t * N**3 for t, N in zip(eig_1d_times, sizes_2d)]
-
-        # The GV approach should be orders of magnitude cheaper
-        # For N=80: projected 2D eigenvalue ~ eig_1d(80) * 80^3 ~ huge
-        # vs GV which is the same constant time
-        assert gv_time < projected_2d[-1], (
-            f"GV time ({gv_time:.4f}s) should be much less than "
-            f"projected 2D eigenvalue time ({projected_2d[-1]:.4f}s)"
-        )
-
-    def test_3d_scaling_projection(self):
-        """For 3D on NxNxN grids, eigenvalue is O(N^9); GV is O(1).
-
-        Extrapolates timing data to demonstrate the practical impossibility
-        of eigenvalue analysis in 3D for moderate grid sizes.
-        """
-        from stencil_gen.interior import derive_interior, full_gamma_array
-
-        p = 1
-        coeffs = derive_interior(0, p, 1)
-        w = [float(c) for c in full_gamma_array(coeffs)]
-        nodes = list(range(-p, p + 1))
-
-        xi_array = np.linspace(0, np.pi, 200)
-
-        # GV cost
-        t0 = time.perf_counter()
-        C = group_velocity_exact(w, 0, nodes, xi_array)
-        gv_time = time.perf_counter() - t0
-
-        # Measure 1D eigenvalue cost at small N to extrapolate
-        N_ref = 30
-        D = self._build_1d_operator(N_ref, p)
-        t0 = time.perf_counter()
-        _ = np.linalg.eigvals(-D[1:, 1:])
-        eig_ref = time.perf_counter() - t0
-
-        # In 3D, operator is N^3 x N^3 => eigenvalue is O((N^3)^3) = O(N^9).
-        # The 1D measurement gives cost c*N_ref^3, so c = eig_ref/N_ref^3.
-        # Projected 3D cost = c * target_N^9 = eig_ref * target_N^9 / N_ref^3.
-        target_N = 100
-        projected_3d_time = eig_ref * (target_N ** 9) / (N_ref ** 3)
-
-        # GV analysis is still O(1) -- same stencil analysis
-        # The projected 3D eigenvalue time should dwarf GV time
-        assert gv_time < projected_3d_time, (
-            f"GV time ({gv_time:.6f}s) should be much less than "
-            f"projected 3D eigenvalue time ({projected_3d_time:.1e}s)"
-        )
-
-        # N=100 in 3D produces a 10^6 x 10^6 matrix -- eigenvalue decomposition
-        # is completely impractical (projected time should be many hours+).
-        assert projected_3d_time > 1e6, (
-            f"Projected 3D eigenvalue time ({projected_3d_time:.1e}s) should be "
-            f"impractically large, demonstrating the motivation for GV analysis"
-        )

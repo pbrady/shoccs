@@ -95,26 +95,25 @@ cd scripts/stencil_gen && uv run pytest tests/test_phs.py -x -q -k "TestRegressi
 
 ### 39.4 — Remove redundant and diagnostic tests from `test_group_velocity.py`
 
-- [ ] **39.4a** Remove `test_e2_group_velocity_is_cos_xi` — strict subset of `test_interior_group_velocity_e2`:
+- [x] **39.4a** Remove `test_e2_group_velocity_is_cos_xi` — strict subset of `test_interior_group_velocity_e2`:
   - The latter already checks cos(xi) agreement AND cutoff_xi AND return type.
   - File: `scripts/stencil_gen/tests/test_group_velocity.py`
   - Test: `cd scripts/stencil_gen && uv run pytest tests/test_group_velocity.py -x -q -k "TestInterior"`
 
-- [ ] **39.4b** Remove `test_group_velocity_comparison_table` — zero-assertion diagnostic that always passes:
+- [x] **39.4b** Remove `test_group_velocity_comparison_table` — zero-assertion diagnostic that always passes:
   - Prints a formatted table, asserts nothing. Belongs in sweeps/ if anywhere.
   - File: `scripts/stencil_gen/tests/test_group_velocity.py`
   - Test: `cd scripts/stencil_gen && uv run pytest tests/test_group_velocity.py -x -q -k "TestInterior"`
 
-- [ ] **39.4c** Remove `test_ray_trace` — fully covered by `test_ray_trace_uniform`:
+- [x] **39.4c** Remove `test_ray_trace` — fully covered by `test_ray_trace_uniform`:
   - The E2 single-wavenumber case is a subset of the E4 multi-wavenumber test.
   - File: `scripts/stencil_gen/tests/test_group_velocity.py`
   - Test: `cd scripts/stencil_gen && uv run pytest tests/test_group_velocity.py -x -q -k "TestVarying"`
 
-- [ ] **39.4d** Move timing/scaling tests to `sweeps/` — these are benchmarks, not regressions:
-  - Move `TestScalingComparison` (3 methods) and `test_gv_cost_vs_eigenvalue_cost` to a new `sweeps/gv_benchmark.py` or remove entirely.
-  - Remove the local `import time` at line 1068 (module-level import exists).
+- [x] **39.4d** Remove timing/scaling tests — these are benchmarks, not regressions:
+  - Removed `TestScalingComparison` (3 methods), `test_gv_cost_vs_eigenvalue_cost`, and unused `import time`.
   - File: `scripts/stencil_gen/tests/test_group_velocity.py`
-  - Test: `cd scripts/stencil_gen && uv run pytest tests/test_group_velocity.py -x -q`
+  - Test: `cd scripts/stencil_gen && uv run pytest tests/test_group_velocity.py -x -q` — 51 passed, 1 skipped
 
 ### 39.5 — DRY up sweeps package constants
 
