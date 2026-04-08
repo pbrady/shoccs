@@ -1,0 +1,23 @@
+{
+  "E2_1": {
+    "params": {"p": 1, "q": 1, "nextra": 1, "nu": 1},
+    "tension": {"sigma": 6.0, "stable_at": [20, 40, 80]},
+    "gaussian": {"epsilon": 2.0, "stable_at": [40]},
+    "multiquadric": {"epsilon": 1.0, "stable_at": [40]},
+    "phs_k2": {"stable_at": [20, 40, 80, 160]}
+  },
+  "E4_1": {
+    "params": {"p": 2, "q": 3, "nextra": 0, "nu": 1},
+    "tension": {"sigma": 3.0, "stable_at": [20, 40, 80, 160]},
+    "gaussian": {"epsilon": 0.9, "stable_at": [40]},
+    "multiquadric": {"epsilon": 1.0, "stable_at": [40]},
+    "phs_k2": {"stable_at": [20, 40, 80, 160]},
+    "known_unstable": [{"kernel": "gaussian", "epsilon": 0.1, "n": 20}]
+  },
+  "footprint": {
+    "E4_nextra0_phs": {"nextra": 0, "stable_at": [20, 40, 80, 160]},
+    "E4_nextra0_tension_3": {"nextra": 0, "sigma": 3.0, "stable_at": [40]},
+    "E4_nextra1_phs": {"nextra": 1, "stable_at": [40]},
+    "E4_nextra2_phs": {"nextra": 2, "stable_at": [40]}
+  }
+}

@@ -47,7 +47,7 @@ The regression tests in `test_phs.py` (`TestRegressionE2Stability`, etc.) then l
   - File: `scripts/stencil_gen/sweeps/__init__.py`, `sweeps/__main__.py`, `sweeps/_common.py`
   - Test: `cd scripts/stencil_gen && uv run python -c "from sweeps._common import SweepResult; print('ok')"`
 
-- [ ] **38.1b** Create `scripts/stencil_gen/sweeps/known_values.json`:
+- [x] **38.1b** Create `scripts/stencil_gen/sweeps/known_values.json`:
   - Extract the hard-coded values from `TestRegressionE2Stability`, `TestRegressionE4Stability`, `TestRegressionFootprint`, `TestRegressionComparison` into a structured JSON file.
   - Structure:
     ```json
@@ -75,7 +75,7 @@ The regression tests in `test_phs.py` (`TestRegressionE2Stability`, etc.) then l
   - File: `scripts/stencil_gen/sweeps/known_values.json`
   - Test: `cd scripts/stencil_gen && uv run python -c "import json; json.load(open('sweeps/known_values.json')); print('ok')"`
 
-- [ ] **38.1c** Update `TestRegressionE2Stability`, `TestRegressionE4Stability`, `TestRegressionFootprint`, `TestRegressionComparison` to load from `known_values.json` instead of hard-coding values:
+- [x] **38.1c** Update `TestRegressionE2Stability`, `TestRegressionE4Stability`, `TestRegressionFootprint`, `TestRegressionComparison` to load from `known_values.json` instead of hard-coding values:
   - Add a `conftest.py` fixture or module-level loader for the JSON.
   - Each regression test reads its expected values from the JSON.
   - File: `scripts/stencil_gen/tests/test_phs.py`

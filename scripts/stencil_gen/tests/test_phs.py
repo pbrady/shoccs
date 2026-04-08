@@ -5901,6 +5901,26 @@ class TestCorrectedComparison:
 
 
 # ---------------------------------------------------------------------------
+# Regression test helpers — load known-good values from sweeps/known_values.json
+# ---------------------------------------------------------------------------
+
+import json as _json
+from pathlib import Path as _Path
+
+_KNOWN_VALUES_FILE = (
+    _Path(__file__).resolve().parent.parent / "sweeps" / "known_values.json"
+)
+
+
+def _load_known_values() -> dict:
+    with open(_KNOWN_VALUES_FILE) as f:
+        return _json.load(f)
+
+
+_KNOWN = _load_known_values()
+
+
+# ---------------------------------------------------------------------------
 # 37.3a: Fast regression tests for E2 stability (replaces swept classes)
 # ---------------------------------------------------------------------------
 
@@ -5908,47 +5928,48 @@ class TestCorrectedComparison:
 class TestRegressionE2Stability:
     """Fast regression spot-checks for E2 stability with known-good parameters.
 
-    Replaces the dense sweeps in TestCorrectedSweepE2, TestCorrectedTensionE2,
-    TestTensionOptimalSigma (E2 part), and TestTensionConservationE2 with
-    O(1) eigendecompositions at known-good parameter values.
-
-    E2_1 parameters: p=1, q=1, nextra=1, nu=1.
-    Key finding: E2 is universally stable under the corrected metric —
-    all tension sigmas and nearly all Gaussian epsilons are stable.
+    Values loaded from sweeps/known_values.json (E2_1 entry).
     """
 
-    # E2_1 scheme parameters
-    P = 1
-    Q = 1
-    NEXTRA = 1
-    NU = 1
+    _kv = _KNOWN["E2_1"]
+    P = _kv["params"]["p"]
+    Q = _kv["params"]["q"]
+    NEXTRA = _kv["params"]["nextra"]
+    NU = _kv["params"]["nu"]
 
     def test_e2_tension_optimal_sigma(self):
-        """E2_1 tension at σ=6.0 is stable (known-good from Phase 30.3b)."""
+        """E2_1 tension at known σ is stable."""
+        sigma = _KNOWN["E2_1"]["tension"]["sigma"]
         se = stability_eigenvalue(
-            40, p=self.P, q=self.Q, epsilon=6.0,
+            40, p=self.P, q=self.Q, epsilon=sigma,
             kernel="tension", nu=self.NU, nextra=self.NEXTRA,
         )
         assert se < STABILITY_TOL, (
-            f"E2_1 tension σ=6.0 n=40: expected stable, got {se:.6e}"
+            f"E2_1 tension σ={sigma} n=40: expected stable, got {se:.6e}"
         )
 
     def test_e2_gaussian_optimal_epsilon(self):
-        """E2_1 Gaussian at ε=2.0 is stable (near optimal ε*≈1.83)."""
+        """E2_1 Gaussian at known ε is stable."""
+        eps = _KNOWN["E2_1"]["gaussian"]["epsilon"]
         se = stability_eigenvalue(
-            40, p=self.P, q=self.Q, epsilon=2.0,
+            40, p=self.P, q=self.Q, epsilon=eps,
             kernel="gaussian", nu=self.NU, nextra=self.NEXTRA,
         )
         assert se < STABILITY_TOL, (
-            f"E2_1 Gaussian ε=2.0 n=40: expected stable, got {se:.6e}"
+            f"E2_1 Gaussian ε={eps} n=40: expected stable, got {se:.6e}"
         )
 
     def test_e2_stable_at_multiple_grid_sizes(self):
-        """E2_1 tension σ=6.0 and PHS k=2 (σ=0) are stable at n=20,40,80."""
-        for sigma, label in [(0.0, "PHS k=2"), (6.0, "tension σ=6.0")]:
-            for n in [20, 40, 80]:
+        """E2_1 tension and PHS k=2 are stable at known grid sizes."""
+        kv = _KNOWN["E2_1"]
+        sigma = kv["tension"]["sigma"]
+        for s, label, grid_key in [
+            (0.0, "PHS k=2", "phs_k2"),
+            (sigma, f"tension σ={sigma}", "tension"),
+        ]:
+            for n in kv[grid_key]["stable_at"]:
                 se = stability_eigenvalue(
-                    n, p=self.P, q=self.Q, epsilon=sigma,
+                    n, p=self.P, q=self.Q, epsilon=s,
                     kernel="tension", nu=self.NU, nextra=self.NEXTRA,
                 )
                 assert se < STABILITY_TOL, (
@@ -5964,59 +5985,59 @@ class TestRegressionE2Stability:
 class TestRegressionE4Stability:
     """Fast regression spot-checks for E4 stability with known-good parameters.
 
-    Replaces the dense sweeps in TestCorrectedSweepE4, TestCorrectedTensionE4,
-    TestCorrectedTensionPenaltyE4, TestTensionSweepE4, TestTensionConservationE4,
-    and TestMixedEpsilon with O(1) eigendecompositions at known-good values.
-
-    E4_1 parameters: p=2, q=3, nextra=0, nu=1.
-    Key findings:
-    - PHS k=2 (σ=0) is the most stable E4 configuration.
-    - Tension σ=3.0 is stable at all grid sizes.
-    - Gaussian has a narrow stable band around ε≈0.9.
-    - Multiquadric has a broader stable region.
+    Values loaded from sweeps/known_values.json (E4_1 entry).
     """
 
-    P = 2
-    Q = 3
-    NEXTRA = 0
-    NU = 1
+    _kv = _KNOWN["E4_1"]
+    P = _kv["params"]["p"]
+    Q = _kv["params"]["q"]
+    NEXTRA = _kv["params"]["nextra"]
+    NU = _kv["params"]["nu"]
 
     def test_e4_tension_known_sigma(self):
-        """E4_1 tension at σ=3.0 is stable (known-good from Phase 32.1)."""
+        """E4_1 tension at known σ is stable."""
+        sigma = _KNOWN["E4_1"]["tension"]["sigma"]
         se = stability_eigenvalue(
-            40, p=self.P, q=self.Q, epsilon=3.0,
+            40, p=self.P, q=self.Q, epsilon=sigma,
             kernel="tension", nu=self.NU, nextra=self.NEXTRA,
         )
         assert se < STABILITY_TOL, (
-            f"E4_1 tension σ=3.0 n=40: expected stable, got {se:.6e}"
+            f"E4_1 tension σ={sigma} n=40: expected stable, got {se:.6e}"
         )
 
     def test_e4_gaussian_known_epsilon(self):
-        """E4_1 Gaussian at ε=0.9 is stable (near optimal band center)."""
+        """E4_1 Gaussian at known ε is stable."""
+        eps = _KNOWN["E4_1"]["gaussian"]["epsilon"]
         se = stability_eigenvalue(
-            40, p=self.P, q=self.Q, epsilon=0.9,
+            40, p=self.P, q=self.Q, epsilon=eps,
             kernel="gaussian", nu=self.NU, nextra=self.NEXTRA,
         )
         assert se < STABILITY_TOL, (
-            f"E4_1 Gaussian ε=0.9 n=40: expected stable, got {se:.6e}"
+            f"E4_1 Gaussian ε={eps} n=40: expected stable, got {se:.6e}"
         )
 
     def test_e4_multiquadric_known_epsilon(self):
-        """E4_1 multiquadric at ε=1.0 is stable (broad stable region)."""
+        """E4_1 multiquadric at known ε is stable."""
+        eps = _KNOWN["E4_1"]["multiquadric"]["epsilon"]
         se = stability_eigenvalue(
-            40, p=self.P, q=self.Q, epsilon=1.0,
+            40, p=self.P, q=self.Q, epsilon=eps,
             kernel="multiquadric", nu=self.NU, nextra=self.NEXTRA,
         )
         assert se < STABILITY_TOL, (
-            f"E4_1 multiquadric ε=1.0 n=40: expected stable, got {se:.6e}"
+            f"E4_1 multiquadric ε={eps} n=40: expected stable, got {se:.6e}"
         )
 
     def test_e4_stable_at_multiple_grid_sizes(self):
-        """E4_1 tension σ=3.0 and PHS k=2 (σ=0) are stable at n=20,40,80,160."""
-        for sigma, label in [(0.0, "PHS k=2"), (3.0, "tension σ=3.0")]:
-            for n in [20, 40, 80, 160]:
+        """E4_1 tension and PHS k=2 are stable at known grid sizes."""
+        kv = _KNOWN["E4_1"]
+        sigma = kv["tension"]["sigma"]
+        for s, label, grid_key in [
+            (0.0, "PHS k=2", "phs_k2"),
+            (sigma, f"tension σ={sigma}", "tension"),
+        ]:
+            for n in kv[grid_key]["stable_at"]:
                 se = stability_eigenvalue(
-                    n, p=self.P, q=self.Q, epsilon=sigma,
+                    n, p=self.P, q=self.Q, epsilon=s,
                     kernel="tension", nu=self.NU, nextra=self.NEXTRA,
                 )
                 assert se < STABILITY_TOL, (
@@ -6024,14 +6045,16 @@ class TestRegressionE4Stability:
                 )
 
     def test_e4_unstable_detected(self):
-        """Known-unstable E4_1 Gaussian at ε=0.1 should be detected."""
-        se = stability_eigenvalue(
-            20, p=self.P, q=self.Q, epsilon=0.1,
-            kernel="gaussian", nu=self.NU, nextra=self.NEXTRA,
-        )
-        assert se > STABILITY_TOL, (
-            f"E4_1 Gaussian ε=0.1 n=20: expected unstable, got {se:.6e}"
-        )
+        """Known-unstable configurations should be detected."""
+        for entry in _KNOWN["E4_1"]["known_unstable"]:
+            se = stability_eigenvalue(
+                entry["n"], p=self.P, q=self.Q, epsilon=entry["epsilon"],
+                kernel=entry["kernel"], nu=self.NU, nextra=self.NEXTRA,
+            )
+            assert se > STABILITY_TOL, (
+                f"E4_1 {entry['kernel']} ε={entry['epsilon']} n={entry['n']}: "
+                f"expected unstable, got {se:.6e}"
+            )
 
 
 # ---------------------------------------------------------------------------
@@ -6042,57 +6065,64 @@ class TestRegressionE4Stability:
 class TestRegressionFootprint:
     """Fast regression spot-checks for E4 nextra stability.
 
-    Replaces the dense sweeps in TestCorrectedFootprint, TestFootprintE4Quick,
-    TestFootprintSweep, and TestFootprintPenalty with O(1) checks.
-
-    Key finding: E4 PHS k=2 (σ=0, nextra=0) is unconditionally stable.
-    Higher nextra values are also stable but not needed.
+    Values loaded from sweeps/known_values.json (footprint entry).
+    Uses E4_1 base parameters (p=2, q=3, nu=1).
     """
 
-    P = 2
-    Q = 3
-    NU = 1
+    _e4 = _KNOWN["E4_1"]["params"]
+    P = _e4["p"]
+    Q = _e4["q"]
+    NU = _e4["nu"]
+    _fp = _KNOWN["footprint"]
 
     def test_nextra0_phs_k2_grid_independence(self):
-        """E4 nextra=0, σ=0 (PHS k=2) is stable at n=20,40,80,160."""
-        for n in [20, 40, 80, 160]:
+        """E4 nextra=0, PHS k=2 is stable at known grid sizes."""
+        entry = self._fp["E4_nextra0_phs"]
+        for n in entry["stable_at"]:
             se = stability_eigenvalue(
                 n, p=self.P, q=self.Q, epsilon=0.0,
-                kernel="tension", nu=self.NU, nextra=0,
+                kernel="tension", nu=self.NU, nextra=entry["nextra"],
             )
             assert se < STABILITY_TOL, (
                 f"E4 PHS k=2 nextra=0 n={n}: expected stable, got {se:.6e}"
             )
 
-    def test_nextra0_tension_sigma3(self):
-        """E4 nextra=0, tension σ=3.0 is stable at n=40."""
-        se = stability_eigenvalue(
-            40, p=self.P, q=self.Q, epsilon=3.0,
-            kernel="tension", nu=self.NU, nextra=0,
-        )
-        assert se < STABILITY_TOL, (
-            f"E4 nextra=0 tension σ=3.0 n=40: expected stable, got {se:.6e}"
-        )
+    def test_nextra0_tension(self):
+        """E4 nextra=0, tension at known σ is stable."""
+        entry = self._fp["E4_nextra0_tension_3"]
+        sigma = entry["sigma"]
+        for n in entry["stable_at"]:
+            se = stability_eigenvalue(
+                n, p=self.P, q=self.Q, epsilon=sigma,
+                kernel="tension", nu=self.NU, nextra=entry["nextra"],
+            )
+            assert se < STABILITY_TOL, (
+                f"E4 nextra=0 tension σ={sigma} n={n}: expected stable, got {se:.6e}"
+            )
 
     def test_nextra1_has_stable_sigma(self):
-        """E4 nextra=1 has a stable σ (PHS k=2 at σ=0)."""
-        se = stability_eigenvalue(
-            40, p=self.P, q=self.Q, epsilon=0.0,
-            kernel="tension", nu=self.NU, nextra=1,
-        )
-        assert se < STABILITY_TOL, (
-            f"E4 nextra=1 PHS k=2 n=40: expected stable, got {se:.6e}"
-        )
+        """E4 nextra=1 has a stable PHS k=2."""
+        entry = self._fp["E4_nextra1_phs"]
+        for n in entry["stable_at"]:
+            se = stability_eigenvalue(
+                n, p=self.P, q=self.Q, epsilon=0.0,
+                kernel="tension", nu=self.NU, nextra=entry["nextra"],
+            )
+            assert se < STABILITY_TOL, (
+                f"E4 nextra=1 PHS k=2 n={n}: expected stable, got {se:.6e}"
+            )
 
     def test_nextra2_has_stable_sigma(self):
-        """E4 nextra=2 has a stable σ (PHS k=2 at σ=0)."""
-        se = stability_eigenvalue(
-            40, p=self.P, q=self.Q, epsilon=0.0,
-            kernel="tension", nu=self.NU, nextra=2,
-        )
-        assert se < STABILITY_TOL, (
-            f"E4 nextra=2 PHS k=2 n=40: expected stable, got {se:.6e}"
-        )
+        """E4 nextra=2 has a stable PHS k=2."""
+        entry = self._fp["E4_nextra2_phs"]
+        for n in entry["stable_at"]:
+            se = stability_eigenvalue(
+                n, p=self.P, q=self.Q, epsilon=0.0,
+                kernel="tension", nu=self.NU, nextra=entry["nextra"],
+            )
+            assert se < STABILITY_TOL, (
+                f"E4 nextra=2 PHS k=2 n={n}: expected stable, got {se:.6e}"
+            )
 
 
 # ---------------------------------------------------------------------------
@@ -6103,58 +6133,57 @@ class TestRegressionFootprint:
 class TestRegressionComparison:
     """Fast regression spot-checks for the comprehensive comparison.
 
-    Replaces the dense sweeps in TestCorrectedComparison with spot-checks
-    at known-good parameter values for each method.
-
-    Key findings:
-    - E2_1 (p=1, q=1, nextra=1): all methods stable, broad stable region.
-    - E4_1 (p=2, q=3, nextra=0): all methods stable, PHS k=2 most stable.
+    Values loaded from sweeps/known_values.json.
+    Tests all methods for both E2_1 and E4_1 at known-good parameters.
     """
 
+    @staticmethod
+    def _configs_for(scheme_key):
+        """Build (label, kernel, eps) configs from known values."""
+        kv = _KNOWN[scheme_key]
+        configs = [("PHS k=2", "tension", 0.0)]
+        for method in ("gaussian", "tension", "multiquadric"):
+            if method in kv:
+                param_key = "sigma" if method == "tension" else "epsilon"
+                configs.append((method, method, kv[method][param_key]))
+        return configs
+
     def test_e2_all_methods_stable(self):
-        """E2_1: PHS k=2, Gaussian, tension, and multiquadric all stable at n=40."""
-        p, q, nextra, nu = 1, 1, 1, 1
-        configs = [
-            ("PHS k=2", "tension", 0.0),
-            ("Gaussian", "gaussian", 2.0),
-            ("tension", "tension", 6.0),
-            ("multiquadric", "multiquadric", 1.0),
-        ]
-        for label, kernel, eps in configs:
+        """E2_1: all methods stable at n=40."""
+        kv = _KNOWN["E2_1"]
+        p = kv["params"]
+        for label, kernel, eps in self._configs_for("E2_1"):
             se = stability_eigenvalue(
-                40, p=p, q=q, epsilon=eps,
-                kernel=kernel, nu=nu, nextra=nextra,
+                40, p=p["p"], q=p["q"], epsilon=eps,
+                kernel=kernel, nu=p["nu"], nextra=p["nextra"],
             )
             assert se < STABILITY_TOL, (
                 f"E2_1 {label} n=40: expected stable, got {se:.6e}"
             )
 
     def test_e4_all_methods_stable(self):
-        """E4_1: PHS k=2, Gaussian, tension, and multiquadric all stable at n=40."""
-        p, q, nextra, nu = 2, 3, 0, 1
-        configs = [
-            ("PHS k=2", "tension", 0.0),
-            ("Gaussian", "gaussian", 0.9),
-            ("tension", "tension", 3.0),
-            ("multiquadric", "multiquadric", 1.0),
-        ]
-        for label, kernel, eps in configs:
+        """E4_1: all methods stable at n=40."""
+        kv = _KNOWN["E4_1"]
+        p = kv["params"]
+        for label, kernel, eps in self._configs_for("E4_1"):
             se = stability_eigenvalue(
-                40, p=p, q=q, epsilon=eps,
-                kernel=kernel, nu=nu, nextra=nextra,
+                40, p=p["p"], q=p["q"], epsilon=eps,
+                kernel=kernel, nu=p["nu"], nextra=p["nextra"],
             )
             assert se < STABILITY_TOL, (
                 f"E4_1 {label} n=40: expected stable, got {se:.6e}"
             )
 
     def test_phs_k2_grid_convergence(self):
-        """PHS k=2 is stable at n=20,40,80,160 for both E2 and E4."""
-        for label, p, q, nextra in [("E2_1", 1, 1, 1), ("E4_1", 2, 3, 0)]:
-            for n in [20, 40, 80, 160]:
+        """PHS k=2 is stable at known grid sizes for both E2 and E4."""
+        for scheme_key in ("E2_1", "E4_1"):
+            kv = _KNOWN[scheme_key]
+            p = kv["params"]
+            for n in kv["phs_k2"]["stable_at"]:
                 se = stability_eigenvalue(
-                    n, p=p, q=q, epsilon=0.0,
-                    kernel="tension", nu=1, nextra=nextra,
+                    n, p=p["p"], q=p["q"], epsilon=0.0,
+                    kernel="tension", nu=p["nu"], nextra=p["nextra"],
                 )
                 assert se < STABILITY_TOL, (
-                    f"{label} PHS k=2 n={n}: expected stable, got {se:.6e}"
+                    f"{scheme_key} PHS k=2 n={n}: expected stable, got {se:.6e}"
                 )
