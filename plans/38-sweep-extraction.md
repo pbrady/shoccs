@@ -121,11 +121,12 @@ The regression tests in `test_phs.py` (`TestRegressionE2Stability`, etc.) then l
 
 ### 38.4 — Footprint and Comparison Scripts
 
-- [ ] **38.4a** Create `sweeps/footprint_sweep.py` — extract from `TestCorrectedFootprint`, `TestFootprintE4Quick`, `TestFootprintSweep`, `TestFootprintPenalty`:
+- [x] **38.4a** Create `sweeps/footprint_sweep.py` — extract from `TestCorrectedFootprint`, `TestFootprintE4Quick`, `TestFootprintSweep`, `TestFootprintPenalty`:
   - Functions: `run_footprint_sweep(nextra_values, n_sigma, n_gamma)` — nextra × sigma (× gamma) sweep
   - Output: nextra comparison table, best parameters per nextra
   - File: `scripts/stencil_gen/sweeps/footprint_sweep.py`
   - Test: `cd scripts/stencil_gen && uv run python -m sweeps.footprint_sweep --n-sigma 10`
+  - Verified: 3 phases (nextra×sigma, penalty, grid independence); dispatcher wired with --update-known-values
 
 - [ ] **38.4b** Create `sweeps/comparison.py` — extract from `TestCorrectedComparison`, `TestComparisonTable`, `TestTensionComparison`, `TestTensionOptimalSigma`:
   - Functions: `run_comparison(schemes, methods, n_values)` — multi-method comparison at each scheme

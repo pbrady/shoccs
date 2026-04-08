@@ -43,6 +43,10 @@ def main() -> int:
 
     sub_footprint = subparsers.add_parser("footprint", help="Stencil footprint (nextra) sweep")
     sub_footprint.add_argument("--n-sigma", type=int, default=20)
+    sub_footprint.add_argument("--n-gamma", type=int, default=20)
+    sub_footprint.add_argument("--sigma-max", type=float, default=50.0)
+    sub_footprint.add_argument("--nextra-values", default="0,1,2,3", help="Comma-separated nextra values")
+    sub_footprint.add_argument("--update-known-values", action="store_true", help="Update known_values.json")
 
     sub_comparison = subparsers.add_parser("comparison", help="Multi-method comparison table")
     sub_comparison.add_argument("--scheme", choices=["E2", "E4"], default=None)
@@ -106,6 +110,17 @@ def main() -> int:
             "--n-sigma", str(args.n_sigma),
             "--n-gamma", str(args.n_gamma),
             "--sigma-max", str(args.sigma_max),
+            *(["--update-known-values"] if args.update_known_values else []),
+        ])
+
+    if args.command == "footprint":
+        from .footprint_sweep import main as fp_main
+
+        return fp_main([
+            "--n-sigma", str(args.n_sigma),
+            "--n-gamma", str(args.n_gamma),
+            "--sigma-max", str(args.sigma_max),
+            "--nextra-values", args.nextra_values,
             *(["--update-known-values"] if args.update_known_values else []),
         ])
 
