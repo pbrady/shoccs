@@ -29,21 +29,11 @@ from stencil_gen.phs import (
     uniform_boundary_weights,
 )
 
-from ._common import load_known_values, save_known_values
+from ._common import SCHEME_PARAMS, STABILITY_TOL, load_known_values, save_known_values
 
 # Floating-point eigenvalue solvers return tiny positive real parts (~1e-14)
-# for genuinely stable operators.  Use this threshold to distinguish true
-# instability from numerical noise.
-STABILITY_TOL = 1e-10
-
 # RK4 stability limit along the imaginary axis
 RK4_IMAG_LIMIT = 2.828
-
-# Scheme parameters: (p, q, nextra, nu)
-SCHEME_PARAMS = {
-    "E2": {"p": 1, "q": 1, "nextra": 1, "nu": 1, "label": "E2_1"},
-    "E4": {"p": 2, "q": 3, "nextra": 0, "nu": 1, "label": "E4_1"},
-}
 
 
 # ---------------------------------------------------------------------- helpers

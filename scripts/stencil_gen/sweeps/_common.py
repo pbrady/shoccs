@@ -8,6 +8,16 @@ from pathlib import Path
 
 KNOWN_VALUES_PATH = Path(__file__).parent / "known_values.json"
 
+# Stability threshold: eigenvalues below this are considered numerically zero
+# (i.e., the operator is stable).
+STABILITY_TOL = 1e-10
+
+# Scheme parameters: (p, q, nextra, nu) for each named scheme.
+SCHEME_PARAMS = {
+    "E2": {"p": 1, "q": 1, "nextra": 1, "nu": 1, "label": "E2_1"},
+    "E4": {"p": 2, "q": 3, "nextra": 0, "nu": 1, "label": "E4_1"},
+}
+
 
 @dataclass
 class SweepResult:

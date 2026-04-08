@@ -31,12 +31,7 @@ from stencil_gen.phs import (
     stability_eigenvalue_from_matrix,
 )
 
-from ._common import load_known_values, save_known_values
-
-# Floating-point eigenvalue solvers return tiny positive real parts (~1e-14)
-# for genuinely stable operators.  Use this threshold to distinguish true
-# instability from numerical noise.
-STABILITY_TOL = 1e-10
+from ._common import STABILITY_TOL, load_known_values, save_known_values
 
 # E4 scheme parameters (footprint sweep is E4-only)
 P = 2

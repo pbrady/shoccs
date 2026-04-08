@@ -34,13 +34,7 @@ from stencil_gen.phs import (
     uniform_boundary_weights_rbf,
 )
 
-from ._common import print_table
-
-# Scheme parameters: (p, q, nextra, nu)
-SCHEME_PARAMS = {
-    "E2": {"p": 1, "q": 1, "nextra": 1, "nu": 1, "label": "E2_1"},
-    "E4": {"p": 2, "q": 3, "nextra": 0, "nu": 1, "label": "E4_1"},
-}
+from ._common import SCHEME_PARAMS, print_table
 
 # Production alphas from src/operators/gradient.t.cpp
 PRODUCTION_ALPHAS = {

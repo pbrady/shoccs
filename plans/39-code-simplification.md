@@ -117,10 +117,10 @@ cd scripts/stencil_gen && uv run pytest tests/test_phs.py -x -q -k "TestRegressi
 
 ### 39.5 — DRY up sweeps package constants
 
-- [ ] **39.5a** Move `STABILITY_TOL` and `SCHEME_PARAMS` to `_common.py`:
-  - Currently copy-pasted in 6 sweep files. Add to `_common.py`, import everywhere else.
+- [x] **39.5a** Move `STABILITY_TOL` and `SCHEME_PARAMS` to `_common.py`:
+  - Moved both constants to `_common.py`. Removed local definitions from epsilon_sweep.py, tension_sweep.py, comparison.py, tension_penalty_sweep.py, footprint_sweep.py, mixed_epsilon_sweep.py, alpha_extraction.py. All import from `_common` now.
   - File: `scripts/stencil_gen/sweeps/_common.py`, and all 6 sweep scripts
-  - Test: `cd scripts/stencil_gen && uv run python -m sweeps epsilon --scheme E2 --n-eps 5`
+  - Test: `cd scripts/stencil_gen && uv run python -m sweeps epsilon --scheme E2 --n-eps 5` — verified OK
 
 - [ ] **39.5b** Extract shared `print_sweep_table` and `report_stable_ranges` to `_common.py`:
   - Nearly identical between `epsilon_sweep.py` and `tension_sweep.py`. Parameterize with `param_label` argument.
