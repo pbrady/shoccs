@@ -97,7 +97,7 @@ The regression tests in `test_phs.py` (`TestRegressionE2Stability`, etc.) then l
   - File: `scripts/stencil_gen/sweeps/__main__.py`
   - Test: `cd scripts/stencil_gen && uv run python -m sweeps epsilon --help` (should show `--update-known-values`)
 
-- [ ] **38.2b** Create `sweeps/mixed_epsilon_sweep.py` — extract from `TestMixedEpsilon`:
+- [x] **38.2b** Create `sweeps/mixed_epsilon_sweep.py` — extract from `TestMixedEpsilon`:
   - Functions: `run_mixed_epsilon_sweep(scheme, kernel, n_groups, n_eps_per_group)`
   - Handles: single-epsilon baseline, 2-group 2D sweep, per-row coordinate descent
   - File: `scripts/stencil_gen/sweeps/mixed_epsilon_sweep.py`

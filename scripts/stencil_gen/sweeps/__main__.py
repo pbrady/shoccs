@@ -48,7 +48,9 @@ def main() -> int:
 
     sub_mixed = subparsers.add_parser("mixed-epsilon", help="Mixed (per-row) epsilon sweep")
     sub_mixed.add_argument("--scheme", choices=["E2", "E4"], default="E4")
+    sub_mixed.add_argument("--kernel", choices=["gaussian", "multiquadric"], default="gaussian")
     sub_mixed.add_argument("--n-eps", type=int, default=20)
+    sub_mixed.add_argument("--update-known-values", action="store_true", help="Update known_values.json")
 
     sub_all = subparsers.add_parser("all", help="Run all sweeps")
     sub_all.add_argument("--quick", action="store_true", help="Reduced resolution for quick verification")
@@ -67,6 +69,16 @@ def main() -> int:
             "--scheme", args.scheme,
             "--kernel", args.kernel,
             "--n-values", args.n_values,
+            "--n-eps", str(args.n_eps),
+            *(["--update-known-values"] if args.update_known_values else []),
+        ])
+
+    if args.command == "mixed-epsilon":
+        from .mixed_epsilon_sweep import main as mixed_main
+
+        return mixed_main([
+            "--scheme", args.scheme,
+            "--kernel", args.kernel,
             "--n-eps", str(args.n_eps),
             *(["--update-known-values"] if args.update_known_values else []),
         ])
