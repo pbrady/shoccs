@@ -435,11 +435,13 @@ The correct GV objective for this sweep is `boundary_gv_error_max(p, q, nextra, 
 
 ### 40.9 — Documentation updates
 
-- [ ] **40.9a** Update `scripts/stencil_gen/docs/sweeps_reference.md` with a new "Group velocity objectives" section:
+- [x] **40.9a** Update `scripts/stencil_gen/docs/sweeps_reference.md` with a new "Group velocity objectives" section:
   - Document `--include-gv`, `--check-gks`, and the new `gv-stability-pareto` subcommand.
   - Document the new `known_values.json` keys: `*.gv_error`, `tension_gv`, `{kernel}_gv`, `footprint.E4_nextra{nx}_tension_*.gv_error`, and `footprint.E4_nextra{nx}_tension_gv` (the parallel GV-optimal entry persisted by 40.5c). The original draft of this item referenced `footprint.*.min_C`, which was retired by the 40.5 rewrite (commit `bc9a19d`) — `min_C` is a TEMO cut-cell concept and now lives only in the deferred 40.5f path.
   - Explain the feasible-then-minimize contract: stability is hard, GV is soft secondary.
-  - File: `scripts/stencil_gen/docs/sweeps_reference.md`
+  - File: `scripts/stencil_gen/docs/sweeps_reference.md` — **done**
+  - Implementation: added new subsection `### 2.9 Group velocity objectives` after `2.8 all` and before the schema section, covering the feasible-then-minimize objective table, the `--include-gv` contract (per-sweep behavior, what the column shows, how the additive and parallel JSON keys land), the `--check-gks` advisory contract (necessary-not-sufficient, no gate), the `gv-stability-pareto` subcommand CLI table and Pareto-partial-order definition, and the bit-exact `(param, gv_error)` self-consistency contract established by 40.8c/40.8d/40.8g. Section 3's "Scheme Entry" JSON example was updated with `tension.gv_error`, `tension_gv`, `gaussian.gv_error`, `gaussian_gv`, `multiquadric.gv_error`, `multiquadric_gv`, `tension_penalty.gv_error`, and `tension_penalty_gv`, and the "Field Descriptions" table gained rows for `tension_penalty` (updated to mention `gv_error`), `*.gv_error` (as a single combined row documenting the bit-exact contract across all four primary fields), `tension_gv`/`gaussian_gv`/`multiquadric_gv` (a single combined row), and `tension_penalty_gv`. The "Footprint Entry" JSON example was extended with the additive `gv_error` field on `E4_nextra0_tension_3` and the parallel `E4_nextra0_tension_gv` entry, and the prose now documents the `best_stable_gv_sigma > 0` filter (40.5d) and the bit-exact contract on the footprint primary entries.
+  - Verified: python sanity check confirms all new section markers (`2.9 Group velocity objectives`, `--include-gv`, `--check-gks`, `gv-stability-pareto`, `tension_gv`, `tension_penalty_gv`, `E4_nextra0_tension_gv`, `feasible-then-minimize`) are present. Final file is 1015 lines (was 861 before this item). No existing sections were removed or renumbered, and the schema rewrite is purely additive on the example dict — existing `params`/`phs_k2`/`known_unstable` fields are untouched.
   - Test: (no test — documentation only; rendered check by reading the file)
 
 - [ ] **40.9b** Update `scripts/stencil_gen/docs/group_velocity_reference.md` with a "Sweep integration" section:
