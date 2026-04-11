@@ -183,24 +183,45 @@ cd scripts/stencil_gen && uv run pytest tests/test_phs.py -x -q -k "TestRegressi
   - Verified: `uv run pytest tests/test_sweep_gv_objectives.py -x -q -k "tension_penalty_sweep_main_merges"` → 1 passed in 0.90s. Mutation check 1: replaced the `tp_entry = dict(kv[scheme_key].get("tension_penalty", {}))` merge with a non-merging literal `tp_entry = {"sigma":..., "gamma":..., "stable_at":...}` — test failed with `KeyError: 'preexisting_extra_key'` (restored). Mutation check 2: replaced the `tp_gv_entry = dict(kv[scheme_key].get("tension_penalty_gv", {}))` merge with a non-merging literal `tp_gv_entry = {"sigma":..., "gamma":..., "gv_error":..., "stable_at":...}` — test failed with `KeyError: 'preexisting_gv_extra'` (restored). Final regression sweep: `pytest tests/test_sweep_gv_objectives.py tests/test_phs.py -x -q -k "TestRegression or gv_objectives or sweep_gv or merges"` → 26 passed in 1.56s.
   - **Carry-over for 40.5c:** same additive merge pattern applies to `footprint.*` entries. When 40.5c lands, consider extracting `_seed_kv` / `_seed_kv_epsilon` / `_seed_kv_tension_penalty` into a single parameterized `_seed_kv_with_keys(path, scheme_key, primary_key, secondary_key, primary_extras, secondary_extras)` helper — four near-identical seeders is past the deduplication threshold.
 
-### 40.5 — Cut-cell GV integration with `footprint_sweep`
+### 40.5 — GV integration with `footprint_sweep`
 
-- [ ] **40.5a** Add `--include-gv` flag to `footprint_sweep.py`:
-  - For each (scheme, nextra) combination, after the existing stability scan, call `cutcell_gv_min_C(scheme_params, psi_values=np.linspace(0.05, 0.95, 19), alpha_values, n_xi=200)`.
-  - Reuse the alpha_values already extracted by the sweep — do not re-derive.
-  - File: `scripts/stencil_gen/sweeps/footprint_sweep.py`
-  - Test: `cd scripts/stencil_gen && uv run python -m sweeps footprint --n-sigma 5 --include-gv`
+**Planning correction (2026-04-10, during 40.5a execution):** The original 40.5a / 40.5b / 40.5c drafts assumed `footprint_sweep.py` already had `scheme_params` / `alpha_values` in scope (inherited from the plan author's mental model of the cut-cell TEMO pipeline). Inspection of the file shows **zero** references to `scheme_params`, `SchemeParams`, `alpha`, or `temo` — the sweep is a pure RBF boundary-closure exploration (E4 tension with varying `nextra`), built around `build_diff_matrix_rbf_penalty` and `stability_eigenvalue`, exactly like `tension_sweep.py` and `epsilon_sweep.py`. Calling `cutcell_gv_min_C` here would require constructing one `SchemeParams(p=2, q=3, s=0, nextra=nx, nu=1, zeros=(3,4))` per nextra value and running the slow mathematica cut-cell derivation per nextra — a completely different axis from what the footprint sweep optimizes (RBF shape parameter sigma).
 
-- [ ] **40.5b** Print `min_C` and `has_sign_reversal` columns in the footprint table when `--include-gv` is set:
-  - Sign reversal is the parasitic-mode signature for cut-cell stencils — deserves a visible flag.
-  - Among feasible footprints (existing stability gate), report "Best footprint by min_C" alongside the existing "Smallest stable footprint" line.
-  - File: `scripts/stencil_gen/sweeps/footprint_sweep.py`
-  - Test: `cd scripts/stencil_gen && uv run python -m sweeps footprint --n-sigma 5 --include-gv`
+The correct GV objective for this sweep is `boundary_gv_error_max(p, q, nextra, nu, sigma, "tension")`, matching the 40.2/40.3 pattern. This measures the GV error of the RBF boundary rows that the footprint sweep is already varying. `cutcell_gv_min_C` is only meaningful for a TEMO cut-cell scheme and does not belong in this file. The items below are rewritten accordingly; a separate deferred 40.5e documents the (optional, currently out-of-scope) cut-cell path.
 
-- [ ] **40.5c** Persist cut-cell GV summary in `known_values.json` under each footprint entry:
-  - `kv["footprint"]["{key}"]["min_C"] = ...`, `kv["footprint"]["{key}"]["has_sign_reversal"] = ...`
+- [ ] **40.5a** Add `--include-gv` flag to `footprint_sweep.py`, mirroring 40.2a/40.3a:
+  - Default `False` so existing invocations behave identically.
+  - When set, after the existing stability scan in `run_nextra_sigma_sweep`, evaluate `boundary_gv_error_max(p=P, q=Q, nextra=nx, nu=NU, sigma=sigma, kernel="tension")` per `(nx, sigma)` pair and return it alongside the existing rows. One call per `(nx, sigma)` — the GV objective does not depend on `n`, so no re-evaluation at multiple grid sizes.
+  - Argument plumbing only — no column printed, no persistence change, no table layout change. 40.5b owns the printing work; 40.5c owns persistence.
+  - Thread `--include-gv` through `run_footprint_sweep` and `__main__.py` subparser (same pattern as the tension/epsilon plumbing).
+  - File: `scripts/stencil_gen/sweeps/footprint_sweep.py` (+ `sweeps/__main__.py` flag passthrough)
+  - Test: `cd scripts/stencil_gen && uv run python -m sweeps footprint --n-sigma 5 --include-gv` runs end-to-end; output without `--include-gv` is byte-identical to the pre-40.5a form.
+
+- [ ] **40.5b** Print `gv_err` column in `run_nextra_sigma_sweep` table when `--include-gv` is set:
+  - Extend the per-`nx` summary row with a `best_stable_gv_sigma` / `best_stable_gv` pair and print a parallel "Best stable (by GV error)" summary block under the existing "Summary: Stability per nextra" table.
+  - Among stable rows (`se < STABILITY_TOL`), report "Best (nextra, sigma) by GV error" as a single-line summary across all nextra values.
   - File: `scripts/stencil_gen/sweeps/footprint_sweep.py`
-  - Test: `cd scripts/stencil_gen && uv run python -m sweeps footprint --n-sigma 5 --include-gv --update-known-values`
+  - Test: `cd scripts/stencil_gen && uv run python -m sweeps footprint --n-sigma 5 --include-gv` shows the new column/block; same command without `--include-gv` is unchanged.
+
+- [ ] **40.5c** Persist per-nextra GV optimum in `known_values.json["footprint"]`:
+  - For each `E4_nextra{nx}_tension_{sigma}` footprint entry that is populated from a stable sigma, also write `entry["gv_error"] = best_gv_err_for_that_nextra` (additive on the existing entry).
+  - Add a parallel top-level `kv["footprint"][f"E4_nextra{nx}_tension_gv"] = {"nextra": nx, "sigma": gv_sigma, "gv_error": gv_err, "stable_at": [...]}` for the GV-optimal feasible sigma at that nextra, with a cross-grid stability re-check at `{20,40,80,160}` mirroring 40.2c/40.3c/40.4d.
+  - Apply the additive merge pattern from 40.2d/40.3c/40.4c: `entry = dict(kv["footprint"].get(key, {}))`, assign only the keys this invocation owns.
+  - **Important — do not blow away the whole `kv["footprint"]` dict:** the current `main()` writes `kv["footprint"] = summary`, which replaces the entire footprint sub-dict on every run. That's a pre-existing non-additive pattern that 40.5c must fix before adding new keys, otherwise GV keys from prior runs will be silently dropped by any non-GV rerun. Rewrite `main()` to merge per-entry into `kv["footprint"].setdefault(key, {})` instead of assigning the whole dict.
+  - File: `scripts/stencil_gen/sweeps/footprint_sweep.py`
+  - Test: `cd scripts/stencil_gen && uv run python -m sweeps footprint --n-sigma 5 --include-gv --update-known-values` (snapshot JSON, verify additive, restore).
+
+- [ ] **40.5d** Add an automated regression test for `footprint_sweep.main()` merge pattern (mirrors 40.2e/40.3d/40.4e):
+  - At this point four near-identical seeders (`_seed_kv`, `_seed_kv_epsilon`, `_seed_kv_tension_penalty`, `_seed_kv_footprint`) exist. Per the 40.4e carry-over note, this is the deduplication threshold: extract them into a single parameterized `_seed_kv_with_keys(path, scheme_key, primary_key, secondary_key, primary_extras, secondary_extras)` helper before adding the footprint test, and refactor the existing three tests to use it.
+  - Implementation: `test_footprint_sweep_main_merges_known_values` seeds `kv["footprint"]["E4_nextra0_tension_6"]` with a `preexisting_extra_key` sentinel and `kv["footprint"]["E4_nextra0_tension_gv"]` with a `preexisting_gv_extra` sentinel, runs `footprint_sweep.main(["--n-sigma","5","--update-known-values"])` (no `--include-gv`) and then with `--include-gv`, asserting both sentinels survive and `gv_error` is refreshed on the second call.
+  - Mutation checks: replace both merge blocks with non-merging literals and confirm each test fails with a `KeyError` on its respective sentinel.
+  - File: `scripts/stencil_gen/tests/test_sweep_gv_objectives.py`
+  - Test: `cd scripts/stencil_gen && uv run pytest tests/test_sweep_gv_objectives.py -x -q -k "footprint_sweep_main_merges"`
+
+- [ ] **40.5e** *(deferred / optional)* True cut-cell GV diagnostics (`min_C` / `has_sign_reversal`) for TEMO schemes:
+  - This is **not** a footprint-sweep concern. The cut-cell path operates on a `SchemeParams` object (`E2_1`, `E4_1`, `E4_2`, …) and runs `psi_sweep_group_velocity` at specific psi values. It is independent of the RBF shape parameter sigma that `footprint_sweep` optimizes.
+  - If desired, the natural home is a new sweep (e.g. `sweeps/cutcell_gv_sweep.py`) or an augmentation of the existing `comparison_sweep.py` — **not** `footprint_sweep.py`. Leaving this as an explicit deferred item so a future Ralph pass does not re-derive the same discovery.
+  - No test / no file / no immediate action.
 
 ### 40.6 — New `gv-stability-pareto` sweep subcommand
 
@@ -289,7 +310,7 @@ cd scripts/stencil_gen && uv run pytest tests/test_phs.py -x -q -k "TestRegressi
   ↓
 40.4a → 40.4b → 40.4c → 40.4d → 40.4e   (tension_penalty 3-way objective; 40.4c expanded after review of 5cd827e to spell out the summary plumbing + additive merge pattern; 40.4d added after review of a5e7f5d to fix the missing cross-grid stability check on the persisted `tension_penalty_gv` entry; 40.4e adds the merge regression test mirroring 40.2e/40.2f/40.3d)
   ↓
-40.5a → 40.5b → 40.5c   (cut-cell footprint integration)
+40.5a → 40.5b → 40.5c → 40.5d   (footprint GV integration — rewritten during 40.5a exploration to use `boundary_gv_error_max` instead of `cutcell_gv_min_C`; the footprint sweep is pure RBF boundary closure, not cut-cell TEMO. 40.5e is a deferred cut-cell path that does not belong here.)
   ↓
 40.6a → 40.6b           (new pareto sweep subcommand)
   ↓
