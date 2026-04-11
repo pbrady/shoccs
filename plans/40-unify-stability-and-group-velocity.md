@@ -482,10 +482,12 @@ The correct GV objective for this sweep is `boundary_gv_error_max(p, q, nextra, 
 
 ### 40.10 — Quick-mode integration in `_run_all`
 
-- [ ] **40.10a** Have `sweeps all --quick` exercise the new GV path on at least one sweep:
-  - In `__main__.py`'s `_run_all` list, augment the `tension` entry with `--include-gv` when `--quick` is set, so the smoke path covers the new objective wiring.
+- [x] **40.10a** Have `sweeps all --quick` exercise the new GV path on at least one sweep:
+  - In `__main__.py`'s `_run_all` list, augment selected entries with `--include-gv` when `--quick` is set, so the smoke path covers the new objective wiring.
   - This guards against silent regressions in the GV integration.
-  - File: `scripts/stencil_gen/sweeps/__main__.py`
+  - File: `scripts/stencil_gen/sweeps/__main__.py` — **done**
+  - Implementation: hoisted `gv_flag = ["--include-gv"] if quick else []` once at the top of `_run_all` and spread it into the argv list of four entries: `Epsilon sweep E2 (gaussian)`, `Tension sweep E2`, `Tension sweep E4`, and `Footprint sweep`. The four targeted sweeps cover all three primary `*.gv_error` JSON paths (tension, gaussian, footprint) plus both schemes for tension. The other epsilon entries (E4 gaussian, E2/E4 multiquadric) and the tension-penalty entries are intentionally left without `--include-gv` — runtime budget and the fact that `tension-penalty` does not have a `--include-gv` flag wired in `__main__.py` (the sweep computes GV unconditionally per 40.4a). The full-resolution (non-`--quick`) `_run_all` path is unchanged: `gv_flag = []` so all argv lists are byte-identical to the pre-edit form. The fast-path opt-in keeps the regression cost contained.
+  - Verified: `SYMPY_CACHE_SIZE=50000 uv run python -m sweeps all --quick` ran end-to-end with `All 13 sweeps completed successfully` (no failures, no regressions). `grep` over the stdout confirms the `gv_err` column appears in `Epsilon sweep E2 (gaussian)`, `Tension sweep E2`, `Tension sweep E4`, and `Footprint sweep` outputs, and the new "Best feasible by GV error" / "Best stable point (lowest GV error)" / "Best (nextra, sigma) by GV error" lines are emitted at the right places. The other epsilon and tension-penalty sweeps still produce their original output (no `gv_err` column, no behavior change). `pytest tests/test_sweep_gv_objectives.py tests/test_phs.py -x -q -k "TestRegression or gv_objectives or sweep_gv or merges or footprint or gks_advisory or bit_exact or tension_penalty"` → 32 passed, 6 skipped (the 6 skips are `TestRegressionGV` against the un-populated baseline JSON, expected since the smoke run does not pass `--update-known-values`).
   - Test: `cd scripts/stencil_gen && uv run python -m sweeps all --quick`
 
 ---

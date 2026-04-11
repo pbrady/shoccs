@@ -203,9 +203,11 @@ def _run_all(*, quick: bool) -> int:
     quick_tp_n_sigma = "5" if quick else "25"
     quick_pareto_n_points = "10" if quick else "61"
 
+    gv_flag = ["--include-gv"] if quick else []
+
     sweeps: list[tuple[str, Callable[[list[str]], int], list[str]]] = [
         ("Epsilon sweep E2 (gaussian)", eps_main,
-         ["--scheme", "E2", "--kernel", "gaussian", "--n-eps", quick_n_eps, "--n-values", quick_n_values]),
+         ["--scheme", "E2", "--kernel", "gaussian", "--n-eps", quick_n_eps, "--n-values", quick_n_values, *gv_flag]),
         ("Epsilon sweep E4 (gaussian)", eps_main,
          ["--scheme", "E4", "--kernel", "gaussian", "--n-eps", quick_n_eps, "--n-values", quick_n_values]),
         ("Epsilon sweep E2 (multiquadric)", eps_main,
@@ -215,15 +217,15 @@ def _run_all(*, quick: bool) -> int:
         ("Mixed epsilon sweep E4", mixed_main,
          ["--scheme", "E4", "--n-eps", quick_mixed_n_eps]),
         ("Tension sweep E2", tension_main,
-         ["--scheme", "E2", "--n-sigma", quick_n_sigma, "--n-values", quick_n_values]),
+         ["--scheme", "E2", "--n-sigma", quick_n_sigma, "--n-values", quick_n_values, *gv_flag]),
         ("Tension sweep E4", tension_main,
-         ["--scheme", "E4", "--n-sigma", quick_n_sigma, "--n-values", quick_n_values]),
+         ["--scheme", "E4", "--n-sigma", quick_n_sigma, "--n-values", quick_n_values, *gv_flag]),
         ("Tension-penalty sweep E2", tp_main,
          ["--scheme", "E2", "--n-sigma", quick_tp_n_sigma, "--n-gamma", quick_n_gamma]),
         ("Tension-penalty sweep E4", tp_main,
          ["--scheme", "E4", "--n-sigma", quick_tp_n_sigma, "--n-gamma", quick_n_gamma]),
         ("Footprint sweep", fp_main,
-         ["--n-sigma", quick_fp_n_sigma, "--n-gamma", quick_fp_n_gamma]),
+         ["--n-sigma", quick_fp_n_sigma, "--n-gamma", quick_fp_n_gamma, *gv_flag]),
         ("Comparison (all schemes)", comp_main,
          ["--n-values", quick_n_values]),
         ("GV-stability Pareto E2 (tension)", pareto_main,
