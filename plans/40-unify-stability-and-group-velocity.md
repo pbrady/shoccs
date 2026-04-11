@@ -97,6 +97,14 @@ cd scripts/stencil_gen && uv run pytest tests/test_phs.py -x -q -k "TestRegressi
   - Implementation: `run_tension_sweep` now cross-checks the GV-optimal feasible sigma at grid sizes `{20,40,80,160}` (mirroring the existing stability-optimum cross-check) and returns `gv_sigma`, `gv_error`, `gv_stable_at` in the summary. `main()` writes `tension.gv_error` (additive on the existing entry) and a new top-level `tension_gv` dict only when both `--update-known-values` and `--include-gv` are set; without `--include-gv`, the existing `tension` entry is written without the `gv_error` key (unchanged behavior). Without `--update-known-values`, nothing is written.
   - Verified: `uv run python -m sweeps tension --scheme E2 --n-sigma 5 --include-gv --update-known-values` wrote both `E2_1.tension.gv_error = 2.074641…` and `E2_1.tension_gv = {sigma: 20.0, gv_error: 2.074641…, stable_at: [20,40,80,160]}`; `known_values.json` restored from pre-test snapshot after verification (the low-resolution `--n-sigma 5` run would have overwritten the stability optimum at 6.0 with 3.483637, so this smoke run was not committed to the JSON). `pytest tests/test_sweep_gv_objectives.py tests/test_phs.py -k "gv_objectives or TestRegression"` → 23 passed. The no-flag invocation (`--n-sigma 5` without `--include-gv`) still produces the same output as before.
 
+- [ ] **40.2d** Fix non-additive overwrite of `tension.gv_error` in `tension_sweep.main()`:
+  - Review pass on commit `74df8c7` confirmed: when `--update-known-values` is invoked **without** `--include-gv`, `main()` rebuilds `tension_entry = {"sigma": ..., "stable_at": ...}` from scratch and assigns it to `kv[scheme_key]["tension"]`, silently dropping any `gv_error` key that a prior `--include-gv` run had populated. The 40.2c verification never exercised this round-trip — it only tested `--include-gv --update-known-values` once and then restored the JSON.
+  - The plan text in 40.2c explicitly says "This is additive: the existing `tension.sigma` (widest-stability optimum) is unchanged" and the broader contract throughout phase 40 is that GV writes are additive on top of the existing entry. The current implementation breaks that contract on the very next non-GV invocation.
+  - Fix: in `tension_sweep.py:269–290`, read the existing `kv[scheme_key].get("tension", {})` first, then update only the keys this invocation owns (`sigma`, `stable_at`, and conditionally `gv_error`), so any keys written by an earlier run survive. Same merge approach for `tension_gv` (don't recreate the dict from scratch when keys may already exist).
+  - Test: `cd scripts/stencil_gen && uv run python -m sweeps tension --scheme E2 --n-sigma 5 --include-gv --update-known-values` followed by `uv run python -m sweeps tension --scheme E2 --n-sigma 5 --update-known-values` (no `--include-gv`); inspect `known_values.json` and confirm `E2_1.tension.gv_error` is still present after the second run. Restore JSON afterward.
+  - **Carry-over note:** the same merge pattern must be used when implementing 40.3c (epsilon sweep), 40.4c (tension-penalty), and 40.5c (footprint) — they all face the identical "additive on existing entry" contract.
+  - File: `scripts/stencil_gen/sweeps/tension_sweep.py`
+
 ### 40.3 — Integrate GV into `epsilon_sweep` (Gaussian / multiquadric kernels)
 
 - [ ] **40.3a** Add `--include-gv` flag to `epsilon_sweep.py`, mirroring 40.2a:
@@ -234,7 +242,7 @@ cd scripts/stencil_gen && uv run pytest tests/test_phs.py -x -q -k "TestRegressi
 ```
 40.1a → 40.1b → 40.1c   (objectives module + tests; everything else depends on these; 40.1c closes a coverage gap)
   ↓
-40.2a → 40.2b → 40.2c   (tension_sweep is the testbed; do this whole strand before branching)
+40.2a → 40.2b → 40.2c → 40.2d   (tension_sweep testbed; 40.2d is a follow-up correctness fix from review of 74df8c7)
   ↓
 40.3a → 40.3b → 40.3c   (epsilon_sweep mirrors tension_sweep — do once tension is verified)
   ↓
