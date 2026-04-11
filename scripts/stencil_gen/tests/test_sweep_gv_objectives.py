@@ -17,6 +17,7 @@ from stencil_gen.phs import build_diff_matrix_rbf
 
 from sweeps.gv_objectives import (
     boundary_gv_error_max,
+    cutcell_gv_min_C,
     gv_score_from_matrix,
     interior_cutoff_fraction,
     interior_gv_error_max,
@@ -65,6 +66,23 @@ def test_boundary_gv_error_max_e4_tension_at_known_sigma():
     )
     assert np.isfinite(val)
     assert val > 0.0
+
+
+def test_cutcell_gv_min_C_e2_returns_finite_tuple():
+    """cutcell_gv_min_C on E2_1 returns (finite float, bool) at small psi grid."""
+    from stencil_gen.temo import E2_1
+
+    result = cutcell_gv_min_C(
+        E2_1,
+        psi_values=np.linspace(0.05, 0.95, 5),
+        alpha_values={},
+        n_xi=100,
+    )
+    assert isinstance(result, tuple)
+    assert len(result) == 2
+    min_C, has_sign_reversal = result
+    assert np.isfinite(min_C)
+    assert isinstance(has_sign_reversal, bool)
 
 
 def test_gv_score_from_matrix_matches_boundary_helper():
