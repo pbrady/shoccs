@@ -481,6 +481,33 @@ def test_check_gks_advisory_tension_e2_no_false_positives(capsys):
     assert "WARNING:" not in out
 
 
+def test_check_gks_advisory_epsilon_e2_gaussian_no_false_positives(capsys):
+    """40.7c: --check-gks on a known-stable E2 gaussian case must not warn.
+
+    Mirrors ``test_check_gks_advisory_tension_e2_no_false_positives`` for the
+    epsilon sweep so a future refactor of ``epsilon_sweep.main``'s
+    ``--check-gks`` argparse entry, the passthrough in ``sweeps/__main__.py``,
+    or the ``print_gks_advisory`` call site inside ``run_epsilon_sweep`` cannot
+    silently break the wiring.  The 40.7a verification confirmed that gaussian
+    at the smoke-run optimum has 1 inspected boundary mode and zero outgoing
+    boundary modes.
+    """
+    rc = epsilon_sweep.main([
+        "--scheme", "E2",
+        "--kernel", "gaussian",
+        "--n-eps", "5",
+        "--n-values", "40",
+        "--check-gks",
+    ])
+    assert rc == 0
+    captured = capsys.readouterr()
+    out = captured.out
+    assert "GKS advisory" in out
+    assert "kernel=gaussian" in out
+    assert "no outgoing boundary modes detected" in out
+    assert "WARNING:" not in out
+
+
 def test_check_gks_advisory_helper_clean_matrix(capsys):
     """40.7b smoke: ``print_gks_advisory`` on a clean diff matrix returns 0.
 
