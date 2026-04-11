@@ -66,6 +66,19 @@ def main() -> int:
     sub_mixed.add_argument("--n-eps", type=int, default=20)
     sub_mixed.add_argument("--update-known-values", action="store_true", help="Update known_values.json")
 
+    sub_pareto = subparsers.add_parser(
+        "gv-stability-pareto",
+        help="GV-vs-stability Pareto sweep (research / documentation aid)",
+    )
+    sub_pareto.add_argument("--scheme", choices=["E2", "E4"], required=True)
+    sub_pareto.add_argument(
+        "--param", choices=["tension", "gaussian", "multiquadric"], required=True,
+        help="Kernel to sweep (parameter is sigma for tension, epsilon otherwise)",
+    )
+    sub_pareto.add_argument("--n-points", type=int, default=61, help="Number of sample points on the parameter grid")
+    sub_pareto.add_argument("--n", type=int, default=40, help="Grid size for the stability eigenvalue")
+    sub_pareto.add_argument("--param-max", type=float, default=20.0, help="Upper end of the parameter grid")
+
     sub_all = subparsers.add_parser("all", help="Run all sweeps")
     sub_all.add_argument("--quick", action="store_true", help="Reduced resolution for quick verification")
 
@@ -147,6 +160,17 @@ def main() -> int:
 
         return alpha_main(["--scheme", args.scheme])
 
+    if args.command == "gv-stability-pareto":
+        from .gv_stability_pareto import main as pareto_main
+
+        return pareto_main([
+            "--scheme", args.scheme,
+            "--param", args.param,
+            "--n-points", str(args.n_points),
+            "--n", str(args.n),
+            "--param-max", str(args.param_max),
+        ])
+
     if args.command == "all":
         return _run_all(quick=args.quick)
 
@@ -160,6 +184,7 @@ def _run_all(*, quick: bool) -> int:
     from .comparison import main as comp_main
     from .epsilon_sweep import main as eps_main
     from .footprint_sweep import main as fp_main
+    from .gv_stability_pareto import main as pareto_main
     from .mixed_epsilon_sweep import main as mixed_main
     from .tension_penalty_sweep import main as tp_main
     from .tension_sweep import main as tension_main
@@ -172,6 +197,7 @@ def _run_all(*, quick: bool) -> int:
     quick_fp_n_sigma = "10" if quick else "20"
     quick_fp_n_gamma = "10" if quick else "20"
     quick_tp_n_sigma = "5" if quick else "25"
+    quick_pareto_n_points = "10" if quick else "61"
 
     sweeps: list[tuple[str, Callable[[list[str]], int], list[str]]] = [
         ("Epsilon sweep E2 (gaussian)", eps_main,
@@ -196,6 +222,8 @@ def _run_all(*, quick: bool) -> int:
          ["--n-sigma", quick_fp_n_sigma, "--n-gamma", quick_fp_n_gamma]),
         ("Comparison (all schemes)", comp_main,
          ["--n-values", quick_n_values]),
+        ("GV-stability Pareto E2 (tension)", pareto_main,
+         ["--scheme", "E2", "--param", "tension", "--n-points", quick_pareto_n_points]),
         ("Alpha extraction E2", alpha_main, ["--scheme", "E2"]),
     ]
 
