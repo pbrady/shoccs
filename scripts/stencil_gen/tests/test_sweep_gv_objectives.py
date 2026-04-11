@@ -16,7 +16,12 @@ import pytest
 from stencil_gen.phs import build_diff_matrix_rbf
 
 from sweeps import _common as sweeps_common
-from sweeps import epsilon_sweep, tension_penalty_sweep, tension_sweep
+from sweeps import (
+    epsilon_sweep,
+    footprint_sweep,
+    tension_penalty_sweep,
+    tension_sweep,
+)
 from sweeps.gv_objectives import (
     boundary_gv_error_max,
     cutcell_gv_min_C,
@@ -124,24 +129,42 @@ def test_gv_score_from_matrix_small_hardcoded():
     assert score["max_gv_error"] > 0.0
 
 
-def _seed_kv(path: Path) -> dict:
-    seed = {
-        "E2_1": {
-            "params": {"p": 1, "q": 1, "nextra": 1, "nu": 1},
-            "tension": {
-                "sigma": 6.0,
-                "stable_at": [20, 40, 80],
-                "gv_error": 1.234,
-                "preexisting_extra_key": "survive",
-            },
-            "tension_gv": {
-                "sigma": 5.5,
-                "gv_error": 1.234,
-                "stable_at": [20, 40],
-                "preexisting_gv_extra": "survive_gv",
-            },
-        }
+def _seed_kv_with_keys(
+    path: Path,
+    scheme_key: str,
+    primary_key: str,
+    secondary_key: str,
+    primary_extras: dict,
+    secondary_extras: dict,
+    *,
+    include_params: bool = True,
+) -> dict:
+    """Seed a temp known_values.json with sentinel-bearing primary/secondary entries.
+
+    Used by the per-sweep merge regression tests.  Pre-existing keys that the
+    sweep's ``main()`` is NOT allowed to clobber are placed on both entries:
+    ``preexisting_extra_key`` on the primary entry and ``preexisting_gv_extra``
+    on the secondary entry.  A stable-at list and ``gv_error=1.234`` sentinel
+    are also seeded so tests can assert refresh vs preservation semantics.
+    When ``include_params=False`` (footprint), the ``params`` sub-entry is
+    omitted because footprint entries live directly under ``kv["footprint"]``.
+    """
+    scheme_entry: dict = {}
+    if include_params:
+        scheme_entry["params"] = {"p": 1, "q": 1, "nextra": 1, "nu": 1}
+    scheme_entry[primary_key] = {
+        **primary_extras,
+        "stable_at": [20, 40, 80],
+        "gv_error": 1.234,
+        "preexisting_extra_key": "survive",
     }
+    scheme_entry[secondary_key] = {
+        **secondary_extras,
+        "gv_error": 1.234,
+        "stable_at": [20, 40],
+        "preexisting_gv_extra": "survive_gv",
+    }
+    seed = {scheme_key: scheme_entry}
     with open(path, "w") as f:
         json.dump(seed, f, indent=2)
     return seed
@@ -157,7 +180,14 @@ def test_tension_sweep_main_merges_known_values(tmp_path, monkeypatch, capsys):
     """
     kv_path = tmp_path / "known_values.json"
     monkeypatch.setattr(sweeps_common, "KNOWN_VALUES_PATH", kv_path)
-    _seed_kv(kv_path)
+    _seed_kv_with_keys(
+        kv_path,
+        scheme_key="E2_1",
+        primary_key="tension",
+        secondary_key="tension_gv",
+        primary_extras={"sigma": 6.0},
+        secondary_extras={"sigma": 5.5},
+    )
 
     rc = tension_sweep.main([
         "--scheme", "E2",
@@ -206,30 +236,6 @@ def test_tension_sweep_main_merges_known_values(tmp_path, monkeypatch, capsys):
     assert isinstance(tension_gv["stable_at"], list)
 
 
-def _seed_kv_epsilon(path: Path, kernel: str = "gaussian") -> dict:
-    gv_key = f"{kernel}_gv"
-    seed = {
-        "E2_1": {
-            "params": {"p": 1, "q": 1, "nextra": 1, "nu": 1},
-            kernel: {
-                "epsilon": 1.0,
-                "stable_at": [20, 40, 80],
-                "gv_error": 1.234,
-                "preexisting_extra_key": "survive",
-            },
-            gv_key: {
-                "epsilon": 0.9,
-                "gv_error": 1.234,
-                "stable_at": [20, 40],
-                "preexisting_gv_extra": "survive_gv",
-            },
-        }
-    }
-    with open(path, "w") as f:
-        json.dump(seed, f, indent=2)
-    return seed
-
-
 def test_epsilon_sweep_main_merges_known_values(tmp_path, monkeypatch, capsys):
     """Regression for 40.3c: epsilon_sweep --update-known-values must merge.
 
@@ -245,7 +251,14 @@ def test_epsilon_sweep_main_merges_known_values(tmp_path, monkeypatch, capsys):
     gv_key = f"{kernel}_gv"
     kv_path = tmp_path / "known_values.json"
     monkeypatch.setattr(sweeps_common, "KNOWN_VALUES_PATH", kv_path)
-    _seed_kv_epsilon(kv_path, kernel=kernel)
+    _seed_kv_with_keys(
+        kv_path,
+        scheme_key="E2_1",
+        primary_key=kernel,
+        secondary_key=gv_key,
+        primary_extras={"epsilon": 1.0},
+        secondary_extras={"epsilon": 0.9},
+    )
 
     rc = epsilon_sweep.main([
         "--scheme", "E2",
@@ -296,31 +309,6 @@ def test_epsilon_sweep_main_merges_known_values(tmp_path, monkeypatch, capsys):
     assert isinstance(gv_entry["stable_at"], list)
 
 
-def _seed_kv_tension_penalty(path: Path) -> dict:
-    seed = {
-        "E2_1": {
-            "params": {"p": 1, "q": 1, "nextra": 1, "nu": 1},
-            "tension_penalty": {
-                "sigma": 6.0,
-                "gamma": 0.0,
-                "stable_at": [20, 40, 80],
-                "gv_error": 1.234,
-                "preexisting_extra_key": "survive",
-            },
-            "tension_penalty_gv": {
-                "sigma": 5.5,
-                "gamma": 0.1,
-                "gv_error": 1.234,
-                "stable_at": [20, 40],
-                "preexisting_gv_extra": "survive_gv",
-            },
-        }
-    }
-    with open(path, "w") as f:
-        json.dump(seed, f, indent=2)
-    return seed
-
-
 def test_tension_penalty_sweep_main_merges_known_values(tmp_path, monkeypatch, capsys):
     """Regression for 40.4c/40.4d: tension_penalty --update-known-values must merge.
 
@@ -335,7 +323,14 @@ def test_tension_penalty_sweep_main_merges_known_values(tmp_path, monkeypatch, c
     """
     kv_path = tmp_path / "known_values.json"
     monkeypatch.setattr(sweeps_common, "KNOWN_VALUES_PATH", kv_path)
-    _seed_kv_tension_penalty(kv_path)
+    _seed_kv_with_keys(
+        kv_path,
+        scheme_key="E2_1",
+        primary_key="tension_penalty",
+        secondary_key="tension_penalty_gv",
+        primary_extras={"sigma": 6.0, "gamma": 0.0},
+        secondary_extras={"sigma": 5.5, "gamma": 0.1},
+    )
 
     rc = tension_penalty_sweep.main([
         "--scheme", "E2",
@@ -364,3 +359,100 @@ def test_tension_penalty_sweep_main_merges_known_values(tmp_path, monkeypatch, c
     assert isinstance(tp_gv["stable_at"], list)
     assert len(tp_gv["stable_at"]) > 0
     assert set(tp_gv["stable_at"]) <= {20, 40, 80, 160}
+
+
+def test_footprint_sweep_main_merges_known_values(tmp_path, monkeypatch, capsys):
+    """Regression for 40.5c/40.5d: footprint --update-known-values must merge.
+
+    Mirrors the tension / epsilon / tension-penalty merge regression tests, but
+    pins the two-level merge pattern unique to footprint: entries live directly
+    under ``kv["footprint"]`` (no ``scheme_key`` wrapper), and the merge loop
+    must preserve both (a) a pre-existing primary entry keyed by a sigma value
+    the current run does NOT reproduce (e.g. ``E4_nextra0_tension_3`` — the
+    real-world key at n-sigma 5 best_sigma != 3.0), and (b) a pre-existing
+    ``_tension_gv`` entry with a sentinel.  Also pins the 40.5d filter: at
+    ``--n-sigma 5`` the GV optimum for nextra=1 collapses to sigma=0, which
+    must NOT be persisted as a tension entry (it would mis-label a PHS
+    baseline point as tension).
+    """
+    kv_path = tmp_path / "known_values.json"
+    monkeypatch.setattr(sweeps_common, "KNOWN_VALUES_PATH", kv_path)
+    _seed_kv_with_keys(
+        kv_path,
+        scheme_key="footprint",
+        primary_key="E4_nextra0_tension_3",
+        secondary_key="E4_nextra0_tension_gv",
+        primary_extras={"nextra": 0, "sigma": 3.0},
+        secondary_extras={"nextra": 0, "sigma": 5.5},
+        include_params=False,
+    )
+
+    # First run: no --include-gv.  The smoke run's best_sigma for nextra=0 is
+    # 0.0 (PHS baseline, filtered out of tension entries), so the run does not
+    # touch either seeded key.  Both sentinels must survive.
+    rc = footprint_sweep.main([
+        "--n-sigma", "5",
+        "--update-known-values",
+    ])
+    assert rc == 0
+    capsys.readouterr()
+
+    with open(kv_path) as f:
+        after_non_gv = json.load(f)
+    footprint = after_non_gv["footprint"]
+    assert footprint["E4_nextra0_tension_3"]["preexisting_extra_key"] == "survive"
+    assert footprint["E4_nextra0_tension_3"]["gv_error"] == 1.234
+    # The non-GV path does not write _tension_gv keys, so the seeded entry
+    # must be byte-identical to the seed.
+    assert footprint["E4_nextra0_tension_gv"] == {
+        "nextra": 0,
+        "sigma": 5.5,
+        "gv_error": 1.234,
+        "stable_at": [20, 40],
+        "preexisting_gv_extra": "survive_gv",
+    }
+
+    # Second run: --include-gv.  The primary sentinel must still survive
+    # (best_sigma != 3.0 for nextra=0 at --n-sigma 5, so the run still does not
+    # touch E4_nextra0_tension_3).  The secondary sentinel must survive because
+    # the per-entry merge is additive.  gv_error is refreshed.
+    rc = footprint_sweep.main([
+        "--n-sigma", "5",
+        "--include-gv",
+        "--update-known-values",
+    ])
+    assert rc == 0
+    capsys.readouterr()
+
+    with open(kv_path) as f:
+        after_gv = json.load(f)
+    footprint = after_gv["footprint"]
+
+    # Primary entry: seed was keyed at sigma=3, run does not reproduce it, so
+    # the whole entry survives untouched including both sentinel and gv_error.
+    t3 = footprint["E4_nextra0_tension_3"]
+    assert t3["preexisting_extra_key"] == "survive"
+    assert t3["gv_error"] == 1.234
+    assert t3["sigma"] == 3.0
+
+    # Secondary entry: the run writes a fresh E4_nextra0_tension_gv (nextra=0
+    # GV-optimal sigma at --n-sigma 5 is 50.0), so the merge must overlay
+    # the new {nextra, sigma, gv_error, stable_at} keys on top of the seeded
+    # dict without dropping the preexisting_gv_extra sentinel.
+    gv0 = footprint["E4_nextra0_tension_gv"]
+    assert gv0["preexisting_gv_extra"] == "survive_gv"
+    assert {"nextra", "sigma", "gv_error", "stable_at"} <= set(gv0)
+    assert gv0["nextra"] == 0
+    assert np.isfinite(gv0["sigma"])
+    assert gv0["sigma"] > 0  # 40.5d filter: must be a real tension sigma
+    assert np.isfinite(gv0["gv_error"])
+    assert gv0["gv_error"] != 1.234  # refreshed
+    assert isinstance(gv0["stable_at"], list)
+    assert len(gv0["stable_at"]) > 0
+    assert set(gv0["stable_at"]) <= {20, 40, 80, 160}
+
+    # 40.5d filter: nextra=1's GV optimum at --n-sigma 5 is sigma=0 (PHS
+    # baseline), which must be filtered before being persisted as a
+    # _tension_gv entry.  The seed did not include this key, so it must
+    # remain absent after both runs.
+    assert "E4_nextra1_tension_gv" not in footprint
