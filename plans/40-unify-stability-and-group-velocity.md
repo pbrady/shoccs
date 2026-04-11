@@ -147,11 +147,12 @@ cd scripts/stencil_gen && uv run pytest tests/test_phs.py -x -q -k "TestRegressi
 
 ### 40.4 — Extend `tension_penalty_sweep` to track GV as a third objective
 
-- [ ] **40.4a** Augment `eval_point()` in `tension_penalty_sweep.py` to return `(stab_eig, deficit, gv_error)`:
+- [x] **40.4a** Augment `eval_point()` in `tension_penalty_sweep.py` to return `(stab_eig, deficit, gv_error)`:
   - Use `gv_objectives.gv_score_from_matrix(D)["max_gv_error"]` so we don't rebuild D.
   - All callers updated to unpack three values.
-  - File: `scripts/stencil_gen/sweeps/tension_penalty_sweep.py`
-  - Test: `cd scripts/stencil_gen && uv run python -m sweeps tension-penalty --scheme E2 --n-sigma 5 --n-gamma 5`
+  - File: `scripts/stencil_gen/sweeps/tension_penalty_sweep.py` — **done**
+  - Implementation: `eval_point` now imports `gv_score_from_matrix` from `.gv_objectives`, computes `gv_error = float(gv_score_from_matrix(D)["max_gv_error"])` from the same `D` matrix it already builds (no rebuild), and returns the 3-tuple `(se, deficit, gv_error)`. The return-type annotation is updated to `tuple[float, float, float]`. All four call sites in this file (`run_joint_sweep_coarse`, `run_penalty_effect`, `run_fine_sweep` main loop, `run_fine_sweep` grid-independence loop) unpack into `se, deficit, _gv` — the `_gv` is intentionally discarded; 40.4b owns plumbing it through to the accumulator and printer. `grep eval_point` confirms no other file calls it. Argument plumbing only — no behavior change yet beyond the additional return value.
+  - Verified: `uv run python -m sweeps tension-penalty --scheme E2 --n-sigma 5 --n-gamma 5` runs end-to-end with output identical to before this item (same coarse-sweep, penalty-effect, and fine-sweep numbers). `pytest tests/test_sweep_gv_objectives.py tests/test_phs.py -x -q -k "TestRegression or gv_objectives or sweep_gv or merges"` → 25 passed in 1.49s.
 
 - [ ] **40.4b** In `run_joint_sweep_coarse`, accumulate `best_stable_gv` (smallest GV error among feasible points):
   - New accumulator alongside `best_stable_deficit`. Same feasible-then-minimize pattern.

@@ -28,6 +28,7 @@ from stencil_gen.phs import (
 )
 
 from ._common import SCHEME_PARAMS, STABILITY_TOL, load_known_values, save_known_values
+from .gv_objectives import gv_score_from_matrix
 
 # Floating-point eigenvalue solvers return tiny positive real parts (~1e-14)
 # for genuinely stable operators.  Use this threshold to distinguish true
@@ -42,12 +43,13 @@ def eval_point(
     q: int,
     nextra: int,
     nu: int,
-) -> tuple[float, float]:
+) -> tuple[float, float, float]:
     """Evaluate a (sigma, gamma) point.
 
-    Returns (stab_eig, deficit) where:
+    Returns (stab_eig, deficit, gv_error) where:
       stab_eig = max Re(eig(-D_bc))  (stable means < STABILITY_TOL)
       deficit  = max |column sum of D|  (conservation measure)
+      gv_error = max boundary-row group velocity error from the same D matrix
     """
     D = build_diff_matrix_rbf_penalty(
         n, p, q, sigma, "tension", nu, nextra,
@@ -55,7 +57,8 @@ def eval_point(
     )
     se = stability_eigenvalue_from_matrix(D)
     deficit = float(np.max(np.abs(np.sum(D, axis=0))))
-    return se, deficit
+    gv_error = float(gv_score_from_matrix(D)["max_gv_error"])
+    return se, deficit, gv_error
 
 
 def run_joint_sweep_coarse(
@@ -103,7 +106,7 @@ def run_joint_sweep_coarse(
 
     for sigma in sigmas:
         for gamma in gammas:
-            se, deficit = eval_point(
+            se, deficit, _gv = eval_point(
                 n, sigma, gamma,
                 p=p, q=q, nextra=nextra, nu=nu,
             )
@@ -191,7 +194,7 @@ def run_penalty_effect(
     deficit_at_max_stable = None
 
     for gamma in gammas:
-        se, deficit = eval_point(
+        se, deficit, _gv = eval_point(
             n, sigma_star, gamma,
             p=p, q=q, nextra=nextra, nu=nu,
         )
@@ -262,7 +265,7 @@ def run_fine_sweep(
 
     for sigma in sigmas:
         for gamma in gammas:
-            se, deficit = eval_point(
+            se, deficit, _gv = eval_point(
                 n, sigma, gamma,
                 p=p, q=q, nextra=nextra, nu=nu,
             )
@@ -292,7 +295,7 @@ def run_fine_sweep(
     print(f"\n  Grid independence at (sigma*={best_sigma:.4f}, gamma*={best_gamma:.4f}):")
     stable_at = []
     for nn in [20, 40, 80]:
-        se, deficit = eval_point(
+        se, deficit, _gv = eval_point(
             nn, best_sigma, best_gamma,
             p=p, q=q, nextra=nextra, nu=nu,
         )
