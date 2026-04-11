@@ -271,20 +271,21 @@ def main(argv: list[str] | None = None) -> int:
         scheme_key = SCHEME_PARAMS[args.scheme]["label"]
         if scheme_key not in kv:
             kv[scheme_key] = {}
-        tension_entry = {
-            "sigma": summary["sigma"],
-            "stable_at": summary["stable_at"],
-        }
+        # Merge into the existing tension entry so that keys written by an
+        # earlier --include-gv run survive a subsequent non-GV invocation.
+        tension_entry = dict(kv[scheme_key].get("tension", {}))
+        tension_entry["sigma"] = summary["sigma"]
+        tension_entry["stable_at"] = summary["stable_at"]
         if args.include_gv and summary["gv_error"] is not None:
             tension_entry["gv_error"] = summary["gv_error"]
         kv[scheme_key]["tension"] = tension_entry
         updated_keys = [f"{scheme_key}.tension"]
         if args.include_gv and summary["gv_sigma"] is not None:
-            kv[scheme_key]["tension_gv"] = {
-                "sigma": summary["gv_sigma"],
-                "gv_error": summary["gv_error"],
-                "stable_at": summary["gv_stable_at"],
-            }
+            tension_gv_entry = dict(kv[scheme_key].get("tension_gv", {}))
+            tension_gv_entry["sigma"] = summary["gv_sigma"]
+            tension_gv_entry["gv_error"] = summary["gv_error"]
+            tension_gv_entry["stable_at"] = summary["gv_stable_at"]
+            kv[scheme_key]["tension_gv"] = tension_gv_entry
             updated_keys.append(f"{scheme_key}.tension_gv")
         save_known_values(kv)
         print(f"\n  Updated known_values.json: {', '.join(updated_keys)}")
