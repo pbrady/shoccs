@@ -150,9 +150,30 @@ def run_epsilon_sweep(
         f"{label} {kernel.capitalize()} — Stability Sweep (p={p}, q={q}, nextra={nextra})",
         results,
         param_label="epsilon",
+        gv_by_param=gv_by_eps,
     )
     print()
     report_stable_ranges(results, param_label="epsilon")
+
+    if gv_by_eps is not None:
+        # Among feasible (stable at every grid size in the sweep) epsilons,
+        # report the smallest GV error.  This does not alter the stability
+        # optimum reported below — it is purely advisory secondary output.
+        feasible_eps: set[float] = set(gv_by_eps)
+        for n, rows in results.items():
+            stable_for_n = {
+                float(e) for e, se in rows if se < STABILITY_TOL
+            }
+            feasible_eps &= stable_for_n
+        if feasible_eps:
+            gv_best_eps = min(feasible_eps, key=lambda e: gv_by_eps[e])
+            gv_best_error = gv_by_eps[gv_best_eps]
+            print(
+                f"  Best feasible by GV error: eps={gv_best_eps:.6f}, "
+                f"gv_err={gv_best_error:.6e}"
+            )
+        else:
+            print("  Best feasible by GV error: (no eps stable at every grid size)")
 
     # Fine sweep at n=40 (or largest available)
     n_fine_grid = 40 if 40 in n_values else max(n_values)
