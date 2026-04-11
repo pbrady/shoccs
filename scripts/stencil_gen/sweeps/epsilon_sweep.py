@@ -204,6 +204,18 @@ def run_epsilon_sweep(
         if se < STABILITY_TOL:
             stable_at.append(nn)
 
+    # GV error at the stability-optimum epsilon (eps_star). This is what
+    # the additive ``{kernel}.gv_error`` field must hold so that the
+    # ``(epsilon, gv_error)`` pair describes a single point. Note that
+    # ``gv_by_eps`` only covers the coarse epsilon grid and ``eps_star``
+    # comes from the fine sweep, so we compute this with one extra call.
+    gv_at_eps_star: float | None = None
+    if include_gv:
+        gv_at_eps_star = boundary_gv_error_max(
+            p=p, q=q, nextra=nextra, nu=nu,
+            sigma=float(eps_star), kernel=kernel,
+        )
+
     # Cross-check GV-optimal epsilon at the same grid sizes as eps_star.
     gv_stable_at: list[int] | None = None
     if gv_best_eps is not None:
@@ -232,6 +244,7 @@ def run_epsilon_sweep(
         "stable_at": stable_at,
         "fine_stab_eig": fine_se,
         "gv_by_eps": gv_by_eps,
+        "gv_at_eps_star": gv_at_eps_star,
         "gv_epsilon": round(gv_best_eps, 6) if gv_best_eps is not None else None,
         "gv_error": gv_best_error,
         "gv_stable_at": gv_stable_at,
@@ -290,8 +303,14 @@ def main(argv: list[str] | None = None) -> int:
         kernel_entry = dict(kv[scheme_key].get(args.kernel, {}))
         kernel_entry["epsilon"] = summary["epsilon"]
         kernel_entry["stable_at"] = summary["stable_at"]
-        if args.include_gv and summary["gv_error"] is not None:
-            kernel_entry["gv_error"] = summary["gv_error"]
+        # The additive ``{kernel}.gv_error`` must represent the GV at
+        # ``{kernel}.epsilon`` (the stability optimum), not the GV-optimum
+        # epsilon — otherwise ``(epsilon, gv_error)`` describe two different
+        # points and the ``test_scheme_primary_gv_error_match`` regression
+        # test fails. The GV at the GV-optimum epsilon is persisted on the
+        # secondary ``{kernel}_gv`` entry below.
+        if args.include_gv and summary["gv_at_eps_star"] is not None:
+            kernel_entry["gv_error"] = summary["gv_at_eps_star"]
         kv[scheme_key][args.kernel] = kernel_entry
         updated_keys = [f"{scheme_key}.{args.kernel}"]
         if args.include_gv and summary["gv_epsilon"] is not None:

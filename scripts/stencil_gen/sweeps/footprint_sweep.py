@@ -447,8 +447,17 @@ def run_footprint_sweep(
                     "sigma": round(res["best_sigma"], 4),
                     "stable_at": [n],
                 }
-                if include_gv and res.get("best_stable_gv") is not None:
-                    t_entry["gv_error"] = float(res["best_stable_gv"])
+                # The additive ``gv_error`` field must represent the GV at
+                # the stability-optimum sigma (``best_sigma``), not at the
+                # GV-optimum sigma (``best_stable_gv_sigma``) — otherwise
+                # the ``(sigma, gv_error)`` pair describes two different
+                # points. The GV at the GV-optimum sigma is persisted on
+                # the parallel ``E4_nextra{nx}_tension_gv`` entry below.
+                if include_gv:
+                    t_entry["gv_error"] = float(boundary_gv_error_max(
+                        p=P, q=Q, nextra=nx, nu=NU,
+                        sigma=float(res["best_sigma"]), kernel="tension",
+                    ))
                 summary[t_key] = t_entry
 
             # Parallel GV-optimal entry (separate from the stability-optimum

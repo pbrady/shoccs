@@ -205,6 +205,18 @@ def run_tension_sweep(
         if se < STABILITY_TOL:
             stable_at.append(nn)
 
+    # GV error at the stability-optimum sigma (sigma_star). This is what
+    # the additive ``tension.gv_error`` field must hold so that the
+    # ``(sigma, gv_error)`` pair describes a single point. Note that
+    # ``gv_by_sigma`` only covers the coarse sigma grid and ``sigma_star``
+    # comes from the fine sweep, so we compute this with one extra call.
+    gv_at_sigma_star: float | None = None
+    if include_gv:
+        gv_at_sigma_star = boundary_gv_error_max(
+            p=p, q=q, nextra=nextra, nu=nu,
+            sigma=float(sigma_star), kernel="tension",
+        )
+
     # Cross-check GV-optimal sigma at the same grid sizes as sigma_star.
     gv_stable_at: list[int] | None = None
     if gv_best_sigma is not None:
@@ -233,6 +245,7 @@ def run_tension_sweep(
         "stable_at": stable_at,
         "fine_stab_eig": fine_se,
         "gv_by_sigma": gv_by_sigma,
+        "gv_at_sigma_star": gv_at_sigma_star,
         "gv_sigma": round(gv_best_sigma, 6) if gv_best_sigma is not None else None,
         "gv_error": gv_best_error,
         "gv_stable_at": gv_stable_at,
@@ -292,8 +305,14 @@ def main(argv: list[str] | None = None) -> int:
         tension_entry = dict(kv[scheme_key].get("tension", {}))
         tension_entry["sigma"] = summary["sigma"]
         tension_entry["stable_at"] = summary["stable_at"]
-        if args.include_gv and summary["gv_error"] is not None:
-            tension_entry["gv_error"] = summary["gv_error"]
+        # The additive ``tension.gv_error`` must represent the GV at
+        # ``tension.sigma`` (the stability optimum), not the GV-optimum
+        # sigma — otherwise ``(sigma, gv_error)`` describe two different
+        # points and the ``test_scheme_primary_gv_error_match`` regression
+        # test fails. The GV at the GV-optimum sigma is persisted on the
+        # secondary ``tension_gv`` entry below.
+        if args.include_gv and summary["gv_at_sigma_star"] is not None:
+            tension_entry["gv_error"] = summary["gv_at_sigma_star"]
         kv[scheme_key]["tension"] = tension_entry
         updated_keys = [f"{scheme_key}.tension"]
         if args.include_gv and summary["gv_sigma"] is not None:
