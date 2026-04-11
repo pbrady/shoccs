@@ -27,6 +27,7 @@ def main() -> int:
     sub_eps.add_argument("--n-values", default="20,40,80", help="Comma-separated grid sizes")
     sub_eps.add_argument("--n-eps", type=int, default=60, help="Number of epsilon sample points")
     sub_eps.add_argument("--update-known-values", action="store_true", help="Update known_values.json with discovered optimal epsilon")
+    sub_eps.add_argument("--include-gv", action="store_true", help="Also compute boundary group-velocity error at each epsilon (advisory)")
 
     sub_tension = subparsers.add_parser("tension", help="Tension spline sigma sweep")
     sub_tension.add_argument("--scheme", choices=["E2", "E4"], required=True)
@@ -83,6 +84,7 @@ def main() -> int:
             "--n-values", args.n_values,
             "--n-eps", str(args.n_eps),
             *(["--update-known-values"] if args.update_known_values else []),
+            *(["--include-gv"] if args.include_gv else []),
         ])
 
     if args.command == "tension":

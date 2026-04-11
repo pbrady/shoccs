@@ -33,6 +33,7 @@ from ._common import (
     report_stable_ranges,
     save_known_values,
 )
+from .gv_objectives import boundary_gv_error_max
 
 # Floating-point eigenvalue solvers return tiny positive real parts (~1e-14)
 # for genuinely stable operators.  Use this threshold to distinguish true
@@ -47,12 +48,26 @@ def sweep_stability(
     q: int,
     nextra: int,
     nu: int,
-) -> dict[int, list[tuple[float, float]]]:
+    include_gv: bool = False,
+) -> tuple[
+    dict[int, list[tuple[float, float]]],
+    dict[float, float] | None,
+]:
     """Run epsilon sweep using stability_eigenvalue.
 
-    Returns dict {n: list of (eps, stab_eig)}.
+    Returns ``(stab_results, gv_by_eps)`` where ``stab_results`` maps
+    ``n -> list of (eps, stab_eig)`` and ``gv_by_eps`` maps
+    ``eps -> boundary_gv_error_max`` (independent of ``n``) when
+    ``include_gv`` is set, else ``None``.
     """
-    results = {}
+    results: dict[int, list[tuple[float, float]]] = {}
+    gv_by_eps: dict[float, float] | None = {} if include_gv else None
+    if include_gv:
+        for eps in epsilons:
+            gv_by_eps[float(eps)] = boundary_gv_error_max(
+                p=p, q=q, nextra=nextra, nu=nu,
+                sigma=float(eps), kernel=kernel,
+            )
     for n in n_values:
         rows = []
         for eps in epsilons:
@@ -62,7 +77,7 @@ def sweep_stability(
             )
             rows.append((float(eps), se))
         results[n] = rows
-    return results
+    return results, gv_by_eps
 
 
 def fine_sweep(
@@ -112,6 +127,8 @@ def run_epsilon_sweep(
     kernel: str,
     n_values: list[int],
     n_eps: int,
+    *,
+    include_gv: bool = False,
 ) -> dict:
     """Run a full epsilon sweep for a scheme/kernel combination.
 
@@ -124,9 +141,10 @@ def run_epsilon_sweep(
     epsilons = np.logspace(np.log10(0.01), np.log10(10), n_eps)
 
     # Main sweep
-    results = sweep_stability(
+    results, gv_by_eps = sweep_stability(
         kernel, n_values, epsilons,
         p=p, q=q, nextra=nextra, nu=nu,
+        include_gv=include_gv,
     )
     print_sweep_table(
         f"{label} {kernel.capitalize()} — Stability Sweep (p={p}, q={q}, nextra={nextra})",
@@ -166,6 +184,7 @@ def run_epsilon_sweep(
         "epsilon": round(eps_star, 6),
         "stable_at": stable_at,
         "fine_stab_eig": fine_se,
+        "gv_by_eps": gv_by_eps,
     }
 
 
@@ -190,11 +209,19 @@ def main(argv: list[str] | None = None) -> int:
         "--update-known-values", action="store_true",
         help="Update known_values.json with discovered optimal epsilon",
     )
+    parser.add_argument(
+        "--include-gv", action="store_true",
+        help="Also compute boundary group-velocity error at each epsilon "
+             "(advisory secondary objective; does not alter the stability optimum)",
+    )
 
     args = parser.parse_args(argv)
     n_values = [int(x) for x in args.n_values.split(",")]
 
-    summary = run_epsilon_sweep(args.scheme, args.kernel, n_values, args.n_eps)
+    summary = run_epsilon_sweep(
+        args.scheme, args.kernel, n_values, args.n_eps,
+        include_gv=args.include_gv,
+    )
 
     if args.update_known_values:
         kv = load_known_values()

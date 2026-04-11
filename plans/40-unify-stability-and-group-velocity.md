@@ -118,10 +118,11 @@ cd scripts/stencil_gen && uv run pytest tests/test_phs.py -x -q -k "TestRegressi
 
 ### 40.3 — Integrate GV into `epsilon_sweep` (Gaussian / multiquadric kernels)
 
-- [ ] **40.3a** Add `--include-gv` flag to `epsilon_sweep.py`, mirroring 40.2a:
+- [x] **40.3a** Add `--include-gv` flag to `epsilon_sweep.py`, mirroring 40.2a:
   - `boundary_gv_error_max(p, q, nextra, nu, eps, kernel)` is the per-point call.
-  - File: `scripts/stencil_gen/sweeps/epsilon_sweep.py`
-  - Test: `cd scripts/stencil_gen && uv run python -m sweeps epsilon --scheme E2 --kernel gaussian --n-eps 5 --include-gv`
+  - File: `scripts/stencil_gen/sweeps/epsilon_sweep.py` — **done**
+  - Implementation: `sweep_stability` now returns `(results, gv_by_eps)` where `gv_by_eps: dict[float, float] | None` is populated once per epsilon (grid-size-independent) when `include_gv=True`, else `None`. The GV call uses `sigma=float(eps)` since `boundary_gv_error_max`'s internal parameter name is `sigma` but `boundary_group_velocity` uses it as the generic RBF shape parameter for all kernels (gaussian/multiquadric/tension — see `group_velocity.py:556`). `run_epsilon_sweep` accepts `include_gv=` kwarg and threads it through; the returned summary dict gains a `gv_by_eps` key. `main()` adds `--include-gv`, and `sweeps/__main__.py` adds the same flag on the epsilon subparser with passthrough. Argument plumbing only — the output format is unchanged (40.3b owns printing the new column and the "best feasible by GV error" line).
+  - Verified: `uv run python -m sweeps epsilon --scheme E2 --kernel gaussian --n-eps 5 --include-gv` runs end-to-end without error; same command with `--kernel multiquadric` also runs; `uv run python -m sweeps epsilon --scheme E2 --kernel gaussian --n-eps 5` (no flag) produces identical output to before. `uv run pytest tests/test_sweep_gv_objectives.py tests/test_phs.py -x -q -k "TestRegression or gv_objectives or sweep_gv or merges"` → 24 passed in 1.35s (no regressions).
 
 - [ ] **40.3b** Print GV column and "best feasible by GV" line in `epsilon_sweep`:
   - Same structure as 40.2b.
