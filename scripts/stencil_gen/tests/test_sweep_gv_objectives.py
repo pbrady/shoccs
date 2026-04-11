@@ -15,6 +15,8 @@ import pytest
 
 from stencil_gen.phs import build_diff_matrix_rbf
 
+from sweeps import _common as sweeps_common
+from sweeps import tension_sweep
 from sweeps.gv_objectives import (
     boundary_gv_error_max,
     cutcell_gv_min_C,
@@ -120,3 +122,82 @@ def test_gv_score_from_matrix_small_hardcoded():
     assert np.isfinite(score["max_gv_error"])
     assert np.isfinite(score["min_cutoff_xi"])
     assert score["max_gv_error"] > 0.0
+
+
+def _seed_kv(path: Path) -> dict:
+    seed = {
+        "E2_1": {
+            "params": {"p": 1, "q": 1, "nextra": 1, "nu": 1},
+            "tension": {
+                "sigma": 6.0,
+                "stable_at": [20, 40, 80],
+                "gv_error": 1.234,
+                "preexisting_extra_key": "survive",
+            },
+            "tension_gv": {
+                "sigma": 5.5,
+                "gv_error": 1.234,
+                "stable_at": [20, 40],
+            },
+        }
+    }
+    with open(path, "w") as f:
+        json.dump(seed, f, indent=2)
+    return seed
+
+
+def test_tension_sweep_main_merges_known_values(tmp_path, monkeypatch, capsys):
+    """Regression for 40.2d: --update-known-values must merge, not overwrite.
+
+    A non-GV --update-known-values invocation must preserve any pre-existing
+    keys that an earlier --include-gv run wrote (gv_error on tension, the
+    full tension_gv entry).  A subsequent --include-gv invocation must
+    refresh those keys without dropping unrelated keys (preexisting_extra_key).
+    """
+    kv_path = tmp_path / "known_values.json"
+    monkeypatch.setattr(sweeps_common, "KNOWN_VALUES_PATH", kv_path)
+    _seed_kv(kv_path)
+
+    rc = tension_sweep.main([
+        "--scheme", "E2",
+        "--n-sigma", "5",
+        "--n-values", "20",
+        "--update-known-values",
+    ])
+    assert rc == 0
+    capsys.readouterr()
+
+    with open(kv_path) as f:
+        after_non_gv = json.load(f)
+    tension = after_non_gv["E2_1"]["tension"]
+    assert tension["gv_error"] == 1.234
+    assert tension["preexisting_extra_key"] == "survive"
+    assert "sigma" in tension and "stable_at" in tension
+    assert after_non_gv["E2_1"]["tension_gv"] == {
+        "sigma": 5.5,
+        "gv_error": 1.234,
+        "stable_at": [20, 40],
+    }
+
+    rc = tension_sweep.main([
+        "--scheme", "E2",
+        "--n-sigma", "5",
+        "--n-values", "20",
+        "--include-gv",
+        "--update-known-values",
+    ])
+    assert rc == 0
+    capsys.readouterr()
+
+    with open(kv_path) as f:
+        after_gv = json.load(f)
+    tension = after_gv["E2_1"]["tension"]
+    assert tension["preexisting_extra_key"] == "survive"
+    assert "sigma" in tension
+    assert "stable_at" in tension
+    assert np.isfinite(tension["gv_error"])
+    tension_gv = after_gv["E2_1"]["tension_gv"]
+    assert set(tension_gv) == {"sigma", "gv_error", "stable_at"}
+    assert np.isfinite(tension_gv["sigma"])
+    assert np.isfinite(tension_gv["gv_error"])
+    assert isinstance(tension_gv["stable_at"], list)
