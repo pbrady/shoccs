@@ -441,22 +441,25 @@ def run_footprint_sweep(
         if nx in sigma_results:
             res = sigma_results[nx]
             if res["best_se"] < STABILITY_TOL and res["best_sigma"] > 0:
+                best_sigma_rounded = round(float(res["best_sigma"]), 4)
                 t_key = f"E4_nextra{nx}_tension_{res['best_sigma']:.0f}"
                 t_entry: dict = {
                     "nextra": nx,
-                    "sigma": round(res["best_sigma"], 4),
+                    "sigma": best_sigma_rounded,
                     "stable_at": [n],
                 }
                 # The additive ``gv_error`` field must represent the GV at
                 # the stability-optimum sigma (``best_sigma``), not at the
                 # GV-optimum sigma (``best_stable_gv_sigma``) — otherwise
                 # the ``(sigma, gv_error)`` pair describes two different
-                # points. The GV at the GV-optimum sigma is persisted on
-                # the parallel ``E4_nextra{nx}_tension_gv`` entry below.
+                # points. Evaluate at the rounded sigma so the persisted
+                # pair is exactly self-consistent. The GV at the GV-optimum
+                # sigma is persisted on the parallel
+                # ``E4_nextra{nx}_tension_gv`` entry below.
                 if include_gv:
                     t_entry["gv_error"] = float(boundary_gv_error_max(
                         p=P, q=Q, nextra=nx, nu=NU,
-                        sigma=float(res["best_sigma"]), kernel="tension",
+                        sigma=best_sigma_rounded, kernel="tension",
                     ))
                 summary[t_key] = t_entry
 
@@ -470,11 +473,15 @@ def run_footprint_sweep(
                 and res.get("best_stable_gv_sigma") is not None
                 and res["best_stable_gv_sigma"] > 0
             ):
+                gv_sigma_rounded = round(float(res["best_stable_gv_sigma"]), 4)
                 gv_key = f"E4_nextra{nx}_tension_gv"
                 summary[gv_key] = {
                     "nextra": nx,
-                    "sigma": round(float(res["best_stable_gv_sigma"]), 4),
-                    "gv_error": float(res["best_stable_gv"]),
+                    "sigma": gv_sigma_rounded,
+                    "gv_error": float(boundary_gv_error_max(
+                        p=P, q=Q, nextra=nx, nu=NU,
+                        sigma=gv_sigma_rounded, kernel="tension",
+                    )),
                     "stable_at": gv_stable_at_by_nx.get(nx, []),
                 }
 

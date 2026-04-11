@@ -206,14 +206,15 @@ def run_epsilon_sweep(
 
     # GV error at the stability-optimum epsilon (eps_star). This is what
     # the additive ``{kernel}.gv_error`` field must hold so that the
-    # ``(epsilon, gv_error)`` pair describes a single point. Note that
-    # ``gv_by_eps`` only covers the coarse epsilon grid and ``eps_star``
-    # comes from the fine sweep, so we compute this with one extra call.
+    # ``(epsilon, gv_error)`` pair describes a single point. Evaluate at
+    # the rounded epsilon so the persisted pair is exactly self-consistent
+    # with the rounded ``{kernel}.epsilon`` field.
+    eps_star_rounded = round(float(eps_star), 6)
     gv_at_eps_star: float | None = None
     if include_gv:
         gv_at_eps_star = boundary_gv_error_max(
             p=p, q=q, nextra=nextra, nu=nu,
-            sigma=float(eps_star), kernel=kernel,
+            sigma=eps_star_rounded, kernel=kernel,
         )
 
     # Cross-check GV-optimal epsilon at the same grid sizes as eps_star.
@@ -239,14 +240,24 @@ def run_epsilon_sweep(
             D_star, label=f"n={n_fine_grid}, eps*={eps_star:.6f}, kernel={kernel}",
         )
 
+    gv_eps_rounded = (
+        round(float(gv_best_eps), 6) if gv_best_eps is not None else None
+    )
+    gv_error_at_rounded: float | None = None
+    if include_gv and gv_eps_rounded is not None:
+        gv_error_at_rounded = boundary_gv_error_max(
+            p=p, q=q, nextra=nextra, nu=nu,
+            sigma=gv_eps_rounded, kernel=kernel,
+        )
+
     return {
-        "epsilon": round(eps_star, 6),
+        "epsilon": eps_star_rounded,
         "stable_at": stable_at,
         "fine_stab_eig": fine_se,
         "gv_by_eps": gv_by_eps,
         "gv_at_eps_star": gv_at_eps_star,
-        "gv_epsilon": round(gv_best_eps, 6) if gv_best_eps is not None else None,
-        "gv_error": gv_best_error,
+        "gv_epsilon": gv_eps_rounded,
+        "gv_error": gv_error_at_rounded if gv_error_at_rounded is not None else gv_best_error,
         "gv_stable_at": gv_stable_at,
     }
 

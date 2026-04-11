@@ -207,14 +207,15 @@ def run_tension_sweep(
 
     # GV error at the stability-optimum sigma (sigma_star). This is what
     # the additive ``tension.gv_error`` field must hold so that the
-    # ``(sigma, gv_error)`` pair describes a single point. Note that
-    # ``gv_by_sigma`` only covers the coarse sigma grid and ``sigma_star``
-    # comes from the fine sweep, so we compute this with one extra call.
+    # ``(sigma, gv_error)`` pair describes a single point. Evaluate at the
+    # rounded sigma so the persisted pair is exactly self-consistent with
+    # the rounded ``tension.sigma`` field.
+    sigma_star_rounded = round(float(sigma_star), 6)
     gv_at_sigma_star: float | None = None
     if include_gv:
         gv_at_sigma_star = boundary_gv_error_max(
             p=p, q=q, nextra=nextra, nu=nu,
-            sigma=float(sigma_star), kernel="tension",
+            sigma=sigma_star_rounded, kernel="tension",
         )
 
     # Cross-check GV-optimal sigma at the same grid sizes as sigma_star.
@@ -240,14 +241,24 @@ def run_tension_sweep(
             D_star, label=f"n={n_fine_grid}, sigma*={sigma_star:.6f}",
         )
 
+    gv_sigma_rounded = (
+        round(float(gv_best_sigma), 6) if gv_best_sigma is not None else None
+    )
+    gv_error_at_rounded: float | None = None
+    if include_gv and gv_sigma_rounded is not None:
+        gv_error_at_rounded = boundary_gv_error_max(
+            p=p, q=q, nextra=nextra, nu=nu,
+            sigma=gv_sigma_rounded, kernel="tension",
+        )
+
     return {
-        "sigma": round(sigma_star, 6),
+        "sigma": sigma_star_rounded,
         "stable_at": stable_at,
         "fine_stab_eig": fine_se,
         "gv_by_sigma": gv_by_sigma,
         "gv_at_sigma_star": gv_at_sigma_star,
-        "gv_sigma": round(gv_best_sigma, 6) if gv_best_sigma is not None else None,
-        "gv_error": gv_best_error,
+        "gv_sigma": gv_sigma_rounded,
+        "gv_error": gv_error_at_rounded if gv_error_at_rounded is not None else gv_best_error,
         "gv_stable_at": gv_stable_at,
     }
 
