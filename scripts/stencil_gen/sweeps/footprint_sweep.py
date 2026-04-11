@@ -348,6 +348,32 @@ def run_grid_independence(
     return results
 
 
+def _check_gv_sigma_stable_grids(
+    nextra: int, gv_sigma: float, grid_sizes: list[int],
+) -> list[int]:
+    """Cross-grid stability re-check for a GV-optimal sigma at a given nextra.
+
+    Mirrors the cross-grid re-check used by tension_sweep (40.2c) and
+    epsilon_sweep (40.3c). Returns the list of grid sizes in ``grid_sizes``
+    at which ``stability_eigenvalue`` is below ``STABILITY_TOL`` for the
+    E4 tension kernel at ``(nextra, sigma)``.
+    """
+    r = Q + 1 + nextra
+    stable_at: list[int] = []
+    for nn in grid_sizes:
+        if nn < 2 * r:
+            continue
+        se = stability_eigenvalue(
+            nn, p=P, q=Q, epsilon=gv_sigma,
+            kernel="tension", nu=NU, nextra=nextra,
+        )
+        status = "STABLE" if se < STABILITY_TOL else "unstable"
+        print(f"    n={nn:3d}  stab_eig={se:14.6e}  [{status}]")
+        if se < STABILITY_TOL:
+            stable_at.append(nn)
+    return stable_at
+
+
 def run_footprint_sweep(
     n_sigma: int,
     n_gamma: int,
@@ -378,6 +404,27 @@ def run_footprint_sweep(
     # Phase 3: grid independence at sigma=0 (PHS k=2)
     grid_results = run_grid_independence(nextra_values, grid_sizes)
 
+    # Phase 4 (GV-only): cross-grid stability re-check at the GV-optimal sigma
+    # for each nextra. Mirrors 40.2c/40.3c/40.4d.
+    gv_stable_at_by_nx: dict[int, list[int]] = {}
+    if include_gv:
+        any_gv = any(
+            sigma_results.get(nx, {}).get("best_stable_gv_sigma") is not None
+            for nx in nextra_values
+        )
+        if any_gv:
+            print(f"\n{'='*70}")
+            print("  Cross-grid stability re-check at GV-optimal sigma (per nextra)")
+            print(f"{'='*70}")
+        for nx in nextra_values:
+            gv_sigma = sigma_results.get(nx, {}).get("best_stable_gv_sigma")
+            if gv_sigma is None:
+                continue
+            print(f"  nextra={nx}, sigma={gv_sigma:.6f}:")
+            gv_stable_at_by_nx[nx] = _check_gv_sigma_stable_grids(
+                nx, gv_sigma, grid_sizes,
+            )
+
     # Build summary
     summary = {}
     for nx in nextra_values:
@@ -392,10 +439,24 @@ def run_footprint_sweep(
             res = sigma_results[nx]
             if res["best_se"] < STABILITY_TOL and res["best_sigma"] > 0:
                 t_key = f"E4_nextra{nx}_tension_{res['best_sigma']:.0f}"
-                summary[t_key] = {
+                t_entry: dict = {
                     "nextra": nx,
                     "sigma": round(res["best_sigma"], 4),
                     "stable_at": [n],
+                }
+                if include_gv and res.get("best_stable_gv") is not None:
+                    t_entry["gv_error"] = float(res["best_stable_gv"])
+                summary[t_key] = t_entry
+
+            # Parallel GV-optimal entry (separate from the stability-optimum
+            # key because the sigma is embedded in the key name).
+            if include_gv and res.get("best_stable_gv_sigma") is not None:
+                gv_key = f"E4_nextra{nx}_tension_gv"
+                summary[gv_key] = {
+                    "nextra": nx,
+                    "sigma": round(float(res["best_stable_gv_sigma"]), 4),
+                    "gv_error": float(res["best_stable_gv"]),
+                    "stable_at": gv_stable_at_by_nx.get(nx, []),
                 }
 
     if gv_by_nx_sigma is not None:
@@ -444,11 +505,21 @@ def main(argv: list[str] | None = None) -> int:
 
     if args.update_known_values:
         kv = load_known_values()
-        if "footprint" not in kv:
-            kv["footprint"] = {}
-        # Drop internal keys (leading underscore) that are for in-process use only
-        # and should not be persisted to known_values.json.
-        kv["footprint"] = {k: v for k, v in summary.items() if not k.startswith("_")}
+        footprint = kv.setdefault("footprint", {})
+        # Per-entry additive merge (pattern from 40.2d/40.3c/40.4c): read
+        # the existing entry dict, update with only the keys this invocation
+        # owns, and reassign. This preserves pre-existing keys (e.g. a
+        # ``gv_error`` set by a prior ``--include-gv`` run) when the current
+        # invocation does not set them, and avoids the pre-existing bug where
+        # ``kv["footprint"] = summary`` silently dropped entries keyed by a
+        # sigma value this run did not reproduce. Drop internal keys (leading
+        # underscore) that are for in-process use only.
+        for key, new_entry in summary.items():
+            if key.startswith("_"):
+                continue
+            merged = dict(footprint.get(key, {}))
+            merged.update(new_entry)
+            footprint[key] = merged
         save_known_values(kv)
         print(f"\n  Updated known_values.json: footprint")
 
