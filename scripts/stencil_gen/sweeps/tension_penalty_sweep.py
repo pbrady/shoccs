@@ -101,12 +101,17 @@ def run_joint_sweep_coarse(
     best_stable_sigma = None
     best_stable_gamma = None
 
+    # Track best stable GV error (feasible-then-minimize, parallel to deficit)
+    best_stable_gv = float("inf")
+    best_stable_gv_sigma = None
+    best_stable_gv_gamma = None
+
     n_stable = 0
     total = len(sigmas) * len(gammas)
 
     for sigma in sigmas:
         for gamma in gammas:
-            se, deficit, _gv = eval_point(
+            se, deficit, gv = eval_point(
                 n, sigma, gamma,
                 p=p, q=q, nextra=nextra, nu=nu,
             )
@@ -127,6 +132,10 @@ def run_joint_sweep_coarse(
                     best_stable_deficit = deficit
                     best_stable_sigma = sigma
                     best_stable_gamma = gamma
+                if gv < best_stable_gv:
+                    best_stable_gv = gv
+                    best_stable_gv_sigma = sigma
+                    best_stable_gv_gamma = gamma
 
     print(f"\n{'='*72}")
     print(f"  {label} Joint (sigma, gamma) Sweep (n={n})")
@@ -149,6 +158,11 @@ def run_joint_sweep_coarse(
         print(f"    sigma={best_stable_sigma:.4f}, gamma={best_stable_gamma:.4f}")
         print(f"    deficit={best_stable_deficit:.6e}")
 
+    if best_stable_gv_sigma is not None:
+        print(f"\n  Best stable point (lowest GV error):")
+        print(f"    sigma={best_stable_gv_sigma:.4f}, gamma={best_stable_gv_gamma:.4f}")
+        print(f"    gv_error={best_stable_gv:.6e}")
+
     return {
         "best_sigma": best_sigma,
         "best_gamma": best_gamma,
@@ -161,6 +175,9 @@ def run_joint_sweep_coarse(
         "best_stable_sigma": best_stable_sigma,
         "best_stable_gamma": best_stable_gamma,
         "best_stable_deficit": best_stable_deficit,
+        "best_stable_gv_sigma": best_stable_gv_sigma,
+        "best_stable_gv_gamma": best_stable_gv_gamma,
+        "best_stable_gv": best_stable_gv if best_stable_gv_sigma is not None else None,
     }
 
 
