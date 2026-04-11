@@ -66,6 +66,13 @@ cd scripts/stencil_gen && uv run pytest tests/test_phs.py -x -q -k "TestRegressi
   - Verified: `uv run pytest tests/test_sweep_gv_objectives.py -x -q` → 7 passed in 0.92s. `tests/test_phs.py -k TestRegression` → 15 passed (no regressions).
   - Follow-up for 40.7b / 40.8b: this file already exists; those items just append tests.
 
+- [ ] **40.1c** Add the missing `cutcell_gv_min_C` unit test (gap from 40.1b — only four of the five helpers were actually tested):
+  - Review pass on commit `8fb9f68` confirmed `tests/test_sweep_gv_objectives.py` has zero references to `cutcell_gv_min_C`. Plan item 40.1b explicitly required "For each helper, one assertion that it returns a finite positive float (or correct tuple) at known inputs"; this helper's tuple contract is currently uncovered, and downstream item 40.5a depends on it.
+  - Use a small fixture: `from stencil_gen.temo import E2_1` for `scheme_params`, an empty `alpha_values={}` (the helper's `psi_sweep_group_velocity` defaults missing alpha symbols to 0 — see `group_velocity.py:763`), and `psi_values=np.linspace(0.05, 0.95, 5)` to keep runtime under one second.
+  - Assertions: returned object is a 2-tuple; `np.isfinite(min_C)`; `isinstance(has_sign_reversal, bool)` (not `np.bool_`, since the helper wraps with `bool(...)`).
+  - File: `scripts/stencil_gen/tests/test_sweep_gv_objectives.py`
+  - Test: `cd scripts/stencil_gen && uv run pytest tests/test_sweep_gv_objectives.py -x -q -k "cutcell"`
+
 ### 40.2 — Integrate GV into `tension_sweep` (testbed sweep)
 
 - [ ] **40.2a** Add `--include-gv` CLI flag to `tension_sweep.py`:
@@ -222,7 +229,7 @@ cd scripts/stencil_gen && uv run pytest tests/test_phs.py -x -q -k "TestRegressi
 ## Ordering
 
 ```
-40.1a → 40.1b           (objectives module + tests; everything else depends on these)
+40.1a → 40.1b → 40.1c   (objectives module + tests; everything else depends on these; 40.1c closes a coverage gap)
   ↓
 40.2a → 40.2b → 40.2c   (tension_sweep is the testbed; do this whole strand before branching)
   ↓
