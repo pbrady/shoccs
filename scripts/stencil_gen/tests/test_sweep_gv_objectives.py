@@ -16,7 +16,7 @@ import pytest
 from stencil_gen.phs import build_diff_matrix_rbf
 
 from sweeps import _common as sweeps_common
-from sweeps import tension_sweep
+from sweeps import epsilon_sweep, tension_sweep
 from sweeps.gv_objectives import (
     boundary_gv_error_max,
     cutcell_gv_min_C,
@@ -204,3 +204,93 @@ def test_tension_sweep_main_merges_known_values(tmp_path, monkeypatch, capsys):
     assert np.isfinite(tension_gv["sigma"])
     assert np.isfinite(tension_gv["gv_error"])
     assert isinstance(tension_gv["stable_at"], list)
+
+
+def _seed_kv_epsilon(path: Path, kernel: str = "gaussian") -> dict:
+    gv_key = f"{kernel}_gv"
+    seed = {
+        "E2_1": {
+            "params": {"p": 1, "q": 1, "nextra": 1, "nu": 1},
+            kernel: {
+                "epsilon": 1.0,
+                "stable_at": [20, 40, 80],
+                "gv_error": 1.234,
+                "preexisting_extra_key": "survive",
+            },
+            gv_key: {
+                "epsilon": 0.9,
+                "gv_error": 1.234,
+                "stable_at": [20, 40],
+                "preexisting_gv_extra": "survive_gv",
+            },
+        }
+    }
+    with open(path, "w") as f:
+        json.dump(seed, f, indent=2)
+    return seed
+
+
+def test_epsilon_sweep_main_merges_known_values(tmp_path, monkeypatch, capsys):
+    """Regression for 40.3c: epsilon_sweep --update-known-values must merge.
+
+    Mirrors test_tension_sweep_main_merges_known_values.  A non-GV
+    --update-known-values invocation must preserve any pre-existing keys
+    that an earlier --include-gv run wrote on both ``{kernel}`` and
+    ``{kernel}_gv`` entries.  A subsequent --include-gv invocation must
+    refresh the keys this run owns without dropping unrelated keys
+    (preexisting_extra_key on ``{kernel}``, preexisting_gv_extra on
+    ``{kernel}_gv``).
+    """
+    kernel = "gaussian"
+    gv_key = f"{kernel}_gv"
+    kv_path = tmp_path / "known_values.json"
+    monkeypatch.setattr(sweeps_common, "KNOWN_VALUES_PATH", kv_path)
+    _seed_kv_epsilon(kv_path, kernel=kernel)
+
+    rc = epsilon_sweep.main([
+        "--scheme", "E2",
+        "--kernel", kernel,
+        "--n-eps", "5",
+        "--n-values", "20",
+        "--update-known-values",
+    ])
+    assert rc == 0
+    capsys.readouterr()
+
+    with open(kv_path) as f:
+        after_non_gv = json.load(f)
+    kernel_entry = after_non_gv["E2_1"][kernel]
+    assert kernel_entry["gv_error"] == 1.234
+    assert kernel_entry["preexisting_extra_key"] == "survive"
+    assert "epsilon" in kernel_entry and "stable_at" in kernel_entry
+    assert after_non_gv["E2_1"][gv_key] == {
+        "epsilon": 0.9,
+        "gv_error": 1.234,
+        "stable_at": [20, 40],
+        "preexisting_gv_extra": "survive_gv",
+    }
+
+    rc = epsilon_sweep.main([
+        "--scheme", "E2",
+        "--kernel", kernel,
+        "--n-eps", "5",
+        "--n-values", "20",
+        "--include-gv",
+        "--update-known-values",
+    ])
+    assert rc == 0
+    capsys.readouterr()
+
+    with open(kv_path) as f:
+        after_gv = json.load(f)
+    kernel_entry = after_gv["E2_1"][kernel]
+    assert kernel_entry["preexisting_extra_key"] == "survive"
+    assert "epsilon" in kernel_entry
+    assert "stable_at" in kernel_entry
+    assert np.isfinite(kernel_entry["gv_error"])
+    gv_entry = after_gv["E2_1"][gv_key]
+    assert {"epsilon", "gv_error", "stable_at"} <= set(gv_entry)
+    assert gv_entry["preexisting_gv_extra"] == "survive_gv"
+    assert np.isfinite(gv_entry["epsilon"])
+    assert np.isfinite(gv_entry["gv_error"])
+    assert isinstance(gv_entry["stable_at"], list)
