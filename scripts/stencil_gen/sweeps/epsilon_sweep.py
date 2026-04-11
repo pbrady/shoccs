@@ -155,6 +155,8 @@ def run_epsilon_sweep(
     print()
     report_stable_ranges(results, param_label="epsilon")
 
+    gv_best_eps: float | None = None
+    gv_best_error: float | None = None
     if gv_by_eps is not None:
         # Among feasible (stable at every grid size in the sweep) epsilons,
         # report the smallest GV error.  This does not alter the stability
@@ -201,11 +203,29 @@ def run_epsilon_sweep(
         if se < STABILITY_TOL:
             stable_at.append(nn)
 
+    # Cross-check GV-optimal epsilon at the same grid sizes as eps_star.
+    gv_stable_at: list[int] | None = None
+    if gv_best_eps is not None:
+        gv_stable_at = []
+        print(f"\n  Checking GV-optimal eps={gv_best_eps:.6f} across grid sizes:")
+        for nn in sorted(set(n_values + [20, 40, 80, 160])):
+            se = stability_eigenvalue(
+                nn, p=p, q=q, epsilon=gv_best_eps,
+                kernel=kernel, nu=nu, nextra=nextra,
+            )
+            status = "STABLE" if se < STABILITY_TOL else "unstable"
+            print(f"    n={nn:4d}: stab_eig={se:.6e} [{status}]")
+            if se < STABILITY_TOL:
+                gv_stable_at.append(nn)
+
     return {
         "epsilon": round(eps_star, 6),
         "stable_at": stable_at,
         "fine_stab_eig": fine_se,
         "gv_by_eps": gv_by_eps,
+        "gv_epsilon": round(gv_best_eps, 6) if gv_best_eps is not None else None,
+        "gv_error": gv_best_error,
+        "gv_stable_at": gv_stable_at,
     }
 
 
@@ -249,12 +269,25 @@ def main(argv: list[str] | None = None) -> int:
         scheme_key = SCHEME_PARAMS[args.scheme]["label"]
         if scheme_key not in kv:
             kv[scheme_key] = {}
-        kv[scheme_key][args.kernel] = {
-            "epsilon": summary["epsilon"],
-            "stable_at": summary["stable_at"],
-        }
+        # Merge into the existing kernel entry so that keys written by an
+        # earlier --include-gv run survive a subsequent non-GV invocation.
+        kernel_entry = dict(kv[scheme_key].get(args.kernel, {}))
+        kernel_entry["epsilon"] = summary["epsilon"]
+        kernel_entry["stable_at"] = summary["stable_at"]
+        if args.include_gv and summary["gv_error"] is not None:
+            kernel_entry["gv_error"] = summary["gv_error"]
+        kv[scheme_key][args.kernel] = kernel_entry
+        updated_keys = [f"{scheme_key}.{args.kernel}"]
+        if args.include_gv and summary["gv_epsilon"] is not None:
+            gv_key = f"{args.kernel}_gv"
+            gv_entry = dict(kv[scheme_key].get(gv_key, {}))
+            gv_entry["epsilon"] = summary["gv_epsilon"]
+            gv_entry["gv_error"] = summary["gv_error"]
+            gv_entry["stable_at"] = summary["gv_stable_at"]
+            kv[scheme_key][gv_key] = gv_entry
+            updated_keys.append(f"{scheme_key}.{gv_key}")
         save_known_values(kv)
-        print(f"\n  Updated known_values.json: {scheme_key}.{args.kernel}")
+        print(f"\n  Updated known_values.json: {', '.join(updated_keys)}")
 
     return 0
 
