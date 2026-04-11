@@ -16,6 +16,7 @@ import numpy as np
 
 from stencil_gen.group_velocity import (
     boundary_group_velocity,
+    gks_group_velocity_check,
     group_velocity_error,
     group_velocity_exact_nonuniform,
     interior_group_velocity,
@@ -116,3 +117,34 @@ def gv_score_from_matrix(D: np.ndarray, n_xi: int = 200) -> dict:
     if not any_row:
         return {"max_gv_error": float("nan"), "min_cutoff_xi": float("nan")}
     return {"max_gv_error": max_err, "min_cutoff_xi": min_cutoff}
+
+
+def print_gks_advisory(
+    D: np.ndarray,
+    *,
+    label: str,
+    n_xi: int = 200,
+) -> int:
+    """Run ``gks_group_velocity_check`` on ``D`` and print outgoing-mode warnings.
+
+    Advisory only — never mutates caller state.  Prints a single ``no outgoing
+    boundary modes`` line when clean, or one ``WARNING`` line per outgoing mode.
+    Returns the count of outgoing modes for callers that want to assert on it.
+    """
+    xi = _default_xi(n_xi)
+    modes = gks_group_velocity_check(D, xi)
+    outgoing = [m for m in modes if m.is_outgoing]
+    print(f"\n  GKS advisory ({label}):")
+    if not outgoing:
+        print(
+            f"    no outgoing boundary modes detected "
+            f"({len(modes)} boundary mode(s) inspected)"
+        )
+        return 0
+    for m in outgoing:
+        print(
+            f"    WARNING: outgoing boundary mode at xi={m.boundary_wavenumber:.4f}, "
+            f"lambda={m.eigenvalue.real:+.3e}{m.eigenvalue.imag:+.3e}j, "
+            f"C={m.group_velocity:+.4e}"
+        )
+    return len(outgoing)

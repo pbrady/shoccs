@@ -20,7 +20,7 @@ import sys
 
 import numpy as np
 
-from stencil_gen.phs import stability_eigenvalue
+from stencil_gen.phs import build_diff_matrix_rbf, stability_eigenvalue
 
 from ._common import (
     SCHEME_PARAMS,
@@ -30,7 +30,7 @@ from ._common import (
     report_stable_ranges,
     save_known_values,
 )
-from .gv_objectives import boundary_gv_error_max
+from .gv_objectives import boundary_gv_error_max, print_gks_advisory
 
 # Floating-point eigenvalue solvers return tiny positive real parts (~1e-14)
 # for genuinely stable operators.  Use this threshold to distinguish true
@@ -127,6 +127,7 @@ def run_tension_sweep(
     sigma_max: float = 20.0,
     *,
     include_gv: bool = False,
+    check_gks: bool = False,
 ) -> dict:
     """Run a full tension sigma sweep for a scheme.
 
@@ -219,6 +220,14 @@ def run_tension_sweep(
             if se < STABILITY_TOL:
                 gv_stable_at.append(nn)
 
+    if check_gks:
+        D_star = build_diff_matrix_rbf(
+            n_fine_grid, p, q, sigma_star, "tension", nu, nextra,
+        )
+        print_gks_advisory(
+            D_star, label=f"n={n_fine_grid}, sigma*={sigma_star:.6f}",
+        )
+
     return {
         "sigma": round(sigma_star, 6),
         "stable_at": stable_at,
@@ -257,6 +266,12 @@ def main(argv: list[str] | None = None) -> int:
         help="Also compute boundary group-velocity error at each sigma "
              "(advisory secondary objective; does not alter the stability optimum)",
     )
+    parser.add_argument(
+        "--check-gks", action="store_true",
+        help="After picking the stability optimum, run gks_group_velocity_check "
+             "on D at sigma* and print any outgoing boundary modes as WARNINGs "
+             "(advisory only; necessary-not-sufficient for instability)",
+    )
 
     args = parser.parse_args(argv)
     n_values = [int(x) for x in args.n_values.split(",")]
@@ -264,6 +279,7 @@ def main(argv: list[str] | None = None) -> int:
     summary = run_tension_sweep(
         args.scheme, n_values, args.n_sigma, args.sigma_max,
         include_gv=args.include_gv,
+        check_gks=args.check_gks,
     )
 
     if args.update_known_values:
