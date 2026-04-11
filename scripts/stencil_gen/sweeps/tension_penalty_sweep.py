@@ -347,12 +347,18 @@ def run_tension_penalty_sweep(
     penalty = run_penalty_effect(scheme, n, n_gamma)
     fine = run_fine_sweep(scheme, n, n_sigma, n_gamma)
 
+    gv_sigma = coarse["best_stable_gv_sigma"]
+    gv_gamma = coarse["best_stable_gv_gamma"]
+    gv_error = coarse["best_stable_gv"]
     return {
         "best_sigma": round(fine["best_sigma"], 6),
         "best_gamma": round(fine["best_gamma"], 6),
         "stable_at": fine["stable_at"],
         "baseline_stable": coarse["baseline_se"] < STABILITY_TOL,
         "max_stable_gamma": penalty["max_stable_gamma"],
+        "gv_sigma": round(gv_sigma, 6) if gv_sigma is not None else None,
+        "gv_gamma": round(gv_gamma, 6) if gv_gamma is not None else None,
+        "gv_error": gv_error,
     }
 
 
@@ -390,13 +396,29 @@ def main(argv: list[str] | None = None) -> int:
         scheme_key = SCHEME_PARAMS[args.scheme]["label"]
         if scheme_key not in kv:
             kv[scheme_key] = {}
-        kv[scheme_key]["tension_penalty"] = {
-            "sigma": summary["best_sigma"],
-            "gamma": summary["best_gamma"],
-            "stable_at": summary["stable_at"],
-        }
+        # Merge into the existing tension_penalty entry so that keys written
+        # by an earlier or future invocation survive this write (mirrors the
+        # 40.2d/40.3c additive-merge pattern).
+        tp_entry = dict(kv[scheme_key].get("tension_penalty", {}))
+        tp_entry["sigma"] = summary["best_sigma"]
+        tp_entry["gamma"] = summary["best_gamma"]
+        tp_entry["stable_at"] = summary["stable_at"]
+        if summary["gv_error"] is not None:
+            tp_entry["gv_error"] = summary["gv_error"]
+        kv[scheme_key]["tension_penalty"] = tp_entry
+        updated_keys = [f"{scheme_key}.tension_penalty"]
+        # tension-penalty coarse sweep is single-grid (n=40 only), so there
+        # is no cross-grid stable_at list on the _gv sub-entry — only the
+        # sigma/gamma/gv_error triple that the coarse sweep discovered.
+        if summary["gv_sigma"] is not None:
+            tp_gv_entry = dict(kv[scheme_key].get("tension_penalty_gv", {}))
+            tp_gv_entry["sigma"] = summary["gv_sigma"]
+            tp_gv_entry["gamma"] = summary["gv_gamma"]
+            tp_gv_entry["gv_error"] = summary["gv_error"]
+            kv[scheme_key]["tension_penalty_gv"] = tp_gv_entry
+            updated_keys.append(f"{scheme_key}.tension_penalty_gv")
         save_known_values(kv)
-        print(f"\n  Updated known_values.json: {scheme_key}.tension_penalty")
+        print(f"\n  Updated known_values.json: {', '.join(updated_keys)}")
 
     return 0
 
