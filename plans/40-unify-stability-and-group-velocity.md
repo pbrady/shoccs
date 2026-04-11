@@ -104,6 +104,16 @@ cd scripts/stencil_gen && uv run pytest tests/test_phs.py -x -q -k "TestRegressi
   - Verified: snapshot `known_values.json`; run `uv run python -m sweeps tension --scheme E2 --n-sigma 5 --include-gv --update-known-values` (writes `E2_1.tension.gv_error = 2.074641…` and `E2_1.tension_gv`), then `uv run python -m sweeps tension --scheme E2 --n-sigma 5 --update-known-values` (no `--include-gv`). After step 2, `E2_1.tension.gv_error` is still `2.074641143264805` and `E2_1.tension_gv` is unchanged. Snapshot restored. `pytest tests/test_sweep_gv_objectives.py tests/test_phs.py -k "TestRegression or gv_objectives"` → 23 passed.
   - **Carry-over note:** the same merge pattern must be used when implementing 40.3c (epsilon sweep), 40.4c (tension-penalty), and 40.5c (footprint) — they all face the identical "additive on existing entry" contract.
 
+- [ ] **40.2e** Add an automated regression test for the `tension_sweep.main()` merge pattern:
+  - Review pass on commit `f9ce69b` confirmed the 40.2d fix is only exercised by manual "snapshot → run twice → inspect JSON → restore" verification. There is no test that will fail if a future refactor (or the carry-over implementations in 40.3c/40.4c/40.5c) re-introduces a non-merging assignment to `kv[scheme_key]["tension"]`. The 40.2c bug was exactly this kind of silent regression; without a test, 40.2d's guarantee is review-dependent.
+  - Implementation: in `tests/test_sweep_gv_objectives.py`, add a `test_tension_sweep_main_merges_known_values` test that uses `monkeypatch.setattr` to point `stencil_gen.sweeps._common.KNOWN_VALUES_PATH` (and the re-export in `tension_sweep`) at a `tmp_path / "known_values.json"`, seeds it with `{"E2_1": {"tension": {"sigma": 6.0, "stable_at": [20,40,80], "gv_error": 1.234, "preexisting_extra_key": "survive"}, "tension_gv": {"sigma": 5.5, "gv_error": 1.234, "stable_at": [20,40]}}}`, then:
+    1. Calls `tension_sweep.main(["--scheme","E2","--n-sigma","5","--n-values","20","--update-known-values"])` (non-GV) and asserts that after the call, the reloaded JSON still contains `tension.gv_error == 1.234`, `tension.preexisting_extra_key == "survive"`, and the full `tension_gv` dict is unchanged.
+    2. Calls `tension_sweep.main(["--scheme","E2","--n-sigma","5","--n-values","20","--include-gv","--update-known-values"])` and asserts `tension.sigma`, `tension.stable_at`, and `tension.gv_error` are all refreshed (new floats, same `preexisting_extra_key` still present), and `tension_gv` has been refreshed with the new sigma/gv_error/stable_at.
+  - Keep `--n-sigma 5 --n-values 20` so the test runs in <2s; mark it `slow` only if it exceeds that after local timing.
+  - Factor the seed/reload/assert block into a module-local helper (e.g. `_assert_merge_preserves_preexisting_keys(main_fn, scheme_key, entry_key, ...)`) so 40.3c/40.4c/40.5c can reuse it for their own sweeps without duplicating test scaffolding.
+  - File: `scripts/stencil_gen/tests/test_sweep_gv_objectives.py`
+  - Test: `cd scripts/stencil_gen && uv run pytest tests/test_sweep_gv_objectives.py -x -q -k "merges_known_values"`
+
 ### 40.3 — Integrate GV into `epsilon_sweep` (Gaussian / multiquadric kernels)
 
 - [ ] **40.3a** Add `--include-gv` flag to `epsilon_sweep.py`, mirroring 40.2a:
@@ -241,7 +251,7 @@ cd scripts/stencil_gen && uv run pytest tests/test_phs.py -x -q -k "TestRegressi
 ```
 40.1a → 40.1b → 40.1c   (objectives module + tests; everything else depends on these; 40.1c closes a coverage gap)
   ↓
-40.2a → 40.2b → 40.2c → 40.2d   (tension_sweep testbed; 40.2d is a follow-up correctness fix from review of 74df8c7)
+40.2a → 40.2b → 40.2c → 40.2d → 40.2e   (tension_sweep testbed; 40.2d is a correctness fix from review of 74df8c7; 40.2e is an automated regression test from review of f9ce69b)
   ↓
 40.3a → 40.3b → 40.3c   (epsilon_sweep mirrors tension_sweep — do once tension is verified)
   ↓
