@@ -456,6 +456,13 @@ The correct GV objective for this sweep is `boundary_gv_error_max(p, q, nextra, 
   - File: `.claude/skills/stencil-sweeps/SKILL.md`
   - Test: (no test)
 
+- [ ] **40.9d** Fix the `gv-stability-pareto` argument table in `sweeps_reference.md` (review of 7bfa7c5):
+  - The table added by 40.9a (currently lines 484–490) lists `--scheme` and `--param` with a "Default" column showing `E2` and `tension`, but `scripts/stencil_gen/sweeps/__main__.py:75,77` mark both as `required=True` (no argparse default). A user copying the documented "minimal" invocation (`uv run python -m sweeps gv-stability-pareto`) will hit `error: the following arguments are required: --scheme, --param` instead of getting the documented defaults.
+  - Fix: change the `Default` cells for `--scheme` and `--param` from `E2`/`tension` to `(required)` so the table matches the actual CLI contract. The other rows (`--n-points`, `--n`, `--param-max`) are correct and should not change.
+  - Cross-check: also confirm the prose example at line 500 (`uv run python -m sweeps gv-stability-pareto --scheme E2 --param tension --n-points 11`) already passes both required flags — it does, so no further prose change is needed.
+  - File: `scripts/stencil_gen/docs/sweeps_reference.md`
+  - Test: (no test — documentation only; verify by re-running `uv run python -m sweeps gv-stability-pareto --help` and matching the rendered help text against the table)
+
 ### 40.10 — Quick-mode integration in `_run_all`
 
 - [ ] **40.10a** Have `sweeps all --quick` exercise the new GV path on at least one sweep:
@@ -485,7 +492,7 @@ The correct GV objective for this sweep is `boundary_gv_error_max(p, q, nextra, 
   ↓
 40.8a → 40.8b → 40.8c → 40.8d → 40.8e → 40.8f → 40.8g   (regression tests for new known_values keys; 40.8c is a correctness fix from review of a89670f for the {primary}.gv_error vs {primary}.sigma semantic mismatch — the additive gv_error field is currently the GV at the GV-optimum sigma, not the GV at the stability-optimum sigma it sits next to, so test_scheme_primary_gv_error_match will fail in production; 40.8d is a residual correctness gap from review of 727da29 — gv_at_*_star is computed at the un-rounded param while the persisted param is rounded, so the (param, gv_error) pair is not exactly self-consistent and a 25% drift was observed at small epsilon; 40.8e is a test-coverage gap from review of 0e07c45 — TestRegressionGV's 10% tolerance is 100,000× too loose to gate 40.8d's bit-level contract, and the footprint primary _tension_{N}.gv_error path has zero test coverage at any tolerance; 40.8f completes the unmet footprint mutation-check acceptance criterion from 40.8e step 4 — the mutation did not trip the new footprint primary test at smoke resolution, leaving the gate mathematically correct but operationally unverified, review of 4f3a0af; 40.8g applies the 40.8c semantic-mismatch fix and the 40.8d bit-level fix to tension_penalty_sweep — both 40.8c and 40.8d enumerate "all three sweeps" and exclude tension_penalty, so tension_penalty.gv_error is currently the GV at the GV-optimum sigma while tension_penalty.sigma is the stability-optimum sigma, and TestRegressionGV has zero coverage of tension_penalty entries at any tolerance, review of f16e803)
   ↓
-40.9a → 40.9b → 40.9c   (docs — only after API is stable)
+40.9a → 40.9b → 40.9c → 40.9d   (docs — only after API is stable; 40.9d is a doc-vs-code correction from review of 7bfa7c5 — the gv-stability-pareto argument table claims `--scheme`/`--param` defaults that do not exist in argparse)
   ↓
 40.10a                   (final integration smoke in _run_all --quick)
 ```
