@@ -458,6 +458,79 @@ def test_footprint_sweep_main_merges_known_values(tmp_path, monkeypatch, capsys)
     assert "E4_nextra1_tension_gv" not in footprint
 
 
+def test_footprint_primary_gv_error_bit_exact_at_persisted_sigma(
+    tmp_path, monkeypatch, capsys,
+):
+    """40.8f: footprint primary entries must persist gv_error computed at the
+    *rounded* sigma so that ``(sigma, gv_error)`` is bit-exact self-consistent.
+
+    The existing ``test_footprint_primary_tension_gv_error_match`` regression in
+    test_phs.py uses a 0.1% strict tolerance, but at smoke-run resolution every
+    populated nextra has a ``best_sigma`` whose 4dp rounding drift is ~1e-6
+    relative — well below 0.1% — so a regression that re-introduces
+    ``sigma=float(res["best_sigma"])`` instead of ``sigma=best_sigma_rounded``
+    would not trip the strict-tolerance gate.  This test is the mechanical
+    fallback (b) the plan calls out: it asserts bit-exact equality between the
+    persisted ``gv_error`` and ``boundary_gv_error_max`` re-evaluated at the
+    persisted ``sigma``.  ``boundary_gv_error_max`` is a deterministic numpy
+    pipeline, so any non-zero parameter drift produces a non-zero gv_error
+    delta — converting the smoke-run's 1e-6 relative drift into a non-bit-equal
+    failure that the test can detect, regardless of how forgiving the strict
+    tolerance is.
+
+    Mutation check (run by hand during 40.8f review): reverting line 460-463 of
+    ``footprint_sweep.py`` to ``sigma=float(res["best_sigma"])`` causes this
+    test to fail with::
+
+        AssertionError: E4_nextra1_tension_1: persisted gv_error
+            4.9596397695... != 4.9596374230... rebuilt at sigma=1.3852
+
+    confirming that the bit-exact gate trips on the exact bug 40.8d eliminated.
+    """
+    kv_path = tmp_path / "known_values.json"
+    monkeypatch.setattr(sweeps_common, "KNOWN_VALUES_PATH", kv_path)
+
+    rc = footprint_sweep.main([
+        "--n-sigma", "5",
+        "--include-gv",
+        "--update-known-values",
+    ])
+    assert rc == 0
+    capsys.readouterr()
+
+    with open(kv_path) as f:
+        kv = json.load(f)
+    footprint = kv["footprint"]
+
+    primary_entries = [
+        (key, entry) for key, entry in footprint.items()
+        if "_tension_" in key
+        and not key.endswith("_gv")
+        and "gv_error" in entry
+    ]
+    assert primary_entries, (
+        "smoke-run footprint sweep produced no primary _tension_N entries with "
+        "gv_error — the 40.8f gate has nothing to validate; check that "
+        "footprint_sweep populates at least one stable nextra at --n-sigma 5"
+    )
+
+    for key, entry in primary_entries:
+        rebuilt = float(boundary_gv_error_max(
+            p=footprint_sweep.P,
+            q=footprint_sweep.Q,
+            nextra=entry["nextra"],
+            nu=footprint_sweep.NU,
+            sigma=entry["sigma"],
+            kernel="tension",
+        ))
+        assert entry["gv_error"] == rebuilt, (
+            f"{key}: persisted gv_error {entry['gv_error']!r} != {rebuilt!r} "
+            f"rebuilt at sigma={entry['sigma']} — the (sigma, gv_error) pair "
+            f"is not bit-exact self-consistent, indicating gv_error was "
+            f"computed at an un-rounded sigma (40.8d regression)"
+        )
+
+
 def test_check_gks_advisory_tension_e2_no_false_positives(capsys):
     """40.7b: --check-gks on a known-stable E2 tension case must not warn.
 
