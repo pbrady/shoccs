@@ -252,11 +252,17 @@ The correct GV objective for this sweep is `boundary_gv_error_max(p, q, nextra, 
   - Verified: `uv run python -c "from sweeps.gv_stability_pareto import main; raise SystemExit(main(['--scheme','E2','--param','tension','--n-points','11']))"` prints both tables end-to-end; 11-row grid at E2 tension has all 11 stable points and produces a 3-point Pareto front (sigma≈3.69, 8.60, 20.0 — monotone decrease in gv_err from 2.606 to 2.075 while stab_eig stays non-positive). Second smoke: `uv run python -m sweeps.gv_stability_pareto --scheme E4 --param gaussian --n-points 9` prints "*(no stable points on this grid)*" as expected (E4 gaussian at n=40 is unstable across the full sigma range without tension augmentation). `pytest tests/test_sweep_gv_objectives.py tests/test_phs.py -x -q -k "TestRegression or gv_objectives or sweep_gv or merges or footprint"` → 27 passed in 5.43s. 40.6b owns registering the `gv-stability-pareto` subcommand in `sweeps/__main__.py`.
 
 - [ ] **40.6b** Register `gv-stability-pareto` subcommand in `sweeps/__main__.py`:
-  - Add `subparsers.add_parser("gv-stability-pareto", ...)` block with args `--scheme`, `--param {tension,gaussian,multiquadric}`, `--n-points`.
-  - Add `if args.command == "gv-stability-pareto":` dispatch with lazy import.
-  - Add to `_run_all`'s `sweeps` list with quick-mode resolution.
+  - Add `subparsers.add_parser("gv-stability-pareto", ...)` block. 40.6a added five CLI flags to the module — all five must be exposed and forwarded so the subcommand is not strictly weaker than `python -m sweeps.gv_stability_pareto`:
+    - `--scheme` (choices `["E2", "E4"]`, required — matches `SCHEME_PARAMS` in `_common.py`)
+    - `--param` (choices `["tension", "gaussian", "multiquadric"]`, required)
+    - `--n-points` (int, default 61)
+    - `--n` (int, default 40 — grid size for the stability eigenvalue)
+    - `--param-max` (float, default 20.0 — upper end of the 1D parameter grid)
+  - Add `if args.command == "gv-stability-pareto":` dispatch with lazy import that forwards **all five** flags to `gv_stability_pareto.main(...)` (mirroring how `tension` forwards `--n-values`, `--n-sigma`, `--sigma-max` to `tension_sweep.main`). Dropping `--n` / `--param-max` at this layer would silently reduce the subcommand's configurability.
+  - Add to `_run_all`'s `sweeps` list with quick-mode resolution — use a small `--n-points` (e.g. `"10"` under `--quick`, `"61"` otherwise) and leave `--n` / `--param-max` at their module defaults so the quick smoke stays fast. 40.10a (not 40.6b) owns the `--include-gv` augmentation for the tension sweep; 40.6b only needs to register the pareto sweep in the list.
   - File: `scripts/stencil_gen/sweeps/__main__.py`
   - Test: `cd scripts/stencil_gen && uv run python -m sweeps gv-stability-pareto --scheme E2 --param tension --n-points 11`
+  - Secondary test: `cd scripts/stencil_gen && uv run python -m sweeps gv-stability-pareto --scheme E2 --param tension --n-points 5 --n 20 --param-max 10.0` to confirm the `--n` / `--param-max` flags actually reach the module (not silently ignored).
 
 ### 40.7 — GKS group-velocity check as advisory diagnostic
 
