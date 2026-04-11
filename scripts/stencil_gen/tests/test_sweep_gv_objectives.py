@@ -456,3 +456,46 @@ def test_footprint_sweep_main_merges_known_values(tmp_path, monkeypatch, capsys)
     # _tension_gv entry.  The seed did not include this key, so it must
     # remain absent after both runs.
     assert "E4_nextra1_tension_gv" not in footprint
+
+
+def test_check_gks_advisory_tension_e2_no_false_positives(capsys):
+    """40.7b: --check-gks on a known-stable E2 tension case must not warn.
+
+    The 40.7a verification confirmed that ``tension --scheme E2 --n-sigma 5``
+    produces zero outgoing boundary modes at the discovered sigma*.  This
+    test pins that as a regression: the sweep must exit 0, the GKS advisory
+    block must appear, and no ``WARNING:`` line (no false-positive outgoing
+    mode) may be printed.
+    """
+    rc = tension_sweep.main([
+        "--scheme", "E2",
+        "--n-sigma", "5",
+        "--n-values", "20",
+        "--check-gks",
+    ])
+    assert rc == 0
+    captured = capsys.readouterr()
+    out = captured.out
+    assert "GKS advisory" in out
+    assert "no outgoing boundary modes detected" in out
+    assert "WARNING:" not in out
+
+
+def test_check_gks_advisory_helper_clean_matrix(capsys):
+    """40.7b smoke: ``print_gks_advisory`` on a clean diff matrix returns 0.
+
+    Builds the same RBF differentiation matrix that the 40.7a verification
+    confirmed has zero outgoing boundary modes (E2 tension at sigma*=0.0,
+    n=20) and asserts the helper returns 0 and prints the clean line.
+    """
+    from sweeps.gv_objectives import print_gks_advisory
+
+    D = build_diff_matrix_rbf(
+        20, p=1, q=1, epsilon=0.0, kernel="tension", nu=1, nextra=1,
+    )
+    n_outgoing = print_gks_advisory(D, label="smoke")
+    assert n_outgoing == 0
+    captured = capsys.readouterr()
+    assert "GKS advisory (smoke)" in captured.out
+    assert "no outgoing boundary modes detected" in captured.out
+    assert "WARNING:" not in captured.out
