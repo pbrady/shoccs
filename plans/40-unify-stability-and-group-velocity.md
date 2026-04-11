@@ -272,7 +272,7 @@ The correct GV objective for this sweep is `boundary_gv_error_max(p, q, nextra, 
 
 - [ ] **40.9a** Update `scripts/stencil_gen/docs/sweeps_reference.md` with a new "Group velocity objectives" section:
   - Document `--include-gv`, `--check-gks`, and the new `gv-stability-pareto` subcommand.
-  - Document the new `known_values.json` keys: `*.gv_error`, `tension_gv`, `{kernel}_gv`, `footprint.*.min_C`.
+  - Document the new `known_values.json` keys: `*.gv_error`, `tension_gv`, `{kernel}_gv`, `footprint.E4_nextra{nx}_tension_*.gv_error`, and `footprint.E4_nextra{nx}_tension_gv` (the parallel GV-optimal entry persisted by 40.5c). The original draft of this item referenced `footprint.*.min_C`, which was retired by the 40.5 rewrite (commit `bc9a19d`) — `min_C` is a TEMO cut-cell concept and now lives only in the deferred 40.5e path.
   - Explain the feasible-then-minimize contract: stability is hard, GV is soft secondary.
   - File: `scripts/stencil_gen/docs/sweeps_reference.md`
   - Test: (no test — documentation only; rendered check by reading the file)
@@ -335,7 +335,7 @@ Independent branches that may be parallelized after 40.1 lands:
 - Every existing sweep (`tension`, `epsilon`, `tension-penalty`, `footprint`) accepts `--include-gv` and produces a GV column without changing the eigenvalue-based optimum.
 - `tension_sweep` and `epsilon_sweep` accept `--check-gks` and report any outgoing boundary modes as warnings.
 - `python -m sweeps gv-stability-pareto --scheme E2 --param tension --n-points 11` runs and prints a Pareto table.
-- `known_values.json` contains additive `*.gv_error`, `tension_gv`, `{kernel}_gv`, and `footprint.*.min_C` keys for at least the E2 scheme — populated by running each sweep with `--include-gv --update-known-values`.
+- `known_values.json` contains additive `*.gv_error`, `tension_gv`, `{kernel}_gv` keys for at least the E2 scheme, and `footprint.E4_nextra{nx}_tension_*.gv_error` plus `footprint.E4_nextra{nx}_tension_gv` entries for the E4 footprint sweep (footprint is E4-only — `P=2, Q=3` are hardcoded in `footprint_sweep.py`, so it cannot exercise E2). Populated by running each sweep with `--include-gv --update-known-values`. The original criterion mentioned `footprint.*.min_C`, which was retired by the 40.5 rewrite (commit `bc9a19d`).
 - `TestRegressionGV` class in `test_phs.py` passes against the populated keys.
 - `cd scripts/stencil_gen && uv run pytest tests/ -x -q` still passes in <30s (no new slow tests added to the default suite).
 - `cd scripts/stencil_gen && uv run python -m sweeps all --quick` runs end-to-end without error and exercises the new GV path on at least one sweep.
