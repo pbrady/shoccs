@@ -1,0 +1,263 @@
+# Phase 40: Unify Stability and Group Velocity in the Sweep Optimization Pipeline
+
+**Goal:** Bring group velocity (GV) analysis into the sweep optimization pipeline as a secondary objective alongside the existing eigenvalue stability check, so that optimal stencil parameters minimize GV error among the stable feasible set. Also expose GKS-style group-velocity diagnostics as advisory output.
+
+**Depends on:** Phase 39 (complete — sweep extraction and code simplification done)
+
+**Background — current state of the two pipelines:**
+
+| Aspect | Eigenvalue stability | Group velocity |
+|---|---|---|
+| Canonical API | `phs.stability_eigenvalue(n,p,q,eps,kernel,nu,nextra)` → `max Re(λ(-D_bc))` (`phs.py:807`) | `interior_group_velocity(p,nu,xi)`, `boundary_group_velocity(...)`, `psi_sweep_group_velocity(...)`, `gks_group_velocity_check(D,xi)` (`group_velocity.py:504,533,718,964`) |
+| Threshold / scalar | `< STABILITY_TOL = 1e-10` (binary feasible/infeasible) | `profile.gv_error` array, `profile.cutoff_xi`, `PsiSweepResult.min_C`, `has_sign_reversal` (no canonical scalar yet) |
+| Cost per call | `np.linalg.eigvals` on dense `n×n` (O(n³), n≤160 → sub-ms) | O(N_xi × stencil_width) numpy ops (microseconds) |
+| Sweep integration | All 6 sweeps consume it via `sweeps/_common.py` constants | **Zero** — no sweep imports `group_velocity` |
+
+**Multi-objective prior art:** `tension_penalty_sweep.py` (`eval_point` at lines 36–58) already handles two objectives via the *feasible-then-minimize* pattern: stability is a hard constraint (`se < STABILITY_TOL`); among feasible points, the conservation deficit is minimized. **This is the exact pattern we will reuse for GV.** GV becomes the secondary objective (or third, in penalty sweeps), never overriding stability.
+
+**Why not GV-as-stability-replacement:** `gks_group_velocity_check` is *necessary not sufficient* for instability (test docstring at `test_group_velocity.py:1015–1017`). It will be exposed as an advisory diagnostic, not a feasibility gate.
+
+**`known_values.json` compatibility:** The regression tests in `test_phs.py` (lines ~1358–1630) only access named keys (`{kernel}.epsilon`, `tension.sigma`, `params`, `stable_at`). Adding new keys (e.g. `tension.gv_error`, `tension_gv`, etc.) is non-breaking; existing tests will ignore them.
+
+**Read first:**
+- `scripts/stencil_gen/sweeps/_common.py` (`STABILITY_TOL`, `SCHEME_PARAMS`, `SweepResult`, helpers)
+- `scripts/stencil_gen/sweeps/tension_penalty_sweep.py` (the multi-objective prior art — `eval_point`, `run_joint_sweep_coarse`)
+- `scripts/stencil_gen/sweeps/tension_sweep.py` (simplest 1D sweep — testbed for new GV objective)
+- `scripts/stencil_gen/sweeps/epsilon_sweep.py` (parallel structure)
+- `scripts/stencil_gen/sweeps/__main__.py` (CLI dispatch — where new subcommands go)
+- `scripts/stencil_gen/sweeps/known_values.json` (schema, current keys)
+- `scripts/stencil_gen/stencil_gen/group_velocity.py` (lines 504–730 — interior/boundary/cut-cell APIs)
+- `scripts/stencil_gen/stencil_gen/phs.py` (lines 807–840 — `stability_eigenvalue` and `_from_matrix`)
+- `scripts/stencil_gen/tests/test_phs.py` (lines 1358–1630 — `TestRegression*` JSON loaders)
+
+**Test commands:**
+```bash
+# Targeted: just the new objectives module
+cd scripts/stencil_gen && uv run pytest tests/test_sweep_gv_objectives.py -x -q
+
+# Smoke: each sweep with --include-gv at minimal resolution (each <30s)
+cd scripts/stencil_gen && uv run python -m sweeps tension --scheme E2 --n-sigma 5 --include-gv
+cd scripts/stencil_gen && uv run python -m sweeps epsilon --scheme E2 --kernel gaussian --n-eps 5 --include-gv
+
+# Regression tests (must still pass)
+cd scripts/stencil_gen && uv run pytest tests/test_phs.py -x -q -k "TestRegression"
+```
+
+---
+
+## Items
+
+### 40.1 — Shared GV objective helpers in `sweeps/`
+
+- [x] **40.1a** Create `sweeps/gv_objectives.py` with five thin scalar wrappers around the existing `group_velocity` API:
+  - `interior_gv_error_max(p: int, nu: int = 1, n_xi: int = 200) -> float` — calls `interior_group_velocity`, returns `float(np.max(np.abs(profile.gv_error)))`.
+  - `interior_cutoff_fraction(p: int, nu: int = 1, n_xi: int = 200) -> float` — returns `profile.cutoff_xi / np.pi` (1.0 = ideal, lower = earlier parasitic onset).
+  - `boundary_gv_error_max(p, q, nextra, nu, sigma, kernel, n_xi=200) -> float` — calls `boundary_group_velocity`, returns the max over rows of `np.max(np.abs(prof.gv_error))`.
+  - `cutcell_gv_min_C(scheme_params, psi_values, alpha_values, n_xi=200) -> tuple[float, bool]` — calls `psi_sweep_group_velocity`, returns `(result.min_C, result.has_sign_reversal)`.
+  - `gv_score_from_matrix(D: np.ndarray, n_xi: int = 200) -> dict` — extracts boundary rows from a constructed `D` matrix and returns `{"max_gv_error": ..., "min_cutoff_xi": ...}` (this is the entry point sweeps that already build `D` will use to avoid rebuilding). Uses a leading-rows scanner (row's leftmost nonzero column == 0) to identify the left-boundary block from D alone.
+  - Each function has a one-line docstring describing its semantics. Module docstring explains the "feasible-then-minimize" contract.
+  - File: `scripts/stencil_gen/sweeps/gv_objectives.py` (new) — **done**
+  - Verified: `uv run python -c "from sweeps.gv_objectives import ...; ..."` returns finite positive values; `gv_score_from_matrix(D)["max_gv_error"]` matches `boundary_gv_error_max` to machine precision for the E2 tension case at sigma=6.0.
+
+- [x] **40.1b** Add unit tests for the five helpers in `tests/test_sweep_gv_objectives.py`:
+  - For each helper, one assertion that it returns a finite positive float (or correct tuple) at known inputs (E2 interior, E4 boundary at the stored optimum sigma from `known_values.json`).
+  - Note: `@pytest.mark.fast` is **not** applied because the project's `pyproject.toml` only registers a `slow` marker; unmarked tests already run in the default suite, and adding an unregistered marker would emit pytest warnings. Tests are simply not marked `slow`.
+  - File: `scripts/stencil_gen/tests/test_sweep_gv_objectives.py` (new) — **done**
+  - Verified: `uv run pytest tests/test_sweep_gv_objectives.py -x -q` → 7 passed in 0.92s. `tests/test_phs.py -k TestRegression` → 15 passed (no regressions).
+  - Follow-up for 40.7b / 40.8b: this file already exists; those items just append tests.
+
+### 40.2 — Integrate GV into `tension_sweep` (testbed sweep)
+
+- [ ] **40.2a** Add `--include-gv` CLI flag to `tension_sweep.py`:
+  - Default `False` so existing invocations behave identically.
+  - When set, after the existing stability scan, evaluate `boundary_gv_error_max(p, q, nextra, nu, sigma, "tension")` for every coarse-grid sigma and store alongside the `(sigma, stab_eig)` tuples.
+  - Argument plumbing only — no behavior change yet beyond a new column. Keep the change <60 lines.
+  - File: `scripts/stencil_gen/sweeps/tension_sweep.py`
+  - Test: `cd scripts/stencil_gen && uv run python -m sweeps tension --scheme E2 --n-sigma 5 --include-gv`
+
+- [ ] **40.2b** Print GV error column in `tension_sweep` table when `--include-gv` is set:
+  - Extend `print_sweep_table` call (or wrap output) so the per-(n, sigma) table gains a `gv_err` column.
+  - Among feasible (`stab_eig < STABILITY_TOL`) sigmas, log a "Best by GV error: sigma=…, gv_err=…" line in addition to the existing "widest stable range" output.
+  - File: `scripts/stencil_gen/sweeps/tension_sweep.py`
+  - Test: `cd scripts/stencil_gen && uv run python -m sweeps tension --scheme E2 --n-sigma 5 --include-gv`
+
+- [ ] **40.2c** Persist GV-optimal sigma to `known_values.json` under a new sub-key:
+  - When `--update-known-values` AND `--include-gv` are both set, write `kv[scheme_key]["tension"]["gv_error"] = best_gv_err` and `kv[scheme_key]["tension_gv"] = {"sigma": ..., "gv_error": ..., "stable_at": [...]}`.
+  - This is additive: the existing `tension.sigma` (widest-stability optimum) is unchanged. The new `tension_gv.sigma` is the GV-optimal feasible sigma.
+  - File: `scripts/stencil_gen/sweeps/tension_sweep.py`
+  - Test: `cd scripts/stencil_gen && uv run python -m sweeps tension --scheme E2 --n-sigma 5 --include-gv --update-known-values`
+
+### 40.3 — Integrate GV into `epsilon_sweep` (Gaussian / multiquadric kernels)
+
+- [ ] **40.3a** Add `--include-gv` flag to `epsilon_sweep.py`, mirroring 40.2a:
+  - `boundary_gv_error_max(p, q, nextra, nu, eps, kernel)` is the per-point call.
+  - File: `scripts/stencil_gen/sweeps/epsilon_sweep.py`
+  - Test: `cd scripts/stencil_gen && uv run python -m sweeps epsilon --scheme E2 --kernel gaussian --n-eps 5 --include-gv`
+
+- [ ] **40.3b** Print GV column and "best feasible by GV" line in `epsilon_sweep`:
+  - Same structure as 40.2b.
+  - File: `scripts/stencil_gen/sweeps/epsilon_sweep.py`
+  - Test: `cd scripts/stencil_gen && uv run python -m sweeps epsilon --scheme E2 --kernel multiquadric --n-eps 5 --include-gv`
+
+- [ ] **40.3c** Persist `{kernel}_gv` keys in `known_values.json` for epsilon sweep:
+  - `kv[scheme_key][kernel]["gv_error"] = ...` (additive on existing entry).
+  - `kv[scheme_key]["{kernel}_gv"] = {"epsilon": ..., "gv_error": ..., "stable_at": [...]}` for the GV-optimal feasible epsilon.
+  - File: `scripts/stencil_gen/sweeps/epsilon_sweep.py`
+  - Test: `cd scripts/stencil_gen && uv run python -m sweeps epsilon --scheme E2 --kernel gaussian --n-eps 5 --include-gv --update-known-values`
+
+### 40.4 — Extend `tension_penalty_sweep` to track GV as a third objective
+
+- [ ] **40.4a** Augment `eval_point()` in `tension_penalty_sweep.py` to return `(stab_eig, deficit, gv_error)`:
+  - Use `gv_objectives.gv_score_from_matrix(D)["max_gv_error"]` so we don't rebuild D.
+  - All callers updated to unpack three values.
+  - File: `scripts/stencil_gen/sweeps/tension_penalty_sweep.py`
+  - Test: `cd scripts/stencil_gen && uv run python -m sweeps tension-penalty --scheme E2 --n-sigma 5 --n-gamma 5`
+
+- [ ] **40.4b** In `run_joint_sweep_coarse`, accumulate `best_stable_gv` (smallest GV error among feasible points):
+  - New accumulator alongside `best_stable_deficit`. Same feasible-then-minimize pattern.
+  - Print a third "best stable GV error" line at end of phase 1 output.
+  - File: `scripts/stencil_gen/sweeps/tension_penalty_sweep.py`
+  - Test: `cd scripts/stencil_gen && uv run python -m sweeps tension-penalty --scheme E2 --n-sigma 5 --n-gamma 5`
+
+- [ ] **40.4c** Persist three-way optimum to `known_values.json`:
+  - `kv[scheme_key]["tension_penalty"]["gv_error"] = best_stable_gv` (additive).
+  - File: `scripts/stencil_gen/sweeps/tension_penalty_sweep.py`
+  - Test: `cd scripts/stencil_gen && uv run python -m sweeps tension-penalty --scheme E2 --n-sigma 5 --n-gamma 5 --update-known-values`
+
+### 40.5 — Cut-cell GV integration with `footprint_sweep`
+
+- [ ] **40.5a** Add `--include-gv` flag to `footprint_sweep.py`:
+  - For each (scheme, nextra) combination, after the existing stability scan, call `cutcell_gv_min_C(scheme_params, psi_values=np.linspace(0.05, 0.95, 19), alpha_values, n_xi=200)`.
+  - Reuse the alpha_values already extracted by the sweep — do not re-derive.
+  - File: `scripts/stencil_gen/sweeps/footprint_sweep.py`
+  - Test: `cd scripts/stencil_gen && uv run python -m sweeps footprint --n-sigma 5 --include-gv`
+
+- [ ] **40.5b** Print `min_C` and `has_sign_reversal` columns in the footprint table when `--include-gv` is set:
+  - Sign reversal is the parasitic-mode signature for cut-cell stencils — deserves a visible flag.
+  - Among feasible footprints (existing stability gate), report "Best footprint by min_C" alongside the existing "Smallest stable footprint" line.
+  - File: `scripts/stencil_gen/sweeps/footprint_sweep.py`
+  - Test: `cd scripts/stencil_gen && uv run python -m sweeps footprint --n-sigma 5 --include-gv`
+
+- [ ] **40.5c** Persist cut-cell GV summary in `known_values.json` under each footprint entry:
+  - `kv["footprint"]["{key}"]["min_C"] = ...`, `kv["footprint"]["{key}"]["has_sign_reversal"] = ...`
+  - File: `scripts/stencil_gen/sweeps/footprint_sweep.py`
+  - Test: `cd scripts/stencil_gen && uv run python -m sweeps footprint --n-sigma 5 --include-gv --update-known-values`
+
+### 40.6 — New `gv-stability-pareto` sweep subcommand
+
+- [ ] **40.6a** Create `sweeps/gv_stability_pareto.py` exporting `main(argv) -> int`:
+  - For a chosen scheme + parameter (sigma for tension, epsilon for Gaussian/MQ), compute `(stab_eig, gv_error)` over a fine 1D grid.
+  - Output: a markdown table sorted by sigma, plus a final "Pareto-optimal points" section listing non-dominated (stable, low gv) entries.
+  - No `--update-known-values` — this sweep is for research / docs only.
+  - Keep total file <200 lines.
+  - File: `scripts/stencil_gen/sweeps/gv_stability_pareto.py` (new)
+  - Test: `cd scripts/stencil_gen && uv run python -c "from sweeps.gv_stability_pareto import main; raise SystemExit(main(['--scheme','E2','--param','tension','--n-points','11']))"`
+
+- [ ] **40.6b** Register `gv-stability-pareto` subcommand in `sweeps/__main__.py`:
+  - Add `subparsers.add_parser("gv-stability-pareto", ...)` block with args `--scheme`, `--param {tension,gaussian,multiquadric}`, `--n-points`.
+  - Add `if args.command == "gv-stability-pareto":` dispatch with lazy import.
+  - Add to `_run_all`'s `sweeps` list with quick-mode resolution.
+  - File: `scripts/stencil_gen/sweeps/__main__.py`
+  - Test: `cd scripts/stencil_gen && uv run python -m sweeps gv-stability-pareto --scheme E2 --param tension --n-points 11`
+
+### 40.7 — GKS group-velocity check as advisory diagnostic
+
+- [ ] **40.7a** Add `--check-gks` flag to `tension_sweep.py` and `epsilon_sweep.py`:
+  - When set, after picking the optimum parameter, build the `D` matrix at the optimum and call `gks_group_velocity_check(D, xi_array)`.
+  - Print any returned `GKSModeInfo` entries with `is_outgoing=True` as `WARNING: outgoing boundary mode at xi=…` lines.
+  - **Does not** alter the optimum or update `stable_at`. Purely advisory output.
+  - Files: `scripts/stencil_gen/sweeps/tension_sweep.py`, `scripts/stencil_gen/sweeps/epsilon_sweep.py`
+  - Test: `cd scripts/stencil_gen && uv run python -m sweeps tension --scheme E2 --n-sigma 5 --check-gks`
+
+- [ ] **40.7b** Add a smoke test for `--check-gks` on a known-stable scheme:
+  - Test asserts the call exits 0 (no crash) and produces no false-positive errors.
+  - File: `scripts/stencil_gen/tests/test_sweep_gv_objectives.py`
+  - Test: `cd scripts/stencil_gen && uv run pytest tests/test_sweep_gv_objectives.py -x -q -k "gks_advisory"`
+
+### 40.8 — Regression tests for GV-augmented `known_values.json`
+
+- [ ] **40.8a** Add `TestRegressionGV` class in `test_phs.py`:
+  - Loads `known_values.json` (gracefully skipping if absent).
+  - For each scheme that has a `tension_gv` or `{kernel}_gv` entry: rebuild the D matrix at the stored sigma/epsilon and assert `gv_score_from_matrix(D)["max_gv_error"] <= stored_value * 1.1` (10% tolerance for floating-point variation).
+  - Mark all class methods with `@pytest.mark.fast`.
+  - File: `scripts/stencil_gen/tests/test_phs.py`
+  - Test: `cd scripts/stencil_gen && uv run pytest tests/test_phs.py -x -q -k "TestRegressionGV"`
+
+- [ ] **40.8b** Add a smoke test that exercises `gv_score_from_matrix` on a small precomputed D:
+  - Hardcoded tiny matrix, deterministic result.
+  - File: `scripts/stencil_gen/tests/test_sweep_gv_objectives.py`
+  - Test: `cd scripts/stencil_gen && uv run pytest tests/test_sweep_gv_objectives.py -x -q -k "from_matrix"`
+
+### 40.9 — Documentation updates
+
+- [ ] **40.9a** Update `scripts/stencil_gen/docs/sweeps_reference.md` with a new "Group velocity objectives" section:
+  - Document `--include-gv`, `--check-gks`, and the new `gv-stability-pareto` subcommand.
+  - Document the new `known_values.json` keys: `*.gv_error`, `tension_gv`, `{kernel}_gv`, `footprint.*.min_C`.
+  - Explain the feasible-then-minimize contract: stability is hard, GV is soft secondary.
+  - File: `scripts/stencil_gen/docs/sweeps_reference.md`
+  - Test: (no test — documentation only; rendered check by reading the file)
+
+- [ ] **40.9b** Update `scripts/stencil_gen/docs/group_velocity_reference.md` with a "Sweep integration" section:
+  - Cross-reference the helpers in `sweeps/gv_objectives.py`.
+  - Note that `gks_group_velocity_check` is exposed as `--check-gks` advisory only (necessary not sufficient).
+  - File: `scripts/stencil_gen/docs/group_velocity_reference.md`
+  - Test: (no test)
+
+- [ ] **40.9c** Update the `stencil-sweeps` skill at `.claude/skills/stencil-sweeps/SKILL.md`:
+  - Add `gv-stability-pareto` to the CLI quick reference.
+  - Add a one-line bullet about `--include-gv` and `--check-gks`.
+  - File: `.claude/skills/stencil-sweeps/SKILL.md`
+  - Test: (no test)
+
+### 40.10 — Quick-mode integration in `_run_all`
+
+- [ ] **40.10a** Have `sweeps all --quick` exercise the new GV path on at least one sweep:
+  - In `__main__.py`'s `_run_all` list, augment the `tension` entry with `--include-gv` when `--quick` is set, so the smoke path covers the new objective wiring.
+  - This guards against silent regressions in the GV integration.
+  - File: `scripts/stencil_gen/sweeps/__main__.py`
+  - Test: `cd scripts/stencil_gen && uv run python -m sweeps all --quick`
+
+---
+
+## Ordering
+
+```
+40.1a → 40.1b           (objectives module + tests; everything else depends on these)
+  ↓
+40.2a → 40.2b → 40.2c   (tension_sweep is the testbed; do this whole strand before branching)
+  ↓
+40.3a → 40.3b → 40.3c   (epsilon_sweep mirrors tension_sweep — do once tension is verified)
+  ↓
+40.4a → 40.4b → 40.4c   (tension_penalty 3-way objective)
+  ↓
+40.5a → 40.5b → 40.5c   (cut-cell footprint integration)
+  ↓
+40.6a → 40.6b           (new pareto sweep subcommand)
+  ↓
+40.7a → 40.7b           (GKS advisory)
+  ↓
+40.8a → 40.8b           (regression tests for new known_values keys)
+  ↓
+40.9a → 40.9b → 40.9c   (docs — only after API is stable)
+  ↓
+40.10a                   (final integration smoke in _run_all --quick)
+```
+
+Independent branches that may be parallelized after 40.1 lands:
+- 40.2 / 40.3 / 40.4 / 40.5 are all independent additive changes to separate sweep files.
+- 40.7 (GKS advisory) can be done in parallel with 40.5.
+
+---
+
+## Completion Criteria
+
+- `sweeps/gv_objectives.py` exists with five documented helpers and unit tests.
+- Every existing sweep (`tension`, `epsilon`, `tension-penalty`, `footprint`) accepts `--include-gv` and produces a GV column without changing the eigenvalue-based optimum.
+- `tension_sweep` and `epsilon_sweep` accept `--check-gks` and report any outgoing boundary modes as warnings.
+- `python -m sweeps gv-stability-pareto --scheme E2 --param tension --n-points 11` runs and prints a Pareto table.
+- `known_values.json` contains additive `*.gv_error`, `tension_gv`, `{kernel}_gv`, and `footprint.*.min_C` keys for at least the E2 scheme — populated by running each sweep with `--include-gv --update-known-values`.
+- `TestRegressionGV` class in `test_phs.py` passes against the populated keys.
+- `cd scripts/stencil_gen && uv run pytest tests/ -x -q` still passes in <30s (no new slow tests added to the default suite).
+- `cd scripts/stencil_gen && uv run python -m sweeps all --quick` runs end-to-end without error and exercises the new GV path on at least one sweep.
+- Documentation (`sweeps_reference.md`, `group_velocity_reference.md`, `stencil-sweeps` skill) is updated.
+- Eigenvalue stability remains the *only* hard feasibility gate everywhere; GV is exclusively a secondary objective or advisory diagnostic. Existing optima in `known_values.json` are unchanged unless `--update-known-values` is rerun with `--include-gv`.
