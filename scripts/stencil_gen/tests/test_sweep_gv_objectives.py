@@ -16,7 +16,7 @@ import pytest
 from stencil_gen.phs import build_diff_matrix_rbf
 
 from sweeps import _common as sweeps_common
-from sweeps import epsilon_sweep, tension_sweep
+from sweeps import epsilon_sweep, tension_penalty_sweep, tension_sweep
 from sweeps.gv_objectives import (
     boundary_gv_error_max,
     cutcell_gv_min_C,
@@ -294,3 +294,73 @@ def test_epsilon_sweep_main_merges_known_values(tmp_path, monkeypatch, capsys):
     assert np.isfinite(gv_entry["epsilon"])
     assert np.isfinite(gv_entry["gv_error"])
     assert isinstance(gv_entry["stable_at"], list)
+
+
+def _seed_kv_tension_penalty(path: Path) -> dict:
+    seed = {
+        "E2_1": {
+            "params": {"p": 1, "q": 1, "nextra": 1, "nu": 1},
+            "tension_penalty": {
+                "sigma": 6.0,
+                "gamma": 0.0,
+                "stable_at": [20, 40, 80],
+                "gv_error": 1.234,
+                "preexisting_extra_key": "survive",
+            },
+            "tension_penalty_gv": {
+                "sigma": 5.5,
+                "gamma": 0.1,
+                "gv_error": 1.234,
+                "stable_at": [20, 40],
+                "preexisting_gv_extra": "survive_gv",
+            },
+        }
+    }
+    with open(path, "w") as f:
+        json.dump(seed, f, indent=2)
+    return seed
+
+
+def test_tension_penalty_sweep_main_merges_known_values(tmp_path, monkeypatch, capsys):
+    """Regression for 40.4c/40.4d: tension_penalty --update-known-values must merge.
+
+    Mirrors test_tension_sweep_main_merges_known_values and
+    test_epsilon_sweep_main_merges_known_values.  tension_penalty has no
+    --include-gv flag (GV is always computed by eval_point), so only one
+    invocation path exists.  The merge must preserve preexisting keys on
+    both ``tension_penalty`` and ``tension_penalty_gv`` entries while
+    refreshing the keys this invocation owns.  After 40.4d, the GV entry
+    is expected to gain a non-empty ``stable_at`` list from the cross-grid
+    re-check.
+    """
+    kv_path = tmp_path / "known_values.json"
+    monkeypatch.setattr(sweeps_common, "KNOWN_VALUES_PATH", kv_path)
+    _seed_kv_tension_penalty(kv_path)
+
+    rc = tension_penalty_sweep.main([
+        "--scheme", "E2",
+        "--n-sigma", "5",
+        "--n-gamma", "5",
+        "--update-known-values",
+    ])
+    assert rc == 0
+    capsys.readouterr()
+
+    with open(kv_path) as f:
+        after = json.load(f)
+    tp = after["E2_1"]["tension_penalty"]
+    assert tp["preexisting_extra_key"] == "survive"
+    assert "sigma" in tp and "gamma" in tp and "stable_at" in tp
+    assert np.isfinite(tp["gv_error"])
+    # gv_error must have been refreshed away from the seeded sentinel.
+    assert tp["gv_error"] != 1.234
+
+    tp_gv = after["E2_1"]["tension_penalty_gv"]
+    assert tp_gv["preexisting_gv_extra"] == "survive_gv"
+    assert {"sigma", "gamma", "gv_error", "stable_at"} <= set(tp_gv)
+    assert np.isfinite(tp_gv["sigma"])
+    assert np.isfinite(tp_gv["gamma"])
+    assert np.isfinite(tp_gv["gv_error"])
+    assert isinstance(tp_gv["stable_at"], list)
+    assert len(tp_gv["stable_at"]) > 0
+    assert set(tp_gv["stable_at"]) <= {20, 40, 80, 160}
