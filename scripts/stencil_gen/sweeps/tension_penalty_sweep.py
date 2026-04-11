@@ -344,12 +344,35 @@ def run_tension_penalty_sweep(
     n = 40  # primary grid size, matching test classes
 
     coarse = run_joint_sweep_coarse(scheme, n, n_sigma, n_gamma, sigma_max)
-    penalty = run_penalty_effect(scheme, n, n_gamma)
-    fine = run_fine_sweep(scheme, n, n_sigma, n_gamma)
 
+    # Cross-grid stability re-check at the GV-optimal (sigma, gamma) pair.
+    # The coarse sweep is single-grid (n=40 only); without this loop the
+    # persisted tension_penalty_gv entry would have no stable_at field.
     gv_sigma = coarse["best_stable_gv_sigma"]
     gv_gamma = coarse["best_stable_gv_gamma"]
     gv_error = coarse["best_stable_gv"]
+    gv_stable_at: list[int] | None = None
+    if gv_sigma is not None:
+        params = SCHEME_PARAMS[scheme]
+        p, q, nextra, nu = params["p"], params["q"], params["nextra"], params["nu"]
+        gv_stable_at = []
+        print(
+            f"\n  Checking GV-optimal (sigma={gv_sigma:.6f}, gamma={gv_gamma:.6f}) "
+            f"across grid sizes:"
+        )
+        for nn in sorted({20, 40, 80, 160}):
+            se, deficit, _gv = eval_point(
+                nn, gv_sigma, gv_gamma,
+                p=p, q=q, nextra=nextra, nu=nu,
+            )
+            status = "STABLE" if se < STABILITY_TOL else "unstable"
+            print(f"    n={nn:4d}: stab_eig={se:.6e}, deficit={deficit:.6e} [{status}]")
+            if se < STABILITY_TOL:
+                gv_stable_at.append(nn)
+
+    penalty = run_penalty_effect(scheme, n, n_gamma)
+    fine = run_fine_sweep(scheme, n, n_sigma, n_gamma)
+
     return {
         "best_sigma": round(fine["best_sigma"], 6),
         "best_gamma": round(fine["best_gamma"], 6),
@@ -359,6 +382,7 @@ def run_tension_penalty_sweep(
         "gv_sigma": round(gv_sigma, 6) if gv_sigma is not None else None,
         "gv_gamma": round(gv_gamma, 6) if gv_gamma is not None else None,
         "gv_error": gv_error,
+        "gv_stable_at": gv_stable_at,
     }
 
 
@@ -407,14 +431,12 @@ def main(argv: list[str] | None = None) -> int:
             tp_entry["gv_error"] = summary["gv_error"]
         kv[scheme_key]["tension_penalty"] = tp_entry
         updated_keys = [f"{scheme_key}.tension_penalty"]
-        # tension-penalty coarse sweep is single-grid (n=40 only), so there
-        # is no cross-grid stable_at list on the _gv sub-entry — only the
-        # sigma/gamma/gv_error triple that the coarse sweep discovered.
         if summary["gv_sigma"] is not None:
             tp_gv_entry = dict(kv[scheme_key].get("tension_penalty_gv", {}))
             tp_gv_entry["sigma"] = summary["gv_sigma"]
             tp_gv_entry["gamma"] = summary["gv_gamma"]
             tp_gv_entry["gv_error"] = summary["gv_error"]
+            tp_gv_entry["stable_at"] = summary["gv_stable_at"]
             kv[scheme_key]["tension_penalty_gv"] = tp_gv_entry
             updated_keys.append(f"{scheme_key}.tension_penalty_gv")
         save_known_values(kv)
