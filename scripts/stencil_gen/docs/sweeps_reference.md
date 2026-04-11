@@ -483,8 +483,8 @@ uv run python -m sweeps gv-stability-pareto --help
 
 | Argument | Type | Default | Description |
 |---|---|---|---|
-| `--scheme` | `E2` or `E4` | `E2` | Stencil scheme |
-| `--param` | `tension`, `gaussian`, or `multiquadric` | `tension` | Kernel / swept parameter |
+| `--scheme` | `E2` or `E4` | (required) | Stencil scheme |
+| `--param` | `tension`, `gaussian`, or `multiquadric` | (required) | Kernel / swept parameter |
 | `--n-points` | int | `61` | Number of parameter sample points |
 | `--n` | int | `40` | Grid size to evaluate at (GV is grid-independent) |
 | `--param-max` | float | `20.0` | Upper bound for the swept parameter |
