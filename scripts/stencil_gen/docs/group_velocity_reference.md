@@ -643,7 +643,7 @@ and the bit-exact `(param, gv_error)` self-consistency contract (see
 |---|---|---|---|
 | `interior_gv_error_max(p, nu, n_xi)` | `interior_group_velocity` | `float` — max `|gv_error|` over `xi` | — (reserved for future interior-only sweeps) |
 | `interior_cutoff_fraction(p, nu, n_xi)` | `interior_group_velocity` | `float` — `cutoff_xi / pi` (1.0 = ideal) | — (reserved) |
-| `boundary_gv_error_max(p, q, nextra, nu, sigma, kernel, n_xi)` | `boundary_group_velocity` | `float` — max `|gv_error|` across all RBF boundary rows | `tension_sweep`, `epsilon_sweep`, `tension_penalty_sweep`, `footprint_sweep`, `gv_stability_pareto` |
+| `boundary_gv_error_max(p, q, nextra, nu, sigma, kernel, n_xi)` | `boundary_group_velocity` | `float` — max `|gv_error|` across all RBF boundary rows | `tension_sweep`, `epsilon_sweep`, `footprint_sweep`, `gv_stability_pareto` |
 | `cutcell_gv_min_C(scheme_params, psi_values, alpha_values, n_xi)` | `psi_sweep_group_velocity` | `(float, bool)` — `(min_C, has_sign_reversal)` | — (reserved for the deferred 40.5f cut-cell GV sweep) |
 | `gv_score_from_matrix(D, n_xi)` | `group_velocity_exact_nonuniform` + `group_velocity_error` | `dict` with `max_gv_error` / `min_cutoff_xi` | `tension_penalty_sweep` (avoids rebuilding `D`) |
 | `print_gks_advisory(D, *, label, n_xi)` | `gks_group_velocity_check` | `int` — outgoing mode count (advisory only) | `tension_sweep`, `epsilon_sweep` (`--check-gks`) |
@@ -694,14 +694,15 @@ policy — do not add a feasibility branch to the sweep helpers.
 The persisted `*.gv_error` fields, `tension_gv` / `{kernel}_gv` /
 `tension_penalty_gv` entries, and `footprint.E4_nextra{nx}_tension_gv`
 entries are all computed through these helpers (see
-`docs/sweeps_reference.md` §2.9 and §3 for the schema). The four primary
-`{primary}.gv_error` fields (`tension`, `gaussian`, `multiquadric`,
-`tension_penalty`, and the footprint `E4_nextra{nx}_tension_{N}.gv_error`)
-are contractually bit-exact self-consistent with their paired `sigma` /
-`epsilon` / `(sigma, gamma)` field: rebuilding `D` at the persisted
-parameter and re-running `boundary_gv_error_max` returns the stored
-`gv_error` to the full 13 significant digits of float64. The regression
-tests in `tests/test_phs.py::TestRegressionGV` and
+`docs/sweeps_reference.md` §2.9 and §3 for the schema). The primary
+`{primary}.gv_error` fields (`tension`, `gaussian`, `multiquadric` via
+`boundary_gv_error_max`; `tension_penalty` via `gv_score_from_matrix`; and
+the footprint `E4_nextra{nx}_tension_{N}.gv_error` via
+`boundary_gv_error_max`) are contractually bit-exact self-consistent with
+their paired `sigma` / `epsilon` / `(sigma, gamma)` field: rebuilding `D`
+at the persisted parameter and re-running the paired helper returns the
+stored `gv_error` to the full 13 significant digits of float64. The
+regression tests in `tests/test_phs.py::TestRegressionGV` and
 `tests/test_sweep_gv_objectives.py::test_*_bit_exact_at_persisted_sigma`
 gate this contract.
 
