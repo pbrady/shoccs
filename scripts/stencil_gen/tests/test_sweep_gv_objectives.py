@@ -531,6 +531,67 @@ def test_footprint_primary_gv_error_bit_exact_at_persisted_sigma(
         )
 
 
+def test_tension_penalty_primary_gv_error_bit_exact_at_persisted_sigma(
+    tmp_path, monkeypatch, capsys,
+):
+    """40.8g: tension_penalty primary + secondary entries must persist gv_error
+    computed at the *rounded* (sigma, gamma) so that the persisted triple is
+    bit-exact self-consistent.
+
+    Mechanical gate mirroring 40.8f's footprint bit-exact test.  Runs
+    ``tension_penalty_sweep.main`` against a ``tmp_path``-redirected
+    ``KNOWN_VALUES_PATH``, then for both the primary ``tension_penalty`` entry
+    and the secondary ``tension_penalty_gv`` entry re-evaluates
+    ``build_diff_matrix_rbf_penalty`` + ``gv_score_from_matrix`` at the
+    persisted ``(sigma, gamma)`` and asserts **bit-exact** equality (``==``,
+    not tolerance) with the persisted ``gv_error``.
+    """
+    from stencil_gen.phs import build_diff_matrix_rbf_penalty
+
+    kv_path = tmp_path / "known_values.json"
+    monkeypatch.setattr(sweeps_common, "KNOWN_VALUES_PATH", kv_path)
+
+    rc = tension_penalty_sweep.main([
+        "--scheme", "E2",
+        "--n-sigma", "5",
+        "--n-gamma", "5",
+        "--update-known-values",
+    ])
+    assert rc == 0
+    capsys.readouterr()
+
+    with open(kv_path) as f:
+        kv = json.load(f)
+    e2 = kv["E2_1"]
+    params = {"p": 1, "q": 1, "nextra": 1, "nu": 1}
+
+    checked = 0
+    for key in ("tension_penalty", "tension_penalty_gv"):
+        entry = e2.get(key)
+        if not isinstance(entry, dict) or "gv_error" not in entry:
+            continue
+        sigma = entry["sigma"]
+        gamma = entry["gamma"]
+        stored = entry["gv_error"]
+        D = build_diff_matrix_rbf_penalty(
+            40, params["p"], params["q"], sigma, "tension",
+            params["nu"], params["nextra"], gamma=gamma,
+        )
+        rebuilt = float(gv_score_from_matrix(D)["max_gv_error"])
+        assert stored == rebuilt, (
+            f"E2_1.{key}: persisted gv_error {stored!r} != {rebuilt!r} "
+            f"rebuilt at sigma={sigma}, gamma={gamma} — the (sigma, gamma, "
+            f"gv_error) triple is not bit-exact self-consistent, indicating "
+            f"gv_error was computed at un-rounded params (40.8g regression)"
+        )
+        checked += 1
+    assert checked >= 1, (
+        "tension_penalty_sweep smoke run produced no E2_1.tension_penalty "
+        "entry with gv_error — the 40.8g bit-exact gate has nothing to "
+        "validate"
+    )
+
+
 def test_check_gks_advisory_tension_e2_no_false_positives(capsys):
     """40.7b: --check-gks on a known-stable E2 tension case must not warn.
 

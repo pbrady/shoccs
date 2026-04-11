@@ -1796,3 +1796,87 @@ if _KNOWN is not None:
                     f"nextra={nx}: measured gv_error {measured:.6e} > "
                     f"stored {stored:.6e} × {self.GV_TOLERANCE_STRICT}"
                 )
+
+        def test_tension_penalty_gv_entries_match_stored_error(self):
+            """``E{2,4}_1.tension_penalty_gv`` entries: measured ≤ stored × 1.1.
+
+            Secondary GV-optimum entries rebuild D via the penalty-augmented
+            constructor at the persisted (sigma, gamma).  Gated at the loose
+            10% tolerance matching the other secondary GV tests — the GV-
+            optimum is a stationary point where honest floating-point /
+            ``n_xi`` drift can hit a few percent.
+            """
+            from sweeps.gv_objectives import gv_score_from_matrix
+
+            checked = 0
+            for scheme_key in ("E2_1", "E4_1"):
+                if scheme_key not in _KNOWN:
+                    continue
+                kv = _KNOWN[scheme_key]
+                params = kv.get("params")
+                if params is None:
+                    continue
+                entry = kv.get("tension_penalty_gv")
+                if not isinstance(entry, dict):
+                    continue
+                if not {"sigma", "gamma", "gv_error"} <= set(entry):
+                    continue
+                sigma = entry["sigma"]
+                gamma = entry["gamma"]
+                stored = entry["gv_error"]
+                D = build_diff_matrix_rbf_penalty(
+                    self.GRID_N, params["p"], params["q"], sigma,
+                    "tension", params["nu"], params["nextra"],
+                    gamma=gamma,
+                )
+                measured = gv_score_from_matrix(D)["max_gv_error"]
+                assert measured <= stored * self.GV_TOLERANCE, (
+                    f"{scheme_key} tension_penalty_gv sigma={sigma} "
+                    f"gamma={gamma}: measured gv_error {measured:.6e} > "
+                    f"stored {stored:.6e} × {self.GV_TOLERANCE}"
+                )
+                checked += 1
+            if checked == 0:
+                pytest.skip("no tension_penalty_gv entries in known_values.json")
+
+        def test_tension_penalty_primary_gv_error_match(self):
+            """``E{2,4}_1.tension_penalty.gv_error`` (primary, 40.8g strict gate).
+
+            The primary entry's ``(sigma, gamma, gv_error)`` triple is written
+            at the stability-optimum by 40.8g; the pair must be bit-exact
+            self-consistent (modulo ~1e-12 numerical noise), so 0.1% strict
+            tolerance is appropriate.
+            """
+            from sweeps.gv_objectives import gv_score_from_matrix
+
+            checked = 0
+            for scheme_key in ("E2_1", "E4_1"):
+                if scheme_key not in _KNOWN:
+                    continue
+                kv = _KNOWN[scheme_key]
+                params = kv.get("params")
+                if params is None:
+                    continue
+                entry = kv.get("tension_penalty")
+                if not isinstance(entry, dict):
+                    continue
+                if not {"sigma", "gamma", "gv_error"} <= set(entry):
+                    continue
+                sigma = entry["sigma"]
+                gamma = entry["gamma"]
+                stored = entry["gv_error"]
+                D = build_diff_matrix_rbf_penalty(
+                    self.GRID_N, params["p"], params["q"], sigma,
+                    "tension", params["nu"], params["nextra"],
+                    gamma=gamma,
+                )
+                measured = gv_score_from_matrix(D)["max_gv_error"]
+                assert measured <= stored * self.GV_TOLERANCE_STRICT, (
+                    f"{scheme_key} tension_penalty (stability-optimum) "
+                    f"sigma={sigma} gamma={gamma}: measured gv_error "
+                    f"{measured:.6e} > stored {stored:.6e} × "
+                    f"{self.GV_TOLERANCE_STRICT}"
+                )
+                checked += 1
+            if checked == 0:
+                pytest.skip("no tension_penalty.gv_error fields in known_values.json")

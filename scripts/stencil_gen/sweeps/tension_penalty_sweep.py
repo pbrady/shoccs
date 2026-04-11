@@ -343,6 +343,9 @@ def run_tension_penalty_sweep(
     """
     n = 40  # primary grid size, matching test classes
 
+    params = SCHEME_PARAMS[scheme]
+    p, q, nextra, nu = params["p"], params["q"], params["nextra"], params["nu"]
+
     coarse = run_joint_sweep_coarse(scheme, n, n_sigma, n_gamma, sigma_max)
 
     # Cross-grid stability re-check at the GV-optimal (sigma, gamma) pair.
@@ -350,11 +353,8 @@ def run_tension_penalty_sweep(
     # persisted tension_penalty_gv entry would have no stable_at field.
     gv_sigma = coarse["best_stable_gv_sigma"]
     gv_gamma = coarse["best_stable_gv_gamma"]
-    gv_error = coarse["best_stable_gv"]
     gv_stable_at: list[int] | None = None
     if gv_sigma is not None:
-        params = SCHEME_PARAMS[scheme]
-        p, q, nextra, nu = params["p"], params["q"], params["nextra"], params["nu"]
         gv_stable_at = []
         print(
             f"\n  Checking GV-optimal (sigma={gv_sigma:.6f}, gamma={gv_gamma:.6f}) "
@@ -373,15 +373,41 @@ def run_tension_penalty_sweep(
     penalty = run_penalty_effect(scheme, n, n_gamma)
     fine = run_fine_sweep(scheme, n, n_sigma, n_gamma)
 
+    # 40.8g: the persisted (param, gv_error) pair must be bit-exact self-
+    # consistent at the *rounded* parameter.  Mirror 40.8c (semantic fix) +
+    # 40.8d (bit-level fix) for the other three sweeps: round sigma/gamma
+    # first and re-evaluate GV at the rounded values for both the primary
+    # (stability-optimum) and secondary (GV-optimum) entries.  eval_point
+    # already returns (stab_eig, deficit, gv_error) per 40.4a.
+    best_sigma_rounded = round(float(fine["best_sigma"]), 6)
+    best_gamma_rounded = round(float(fine["best_gamma"]), 6)
+    _se, _def, gv_at_stability = eval_point(
+        n, best_sigma_rounded, best_gamma_rounded,
+        p=p, q=q, nextra=nextra, nu=nu,
+    )
+
+    if gv_sigma is not None:
+        gv_sigma_rounded = round(float(gv_sigma), 6)
+        gv_gamma_rounded = round(float(gv_gamma), 6)
+        _se, _def, gv_at_gv = eval_point(
+            n, gv_sigma_rounded, gv_gamma_rounded,
+            p=p, q=q, nextra=nextra, nu=nu,
+        )
+    else:
+        gv_sigma_rounded = None
+        gv_gamma_rounded = None
+        gv_at_gv = None
+
     return {
-        "best_sigma": round(fine["best_sigma"], 6),
-        "best_gamma": round(fine["best_gamma"], 6),
+        "best_sigma": best_sigma_rounded,
+        "best_gamma": best_gamma_rounded,
         "stable_at": fine["stable_at"],
         "baseline_stable": coarse["baseline_se"] < STABILITY_TOL,
         "max_stable_gamma": penalty["max_stable_gamma"],
-        "gv_sigma": round(gv_sigma, 6) if gv_sigma is not None else None,
-        "gv_gamma": round(gv_gamma, 6) if gv_gamma is not None else None,
-        "gv_error": gv_error,
+        "gv_sigma": gv_sigma_rounded,
+        "gv_gamma": gv_gamma_rounded,
+        "gv_error_at_stability": gv_at_stability,
+        "gv_error_at_gv": gv_at_gv,
         "gv_stable_at": gv_stable_at,
     }
 
@@ -427,15 +453,15 @@ def main(argv: list[str] | None = None) -> int:
         tp_entry["sigma"] = summary["best_sigma"]
         tp_entry["gamma"] = summary["best_gamma"]
         tp_entry["stable_at"] = summary["stable_at"]
-        if summary["gv_error"] is not None:
-            tp_entry["gv_error"] = summary["gv_error"]
+        if summary["gv_error_at_stability"] is not None:
+            tp_entry["gv_error"] = summary["gv_error_at_stability"]
         kv[scheme_key]["tension_penalty"] = tp_entry
         updated_keys = [f"{scheme_key}.tension_penalty"]
         if summary["gv_sigma"] is not None:
             tp_gv_entry = dict(kv[scheme_key].get("tension_penalty_gv", {}))
             tp_gv_entry["sigma"] = summary["gv_sigma"]
             tp_gv_entry["gamma"] = summary["gv_gamma"]
-            tp_gv_entry["gv_error"] = summary["gv_error"]
+            tp_gv_entry["gv_error"] = summary["gv_error_at_gv"]
             tp_gv_entry["stable_at"] = summary["gv_stable_at"]
             kv[scheme_key]["tension_penalty_gv"] = tp_gv_entry
             updated_keys.append(f"{scheme_key}.tension_penalty_gv")
