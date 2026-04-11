@@ -1625,3 +1625,137 @@ if _KNOWN is not None:
                     assert se < STABILITY_TOL, (
                         f"{scheme_key} PHS k=2 n={n}: expected stable, got {se:.6e}"
                     )
+
+    class TestRegressionGV:
+        """Fast regression spot-checks for group-velocity-optimal known values.
+
+        For each ``*_gv`` entry in ``sweeps/known_values.json`` (populated by
+        running each sweep with ``--include-gv --update-known-values``), rebuild
+        the boundary D matrix at the stored optimum and assert that
+        ``gv_score_from_matrix(D)["max_gv_error"]`` matches the stored
+        ``gv_error`` within 10% (allows floating-point / ``n_xi`` slack).
+
+        Gracefully skips individual tests when the corresponding ``*_gv`` keys
+        are absent — the 40.8a contract is "activate once sweeps populate the
+        keys", not "fail when they haven't yet".
+        """
+
+        GV_TOLERANCE = 1.1
+        GRID_N = 40
+
+        @staticmethod
+        def _iter_scheme_gv_entries():
+            """Yield (scheme_key, kernel, param_name, gv_entry, params)."""
+            for scheme_key in ("E2_1", "E4_1"):
+                if scheme_key not in _KNOWN:
+                    continue
+                kv = _KNOWN[scheme_key]
+                params = kv.get("params")
+                if params is None:
+                    continue
+                for gv_key, kernel, param_name in (
+                    ("tension_gv", "tension", "sigma"),
+                    ("gaussian_gv", "gaussian", "epsilon"),
+                    ("multiquadric_gv", "multiquadric", "epsilon"),
+                ):
+                    entry = kv.get(gv_key)
+                    if entry is None or "gv_error" not in entry or param_name not in entry:
+                        continue
+                    yield scheme_key, kernel, param_name, entry, params
+
+        def test_scheme_gv_entries_match_stored_error(self):
+            """E2_1/E4_1 ``*_gv`` entries: measured GV error ≤ stored × 1.1."""
+            from sweeps.gv_objectives import gv_score_from_matrix
+
+            entries = list(self._iter_scheme_gv_entries())
+            if not entries:
+                pytest.skip("no *_gv entries in known_values.json")
+            for scheme_key, kernel, param_name, gv_entry, params in entries:
+                eps = gv_entry[param_name]
+                stored = gv_entry["gv_error"]
+                D = build_diff_matrix_rbf(
+                    self.GRID_N,
+                    p=params["p"], q=params["q"], epsilon=eps,
+                    kernel=kernel, nu=params["nu"], nextra=params["nextra"],
+                )
+                measured = gv_score_from_matrix(D)["max_gv_error"]
+                assert measured <= stored * self.GV_TOLERANCE, (
+                    f"{scheme_key} {kernel} {param_name}={eps}: measured "
+                    f"gv_error {measured:.6e} > stored {stored:.6e} × "
+                    f"{self.GV_TOLERANCE}"
+                )
+
+        def test_footprint_gv_entries_match_stored_error(self):
+            """``footprint.E4_nextra{nx}_tension_gv`` entries: rebuild D and verify."""
+            from sweeps.gv_objectives import gv_score_from_matrix
+
+            if "footprint" not in _KNOWN or "E4_1" not in _KNOWN:
+                pytest.skip("footprint or E4_1 missing from known_values.json")
+            fp = _KNOWN["footprint"]
+            params = _KNOWN["E4_1"]["params"]
+            gv_entries = [
+                (key, entry)
+                for key, entry in fp.items()
+                if key.endswith("_tension_gv")
+                and isinstance(entry, dict)
+                and "gv_error" in entry
+                and "sigma" in entry
+                and "nextra" in entry
+            ]
+            if not gv_entries:
+                pytest.skip("no footprint *_tension_gv entries in known_values.json")
+            for key, entry in gv_entries:
+                sigma = entry["sigma"]
+                nx = entry["nextra"]
+                stored = entry["gv_error"]
+                D = build_diff_matrix_rbf(
+                    self.GRID_N,
+                    p=params["p"], q=params["q"], epsilon=sigma,
+                    kernel="tension", nu=params["nu"], nextra=nx,
+                )
+                measured = gv_score_from_matrix(D)["max_gv_error"]
+                assert measured <= stored * self.GV_TOLERANCE, (
+                    f"footprint {key} sigma={sigma} nextra={nx}: measured "
+                    f"gv_error {measured:.6e} > stored {stored:.6e} × "
+                    f"{self.GV_TOLERANCE}"
+                )
+
+        def test_scheme_primary_gv_error_match(self):
+            """``E{2,4}_1.{kernel}.gv_error`` (additive field on the primary entry)."""
+            from sweeps.gv_objectives import gv_score_from_matrix
+
+            checked = 0
+            for scheme_key in ("E2_1", "E4_1"):
+                if scheme_key not in _KNOWN:
+                    continue
+                kv = _KNOWN[scheme_key]
+                params = kv.get("params")
+                if params is None:
+                    continue
+                for kernel, param_name in (
+                    ("tension", "sigma"),
+                    ("gaussian", "epsilon"),
+                    ("multiquadric", "epsilon"),
+                ):
+                    entry = kv.get(kernel)
+                    if not isinstance(entry, dict):
+                        continue
+                    if "gv_error" not in entry or param_name not in entry:
+                        continue
+                    eps = entry[param_name]
+                    stored = entry["gv_error"]
+                    D = build_diff_matrix_rbf(
+                        self.GRID_N,
+                        p=params["p"], q=params["q"], epsilon=eps,
+                        kernel=kernel, nu=params["nu"], nextra=params["nextra"],
+                    )
+                    measured = gv_score_from_matrix(D)["max_gv_error"]
+                    assert measured <= stored * self.GV_TOLERANCE, (
+                        f"{scheme_key} {kernel} (stability-optimum) "
+                        f"{param_name}={eps}: measured gv_error "
+                        f"{measured:.6e} > stored {stored:.6e} × "
+                        f"{self.GV_TOLERANCE}"
+                    )
+                    checked += 1
+            if checked == 0:
+                pytest.skip("no scheme.*.gv_error fields in known_values.json")

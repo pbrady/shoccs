@@ -283,11 +283,22 @@ The correct GV objective for this sweep is `boundary_gv_error_max(p, q, nextra, 
 
 ### 40.8 — Regression tests for GV-augmented `known_values.json`
 
-- [ ] **40.8a** Add `TestRegressionGV` class in `test_phs.py`:
+- [x] **40.8a** Add `TestRegressionGV` class in `test_phs.py`:
   - Loads `known_values.json` (gracefully skipping if absent).
   - For each scheme that has a `tension_gv` or `{kernel}_gv` entry: rebuild the D matrix at the stored sigma/epsilon and assert `gv_score_from_matrix(D)["max_gv_error"] <= stored_value * 1.1` (10% tolerance for floating-point variation).
-  - Mark all class methods with `@pytest.mark.fast`.
-  - File: `scripts/stencil_gen/tests/test_phs.py`
+  - **Correction vs. draft:** plan originally said "Mark all class methods with `@pytest.mark.fast`", but 40.1b already documented that the project only registers a `slow` marker in `pyproject.toml`; adding a `fast` marker would emit pytest warnings. Tests are simply left unmarked, matching the 40.1b precedent for `test_sweep_gv_objectives.py`.
+  - File: `scripts/stencil_gen/tests/test_phs.py` — **done**
+  - Implementation: `TestRegressionGV` added inside the existing `if _KNOWN is not None:` block after `TestRegressionComparison`. Three test methods:
+    1. `test_scheme_gv_entries_match_stored_error` — iterates `E2_1` / `E4_1` `tension_gv` / `gaussian_gv` / `multiquadric_gv` entries via a `_iter_scheme_gv_entries` helper, rebuilds `D = build_diff_matrix_rbf(40, p, q, eps/sigma, kernel, nu, nextra)` using the scheme's `params` sub-entry, and asserts `gv_score_from_matrix(D)["max_gv_error"] <= stored * 1.1`. Skips if no such entries exist.
+    2. `test_footprint_gv_entries_match_stored_error` — iterates `footprint.*_tension_gv` entries, uses `E4_1.params` (footprint is E4-only), same 10% tolerance check. Skips if the footprint dict or any `*_tension_gv` keys are absent.
+    3. `test_scheme_primary_gv_error_match` — complementary check for the **additive** `gv_error` field on the primary `{kernel}` entry (not `*_gv`), which 40.2c/40.3c populate alongside the secondary `*_gv` entry. Rebuilds D at the stability-optimum sigma/epsilon (which may differ from the GV-optimum), still uses the same 10% tolerance. Skips if no primary entries carry `gv_error`.
+  - Imports `gv_score_from_matrix` lazily inside each test method (mirroring the `from stencil_gen.interior import ...` pattern used by other tests in this file) so that a missing `sweeps` package doesn't break module collection.
+  - `GV_TOLERANCE = 1.1`, `GRID_N = 40` are class constants. `_iter_scheme_gv_entries` is a `@staticmethod` generator that defensively checks for missing `params`, missing `gv_error`, or missing `sigma`/`epsilon` fields before yielding — the test never crashes on a partially-populated `known_values.json`.
+  - Verified (four-step):
+    1. Baseline: `uv run pytest tests/test_phs.py -x -q -k TestRegressionGV` → 3 skipped (no `*_gv` keys in current `known_values.json`). The skip messages are `"no *_gv entries in known_values.json"`, `"footprint or E4_1 missing from known_values.json"` (actually takes the "no footprint *_tension_gv entries" branch), and `"no scheme.*.gv_error fields in known_values.json"`.
+    2. Positive seed: inserted `E2_1.tension_gv = {sigma: 6.0, gv_error: 2.328151e+00, stable_at: [20,40,80,160]}` and `E2_1.tension.gv_error = 2.328151e+00` (computed by running `gv_score_from_matrix(build_diff_matrix_rbf(40, p=1, q=1, epsilon=6.0, kernel="tension", nu=1, nextra=0))` — the true value at E2's stability-optimum sigma=6.0), then re-ran → **2 passed, 1 skipped** (footprint still skips as expected).
+    3. Mutation check: shrunk the seeded `gv_error` to `0.001` (impossibly small) → `test_scheme_gv_entries_match_stored_error` fails with `AssertionError: E2_1 tension sigma=6.0: measured gv_error 2.328151e+00 > stored 1.000000e-03 × 1.1` — the tolerance gate is exercised correctly.
+    4. Restore: `git checkout scripts/stencil_gen/sweeps/known_values.json` restored the un-seeded baseline. Final regression sweep `uv run pytest tests/test_phs.py tests/test_sweep_gv_objectives.py -x -q -k "TestRegression or gv_objectives or sweep_gv or merges or footprint or gks_advisory"` → 30 passed, 3 skipped in 5.99s. The 3 skips are the new `TestRegressionGV` tests (as expected — no `*_gv` entries yet); 40.10a's `sweeps all --quick` run or a full `--include-gv --update-known-values` sweep will activate them.
   - Test: `cd scripts/stencil_gen && uv run pytest tests/test_phs.py -x -q -k "TestRegressionGV"`
 
 - [ ] **40.8b** Add a smoke test that exercises `gv_score_from_matrix` on a small precomputed D:
