@@ -138,6 +138,7 @@ def _seed_kv(path: Path) -> dict:
                 "sigma": 5.5,
                 "gv_error": 1.234,
                 "stable_at": [20, 40],
+                "preexisting_gv_extra": "survive_gv",
             },
         }
     }
@@ -177,6 +178,7 @@ def test_tension_sweep_main_merges_known_values(tmp_path, monkeypatch, capsys):
         "sigma": 5.5,
         "gv_error": 1.234,
         "stable_at": [20, 40],
+        "preexisting_gv_extra": "survive_gv",
     }
 
     rc = tension_sweep.main([
@@ -197,7 +199,8 @@ def test_tension_sweep_main_merges_known_values(tmp_path, monkeypatch, capsys):
     assert "stable_at" in tension
     assert np.isfinite(tension["gv_error"])
     tension_gv = after_gv["E2_1"]["tension_gv"]
-    assert set(tension_gv) == {"sigma", "gv_error", "stable_at"}
+    assert {"sigma", "gv_error", "stable_at"} <= set(tension_gv)
+    assert tension_gv["preexisting_gv_extra"] == "survive_gv"
     assert np.isfinite(tension_gv["sigma"])
     assert np.isfinite(tension_gv["gv_error"])
     assert isinstance(tension_gv["stable_at"], list)
