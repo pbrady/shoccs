@@ -50,6 +50,7 @@ def main() -> int:
     sub_footprint.add_argument("--sigma-max", type=float, default=50.0)
     sub_footprint.add_argument("--nextra-values", default="0,1,2,3", help="Comma-separated nextra values")
     sub_footprint.add_argument("--update-known-values", action="store_true", help="Update known_values.json")
+    sub_footprint.add_argument("--include-gv", action="store_true", help="Also compute boundary group-velocity error per (nextra, sigma) (advisory)")
 
     sub_comparison = subparsers.add_parser("comparison", help="Multi-method comparison table")
     sub_comparison.add_argument("--scheme", choices=["E2", "E4"], default=None)
@@ -129,6 +130,7 @@ def main() -> int:
             "--sigma-max", str(args.sigma_max),
             "--nextra-values", args.nextra_values,
             *(["--update-known-values"] if args.update_known_values else []),
+            *(["--include-gv"] if args.include_gv else []),
         ])
 
     if args.command == "comparison":

@@ -32,6 +32,7 @@ from stencil_gen.phs import (
 )
 
 from ._common import STABILITY_TOL, load_known_values, save_known_values
+from .gv_objectives import boundary_gv_error_max
 
 # E4 scheme parameters (footprint sweep is E4-only)
 P = 2
@@ -44,11 +45,16 @@ def run_nextra_sigma_sweep(
     nextra_values: list[int],
     n_sigma: int,
     sigma_max: float,
-) -> dict[int, dict]:
+    *,
+    include_gv: bool = False,
+) -> tuple[dict[int, dict], dict[int, dict[float, float]] | None]:
     """Phase 1: nextra x sigma sweep.
 
     For each nextra, sweeps sigma in [0, sigma_max] and reports stability.
-    Returns {nextra: {best_sigma, best_se, n_stable, total, rows}}.
+    Returns ``(results, gv_by_nx_sigma)`` where ``results`` maps
+    ``nextra -> {best_sigma, best_se, n_stable, total, rows}`` and
+    ``gv_by_nx_sigma`` maps ``nextra -> {sigma -> boundary_gv_error_max}``
+    (grid-size independent) when ``include_gv`` is set, else ``None``.
     """
     sigmas = np.concatenate([
         [0.0],
@@ -56,6 +62,9 @@ def run_nextra_sigma_sweep(
     ])
 
     results = {}
+    gv_by_nx_sigma: dict[int, dict[float, float]] | None = (
+        {} if include_gv else None
+    )
     for nx in nextra_values:
         r = Q + 1 + nx
         if n < 2 * r:
@@ -80,6 +89,15 @@ def run_nextra_sigma_sweep(
             "total": len(rows),
             "rows": rows,
         }
+
+        if include_gv:
+            gv_for_nx: dict[float, float] = {}
+            for sigma in sigmas:
+                gv_for_nx[float(sigma)] = boundary_gv_error_max(
+                    p=P, q=Q, nextra=nx, nu=NU,
+                    sigma=float(sigma), kernel="tension",
+                )
+            gv_by_nx_sigma[nx] = gv_for_nx
 
     # Print table
     print(f"\n{'='*80}")
@@ -132,7 +150,7 @@ def run_nextra_sigma_sweep(
               f"{extra_dof:9d}  {res['best_sigma']:10.4f}  {res['best_se']:16.6e}  "
               f"{res['n_stable']:>3d}/{res['total']:<3d}  {status:>10s}")
 
-    return results
+    return results, gv_by_nx_sigma
 
 
 def run_nextra_penalty_sweep(
@@ -277,6 +295,8 @@ def run_footprint_sweep(
     n_gamma: int,
     sigma_max: float = 50.0,
     nextra_values: list[int] | None = None,
+    *,
+    include_gv: bool = False,
 ) -> dict:
     """Run all three phases and return summary for known_values.json.
 
@@ -288,7 +308,9 @@ def run_footprint_sweep(
     grid_sizes = [20, 40, 80, 160]
 
     # Phase 1: nextra x sigma
-    sigma_results = run_nextra_sigma_sweep(n, nextra_values, n_sigma, sigma_max)
+    sigma_results, gv_by_nx_sigma = run_nextra_sigma_sweep(
+        n, nextra_values, n_sigma, sigma_max, include_gv=include_gv,
+    )
 
     # Phase 2: nextra x sigma x gamma penalty
     penalty_results = run_nextra_penalty_sweep(
@@ -318,6 +340,9 @@ def run_footprint_sweep(
                     "stable_at": [n],
                 }
 
+    if gv_by_nx_sigma is not None:
+        summary["_gv_by_nx_sigma"] = gv_by_nx_sigma
+
     return summary
 
 
@@ -346,19 +371,26 @@ def main(argv: list[str] | None = None) -> int:
         "--update-known-values", action="store_true",
         help="Update known_values.json with discovered footprint stability",
     )
+    parser.add_argument(
+        "--include-gv", action="store_true",
+        help="Also compute boundary group-velocity error per (nextra, sigma) (advisory)",
+    )
 
     args = parser.parse_args(argv)
     nextra_values = [int(x) for x in args.nextra_values.split(",")]
 
     summary = run_footprint_sweep(
         args.n_sigma, args.n_gamma, args.sigma_max, nextra_values,
+        include_gv=args.include_gv,
     )
 
     if args.update_known_values:
         kv = load_known_values()
         if "footprint" not in kv:
             kv["footprint"] = {}
-        kv["footprint"] = summary
+        # Drop internal keys (leading underscore) that are for in-process use only
+        # and should not be persisted to known_values.json.
+        kv["footprint"] = {k: v for k, v in summary.items() if not k.startswith("_")}
         save_known_values(kv)
         print(f"\n  Updated known_values.json: footprint")
 
