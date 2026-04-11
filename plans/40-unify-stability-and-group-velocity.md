@@ -242,13 +242,14 @@ The correct GV objective for this sweep is `boundary_gv_error_max(p, q, nextra, 
 
 ### 40.6 — New `gv-stability-pareto` sweep subcommand
 
-- [ ] **40.6a** Create `sweeps/gv_stability_pareto.py` exporting `main(argv) -> int`:
+- [x] **40.6a** Create `sweeps/gv_stability_pareto.py` exporting `main(argv) -> int`:
   - For a chosen scheme + parameter (sigma for tension, epsilon for Gaussian/MQ), compute `(stab_eig, gv_error)` over a fine 1D grid.
   - Output: a markdown table sorted by sigma, plus a final "Pareto-optimal points" section listing non-dominated (stable, low gv) entries.
   - No `--update-known-values` — this sweep is for research / docs only.
   - Keep total file <200 lines.
-  - File: `scripts/stencil_gen/sweeps/gv_stability_pareto.py` (new)
-  - Test: `cd scripts/stencil_gen && uv run python -c "from sweeps.gv_stability_pareto import main; raise SystemExit(main(['--scheme','E2','--param','tension','--n-points','11']))"`
+  - File: `scripts/stencil_gen/sweeps/gv_stability_pareto.py` (new) — **done**
+  - Implementation: 193-line module exposing `main(argv)`, `run_gv_stability_pareto`, `evaluate_grid`, `pareto_front`, `print_markdown_table`, and `_default_grid`. `evaluate_grid` calls `stability_eigenvalue` and `boundary_gv_error_max` once per parameter value at a single grid size (`--n`, default 40) — GV is grid-independent, so no inner loop over n. `_default_grid` uses `[0.0] + logspace(0.01, param_max)` for the tension kernel (matching `tension_sweep.py`) and pure logspace for Gaussian/MQ where `epsilon=0` is meaningless. `pareto_front` filters to feasible (`se < STABILITY_TOL`) rows, then removes any row dominated by another feasible row under the partial order `(stab_eig ≤, gv_err ≤)` with at least one strict inequality. Two markdown tables are printed: the full sorted grid and the Pareto-optimal subset (or a "no stable points" fallback). CLI flags: `--scheme`, `--param`, `--n-points` (default 61), `--n` (default 40), `--param-max` (default 20.0). No `--update-known-values` path and no file I/O beyond stdout.
+  - Verified: `uv run python -c "from sweeps.gv_stability_pareto import main; raise SystemExit(main(['--scheme','E2','--param','tension','--n-points','11']))"` prints both tables end-to-end; 11-row grid at E2 tension has all 11 stable points and produces a 3-point Pareto front (sigma≈3.69, 8.60, 20.0 — monotone decrease in gv_err from 2.606 to 2.075 while stab_eig stays non-positive). Second smoke: `uv run python -m sweeps.gv_stability_pareto --scheme E4 --param gaussian --n-points 9` prints "*(no stable points on this grid)*" as expected (E4 gaussian at n=40 is unstable across the full sigma range without tension augmentation). `pytest tests/test_sweep_gv_objectives.py tests/test_phs.py -x -q -k "TestRegression or gv_objectives or sweep_gv or merges or footprint"` → 27 passed in 5.43s. 40.6b owns registering the `gv-stability-pareto` subcommand in `sweeps/__main__.py`.
 
 - [ ] **40.6b** Register `gv-stability-pareto` subcommand in `sweeps/__main__.py`:
   - Add `subparsers.add_parser("gv-stability-pareto", ...)` block with args `--scheme`, `--param {tension,gaussian,multiquadric}`, `--n-points`.
