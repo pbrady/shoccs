@@ -408,8 +408,11 @@ def run_footprint_sweep(
     # for each nextra. Mirrors 40.2c/40.3c/40.4d.
     gv_stable_at_by_nx: dict[int, list[int]] = {}
     if include_gv:
+        # Filter sigma > 0 (40.5d): a "tension" GV optimum at sigma=0 is
+        # really the PHS k=2 baseline, not a tension-kernel point. The
+        # eigenvalue-stability path applies the same filter at line 440.
         any_gv = any(
-            sigma_results.get(nx, {}).get("best_stable_gv_sigma") is not None
+            (sigma_results.get(nx, {}).get("best_stable_gv_sigma") or 0.0) > 0
             for nx in nextra_values
         )
         if any_gv:
@@ -418,7 +421,7 @@ def run_footprint_sweep(
             print(f"{'='*70}")
         for nx in nextra_values:
             gv_sigma = sigma_results.get(nx, {}).get("best_stable_gv_sigma")
-            if gv_sigma is None:
+            if gv_sigma is None or gv_sigma <= 0:
                 continue
             print(f"  nextra={nx}, sigma={gv_sigma:.6f}:")
             gv_stable_at_by_nx[nx] = _check_gv_sigma_stable_grids(
@@ -449,8 +452,15 @@ def run_footprint_sweep(
                 summary[t_key] = t_entry
 
             # Parallel GV-optimal entry (separate from the stability-optimum
-            # key because the sigma is embedded in the key name).
-            if include_gv and res.get("best_stable_gv_sigma") is not None:
+            # key because the sigma is embedded in the key name). Filter
+            # sigma > 0 (40.5d) so a GV optimum that collapses to the PHS
+            # k=2 baseline is not mis-labeled as a tension entry — that
+            # information already lives on ``E4_nextra{nx}_phs``.
+            if (
+                include_gv
+                and res.get("best_stable_gv_sigma") is not None
+                and res["best_stable_gv_sigma"] > 0
+            ):
                 gv_key = f"E4_nextra{nx}_tension_gv"
                 summary[gv_key] = {
                     "nextra": nx,
