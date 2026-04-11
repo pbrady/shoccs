@@ -273,6 +273,13 @@ The correct GV objective for this sweep is `boundary_gv_error_max(p, q, nextra, 
   - Implementation: two tests, both name-matching the plan's `-k "gks_advisory"` filter. (1) `test_check_gks_advisory_tension_e2_no_false_positives` calls `tension_sweep.main(["--scheme","E2","--n-sigma","5","--n-values","20","--check-gks"])`, captures stdout, and asserts `rc == 0`, `"GKS advisory" in out`, `"no outgoing boundary modes detected" in out`, and `"WARNING:" not in out`. The 40.7a verification confirmed E2 tension at sigma*=0.0 produces zero outgoing boundary modes, so this is a reliable known-clean case for the regression. (2) `test_check_gks_advisory_helper_clean_matrix` exercises `print_gks_advisory` directly on the same RBF differentiation matrix (`build_diff_matrix_rbf(20, p=1, q=1, epsilon=0.0, kernel="tension", nu=1, nextra=1)`) and asserts the helper returns `0` and prints the same clean line — isolating the helper from the surrounding sweep wiring. The sweep-level test wraps the wiring contract; the helper-level test wraps the math contract.
   - Verified: `uv run pytest tests/test_sweep_gv_objectives.py -x -q -k "gks_advisory"` → 2 passed in 0.95s. `pytest tests/test_sweep_gv_objectives.py tests/test_phs.py -x -q -k "TestRegression or gv_objectives or sweep_gv or merges or footprint or gks_advisory"` → 29 passed in 5.59s.
 
+- [ ] **40.7c** Add a parallel `--check-gks` smoke test for `epsilon_sweep.main` (coverage gap from review of `2b2e851`):
+  - Review pass on commit `2b2e851` confirmed that 40.7a wired `--check-gks` through **both** `tension_sweep` and `epsilon_sweep` (both were verified by hand in the 40.7a note), but 40.7b's two new tests (`test_check_gks_advisory_tension_e2_no_false_positives` and `test_check_gks_advisory_helper_clean_matrix`) both target tension-kernel matrices only. A future refactor that breaks `epsilon_sweep.main`'s `--check-gks` argparse entry, the passthrough in `sweeps/__main__.py`'s epsilon subparser, or the `print_gks_advisory` call site inside `run_epsilon_sweep` would pass all existing tests silently.
+  - Re-verified during review: `uv run python -m sweeps epsilon --scheme E2 --kernel gaussian --n-eps 5 --check-gks` prints `GKS advisory (n=40, eps*=0.002492, kernel=gaussian): no outgoing boundary modes detected (1 boundary mode(s) inspected)` — i.e. gaussian at the default smoke-run optimum has 1 boundary mode but **zero** outgoing modes, so a direct mirror of the tension test (assert no `WARNING:` line) is feasible. The 40.7a note's "1 for gaussian eps*" referred to the **inspected** count, not the outgoing count.
+  - Implementation sketch: `test_check_gks_advisory_epsilon_e2_gaussian_no_false_positives` calls `epsilon_sweep.main(["--scheme","E2","--kernel","gaussian","--n-eps","5","--n-values","40","--check-gks"])`, captures stdout via `capsys`, and asserts `rc == 0`, `"GKS advisory" in out`, `"kernel=gaussian" in out` (pins the epsilon-specific label format that the helper does not produce for tension), `"no outgoing boundary modes detected" in out`, and `"WARNING:" not in out`. Do **not** add `--update-known-values` — the test must not mutate `known_values.json`. The test must be in the `gks_advisory` keyword filter (name must contain `gks_advisory`) so `pytest -k "gks_advisory"` picks it up alongside the existing two.
+  - File: `scripts/stencil_gen/tests/test_sweep_gv_objectives.py`
+  - Test: `cd scripts/stencil_gen && uv run pytest tests/test_sweep_gv_objectives.py -x -q -k "gks_advisory"` should run 3 passed (was 2 passed in 40.7b verification).
+
 ### 40.8 — Regression tests for GV-augmented `known_values.json`
 
 - [ ] **40.8a** Add `TestRegressionGV` class in `test_phs.py`:
@@ -333,7 +340,7 @@ The correct GV objective for this sweep is `boundary_gv_error_max(p, q, nextra, 
   ↓
 40.6a → 40.6b           (new pareto sweep subcommand)
   ↓
-40.7a → 40.7b           (GKS advisory)
+40.7a → 40.7b → 40.7c   (GKS advisory; 40.7c closes the epsilon_sweep coverage gap from review of 2b2e851)
   ↓
 40.8a → 40.8b           (regression tests for new known_values keys)
   ↓
