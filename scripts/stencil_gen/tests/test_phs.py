@@ -1641,6 +1641,7 @@ if _KNOWN is not None:
         """
 
         GV_TOLERANCE = 1.1
+        GV_TOLERANCE_STRICT = 1.001
         GRID_N = 40
 
         @staticmethod
@@ -1750,12 +1751,48 @@ if _KNOWN is not None:
                         kernel=kernel, nu=params["nu"], nextra=params["nextra"],
                     )
                     measured = gv_score_from_matrix(D)["max_gv_error"]
-                    assert measured <= stored * self.GV_TOLERANCE, (
+                    assert measured <= stored * self.GV_TOLERANCE_STRICT, (
                         f"{scheme_key} {kernel} (stability-optimum) "
                         f"{param_name}={eps}: measured gv_error "
                         f"{measured:.6e} > stored {stored:.6e} × "
-                        f"{self.GV_TOLERANCE}"
+                        f"{self.GV_TOLERANCE_STRICT}"
                     )
                     checked += 1
             if checked == 0:
                 pytest.skip("no scheme.*.gv_error fields in known_values.json")
+
+        def test_footprint_primary_tension_gv_error_match(self):
+            """``footprint.E4_nextra{nx}_tension_{N}.gv_error`` (primary entry, 4dp rounding)."""
+            from sweeps.gv_objectives import gv_score_from_matrix
+
+            if "footprint" not in _KNOWN or "E4_1" not in _KNOWN:
+                pytest.skip("footprint or E4_1 missing from known_values.json")
+            fp = _KNOWN["footprint"]
+            params = _KNOWN["E4_1"]["params"]
+            primary_entries = [
+                (key, entry)
+                for key, entry in fp.items()
+                if "_tension_" in key
+                and not key.endswith("_tension_gv")
+                and isinstance(entry, dict)
+                and "gv_error" in entry
+                and "sigma" in entry
+                and "nextra" in entry
+            ]
+            if not primary_entries:
+                pytest.skip("no footprint primary *_tension_{N}.gv_error entries in known_values.json")
+            for key, entry in primary_entries:
+                sigma = entry["sigma"]
+                nx = entry["nextra"]
+                stored = entry["gv_error"]
+                D = build_diff_matrix_rbf(
+                    self.GRID_N,
+                    p=params["p"], q=params["q"], epsilon=sigma,
+                    kernel="tension", nu=params["nu"], nextra=nx,
+                )
+                measured = gv_score_from_matrix(D)["max_gv_error"]
+                assert measured <= stored * self.GV_TOLERANCE_STRICT, (
+                    f"footprint {key} (stability-optimum) sigma={sigma} "
+                    f"nextra={nx}: measured gv_error {measured:.6e} > "
+                    f"stored {stored:.6e} × {self.GV_TOLERANCE_STRICT}"
+                )
