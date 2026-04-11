@@ -30,6 +30,7 @@ from ._common import (
     report_stable_ranges,
     save_known_values,
 )
+from .gv_objectives import boundary_gv_error_max
 
 # Floating-point eigenvalue solvers return tiny positive real parts (~1e-14)
 # for genuinely stable operators.  Use this threshold to distinguish true
@@ -43,12 +44,26 @@ def sweep_stability(
     q: int,
     nextra: int,
     nu: int,
-) -> dict[int, list[tuple[float, float]]]:
+    include_gv: bool = False,
+) -> tuple[
+    dict[int, list[tuple[float, float]]],
+    dict[float, float] | None,
+]:
     """Run sigma sweep using stability_eigenvalue with tension kernel.
 
-    Returns dict {n: list of (sigma, stab_eig)}.
+    Returns ``(stab_results, gv_by_sigma)`` where ``stab_results`` maps
+    ``n -> list of (sigma, stab_eig)`` and ``gv_by_sigma`` maps
+    ``sigma -> boundary_gv_error_max`` (independent of ``n``) when
+    ``include_gv`` is set, else ``None``.
     """
-    results = {}
+    results: dict[int, list[tuple[float, float]]] = {}
+    gv_by_sigma: dict[float, float] | None = {} if include_gv else None
+    if include_gv:
+        for sigma in sigmas:
+            gv_by_sigma[float(sigma)] = boundary_gv_error_max(
+                p=p, q=q, nextra=nextra, nu=nu,
+                sigma=float(sigma), kernel="tension",
+            )
     for n in n_values:
         rows = []
         for sigma in sigmas:
@@ -58,7 +73,7 @@ def sweep_stability(
             )
             rows.append((float(sigma), se))
         results[n] = rows
-    return results
+    return results, gv_by_sigma
 
 
 def fine_sweep(
@@ -110,6 +125,8 @@ def run_tension_sweep(
     n_values: list[int],
     n_sigma: int,
     sigma_max: float = 20.0,
+    *,
+    include_gv: bool = False,
 ) -> dict:
     """Run a full tension sigma sweep for a scheme.
 
@@ -125,9 +142,10 @@ def run_tension_sweep(
     )
 
     # Main sweep
-    results = sweep_stability(
+    results, gv_by_sigma = sweep_stability(
         n_values, sigmas,
         p=p, q=q, nextra=nextra, nu=nu,
+        include_gv=include_gv,
     )
     print_sweep_table(
         f"{label} Tension Spline — Stability Sweep (p={p}, q={q}, nextra={nextra})",
@@ -167,6 +185,7 @@ def run_tension_sweep(
         "sigma": round(sigma_star, 6),
         "stable_at": stable_at,
         "fine_stab_eig": fine_se,
+        "gv_by_sigma": gv_by_sigma,
     }
 
 
@@ -192,11 +211,19 @@ def main(argv: list[str] | None = None) -> int:
         "--update-known-values", action="store_true",
         help="Update known_values.json with discovered optimal sigma",
     )
+    parser.add_argument(
+        "--include-gv", action="store_true",
+        help="Also compute boundary group-velocity error at each sigma "
+             "(advisory secondary objective; does not alter the stability optimum)",
+    )
 
     args = parser.parse_args(argv)
     n_values = [int(x) for x in args.n_values.split(",")]
 
-    summary = run_tension_sweep(args.scheme, n_values, args.n_sigma, args.sigma_max)
+    summary = run_tension_sweep(
+        args.scheme, n_values, args.n_sigma, args.sigma_max,
+        include_gv=args.include_gv,
+    )
 
     if args.update_known_values:
         kv = load_known_values()

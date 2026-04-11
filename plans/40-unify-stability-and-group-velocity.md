@@ -75,12 +75,13 @@ cd scripts/stencil_gen && uv run pytest tests/test_phs.py -x -q -k "TestRegressi
 
 ### 40.2 — Integrate GV into `tension_sweep` (testbed sweep)
 
-- [ ] **40.2a** Add `--include-gv` CLI flag to `tension_sweep.py`:
+- [x] **40.2a** Add `--include-gv` CLI flag to `tension_sweep.py`:
   - Default `False` so existing invocations behave identically.
   - When set, after the existing stability scan, evaluate `boundary_gv_error_max(p, q, nextra, nu, sigma, "tension")` for every coarse-grid sigma and store alongside the `(sigma, stab_eig)` tuples.
   - Argument plumbing only — no behavior change yet beyond a new column. Keep the change <60 lines.
-  - File: `scripts/stencil_gen/sweeps/tension_sweep.py`
-  - Test: `cd scripts/stencil_gen && uv run python -m sweeps tension --scheme E2 --n-sigma 5 --include-gv`
+  - File: `scripts/stencil_gen/sweeps/tension_sweep.py` — **done**
+  - Implementation: `sweep_stability` now returns `(stab_results, gv_by_sigma)` where `gv_by_sigma: dict[float, float] | None` is populated once per sigma (grid-size-independent) when `include_gv=True`, else `None`. `run_tension_sweep` accepts `include_gv=` kwarg and threads it through; the returned summary dict gains a `gv_by_sigma` key. `main()` adds `--include-gv`, and `sweeps/__main__.py` adds the same flag on the tension subparser with passthrough. No existing output format changed — 40.2b owns the printing work.
+  - Verified: `uv run python -m sweeps tension --scheme E2 --n-sigma 5 --include-gv` runs end-to-end without error; `uv run python -m sweeps tension --scheme E2 --n-sigma 5` (no flag) behaves identically to before; `uv run pytest tests/test_sweep_gv_objectives.py tests/test_phs.py -k "TestRegression or gv_objectives"` → 23 passed (no regressions).
 
 - [ ] **40.2b** Print GV error column in `tension_sweep` table when `--include-gv` is set:
   - Extend `print_sweep_table` call (or wrap output) so the per-(n, sigma) table gains a `gv_err` column.

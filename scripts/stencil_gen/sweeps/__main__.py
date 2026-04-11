@@ -34,6 +34,7 @@ def main() -> int:
     sub_tension.add_argument("--n-sigma", type=int, default=61, help="Number of sigma sample points")
     sub_tension.add_argument("--sigma-max", type=float, default=20.0)
     sub_tension.add_argument("--update-known-values", action="store_true", help="Update known_values.json with discovered optimal sigma")
+    sub_tension.add_argument("--include-gv", action="store_true", help="Also compute boundary group-velocity error at each sigma (advisory)")
 
     sub_tension_pen = subparsers.add_parser("tension-penalty", help="Tension + conservation penalty sweep")
     sub_tension_pen.add_argument("--scheme", choices=["E2", "E4"], required=True)
@@ -93,6 +94,7 @@ def main() -> int:
             "--n-sigma", str(args.n_sigma),
             "--sigma-max", str(args.sigma_max),
             *(["--update-known-values"] if args.update_known_values else []),
+            *(["--include-gv"] if args.include_gv else []),
         ])
 
     if args.command == "mixed-epsilon":
