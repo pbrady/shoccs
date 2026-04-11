@@ -105,15 +105,22 @@ def run_nextra_sigma_sweep(
     print(f"{'='*80}")
 
     # Header
+    nx_col_width = 32 if include_gv else 16
     header = f"  {'sigma':>10s}"
     for nx in nextra_values:
         if nx in results:
-            header += f"  {'nx=' + str(nx):>16s}"
+            header += f"  {'nx=' + str(nx):>{nx_col_width}s}"
     print(header)
+    if include_gv:
+        subheader = f"  {'':>10s}"
+        for nx in nextra_values:
+            if nx in results:
+                subheader += f"  {'stab_eig':>16s}{'gv_err':>16s}"
+        print(subheader)
     divider = f"  {'-'*10}"
     for nx in nextra_values:
         if nx in results:
-            divider += f"  {'-'*16}"
+            divider += f"  {'-'*nx_col_width}"
     print(divider)
 
     # Print every 5th row to keep output readable
@@ -122,10 +129,34 @@ def run_nextra_sigma_sweep(
         line = f"  {sigmas[idx]:10.4f}"
         for nx in nextra_values:
             if nx in results:
-                _, se = results[nx]["rows"][idx]
-                marker = " *" if se < STABILITY_TOL else ""
-                line += f"  {se:14.6e}{marker}"
+                sigma_at_idx, se = results[nx]["rows"][idx]
+                if include_gv:
+                    marker = " *" if se < STABILITY_TOL else "  "
+                    gv = gv_by_nx_sigma[nx][sigma_at_idx]
+                    line += f"  {se:14.6e}{marker}{gv:14.6e}  "
+                else:
+                    marker = " *" if se < STABILITY_TOL else ""
+                    line += f"  {se:14.6e}{marker}"
         print(line)
+
+    # Populate GV-optimal-feasible stats per nextra when include_gv is set.
+    # "Feasible" here = stable at the primary grid size n (matching the scope
+    # of the row data we have); cross-grid re-checks happen in 40.5c.
+    if include_gv:
+        for nx in nextra_values:
+            if nx not in results:
+                continue
+            stable_gv = [
+                (sigma_at, gv_by_nx_sigma[nx][sigma_at])
+                for sigma_at, se in results[nx]["rows"]
+                if se < STABILITY_TOL
+            ]
+            if stable_gv:
+                best_gv_sigma, best_gv = min(stable_gv, key=lambda t: t[1])
+            else:
+                best_gv_sigma, best_gv = None, None
+            results[nx]["best_stable_gv_sigma"] = best_gv_sigma
+            results[nx]["best_stable_gv"] = best_gv
 
     # Summary
     print(f"\n  {'='*70}")
@@ -149,6 +180,33 @@ def run_nextra_sigma_sweep(
         print(f"  {nx:6d}  {t:3d}  {r:3d}  "
               f"{extra_dof:9d}  {res['best_sigma']:10.4f}  {res['best_se']:16.6e}  "
               f"{res['n_stable']:>3d}/{res['total']:<3d}  {status:>10s}")
+
+    if include_gv:
+        print(f"\n  {'='*70}")
+        print(f"  Summary: Best stable (by GV error) per nextra")
+        print(f"  {'='*70}")
+        print(f"  {'nextra':>6s}  {'gv sigma':>10s}  {'gv_err':>16s}")
+        print(f"  {'-'*6}  {'-'*10}  {'-'*16}")
+        best_overall: tuple[int, float, float] | None = None
+        for nx in nextra_values:
+            if nx not in results:
+                continue
+            gv_sigma = results[nx].get("best_stable_gv_sigma")
+            gv_err = results[nx].get("best_stable_gv")
+            if gv_sigma is None:
+                print(f"  {nx:6d}  {'--':>10s}  {'--':>16s}")
+            else:
+                print(f"  {nx:6d}  {gv_sigma:10.4f}  {gv_err:16.6e}")
+                if best_overall is None or gv_err < best_overall[2]:
+                    best_overall = (nx, gv_sigma, gv_err)
+        if best_overall is not None:
+            nx_b, sigma_b, gv_b = best_overall
+            print(
+                f"\n  Best (nextra, sigma) by GV error: "
+                f"nextra={nx_b}, sigma={sigma_b:.6f}, gv_err={gv_b:.6e}"
+            )
+        else:
+            print("\n  Best (nextra, sigma) by GV error: (no feasible point)")
 
     return results, gv_by_nx_sigma
 
