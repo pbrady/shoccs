@@ -110,6 +110,12 @@ cd scripts/stencil_gen && uv run pytest tests/test_phs.py -x -q -k "TestRegressi
   - File: `scripts/stencil_gen/tests/test_sweep_gv_objectives.py` — **done**
   - Verified: `uv run pytest tests/test_sweep_gv_objectives.py -x -q` → 9 passed in 1.09s. `pytest tests/test_sweep_gv_objectives.py tests/test_phs.py -x -q -k "TestRegression or gv_objectives or sweep_gv"` → 24 passed in 1.33s. The two `tension_sweep.main` invocations together add ~1s to the test runtime, well under the 2s budget.
 
+- [ ] **40.2f** Extend the 40.2e regression test to also pin the `tension_gv` merge:
+  - Review pass on commit `7071482` confirmed: `_seed_kv` places the `preexisting_extra_key` sentinel only on the `tension` entry, not on `tension_gv`. After the `--include-gv` invocation, the test asserts `set(tension_gv) == {"sigma", "gv_error", "stable_at"}`, which passes whether `tension_sweep.main()` merges into the existing `tension_gv` dict (as 40.2d requires) or overwrites it with a fresh `{"sigma":..., "gv_error":..., "stable_at":...}` literal. Only half of the 40.2d fix is actually pinned. The carry-over items (40.3c/40.4c/40.5c) will replicate this same merge pattern for `{kernel}_gv`, `tension_penalty`, and `footprint.*`, so a robust template matters.
+  - Fix: in `_seed_kv`, add a sentinel key to the seeded `tension_gv` (e.g. `"preexisting_gv_extra": "survive_gv"`). After the `--include-gv` invocation, assert `tension_gv["preexisting_gv_extra"] == "survive_gv"` and loosen the exact-equality assertion on `tension_gv`'s key set to a superset check (`{"sigma","gv_error","stable_at"} <= set(tension_gv)`), so extra keys are allowed but the required three are still present. Keep the strict byte-equality check on the non-GV first pass (nothing should touch `tension_gv` there) — including the sentinel.
+  - File: `scripts/stencil_gen/tests/test_sweep_gv_objectives.py`
+  - Test: `cd scripts/stencil_gen && uv run pytest tests/test_sweep_gv_objectives.py -x -q -k "merges_known_values"` — must still pass against the current merging implementation, and must fail if `kv[scheme_key]["tension_gv"] = tension_gv_entry` is replaced with a fresh-dict assignment that drops the sentinel.
+
 ### 40.3 — Integrate GV into `epsilon_sweep` (Gaussian / multiquadric kernels)
 
 - [ ] **40.3a** Add `--include-gv` flag to `epsilon_sweep.py`, mirroring 40.2a:
@@ -247,7 +253,7 @@ cd scripts/stencil_gen && uv run pytest tests/test_phs.py -x -q -k "TestRegressi
 ```
 40.1a → 40.1b → 40.1c   (objectives module + tests; everything else depends on these; 40.1c closes a coverage gap)
   ↓
-40.2a → 40.2b → 40.2c → 40.2d → 40.2e   (tension_sweep testbed; 40.2d is a correctness fix from review of 74df8c7; 40.2e is an automated regression test from review of f9ce69b)
+40.2a → 40.2b → 40.2c → 40.2d → 40.2e → 40.2f   (tension_sweep testbed; 40.2d is a correctness fix from review of 74df8c7; 40.2e is an automated regression test from review of f9ce69b; 40.2f closes a tension_gv merge-coverage gap from review of 7071482)
   ↓
 40.3a → 40.3b → 40.3c   (epsilon_sweep mirrors tension_sweep — do once tension is verified)
   ↓
