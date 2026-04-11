@@ -156,6 +156,8 @@ def run_tension_sweep(
     print()
     report_stable_ranges(results, param_label="sigma")
 
+    gv_best_sigma: float | None = None
+    gv_best_error: float | None = None
     if gv_by_sigma is not None:
         # Among feasible (stable at every grid size in the sweep) sigmas,
         # report the smallest GV error.  This does not alter the stability
@@ -167,10 +169,11 @@ def run_tension_sweep(
             }
             feasible_sigmas &= stable_for_n
         if feasible_sigmas:
-            best_sigma = min(feasible_sigmas, key=lambda s: gv_by_sigma[s])
+            gv_best_sigma = min(feasible_sigmas, key=lambda s: gv_by_sigma[s])
+            gv_best_error = gv_by_sigma[gv_best_sigma]
             print(
-                f"  Best feasible by GV error: sigma={best_sigma:.6f}, "
-                f"gv_err={gv_by_sigma[best_sigma]:.6e}"
+                f"  Best feasible by GV error: sigma={gv_best_sigma:.6f}, "
+                f"gv_err={gv_best_error:.6e}"
             )
         else:
             print("  Best feasible by GV error: (no sigma stable at every grid size)")
@@ -201,11 +204,29 @@ def run_tension_sweep(
         if se < STABILITY_TOL:
             stable_at.append(nn)
 
+    # Cross-check GV-optimal sigma at the same grid sizes as sigma_star.
+    gv_stable_at: list[int] | None = None
+    if gv_best_sigma is not None:
+        gv_stable_at = []
+        print(f"\n  Checking GV-optimal sigma={gv_best_sigma:.6f} across grid sizes:")
+        for nn in sorted(set(n_values + [20, 40, 80, 160])):
+            se = stability_eigenvalue(
+                nn, p=p, q=q, epsilon=gv_best_sigma,
+                kernel="tension", nu=nu, nextra=nextra,
+            )
+            status = "STABLE" if se < STABILITY_TOL else "unstable"
+            print(f"    n={nn:4d}: stab_eig={se:.6e} [{status}]")
+            if se < STABILITY_TOL:
+                gv_stable_at.append(nn)
+
     return {
         "sigma": round(sigma_star, 6),
         "stable_at": stable_at,
         "fine_stab_eig": fine_se,
         "gv_by_sigma": gv_by_sigma,
+        "gv_sigma": round(gv_best_sigma, 6) if gv_best_sigma is not None else None,
+        "gv_error": gv_best_error,
+        "gv_stable_at": gv_stable_at,
     }
 
 
@@ -250,12 +271,23 @@ def main(argv: list[str] | None = None) -> int:
         scheme_key = SCHEME_PARAMS[args.scheme]["label"]
         if scheme_key not in kv:
             kv[scheme_key] = {}
-        kv[scheme_key]["tension"] = {
+        tension_entry = {
             "sigma": summary["sigma"],
             "stable_at": summary["stable_at"],
         }
+        if args.include_gv and summary["gv_error"] is not None:
+            tension_entry["gv_error"] = summary["gv_error"]
+        kv[scheme_key]["tension"] = tension_entry
+        updated_keys = [f"{scheme_key}.tension"]
+        if args.include_gv and summary["gv_sigma"] is not None:
+            kv[scheme_key]["tension_gv"] = {
+                "sigma": summary["gv_sigma"],
+                "gv_error": summary["gv_error"],
+                "stable_at": summary["gv_stable_at"],
+            }
+            updated_keys.append(f"{scheme_key}.tension_gv")
         save_known_values(kv)
-        print(f"\n  Updated known_values.json: {scheme_key}.tension")
+        print(f"\n  Updated known_values.json: {', '.join(updated_keys)}")
 
     return 0
 

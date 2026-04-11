@@ -90,11 +90,12 @@ cd scripts/stencil_gen && uv run pytest tests/test_phs.py -x -q -k "TestRegressi
   - Implementation: `print_sweep_table` in `_common.py` gained an optional `gv_by_param` kwarg (additive, default `None`); when present, the per-n table renders a fourth `gv_err` column. `tension_sweep.py` passes `gv_by_sigma` through and, after `report_stable_ranges`, computes the intersection of stable sigmas across all grid sizes (the feasible set) and prints `Best feasible by GV error: sigma=…, gv_err=…`. The feasible set being empty is reported, not crashed.
   - Verified: `uv run python -m sweeps tension --scheme E2 --n-sigma 5 --include-gv` shows the new column and `Best feasible by GV error: sigma=20.000000, gv_err=2.074641e+00`. The same command without `--include-gv` is byte-identical to the prior format (no column added). `uv run pytest tests/test_sweep_gv_objectives.py tests/test_phs.py -k "TestRegression or gv_objectives"` → 23 passed.
 
-- [ ] **40.2c** Persist GV-optimal sigma to `known_values.json` under a new sub-key:
+- [x] **40.2c** Persist GV-optimal sigma to `known_values.json` under a new sub-key:
   - When `--update-known-values` AND `--include-gv` are both set, write `kv[scheme_key]["tension"]["gv_error"] = best_gv_err` and `kv[scheme_key]["tension_gv"] = {"sigma": ..., "gv_error": ..., "stable_at": [...]}`.
   - This is additive: the existing `tension.sigma` (widest-stability optimum) is unchanged. The new `tension_gv.sigma` is the GV-optimal feasible sigma.
-  - File: `scripts/stencil_gen/sweeps/tension_sweep.py`
-  - Test: `cd scripts/stencil_gen && uv run python -m sweeps tension --scheme E2 --n-sigma 5 --include-gv --update-known-values`
+  - File: `scripts/stencil_gen/sweeps/tension_sweep.py` — **done**
+  - Implementation: `run_tension_sweep` now cross-checks the GV-optimal feasible sigma at grid sizes `{20,40,80,160}` (mirroring the existing stability-optimum cross-check) and returns `gv_sigma`, `gv_error`, `gv_stable_at` in the summary. `main()` writes `tension.gv_error` (additive on the existing entry) and a new top-level `tension_gv` dict only when both `--update-known-values` and `--include-gv` are set; without `--include-gv`, the existing `tension` entry is written without the `gv_error` key (unchanged behavior). Without `--update-known-values`, nothing is written.
+  - Verified: `uv run python -m sweeps tension --scheme E2 --n-sigma 5 --include-gv --update-known-values` wrote both `E2_1.tension.gv_error = 2.074641…` and `E2_1.tension_gv = {sigma: 20.0, gv_error: 2.074641…, stable_at: [20,40,80,160]}`; `known_values.json` restored from pre-test snapshot after verification (the low-resolution `--n-sigma 5` run would have overwritten the stability optimum at 6.0 with 3.483637, so this smoke run was not committed to the JSON). `pytest tests/test_sweep_gv_objectives.py tests/test_phs.py -k "gv_objectives or TestRegression"` → 23 passed. The no-flag invocation (`--n-sigma 5` without `--include-gv`) still produces the same output as before.
 
 ### 40.3 — Integrate GV into `epsilon_sweep` (Gaussian / multiquadric kernels)
 
