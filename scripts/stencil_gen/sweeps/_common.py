@@ -78,18 +78,37 @@ def print_sweep_table(
     results: dict[int, list[tuple[float, float]]],
     *,
     param_label: str = "param",
+    gv_by_param: dict[float, float] | None = None,
 ) -> None:
-    """Print formatted sweep table with stability classification."""
+    """Print formatted sweep table with stability classification.
+
+    If ``gv_by_param`` is given, append a ``gv_err`` column whose value is
+    looked up by the row's parameter (GV is independent of n, so the same
+    value repeats across grid sizes).
+    """
     print(f"\n{'='*72}")
     print(f"  {label}")
     print(f"{'='*72}")
     for n, rows in sorted(results.items()):
         print(f"\n  n = {n}")
-        print(f"  {param_label:>10s}  {'stab_eig':>14s}  {'status':>10s}")
-        print(f"  {'-'*10}  {'-'*14}  {'-'*10}")
-        for val, se in rows:
-            status = "STABLE" if se < STABILITY_TOL else "unstable"
-            print(f"  {val:10.4f}  {se:14.6e}  {status:>10s}")
+        if gv_by_param is None:
+            print(f"  {param_label:>10s}  {'stab_eig':>14s}  {'status':>10s}")
+            print(f"  {'-'*10}  {'-'*14}  {'-'*10}")
+            for val, se in rows:
+                status = "STABLE" if se < STABILITY_TOL else "unstable"
+                print(f"  {val:10.4f}  {se:14.6e}  {status:>10s}")
+        else:
+            print(
+                f"  {param_label:>10s}  {'stab_eig':>14s}  "
+                f"{'status':>10s}  {'gv_err':>14s}"
+            )
+            print(f"  {'-'*10}  {'-'*14}  {'-'*10}  {'-'*14}")
+            for val, se in rows:
+                status = "STABLE" if se < STABILITY_TOL else "unstable"
+                gv = gv_by_param.get(float(val), float("nan"))
+                print(
+                    f"  {val:10.4f}  {se:14.6e}  {status:>10s}  {gv:14.6e}"
+                )
 
     # Summary: best value per n
     print(f"\n  --- Best {param_label} (min stability eigenvalue) ---")

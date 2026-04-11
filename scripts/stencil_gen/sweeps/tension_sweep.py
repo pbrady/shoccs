@@ -151,9 +151,29 @@ def run_tension_sweep(
         f"{label} Tension Spline — Stability Sweep (p={p}, q={q}, nextra={nextra})",
         results,
         param_label="sigma",
+        gv_by_param=gv_by_sigma,
     )
     print()
     report_stable_ranges(results, param_label="sigma")
+
+    if gv_by_sigma is not None:
+        # Among feasible (stable at every grid size in the sweep) sigmas,
+        # report the smallest GV error.  This does not alter the stability
+        # optimum reported below — it is purely advisory secondary output.
+        feasible_sigmas: set[float] = set(gv_by_sigma)
+        for n, rows in results.items():
+            stable_for_n = {
+                float(s) for s, se in rows if se < STABILITY_TOL
+            }
+            feasible_sigmas &= stable_for_n
+        if feasible_sigmas:
+            best_sigma = min(feasible_sigmas, key=lambda s: gv_by_sigma[s])
+            print(
+                f"  Best feasible by GV error: sigma={best_sigma:.6f}, "
+                f"gv_err={gv_by_sigma[best_sigma]:.6e}"
+            )
+        else:
+            print("  Best feasible by GV error: (no sigma stable at every grid size)")
 
     # Fine sweep at n=40 (or largest available)
     n_fine_grid = 40 if 40 in n_values else max(n_values)
