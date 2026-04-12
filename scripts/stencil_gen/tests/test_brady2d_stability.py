@@ -12,6 +12,7 @@ from stencil_gen.brady2d_stability import (
     L5_TOL,
     STABILITY_TOL,
     StabilityReport,
+    build_sparse_2d_operator,
     layer1_interior_boundary_gv,
     layer3_1d_eigenvalue,
     layer4_local_gv_2d,
@@ -307,3 +308,60 @@ class TestLayer5:
             f"max_aligned_error={result['max_aligned_error']:.6f} "
             f"should exceed L5_TOL={L5_TOL}"
         )
+
+
+class TestBuildSparse2D:
+    """Tests for build_sparse_2d_operator."""
+
+    def test_shape_n11(self):
+        """At N=11, the reduced operator has shape (100, 100)."""
+        L_red, keep_idx = build_sparse_2d_operator(
+            "E4", "tension", {"sigma": 3.0}, N=11,
+        )
+        assert L_red.shape == (100, 100), f"Expected (100, 100), got {L_red.shape}"
+        assert len(keep_idx) == 100
+
+    def test_shape_n21(self):
+        """At N=21, the reduced operator has shape (400, 400)."""
+        L_red, keep_idx = build_sparse_2d_operator(
+            "E4", "tension", {"sigma": 3.0}, N=21,
+        )
+        assert L_red.shape == (400, 400), f"Expected (400, 400), got {L_red.shape}"
+        assert len(keep_idx) == 400
+
+    def test_keep_idx_excludes_inflow(self):
+        """keep_idx excludes all DOFs with i=0 or j=0."""
+        N = 11
+        _, keep_idx = build_sparse_2d_operator(
+            "E4", "tension", {"sigma": 3.0}, N=N,
+        )
+        ii = keep_idx % N
+        jj = keep_idx // N
+        assert np.all(ii > 0), "keep_idx should exclude i=0 (x inflow)"
+        assert np.all(jj > 0), "keep_idx should exclude j=0 (y inflow)"
+
+    def test_sparse_format(self):
+        """Output is CSR sparse matrix."""
+        import scipy.sparse as sp
+
+        L_red, _ = build_sparse_2d_operator(
+            "E4", "tension", {"sigma": 3.0}, N=11,
+        )
+        assert sp.issparse(L_red), "L_red should be sparse"
+        assert L_red.format == "csr", f"Expected CSR, got {L_red.format}"
+
+    def test_classical_e4_builds(self):
+        """Classical E4 kernel builds without error."""
+        alpha = [-0.7733323791884821, 0.1623961700641681]
+        L_red, keep_idx = build_sparse_2d_operator(
+            "E4", "classical", {"alpha": alpha}, N=11,
+        )
+        assert L_red.shape == (100, 100)
+
+    def test_eigenvalues_finite(self):
+        """Eigenvalues of the reduced operator are all finite."""
+        L_red, _ = build_sparse_2d_operator(
+            "E4", "tension", {"sigma": 3.0}, N=11,
+        )
+        eigs = np.linalg.eigvals(L_red.toarray())
+        assert np.all(np.isfinite(eigs)), "All eigenvalues should be finite"

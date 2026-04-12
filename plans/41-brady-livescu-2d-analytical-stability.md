@@ -351,7 +351,7 @@ Implementing Trefethen 1983 (pp. 206–207). For the semi-discrete problem `u_t 
 
 ### 41.9 — L7 sparse 2D eigenvalue of the full varying-coefficient BL operator
 
-- [ ] **41.9a** Add `build_sparse_2d_operator(scheme, kernel, params, N) -> tuple[scipy.sparse.csr_matrix, np.ndarray]` to `brady2d_stability.py`:
+- [x] **41.9a** Add `build_sparse_2d_operator(scheme, kernel, params, N) -> tuple[scipy.sparse.csr_matrix, np.ndarray]` to `brady2d_stability.py`:
   - Build `D_x_1D` via `phs.build_diff_matrix_rbf(...)` for the chosen family (1D, shape N×N, sparse via `scipy.sparse.csr_matrix`).
   - `Ix, Iy = sp.eye(N)`, `Dx_2D = sp.kron(Iy, Dx1)`, `Dy_2D = sp.kron(Dy1, Ix)`.
   - `c_x_vec, c_y_vec` from `brady_livescu_2d.make_coefficient_field(N)` flattened row-major (`u[j*N + i]` with `i=x, j=y`).

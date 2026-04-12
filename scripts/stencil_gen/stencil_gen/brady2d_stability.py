@@ -428,3 +428,81 @@ def layer5_anisotropy(
     xi_mag = profile.cutoff_xi * 0.2
 
     return anisotropy_over_coefficient_field(scheme, c_x, c_y, theta_array, xi_mag)
+
+
+def build_sparse_2d_operator(
+    scheme: str,
+    kernel: str,
+    params: dict,
+    N: int,
+) -> tuple:
+    """Build the sparse 2D semi-discrete operator for the Brady-Livescu benchmark.
+
+    Constructs the full N²×N² advection operator L = -(Cx @ Dx_2D + Cy @ Dy_2D)
+    using Kronecker products of 1D differentiation matrices, then removes inflow
+    rows/columns (i=0 and j=0) to produce the reduced operator for stability
+    analysis.
+
+    Parameters
+    ----------
+    scheme : str
+        Scheme name ("E2" or "E4").
+    kernel : str
+        Kernel type ("classical", "tension", "gaussian", "multiquadric").
+    params : dict
+        Kernel-specific parameters.
+    N : int
+        Number of grid points per direction.
+
+    Returns
+    -------
+    (L_red, keep_idx) : tuple[scipy.sparse.csr_matrix, np.ndarray]
+        L_red : the reduced operator of shape ((N-1)², (N-1)²).
+        keep_idx : integer array of retained DOF indices into the full N² system.
+    """
+    import scipy.sparse as sp
+
+    from stencil_gen.benchmarks.brady_livescu_2d import make_coefficient_field
+
+    spar = _SCHEME_PARAMS[scheme]
+    p, q, nextra, nu = spar["p"], spar["q"], spar["nextra"], spar["nu"]
+
+    # Build 1D differentiation matrix
+    if kernel == "classical":
+        D1 = _build_classical_diff_matrix(N, p, nu, params["alpha"])
+    else:
+        epsilon = params.get("sigma", params.get("epsilon", 0.0))
+        D1 = build_diff_matrix_rbf(N, p, q, epsilon, kernel, nu, nextra)
+
+    D1_sp = sp.csr_matrix(D1)
+    I_N = sp.eye(N, format="csr")
+
+    # Kronecker products for column-major (Fortran-order) flattening:
+    # u_flat[j*N + i] = u[i, j], where i=x-index, j=y-index
+    Dx_2D = sp.kron(I_N, D1_sp, format="csr")  # x-derivative
+    Dy_2D = sp.kron(D1_sp, I_N, format="csr")  # y-derivative
+
+    # Coefficient fields from Brady-Livescu benchmark
+    _, _, cx_field, cy_field = make_coefficient_field(N)
+
+    # Flatten in Fortran order to match Kronecker product convention
+    cx_vec = cx_field.flatten("F")
+    cy_vec = cy_field.flatten("F")
+
+    Cx = sp.diags(cx_vec, format="csr")
+    Cy = sp.diags(cy_vec, format="csr")
+
+    # Full 2D advection operator: L = -(Cx @ Dx + Cy @ Dy)
+    L_2D = -(Cx @ Dx_2D + Cy @ Dy_2D)
+
+    # Remove inflow DOFs: i=0 (x=0) and j=0 (y=0)
+    N2 = N * N
+    flat_indices = np.arange(N2)
+    ii = flat_indices % N   # x-index
+    jj = flat_indices // N  # y-index
+    keep_mask = (ii > 0) & (jj > 0)
+    keep_idx = flat_indices[keep_mask]
+
+    L_red = L_2D[np.ix_(keep_idx, keep_idx)].tocsr()
+
+    return L_red, keep_idx
