@@ -10,6 +10,7 @@ from stencil_gen.brady2d_stability import (
     L1_TOL,
     L4_TOL,
     L5_TOL,
+    L7_TOL,
     STABILITY_TOL,
     StabilityReport,
     build_sparse_2d_operator,
@@ -17,6 +18,7 @@ from stencil_gen.brady2d_stability import (
     layer3_1d_eigenvalue,
     layer4_local_gv_2d,
     layer5_anisotropy,
+    layer7_sparse_2d_eigenvalue,
 )
 from stencil_gen.group_velocity import local_group_velocity_2d_varying
 
@@ -365,3 +367,61 @@ class TestBuildSparse2D:
         )
         eigs = np.linalg.eigvals(L_red.toarray())
         assert np.all(np.isfinite(eigs)), "All eigenvalues should be finite"
+
+
+class TestLayer7:
+    """Layer 7: sparse 2D Arnoldi eigenvalue check on the BL operator."""
+
+    def test_tension_e4_stable(self):
+        """Tension E4 at sigma=3.0 is stable at small grid sizes."""
+        result = layer7_sparse_2d_eigenvalue(
+            "E4", "tension", {"sigma": 3.0}, n_values=(21, 31),
+        )
+        for n, max_re in result["eigenvalues"].items():
+            assert max_re <= L7_TOL, (
+                f"Tension E4 sigma=3.0 unstable at N={n}: "
+                f"max Re(lambda)={max_re:.6e}"
+            )
+        assert result["max_spectral_abscissa"] <= L7_TOL
+
+    def test_classical_e4_stable(self):
+        """Classical E4 with known-good alpha is stable at N=21."""
+        alpha = [-0.7733323791884821, 0.1623961700641681]
+        result = layer7_sparse_2d_eigenvalue(
+            "E4", "classical", {"alpha": alpha}, n_values=(21,),
+        )
+        assert result["max_spectral_abscissa"] <= L7_TOL, (
+            f"Classical E4 unstable: "
+            f"max_spectral_abscissa={result['max_spectral_abscissa']:.6e}"
+        )
+
+    def test_gaussian_e4_eps_01_unstable(self):
+        """Gaussian E4 eps=0.1 (known_unstable) fails L7."""
+        kv = _load_known_values()
+        unstable = kv["E4_1"]["known_unstable"][0]
+        assert unstable["kernel"] == "gaussian"
+        eps = unstable["epsilon"]
+
+        result = layer7_sparse_2d_eigenvalue(
+            "E4", "gaussian", {"epsilon": eps}, n_values=(21,),
+        )
+        assert result["max_spectral_abscissa"] > L7_TOL, (
+            f"Expected Gaussian eps={eps} to be unstable, got "
+            f"max_spectral_abscissa={result['max_spectral_abscissa']:.6e}"
+        )
+
+    def test_return_keys(self):
+        """Layer 7 returns expected keys."""
+        result = layer7_sparse_2d_eigenvalue(
+            "E4", "tension", {"sigma": 3.0}, n_values=(21,),
+        )
+        assert "eigenvalues" in result
+        assert "max_spectral_abscissa" in result
+        assert 21 in result["eigenvalues"]
+
+    def test_custom_n_values(self):
+        """Custom n_values are respected."""
+        result = layer7_sparse_2d_eigenvalue(
+            "E4", "tension", {"sigma": 3.0}, n_values=(11, 21),
+        )
+        assert set(result["eigenvalues"].keys()) == {11, 21}
