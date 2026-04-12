@@ -371,7 +371,7 @@ Implementing Trefethen 1983 (pp. 206–207). For the semi-discrete problem `u_t 
   - File: `scripts/stencil_gen/stencil_gen/brady2d_stability.py`
   - Test: `cd scripts/stencil_gen && uv run pytest tests/test_brady2d_stability.py -x -q -k "TestLayer7"`
 
-- [ ] **41.9c** Add `layer7_with_non_normality(scheme, kernel, params, N=31) -> NonNormalityReport` wrapper:
+- [x] **41.9c** Add `layer7_with_non_normality(scheme, kernel, params, N=31) -> NonNormalityReport` wrapper:
   - Builds `L_red` at a single modest N and calls `compute_non_normality(L_red)`.
   - This links L6 to the actual BL operator (L6 defines the infrastructure, this wires it to the BL coefficient field).
   - Failure: `spectral_abscissa > L7_TOL (5e-3)` OR `transient_growth_bound > 50.0`.

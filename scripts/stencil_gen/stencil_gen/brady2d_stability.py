@@ -27,7 +27,11 @@ from stencil_gen.group_velocity import (
     local_group_velocity_2d_varying,
     max_local_gv_error_2d,
 )
-from stencil_gen.non_normality import spectral_abscissa_sparse
+from stencil_gen.non_normality import (
+    NonNormalityReport,
+    compute_non_normality,
+    spectral_abscissa_sparse,
+)
 from stencil_gen.phs import (
     build_diff_matrix_rbf,
     stability_eigenvalue,
@@ -565,3 +569,57 @@ def layer7_sparse_2d_eigenvalue(
         "eigenvalues": eigenvalues,
         "max_spectral_abscissa": max(eigenvalues.values()),
     }
+
+
+# Transient growth bound threshold for L7+non-normality combined check.
+L7_TRANSIENT_GROWTH_TOL = 50.0
+
+
+def layer7_with_non_normality(
+    scheme: str,
+    kernel: str,
+    params: dict,
+    N: int = 31,
+) -> NonNormalityReport:
+    """L7 + L6: non-normality diagnostics on the full 2D BL operator.
+
+    Builds the reduced 2D Brady-Livescu operator at a single grid size and
+    computes the full non-normality report (spectral abscissa, numerical
+    abscissa, Henrici departure, pseudospectral abscissa, Kreiss constant,
+    transient growth bound).
+
+    This links L6 infrastructure to the actual BL operator — L6 defines the
+    metric functions, this wires them to the BL coefficient field.
+
+    Failure criteria:
+    - spectral_abscissa > L7_TOL (5e-3), OR
+    - transient_growth_bound > L7_TRANSIENT_GROWTH_TOL (50.0).
+
+    Parameters
+    ----------
+    scheme : str
+        Scheme name ("E2" or "E4").
+    kernel : str
+        Kernel type ("classical", "tension", "gaussian", "multiquadric").
+    params : dict
+        Kernel-specific parameters.
+    N : int
+        Grid points per direction.  Default 31 gives a (30×30 = 900)-DOF
+        reduced operator, small enough for dense SVD in the resolvent
+        computation.
+
+    Returns
+    -------
+    NonNormalityReport
+        Full non-normality diagnostics for the 2D BL operator.
+    """
+    L_red, _ = build_sparse_2d_operator(scheme, kernel, params, N)
+    report = compute_non_normality(L_red)
+    logger.debug(
+        "L7+non-normality %s/%s N=%d: spectral_abscissa=%.6e, "
+        "transient_growth_bound=%.2f, kreiss_constant=%.2f, compute_time=%.1fs",
+        scheme, kernel, N, report.spectral_abscissa,
+        report.transient_growth_bound, report.kreiss_constant,
+        report.compute_time,
+    )
+    return report

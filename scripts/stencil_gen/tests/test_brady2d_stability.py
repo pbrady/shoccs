@@ -11,6 +11,7 @@ from stencil_gen.brady2d_stability import (
     L4_TOL,
     L5_TOL,
     L7_TOL,
+    L7_TRANSIENT_GROWTH_TOL,
     STABILITY_TOL,
     StabilityReport,
     build_sparse_2d_operator,
@@ -19,6 +20,7 @@ from stencil_gen.brady2d_stability import (
     layer4_local_gv_2d,
     layer5_anisotropy,
     layer7_sparse_2d_eigenvalue,
+    layer7_with_non_normality,
 )
 from stencil_gen.group_velocity import local_group_velocity_2d_varying
 
@@ -425,3 +427,74 @@ class TestLayer7:
             "E4", "tension", {"sigma": 3.0}, n_values=(11, 21),
         )
         assert set(result["eigenvalues"].keys()) == {11, 21}
+
+
+class TestLayer7WithNonNormality:
+    """Layer 7 + L6: non-normality diagnostics on the full 2D BL operator."""
+
+    @pytest.mark.slow
+    def test_classical_e4_passes(self):
+        """Classical E4 with known-good alpha passes the combined L7+L6 check.
+
+        Both the spectral abscissa and transient growth bound must be within
+        tolerances for a scheme that is known to be long-time stable in the
+        Brady-Livescu benchmark.
+        """
+        alpha = [-0.7733323791884821, 0.1623961700641681]
+        report = layer7_with_non_normality(
+            "E4", "classical", {"alpha": alpha}, N=21,
+        )
+        assert report.spectral_abscissa <= L7_TOL, (
+            f"Classical E4 spectral_abscissa={report.spectral_abscissa:.6e} "
+            f"exceeds L7_TOL={L7_TOL}"
+        )
+        assert report.transient_growth_bound <= L7_TRANSIENT_GROWTH_TOL, (
+            f"Classical E4 transient_growth_bound={report.transient_growth_bound:.2f} "
+            f"exceeds L7_TRANSIENT_GROWTH_TOL={L7_TRANSIENT_GROWTH_TOL}"
+        )
+        # Sanity: all fields populated and finite
+        assert np.isfinite(report.numerical_abscissa)
+        assert np.isfinite(report.henrici_departure)
+        assert np.isfinite(report.kreiss_constant)
+        assert report.n == 20 * 20  # (21-1)^2 = 400
+
+    @pytest.mark.slow
+    def test_gaussian_e4_eps_01_fails(self):
+        """Gaussian E4 eps=0.1 (known_unstable) fails the combined check.
+
+        This scheme has a positive spectral abscissa in the 2D BL operator,
+        so it must fail at least on the spectral_abscissa criterion.
+        """
+        kv = _load_known_values()
+        unstable = kv["E4_1"]["known_unstable"][0]
+        assert unstable["kernel"] == "gaussian"
+        eps = unstable["epsilon"]
+
+        report = layer7_with_non_normality(
+            "E4", "gaussian", {"epsilon": eps}, N=21,
+        )
+        # The known-unstable scheme must fail on at least one criterion
+        fails_spectral = report.spectral_abscissa > L7_TOL
+        fails_transient = report.transient_growth_bound > L7_TRANSIENT_GROWTH_TOL
+        assert fails_spectral or fails_transient, (
+            f"Gaussian eps={eps} should fail: "
+            f"spectral_abscissa={report.spectral_abscissa:.6e}, "
+            f"transient_growth_bound={report.transient_growth_bound:.2f}"
+        )
+
+    @pytest.mark.slow
+    def test_report_fields_populated(self):
+        """All NonNormalityReport fields are populated for a BL-sized operator."""
+        report = layer7_with_non_normality(
+            "E4", "tension", {"sigma": 3.0}, N=21,
+        )
+        assert np.isfinite(report.spectral_abscissa)
+        assert np.isfinite(report.numerical_abscissa)
+        assert np.isfinite(report.henrici_departure)
+        assert report.henrici_departure >= 0.0
+        assert np.isfinite(report.kreiss_constant)
+        assert report.kreiss_constant >= 0.0
+        assert np.isfinite(report.transient_growth_bound)
+        assert report.compute_time > 0.0
+        assert isinstance(report.pseudospectral_abscissae, dict)
+        assert len(report.pseudospectral_abscissae) > 0
