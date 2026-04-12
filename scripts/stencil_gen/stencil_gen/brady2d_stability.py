@@ -155,6 +155,21 @@ class StabilityReport:
                 f"max_aligned_error={err:.4e}"
             )
 
+        # Layer 6 (standalone 1D non-normality)
+        if self.layer6 is not None:
+            d = self.layer6
+            sa = d.get("spectral_abscissa", float("nan"))
+            tgb = d.get("transient_growth_bound", float("nan"))
+            sa_ok = sa <= STABILITY_TOL
+            tgb_ok = tgb <= L6_TRANSIENT_GROWTH_TOL
+            status = "PASS" if (sa_ok and tgb_ok) else "FAIL"
+            lines.append(
+                f"L6  Non-normality   : {status:4s}  "
+                f"kreiss_K={d.get('kreiss_constant', float('nan')):.2f}  "
+                f"tgb={tgb:.2f}  "
+                f"henrici={d.get('henrici_departure', float('nan')):.4e}"
+            )
+
         # Layer 7
         if self.layer7 is not None:
             d = self.layer7
@@ -165,11 +180,11 @@ class StabilityReport:
                 f"max_spectral_abscissa={msa:.4e}"
             )
 
-        # Non-normality
-        if self.non_normality is not None:
+        # Non-normality (2D, from L7)
+        if self.non_normality is not None and self.layer7 is not None:
             nn = self.non_normality
             lines.append(
-                f"L6  Non-normality   :       "
+                f"L7+ Non-normality  :       "
                 f"kreiss_K={nn.kreiss_constant:.2f}  "
                 f"tgb={nn.transient_growth_bound:.2f}  "
                 f"henrici={nn.henrici_departure:.4e}"
@@ -617,6 +632,75 @@ def layer5_anisotropy(
     return anisotropy_over_coefficient_field(scheme, c_x, c_y, theta_array, xi_mag)
 
 
+def layer6_non_normality(
+    scheme: str,
+    kernel: str,
+    params: dict,
+    n: int = 80,
+) -> dict:
+    """L6: non-normality diagnostics on the 1D differentiation matrix.
+
+    Runs the full non-normality analysis (spectral/numerical abscissa, Henrici
+    departure, Kreiss constant, transient growth bound) on the 1D first-derivative
+    operator with inflow BC removed.  This is cheaper than the 2D L7 check
+    (~seconds vs ~tens of seconds) and catches operators with dangerous transient
+    growth even when eigenvalues are stable.
+
+    Parameters
+    ----------
+    scheme : str
+        Scheme name ("E2" or "E4").
+    kernel : str
+        Kernel type ("classical", "tension", "gaussian", "multiquadric").
+    params : dict
+        Kernel-specific parameters.
+    n : int
+        Grid size for the 1D differentiation matrix.
+
+    Returns
+    -------
+    dict with keys:
+        spectral_abscissa : float
+        numerical_abscissa : float
+        henrici_departure : float
+        kreiss_constant : float
+        transient_growth_bound : float
+        compute_time : float
+        non_normality_report : NonNormalityReport
+    """
+    sp = _SCHEME_PARAMS[scheme]
+    p, q, nextra, nu = sp["p"], sp["q"], sp["nextra"], sp["nu"]
+
+    if kernel == "classical":
+        D = _build_classical_diff_matrix(n, p, nu, params["alpha"])
+    else:
+        epsilon = params.get("sigma", params.get("epsilon", 0.0))
+        D = build_diff_matrix_rbf(n, p, q, epsilon, kernel, nu, nextra)
+
+    # Remove inflow row/column (row 0) to form the semi-discrete operator
+    # for the homogeneous stability problem: -D_bc
+    L_1d = -D[1:, 1:]
+
+    report = compute_non_normality(L_1d)
+    logger.debug(
+        "L6 %s/%s n=%d: spectral_abscissa=%.6e, kreiss_K=%.2f, "
+        "tgb=%.2f, compute_time=%.1fs",
+        scheme, kernel, n, report.spectral_abscissa,
+        report.kreiss_constant, report.transient_growth_bound,
+        report.compute_time,
+    )
+
+    return {
+        "spectral_abscissa": report.spectral_abscissa,
+        "numerical_abscissa": report.numerical_abscissa,
+        "henrici_departure": report.henrici_departure,
+        "kreiss_constant": report.kreiss_constant,
+        "transient_growth_bound": report.transient_growth_bound,
+        "compute_time": report.compute_time,
+        "non_normality_report": report,
+    }
+
+
 def build_sparse_2d_operator(
     scheme: str,
     kernel: str,
@@ -752,6 +836,12 @@ def layer7_sparse_2d_eigenvalue(
         "max_spectral_abscissa": max(eigenvalues.values()),
     }
 
+
+# Layer-6 threshold: transient growth bound on the 1D operator.
+# This is the standalone non-normality check on the 1D diff matrix, cheaper
+# than the full 2D L7 check.  The threshold is the same as L7 since the
+# 1D operator should be at least as well-behaved as the 2D one.
+L6_TRANSIENT_GROWTH_TOL = 50.0
 
 # Transient growth bound threshold for L7+non-normality combined check.
 L7_TRANSIENT_GROWTH_TOL = 50.0
@@ -905,6 +995,28 @@ def brady2d_stability_score(
         aniso_err = report.layer5["max_aligned_error"]
         if aniso_err > L5_TOL:
             _record_failure(5, f"max_aligned_error={aniso_err:.4e} > L5_TOL={L5_TOL}")
+        if _should_stop():
+            report.overall_verdict = "fail"
+            report.compute_time = time.perf_counter() - t0
+            return report
+
+    # --- Layer 6: non-normality diagnostics on 1D operator ---
+    if max_layer >= 6:
+        l6 = layer6_non_normality(scheme, kernel, params)
+        report.layer6 = l6
+        report.non_normality = l6["non_normality_report"]
+        sa = l6["spectral_abscissa"]
+        tgb = l6["transient_growth_bound"]
+        if sa > STABILITY_TOL:
+            _record_failure(
+                6, f"1D spectral_abscissa={sa:.4e} > STABILITY_TOL={STABILITY_TOL}"
+            )
+        elif tgb > L6_TRANSIENT_GROWTH_TOL:
+            _record_failure(
+                6,
+                f"1D transient_growth_bound={tgb:.2f} "
+                f"> L6_TRANSIENT_GROWTH_TOL={L6_TRANSIENT_GROWTH_TOL}",
+            )
         if _should_stop():
             report.overall_verdict = "fail"
             report.compute_time = time.perf_counter() - t0

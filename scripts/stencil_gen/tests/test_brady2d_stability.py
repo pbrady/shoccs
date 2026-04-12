@@ -10,6 +10,7 @@ from stencil_gen.brady2d_stability import (
     L1_TOL,
     L4_TOL,
     L5_TOL,
+    L6_TRANSIENT_GROWTH_TOL,
     L7_TOL,
     L7_TRANSIENT_GROWTH_TOL,
     STABILITY_TOL,
@@ -21,6 +22,7 @@ from stencil_gen.brady2d_stability import (
     layer3_1d_eigenvalue,
     layer4_local_gv_2d,
     layer5_anisotropy,
+    layer6_non_normality,
     layer7_sparse_2d_eigenvalue,
     layer7_with_non_normality,
 )
@@ -732,3 +734,93 @@ class TestStabilityScoreOrchestrator:
         assert report.kreiss is not None
         assert report.kreiss is report.layer2
         assert report.kreiss.is_stable is True
+
+    def test_max_layer_6_runs_non_normality(self):
+        """max_layer=6 populates layer6 and non_normality fields."""
+        report = brady2d_stability_score(
+            "E4", "tension", {"sigma": 3.0}, max_layer=6,
+        )
+        assert report.overall_verdict == "pass"
+        assert report.layer6 is not None, "layer6 should be populated at max_layer=6"
+        assert report.non_normality is not None, (
+            "non_normality should be populated at max_layer=6"
+        )
+        assert "spectral_abscissa" in report.layer6
+        assert "kreiss_constant" in report.layer6
+        assert "transient_growth_bound" in report.layer6
+        assert report.layer6["transient_growth_bound"] <= L6_TRANSIENT_GROWTH_TOL
+        # L7 should not be run
+        assert report.layer7 is None
+
+    def test_max_layer_6_differs_from_5(self):
+        """max_layer=6 produces different populated fields than max_layer=5."""
+        report5 = brady2d_stability_score(
+            "E4", "tension", {"sigma": 3.0}, max_layer=5,
+        )
+        report6 = brady2d_stability_score(
+            "E4", "tension", {"sigma": 3.0}, max_layer=6,
+        )
+        # max_layer=5 should not have layer6 or non_normality
+        assert report5.layer6 is None
+        assert report5.non_normality is None
+        # max_layer=6 should have both
+        assert report6.layer6 is not None
+        assert report6.non_normality is not None
+
+    def test_max_layer_6_str_shows_l6(self):
+        """The __str__ output at max_layer=6 includes an L6 line."""
+        report = brady2d_stability_score(
+            "E4", "tension", {"sigma": 3.0}, max_layer=6,
+        )
+        s = str(report)
+        assert "L6  Non-normality" in s
+        assert "kreiss_K=" in s
+
+
+class TestLayer6:
+    """Layer 6: standalone 1D non-normality diagnostics."""
+
+    def test_tension_e4_returns_expected_keys(self):
+        """layer6_non_normality returns all expected keys."""
+        result = layer6_non_normality("E4", "tension", {"sigma": 3.0})
+        expected_keys = {
+            "spectral_abscissa",
+            "numerical_abscissa",
+            "henrici_departure",
+            "kreiss_constant",
+            "transient_growth_bound",
+            "compute_time",
+            "non_normality_report",
+        }
+        assert expected_keys == set(result.keys())
+
+    def test_tension_e4_stable(self):
+        """Tension E4 at sigma=3.0 has stable 1D non-normality metrics."""
+        result = layer6_non_normality("E4", "tension", {"sigma": 3.0})
+        assert result["spectral_abscissa"] <= STABILITY_TOL
+        assert result["transient_growth_bound"] <= L6_TRANSIENT_GROWTH_TOL
+        assert result["compute_time"] > 0.0
+
+    def test_e2_phs_stable(self):
+        """E2 PHS (tension sigma=0) has stable 1D non-normality metrics."""
+        result = layer6_non_normality("E2", "tension", {"sigma": 0.0})
+        assert result["spectral_abscissa"] <= STABILITY_TOL
+        assert result["transient_growth_bound"] <= L6_TRANSIENT_GROWTH_TOL
+
+    def test_gaussian_e4_unstable(self):
+        """Gaussian E4 eps=0.1 has positive spectral abscissa (unstable)."""
+        kv = _load_known_values()
+        unstable = kv["E4_1"]["known_unstable"][0]
+        assert unstable["kernel"] == "gaussian"
+        eps = unstable["epsilon"]
+
+        result = layer6_non_normality("E4", "gaussian", {"epsilon": eps})
+        # Known eigenvalue-unstable: spectral abscissa should be positive
+        assert result["spectral_abscissa"] > STABILITY_TOL
+
+    def test_non_normality_report_field(self):
+        """The non_normality_report field is a proper NonNormalityReport."""
+        result = layer6_non_normality("E4", "tension", {"sigma": 3.0}, n=30)
+        nn = result["non_normality_report"]
+        assert isinstance(nn, NonNormalityReport)
+        assert nn.n == 29  # n=30 minus inflow row
