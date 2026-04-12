@@ -86,7 +86,58 @@ def spectral_abscissa_sparse(L, k: int = 20, shift_invert: bool = True):
     tuple[float, np.ndarray]
         (max_real_part, all_computed_eigenvalues)
     """
-    raise NotImplementedError("spectral_abscissa_sparse: 41.8b")
+    import scipy.sparse as sp
+    from scipy.sparse.linalg import eigs, ArpackNoConvergence, ArpackError
+
+    n = L.shape[0]
+
+    # Dense fallback for small matrices
+    if n <= 900 and (not sp.issparse(L) or n <= k + 1):
+        A = L.toarray() if sp.issparse(L) else np.asarray(L)
+        evals = np.linalg.eigvals(A)
+        return float(np.max(evals.real)), evals
+
+    # Ensure sparse format for Arnoldi
+    if not sp.issparse(L):
+        L = sp.csr_matrix(L)
+
+    # Clamp k to valid range: k must be < n for eigs
+    k_use = min(k, n - 2) if n > 2 else 1
+
+    # Primary: standard Arnoldi for rightmost eigenvalues
+    try:
+        evals = eigs(L, k=k_use, which="LR", return_eigenvectors=False)
+        return float(np.max(evals.real)), evals
+    except ArpackNoConvergence as exc:
+        logger.debug("eigs(which='LR') did not converge: %s", exc)
+        if exc.eigenvalues is not None and len(exc.eigenvalues) > 0:
+            # Some eigenvalues did converge — use them
+            evals = exc.eigenvalues
+            logger.debug("Using %d partially converged eigenvalues", len(evals))
+            return float(np.max(evals.real)), evals
+
+    # Retry with shift-invert around the imaginary axis
+    if shift_invert:
+        try:
+            evals = eigs(L, k=k_use, sigma=0.0, which="LR",
+                         return_eigenvectors=False)
+            return float(np.max(evals.real)), evals
+        except (ArpackNoConvergence, ArpackError) as exc:
+            logger.debug("Shift-invert eigs failed: %s", exc)
+            if isinstance(exc, ArpackNoConvergence) and exc.eigenvalues is not None and len(exc.eigenvalues) > 0:
+                evals = exc.eigenvalues
+                return float(np.max(evals.real)), evals
+
+    # Final fallback: densify if small enough
+    if n <= 900:
+        A = L.toarray() if sp.issparse(L) else np.asarray(L)
+        evals = np.linalg.eigvals(A)
+        return float(np.max(evals.real)), evals
+
+    raise RuntimeError(
+        f"spectral_abscissa_sparse: all Arnoldi attempts failed for {n}x{n} "
+        f"matrix and N > 900 prevents dense fallback"
+    )
 
 
 def numerical_abscissa_sparse(L) -> float:

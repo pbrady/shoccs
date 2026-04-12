@@ -297,7 +297,7 @@ Implementing Trefethen 1983 (pp. 206–207). For the semi-discrete problem `u_t 
   - File: `scripts/stencil_gen/stencil_gen/non_normality.py` (new)
   - Test: `cd scripts/stencil_gen && uv run python -c "from stencil_gen.non_normality import NonNormalityReport; print('ok')"`
 
-- [ ] **41.8b** Implement `spectral_abscissa_sparse(L, k=20, shift_invert=True)`:
+- [x] **41.8b** Implement `spectral_abscissa_sparse(L, k=20, shift_invert=True)`:
   - Primary: `scipy.sparse.linalg.eigs(L, k=k, which="LR")`.
   - On `ArpackNoConvergence`: retry with `sigma=0.0, which="LR"` (shift-invert).
   - Fallback: if `L.shape[0] <= 900` densify and use `np.linalg.eigvals`.
