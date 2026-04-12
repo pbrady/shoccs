@@ -190,6 +190,11 @@ Implementing Trefethen 1983 (pp. 206–207). For the semi-discrete problem `u_t 
   - File: `scripts/stencil_gen/stencil_gen/gks_kreiss.py`, `scripts/stencil_gen/tests/test_gks_kreiss.py`
   - Test: `cd scripts/stencil_gen && uv run pytest tests/test_gks_kreiss.py -x -q -k "TestClassifyImagAxis or test_s_equals_zero"`
 
+- [ ] **41.3h-followup2** Add test for near-unit-circle defective path in `_classify_imag_axis`:
+  - The `return "defective"` at gks_kreiss.py line 396 (the near-unit defective check added in 41.3h-followup) has zero test coverage. `test_defective_roots_far_from_unit_circle_returns_no_candidates` only tests the non-triggering case. Add `test_defective_roots_near_unit_circle_returns_defective` that engineers a stencil with a double root near `|κ| = 1` (e.g., `(κ - 0.9999)²(κ - 5)` → reverse-engineer weights from `np.poly([0.9999, 0.9999, 5.0])`) and asserts `_classify_imag_axis` returns `"defective"`.
+  - File: `scripts/stencil_gen/tests/test_gks_kreiss.py`
+  - Test: `cd scripts/stencil_gen && uv run pytest tests/test_gks_kreiss.py -x -q -k "test_defective_roots_near_unit_circle"`
+
 ### 41.4 — Generalize `gks_group_velocity_check` for all four boundary sides
 
 - [ ] **41.4a** Add `side: Literal["left", "right", "bottom", "top"] = "left"` parameter to `gks_group_velocity_check` at `group_velocity.py:964`:
