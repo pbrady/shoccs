@@ -276,3 +276,34 @@ class TestLayer5:
         # BL field has angles roughly in (0, pi/4), so worst_theta
         # should be in the first quadrant.
         assert 0.0 < result["worst_theta"] < np.pi / 2
+
+    def test_large_xi_mag_exceeds_threshold(self):
+        """At a large wavenumber (80% of cutoff), E2 anisotropy exceeds L5_TOL.
+
+        The default layer5_anisotropy uses 20% of the cutoff, where E2 just
+        barely passes (0.048 vs L5_TOL=0.05).  At 80% of the cutoff the
+        anisotropy error is much larger, providing the failure-side test for
+        the L5 threshold.
+        """
+        from stencil_gen.benchmarks.brady_livescu_2d import make_coefficient_field
+        from stencil_gen.group_velocity import (
+            anisotropy_over_coefficient_field,
+            interior_group_velocity,
+        )
+
+        N = 21
+        _, _, c_x, c_y = make_coefficient_field(N)
+        theta_array = np.linspace(0.01, np.pi / 2 - 0.01, 200)
+
+        # E2 interior cutoff at p=1
+        profile = interior_group_velocity(1, 1, np.linspace(0.01, np.pi, 200))
+        xi_mag = profile.cutoff_xi * 0.8  # 80% of cutoff instead of 20%
+
+        result = anisotropy_over_coefficient_field(
+            "E2", c_x, c_y, theta_array, xi_mag,
+        )
+        assert result["max_aligned_error"] > L5_TOL, (
+            f"E2 at 80% cutoff xi_mag={xi_mag:.3f}: "
+            f"max_aligned_error={result['max_aligned_error']:.6f} "
+            f"should exceed L5_TOL={L5_TOL}"
+        )
