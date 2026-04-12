@@ -251,6 +251,30 @@ class TestSigmaField:
         result = _sigma_field(L, s_grid)
         assert result.shape == (4, 7)
 
+    def test_dense_large_input(self):
+        """Dense ndarray with n > 900 does not crash (41.8d-followup).
+
+        Previously, _sigma_field would crash with NameError on I_sp/L_sp
+        when given a dense matrix with n > 900, because those variables
+        were only set in the sp.issparse(L) branch.
+        """
+        n = 901
+        # Diagonal matrix: eigenvalues are -1, -2, ..., -901
+        diag_vals = -np.arange(1, n + 1, dtype=float)
+        L_dense = np.diag(diag_vals)
+
+        # Avoid s values that coincide with eigenvalues (sigma_min = 0
+        # is poorly handled by sparse svds).  Use points away from the
+        # spectrum so sigma_min is comfortably positive.
+        s_grid = np.array([0.5 + 0j, 0.0 + 3j, -0.5 + 1j])
+        result = _sigma_field(L_dense, s_grid)
+
+        # Verify against brute-force dense SVD
+        for idx, s in enumerate(s_grid):
+            M = s * np.eye(n) - L_dense
+            sv_ref = np.linalg.svd(M, compute_uv=False)[-1]
+            assert result[idx] == pytest.approx(sv_ref, abs=1e-4)
+
     def test_sparse_medium_size(self):
         """Sparse path exercised for N > 200 (if we make L sparse and large)."""
         n = 250

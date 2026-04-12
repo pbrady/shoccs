@@ -284,6 +284,10 @@ def _sigma_field(L, s_grid: np.ndarray) -> np.ndarray:
         I_sp = sp.eye(n, format="csc")
     else:
         L_dense = np.asarray(L, dtype=complex)
+        if not use_dense:
+            # Sparse SVD path needs L_sp/I_sp even when input was dense
+            L_sp = sp.csc_matrix(L_dense)
+            I_sp = sp.eye(n, format="csc")
 
     flat = s_grid.ravel()
     result = np.empty(flat.shape[0], dtype=float)
