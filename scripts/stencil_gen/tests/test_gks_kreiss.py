@@ -552,6 +552,36 @@ class TestClassifyImagAxis:
         )
         assert result == "no_candidates"
 
+    def test_defective_roots_near_unit_circle_returns_defective(self):
+        """When defective roots are near the unit circle, return 'defective'.
+
+        Engineer a stencil whose characteristic polynomial has a double root
+        at kappa=0.99995 (|kappa| - 1 = -5e-5, within unit_tol=1e-4) and a
+        third root at kappa=5 (outside the unit disk).
+
+        Target polynomial: (kappa - 0.99995)^2 (kappa - 5.0)
+        With offsets [-2, -1, 0, 1], L_left=2, the polynomial is:
+            Q(kappa) = w_0 + w_1*kappa + (w_2 + s)*kappa^2 + w_3*kappa^3
+        Set s=0 and match coefficients.
+        """
+        r = 0.99995
+        a = 5.0
+        # (kappa - r)^2 (kappa - a) = kappa^3 - (2r+a)*kappa^2
+        #                            + (r^2 + 2*r*a)*kappa - r^2*a
+        w_3 = 1.0
+        s_val = 0.0 + 0j
+        w_2 = -(2 * r + a) - s_val  # coeff of kappa^2 minus s
+        w_1 = r**2 + 2 * r * a
+        w_0 = -(r**2 * a)
+
+        interior_weights = np.array([w_0, w_1, w_2, w_3])
+        interior_offsets = np.array([-2, -1, 0, 1])
+
+        result = _classify_imag_axis(
+            interior_weights, interior_offsets, s_candidate=s_val
+        )
+        assert result == "defective"
+
 
 class TestKreissStabilityCheck:
     """Tests for kreiss_stability_check orchestrator (41.3g)."""
