@@ -1,23 +1,318 @@
 {
   "E2_1": {
-    "params": {"p": 1, "q": 1, "nextra": 1, "nu": 1},
-    "tension": {"sigma": 6.0, "stable_at": [20, 40, 80]},
-    "gaussian": {"epsilon": 2.0, "stable_at": [40]},
-    "multiquadric": {"epsilon": 1.0, "stable_at": [40]},
-    "phs_k2": {"stable_at": [20, 40, 80, 160]}
+    "params": {
+      "p": 1,
+      "q": 1,
+      "nextra": 1,
+      "nu": 1
+    },
+    "tension": {
+      "sigma": 6.0,
+      "stable_at": [
+        20,
+        40,
+        80
+      ]
+    },
+    "gaussian": {
+      "epsilon": 2.0,
+      "stable_at": [
+        40
+      ]
+    },
+    "multiquadric": {
+      "epsilon": 1.0,
+      "stable_at": [
+        40
+      ]
+    },
+    "phs_k2": {
+      "stable_at": [
+        20,
+        40,
+        80,
+        160
+      ]
+    }
   },
   "E4_1": {
-    "params": {"p": 2, "q": 3, "nextra": 0, "nu": 1},
-    "tension": {"sigma": 3.0, "stable_at": [20, 40, 80, 160]},
-    "gaussian": {"epsilon": 0.9, "stable_at": [40]},
-    "multiquadric": {"epsilon": 1.0, "stable_at": [40]},
-    "phs_k2": {"stable_at": [20, 40, 80, 160]},
-    "known_unstable": [{"kernel": "gaussian", "epsilon": 0.1, "n": 20}]
+    "params": {
+      "p": 2,
+      "q": 3,
+      "nextra": 0,
+      "nu": 1
+    },
+    "tension": {
+      "sigma": 3.0,
+      "stable_at": [
+        20,
+        40,
+        80,
+        160
+      ]
+    },
+    "gaussian": {
+      "epsilon": 0.9,
+      "stable_at": [
+        40
+      ]
+    },
+    "multiquadric": {
+      "epsilon": 1.0,
+      "stable_at": [
+        40
+      ]
+    },
+    "phs_k2": {
+      "stable_at": [
+        20,
+        40,
+        80,
+        160
+      ]
+    },
+    "known_unstable": [
+      {
+        "kernel": "gaussian",
+        "epsilon": 0.1,
+        "n": 20
+      }
+    ]
   },
   "footprint": {
-    "E4_nextra0_phs": {"nextra": 0, "stable_at": [20, 40, 80, 160]},
-    "E4_nextra0_tension_3": {"nextra": 0, "sigma": 3.0, "stable_at": [40]},
-    "E4_nextra1_phs": {"nextra": 1, "stable_at": [40]},
-    "E4_nextra2_phs": {"nextra": 2, "stable_at": [40]}
+    "E4_nextra0_phs": {
+      "nextra": 0,
+      "stable_at": [
+        20,
+        40,
+        80,
+        160
+      ]
+    },
+    "E4_nextra0_tension_3": {
+      "nextra": 0,
+      "sigma": 3.0,
+      "stable_at": [
+        40
+      ]
+    },
+    "E4_nextra1_phs": {
+      "nextra": 1,
+      "stable_at": [
+        40
+      ]
+    },
+    "E4_nextra2_phs": {
+      "nextra": 2,
+      "stable_at": [
+        40
+      ]
+    }
+  },
+  "brady2d_calibration": {
+    "E4_classical": {
+      "overall_verdict": "pass",
+      "failed_layer": null,
+      "failed_reason": "",
+      "compute_time": 1.1718094169918913,
+      "layer1": {
+        "interior_gv_err_x": 0.00013016508525931503,
+        "interior_gv_err_y": 0.00013016508525931503,
+        "boundary_gv_err": 0.021056053547695353,
+        "cutoff_fraction": 0.57422393669978
+      },
+      "layer2": {
+        "is_stable": true
+      },
+      "layer3": {
+        "max_stab_eig": -0.0001808367140203875
+      },
+      "layer4": {
+        "max_local_gv_error": 0.00017360868541544126
+      },
+      "layer5": {
+        "max_aligned_error": 0.0026147663048305177
+      },
+      "layer6": {
+        "spectral_abscissa": -0.0001808367140203875,
+        "transient_growth_bound": 8.527076798420156
+      }
+    },
+    "E2_phs_k2": {
+      "overall_verdict": "pass",
+      "failed_layer": null,
+      "failed_reason": "",
+      "compute_time": 0.45361716600018553,
+      "layer1": {
+        "interior_gv_err_x": 0.011473792229796054,
+        "interior_gv_err_y": 0.011473792229796054,
+        "boundary_gv_err": 0.0036362503367136645,
+        "cutoff_fraction": 0.5642056763868336
+      },
+      "layer2": {
+        "is_stable": true
+      },
+      "layer3": {
+        "max_stab_eig": -0.00011226540786009979
+      },
+      "layer4": {
+        "max_local_gv_error": 0.01237493230014061
+      },
+      "layer5": {
+        "max_aligned_error": 0.04811311242252088
+      },
+      "layer6": {
+        "spectral_abscissa": -0.00011226540786009979,
+        "transient_growth_bound": 3.346610142188868
+      }
+    },
+    "E4_phs_k2": {
+      "overall_verdict": "pass",
+      "failed_layer": null,
+      "failed_reason": "",
+      "compute_time": 0.7013166249962524,
+      "layer1": {
+        "interior_gv_err_x": 0.00013016508525931503,
+        "interior_gv_err_y": 0.00013016508525931503,
+        "boundary_gv_err": 0.02119025992732393,
+        "cutoff_fraction": 0.6243152382645119
+      },
+      "layer2": {
+        "is_stable": true
+      },
+      "layer3": {
+        "max_stab_eig": -0.0005885839609341391
+      },
+      "layer4": {
+        "max_local_gv_error": 0.00017360868541544126
+      },
+      "layer5": {
+        "max_aligned_error": 0.0026147663048305177
+      },
+      "layer6": {
+        "spectral_abscissa": -0.0005885839609341391,
+        "transient_growth_bound": 4.285838618412199
+      }
+    },
+    "E2_tension_6": {
+      "overall_verdict": "fail",
+      "failed_layer": 1,
+      "failed_reason": "boundary_gv_err=9.7527e-02 > L1_TOL=0.05",
+      "compute_time": 0.0008650000090710819,
+      "layer1": {
+        "interior_gv_err_x": 0.011473792229796054,
+        "interior_gv_err_y": 0.011473792229796054,
+        "boundary_gv_err": 0.0975269363046769,
+        "cutoff_fraction": 0.5391600256044679
+      }
+    },
+    "E4_tension_3": {
+      "overall_verdict": "pass",
+      "failed_layer": null,
+      "failed_reason": "",
+      "compute_time": 0.6543935840018094,
+      "layer1": {
+        "interior_gv_err_x": 0.00013016508525931503,
+        "interior_gv_err_y": 0.00013016508525931503,
+        "boundary_gv_err": 0.03633339025998916,
+        "cutoff_fraction": 0.5892513271691996
+      },
+      "layer2": {
+        "is_stable": true
+      },
+      "layer3": {
+        "max_stab_eig": -7.802238653237703e-06
+      },
+      "layer4": {
+        "max_local_gv_error": 0.00017360868541544126
+      },
+      "layer5": {
+        "max_aligned_error": 0.0026147663048305177
+      },
+      "layer6": {
+        "spectral_abscissa": -7.802238653237703e-06,
+        "transient_growth_bound": 3.332464641086054
+      }
+    },
+    "E2_gaussian_2": {
+      "overall_verdict": "fail",
+      "failed_layer": 1,
+      "failed_reason": "boundary_gv_err=2.6981e-01 > L1_TOL=0.05",
+      "compute_time": 0.0006991659756749868,
+      "layer1": {
+        "interior_gv_err_x": 0.011473792229796054,
+        "interior_gv_err_y": 0.011473792229796054,
+        "boundary_gv_err": 0.2698147449392271,
+        "cutoff_fraction": 0.35382220981496026
+      }
+    },
+    "E4_gaussian_09": {
+      "overall_verdict": "pass",
+      "failed_layer": null,
+      "failed_reason": "",
+      "compute_time": 0.6590312079933938,
+      "layer1": {
+        "interior_gv_err_x": 0.00013016508525931503,
+        "interior_gv_err_y": 0.00013016508525931503,
+        "boundary_gv_err": 0.034342000515673377,
+        "cutoff_fraction": 0.6543700192033507
+      },
+      "layer2": {
+        "is_stable": true
+      },
+      "layer3": {
+        "max_stab_eig": -2.948974986938358e-05
+      },
+      "layer4": {
+        "max_local_gv_error": 0.00017360868541544126
+      },
+      "layer5": {
+        "max_aligned_error": 0.0026147663048305177
+      },
+      "layer6": {
+        "spectral_abscissa": -2.948974986938358e-05,
+        "transient_growth_bound": 4.411646616676294
+      }
+    },
+    "E2_multiquadric_1": {
+      "overall_verdict": "fail",
+      "failed_layer": 1,
+      "failed_reason": "boundary_gv_err=5.9976e-02 > L1_TOL=0.05",
+      "compute_time": 0.0007015000155661255,
+      "layer1": {
+        "interior_gv_err_x": 0.011473792229796054,
+        "interior_gv_err_y": 0.011473792229796054,
+        "boundary_gv_err": 0.05997615349761254,
+        "cutoff_fraction": 0.5792330668562532
+      }
+    },
+    "E4_multiquadric_1": {
+      "overall_verdict": "pass",
+      "failed_layer": null,
+      "failed_reason": "",
+      "compute_time": 0.6141156250087079,
+      "layer1": {
+        "interior_gv_err_x": 0.00013016508525931503,
+        "interior_gv_err_y": 0.00013016508525931503,
+        "boundary_gv_err": 0.023323536204860496,
+        "cutoff_fraction": 0.6343334985774581
+      },
+      "layer2": {
+        "is_stable": true
+      },
+      "layer3": {
+        "max_stab_eig": -9.34107837092079e-05
+      },
+      "layer4": {
+        "max_local_gv_error": 0.00017360868541544126
+      },
+      "layer5": {
+        "max_aligned_error": 0.0026147663048305177
+      },
+      "layer6": {
+        "spectral_abscissa": -9.34107837092079e-05,
+        "transient_growth_bound": 4.397331320645563
+      }
+    }
   }
 }

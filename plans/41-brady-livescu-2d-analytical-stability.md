@@ -456,9 +456,10 @@ The point of this phase is to run `brady2d_stability_score` on every (scheme, ke
   - File: `scripts/stencil_gen/stencil_gen/brady2d_cli.py`
   - Test: `cd scripts/stencil_gen && uv run python -m stencil_gen.brady2d_cli --run-calibration --max-layer 3`
 
-- [ ] **41.11c** Run the calibration at `max_layer=6` and commit the resulting `known_values.json`:
+- [x] **41.11c** Run the calibration at `max_layer=6` and commit the resulting `known_values.json`:
   - `cd scripts/stencil_gen && uv run python -m stencil_gen.brady2d_cli --run-calibration --max-layer 6 --update-known-values`
   - Review the output for any family that unexpectedly fails. Record surprising results in a brief note at the top of `brady2d_calibration.py`.
+  - **Results:** 6/9 families pass through L6; 3 E2 families (tension σ=6, gaussian ε=2, multiquadric ε=1) fail at L1 boundary GV error. Expected: E2 is 2nd-order, boundary dispersion is inherently larger. Only E2_phs_k2 (fully-determined weights) passes. Note added to `brady2d_calibration.py`.
   - File: `scripts/stencil_gen/sweeps/known_values.json`
   - Test: `cd scripts/stencil_gen && uv run python -c "import json; d = json.load(open('sweeps/known_values.json')); assert 'brady2d_calibration' in d; print(list(d['brady2d_calibration'].keys()))"`
 

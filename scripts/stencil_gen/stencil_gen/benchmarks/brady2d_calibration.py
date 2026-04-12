@@ -6,6 +6,16 @@ results.  Plan 42 uses these scores to prioritise which families to port
 to C++ first.
 
 Reference: Brady & Livescu 2019 §4.3, pp. 92–94.
+
+Calibration results (max_layer=6, 2026-04-12):
+  All E4 families and E2_phs_k2 pass through L6.  Three E2 families fail
+  at L1 (boundary group-velocity error > 5%):
+    - E2_tension_6:     bndGV=9.75e-02 (sigma=6 pushes boundary dispersion)
+    - E2_gaussian_2:    bndGV=2.70e-01 (Gaussian ε=2 poor boundary dispersion)
+    - E2_multiquadric_1: bndGV=6.00e-02 (barely over threshold)
+  These are expected: E2 is 2nd-order, so boundary closures have larger
+  dispersion error.  Only E2_phs_k2 (sigma=0, fully-determined weights)
+  passes L1.  Plan 42 should prioritise the six passing families.
 """
 
 from __future__ import annotations
