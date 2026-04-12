@@ -283,6 +283,11 @@ Implementing Trefethen 1983 (pp. 206–207). For the semi-discrete problem `u_t 
   - File: `scripts/stencil_gen/stencil_gen/brady2d_stability.py`
   - Test: `cd scripts/stencil_gen && uv run pytest tests/test_brady2d_stability.py -x -q -k "TestLayer5"`
 
+- [ ] **41.7b-followup** Add missing L5 failure test in `TestLayer5`:
+  - No test exercises the `L5_TOL = 0.05` threshold from the failure side. E2 is at 0.048 — just 4% below the threshold — so no real scheme naturally fails. This mirrors the gap caught and fixed for L4 in 41.6c-followup. Approach: construct a synthetic scheme with large anisotropy error by calling `anisotropy_over_coefficient_field` with a scheme string that maps to a low-order `p` value (E2, p=1), and use a larger `xi_mag` (e.g., 80% of cutoff instead of 20%) so the anisotropy error exceeds `L5_TOL`. Alternatively, directly call `anisotropy_over_coefficient_field` with a fabricated anisotropy profile that has known large error. Wrap in a test `test_large_xi_mag_exceeds_threshold` that asserts `max_aligned_error > L5_TOL`.
+  - File: `scripts/stencil_gen/tests/test_brady2d_stability.py`
+  - Test: `cd scripts/stencil_gen && uv run pytest tests/test_brady2d_stability.py -x -q -k "test_large_xi_mag_exceeds_threshold"`
+
 ### 41.8 — L6 non-normality diagnostics module (`non_normality.py`)
 
 - [ ] **41.8a** Create `stencil_gen/non_normality.py` skeleton:
