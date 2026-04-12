@@ -413,7 +413,7 @@ Implementing Trefethen 1983 (pp. 206–207). For the semi-discrete problem `u_t 
   - File: `scripts/stencil_gen/tests/test_brady2d_stability.py`
   - Test: `cd scripts/stencil_gen && uv run pytest tests/test_brady2d_stability.py -x -q -k "TestBrady2DScoreIntegration"`
 
-- [ ] **41.10d** Add CLI entry point `stencil_gen/brady2d_cli.py` with `main(argv) -> int`:
+- [x] **41.10d** Add CLI entry point `stencil_gen/brady2d_cli.py` with `main(argv) -> int`:
   - Args: `--scheme {E2,E4}`, `--kernel {classical,tension,gaussian,multiquadric,phs}`, numeric params (`--sigma`, `--epsilon`, or `--alpha`), `--max-layer int`, `--short-circuit/--no-short-circuit`, `--json-output PATH`.
   - Prints the `StabilityReport.__str__` summary; optionally dumps JSON.
   - Register as `python -m stencil_gen.brady2d` via a new `__main__` entry or add it to `sweeps/__main__.py` subparser table.
