@@ -405,7 +405,7 @@ Implementing Trefethen 1983 (pp. 206–207). For the semi-discrete problem `u_t 
   - File: `scripts/stencil_gen/stencil_gen/brady2d_stability.py`, `scripts/stencil_gen/tests/test_brady2d_stability.py`
   - Test: `cd scripts/stencil_gen && uv run pytest tests/test_brady2d_stability.py -x -q -k "test_max_layer_6"`
 
-- [ ] **41.10c** Integration tests `TestBrady2DScoreIntegration`:
+- [x] **41.10c** Integration tests `TestBrady2DScoreIntegration`:
   - `test_classical_e4_passes_all_layers_1_through_7` — overall `pass`, `failed_layer is None`.
   - `test_gaussian_eps_01_fails_at_layer_2_or_3` — overall `fail`, `failed_layer in (2, 3)`.
   - `test_short_circuit_false_runs_all_layers` — with `short_circuit=False`, all layer fields populated even on failure.

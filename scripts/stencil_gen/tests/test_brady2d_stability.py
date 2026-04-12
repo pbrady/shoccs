@@ -824,3 +824,97 @@ class TestLayer6:
         nn = result["non_normality_report"]
         assert isinstance(nn, NonNormalityReport)
         assert nn.n == 29  # n=30 minus inflow row
+
+
+class TestBrady2DScoreIntegration:
+    """End-to-end integration tests for the full brady2d_stability_score pipeline.
+
+    These tests run layers 1–7 and are therefore slow (~30s each).
+    """
+
+    @pytest.mark.slow
+    def test_classical_e4_passes_all_layers_1_through_7(self):
+        """Classical E4 with known-good alpha passes all 7 layers.
+
+        This is the primary positive integration test: a scheme known to be
+        long-time stable in the Brady-Livescu benchmark must pass every layer
+        of the analytical pipeline.
+        """
+        alpha = [-0.7733323791884821, 0.1623961700641681]
+        report = brady2d_stability_score(
+            "E4", "classical", {"alpha": alpha}, max_layer=7,
+        )
+        assert report.overall_verdict == "pass", (
+            f"Expected pass, got {report.overall_verdict} "
+            f"(failed at layer {report.failed_layer}: {report.failed_reason})"
+        )
+        assert report.failed_layer is None
+        # All layers populated
+        assert report.layer1 is not None
+        assert report.layer2 is not None
+        assert report.layer3 is not None
+        assert report.layer4 is not None
+        assert report.layer5 is not None
+        assert report.layer6 is not None
+        assert report.layer7 is not None
+        assert report.non_normality is not None
+        assert report.kreiss is not None
+        assert report.compute_time > 0.0
+
+    @pytest.mark.slow
+    def test_gaussian_eps_01_fails_at_layer_2_or_3(self):
+        """Gaussian E4 eps=0.1 (known_unstable) fails at layer 2 or 3.
+
+        This scheme is eigenvalue-unstable.  It may be GKS-boundary-unstable
+        (fail at L2) or pass L2 and fail at L3 (1D eigenvalue check).  Either
+        failure is correct — the important assertion is that the pipeline
+        rejects it and short-circuits before expensive layers.
+        """
+        kv = _load_known_values()
+        unstable = kv["E4_1"]["known_unstable"][0]
+        assert unstable["kernel"] == "gaussian"
+        eps = unstable["epsilon"]
+
+        report = brady2d_stability_score(
+            "E4", "gaussian", {"epsilon": eps}, max_layer=7,
+        )
+        assert report.overall_verdict == "fail"
+        assert report.failed_layer in (2, 3), (
+            f"Expected failure at layer 2 or 3, got layer {report.failed_layer}"
+        )
+        # Short-circuited: later layers should not be populated
+        assert report.layer1 is not None  # always runs
+        if report.failed_layer == 3:
+            assert report.layer2 is not None
+            assert report.layer3 is not None
+            assert report.layer4 is None  # short-circuited
+        assert report.layer7 is None  # definitely not run
+
+    @pytest.mark.slow
+    def test_short_circuit_false_runs_all_layers(self):
+        """With short_circuit=False, all layers run even on a failing scheme.
+
+        The Gaussian E4 eps=0.1 scheme fails early, but with short_circuit=False
+        every layer up to max_layer=7 should still be evaluated and populated.
+        """
+        kv = _load_known_values()
+        unstable = kv["E4_1"]["known_unstable"][0]
+        assert unstable["kernel"] == "gaussian"
+        eps = unstable["epsilon"]
+
+        report = brady2d_stability_score(
+            "E4", "gaussian", {"epsilon": eps},
+            max_layer=7, short_circuit=False,
+        )
+        assert report.overall_verdict == "fail"
+        # First failure is still recorded
+        assert report.failed_layer is not None
+        # But ALL layers are populated despite the failure
+        assert report.layer1 is not None
+        assert report.layer2 is not None
+        assert report.layer3 is not None
+        assert report.layer4 is not None
+        assert report.layer5 is not None
+        assert report.layer6 is not None
+        assert report.layer7 is not None
+        assert report.non_normality is not None
