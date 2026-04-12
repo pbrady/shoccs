@@ -430,7 +430,7 @@ Implementing Trefethen 1983 (pp. 206–207). For the semi-discrete problem `u_t 
 
 The point of this phase is to run `brady2d_stability_score` on every (scheme, kernel, parameter) combination currently supported by `stencil_gen` and record the per-layer results in `known_values.json` under a new top-level key. Plan 42 uses these scores to prioritize which families to port to C++ first.
 
-- [ ] **41.11a** Create `stencil_gen/benchmarks/brady2d_calibration.py` with:
+- [x] **41.11a** Create `stencil_gen/benchmarks/brady2d_calibration.py` with:
   - `FAMILIES: list[tuple[str, str, dict]]` — the enumeration. **Note on PHS k=2:** `phs._rbf_weights_numeric` dispatches PHS via `kernel="tension"` with `epsilon=0.0` (see `phs.py:407–423`), not via a distinct `"phs_k2"` kernel string. The `FAMILIES` entries must use the actual kernel string accepted by the dispatcher:
     ```
     # NOTE: E2 classical removed per 41.5c — E2 has no free alpha parameters.

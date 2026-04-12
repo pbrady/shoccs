@@ -17,6 +17,13 @@ from stencil_gen.benchmarks.brady_livescu_2d import (
     make_coefficient_field,
     psi,
 )
+from stencil_gen.benchmarks.brady2d_calibration import (
+    FAMILIES,
+    _E4_CLASSICAL_ALPHA,
+    _report_to_dict,
+    format_calibration_table,
+    run_calibration,
+)
 
 
 class TestBradyLivescu2D:
@@ -93,4 +100,76 @@ class TestBradyLivescu2D:
         for x_val, t_val in zip(xs, ts):
             assert inflow_bc_y(x_val, t_val) == pytest.approx(
                 exact_solution(x_val, 0.0, t_val)
+            )
+
+
+class TestCalibrationDataclass:
+    """Tests for brady2d_calibration module data structures and enumeration."""
+
+    def test_families_length(self):
+        """FAMILIES has the expected 9 entries (no E2 classical per 41.5c)."""
+        assert len(FAMILIES) == 9
+
+    def test_families_entries_are_4_tuples(self):
+        """Each family entry has (scheme, kernel, params, display_label)."""
+        for entry in FAMILIES:
+            assert len(entry) == 4
+            scheme, kernel, params, label = entry
+            assert scheme in ("E2", "E4")
+            assert kernel in ("classical", "tension", "gaussian", "multiquadric")
+            assert isinstance(params, dict)
+            assert isinstance(label, str)
+
+    def test_e4_classical_alpha_values(self):
+        """E4 classical alpha matches known production values."""
+        assert _E4_CLASSICAL_ALPHA == pytest.approx(
+            [-0.7733323791884821, 0.1623961700641681]
+        )
+
+    def test_phs_k2_entries_use_sigma_zero(self):
+        """PHS k=2 entries use kernel='tension' with sigma=0.0."""
+        phs_entries = [(s, k, p, l) for s, k, p, l in FAMILIES if "phs_k2" in l]
+        assert len(phs_entries) == 2  # E2 and E4
+        for _, kernel, params, _ in phs_entries:
+            assert kernel == "tension"
+            assert params["sigma"] == 0.0
+
+    def test_display_labels_unique(self):
+        """All display labels are unique."""
+        labels = [label for _, _, _, label in FAMILIES]
+        assert len(labels) == len(set(labels))
+
+    def test_report_to_dict_handles_empty_report(self):
+        """_report_to_dict works on a minimal StabilityReport."""
+        from stencil_gen.brady2d_stability import StabilityReport
+        report = StabilityReport()
+        d = _report_to_dict(report)
+        assert d["overall_verdict"] == "unknown"
+        assert d["failed_layer"] is None
+        assert "layer1" not in d
+
+    def test_format_calibration_table_produces_markdown(self):
+        """format_calibration_table returns a string with a markdown header."""
+        sample = {"test_family": {
+            "overall_verdict": "pass",
+            "failed_layer": None,
+            "failed_reason": "",
+            "compute_time": 1.5,
+            "layer1": {"boundary_gv_err": 0.01},
+        }}
+        table = format_calibration_table(sample)
+        assert "| Family" in table
+        assert "test_family" in table
+        assert "pass" in table
+
+    def test_run_calibration_at_layer_1(self):
+        """run_calibration at max_layer=1 returns results for all families."""
+        results = run_calibration(max_layer=1)
+        assert len(results) == len(FAMILIES)
+        for label, r in results.items():
+            assert r["overall_verdict"] in ("pass", "fail", "error"), (
+                f"{label}: unexpected verdict {r['overall_verdict']}"
+            )
+            assert "layer1" in r or r["overall_verdict"] == "error", (
+                f"{label}: missing layer1 data"
             )
