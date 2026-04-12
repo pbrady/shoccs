@@ -136,7 +136,7 @@ Implementing Trefethen 1983 (pp. 206–207). For the semi-discrete problem `u_t 
   - File: `scripts/stencil_gen/stencil_gen/gks_kreiss.py`, `scripts/stencil_gen/tests/test_gks_kreiss.py`
   - Test: `cd scripts/stencil_gen && uv run pytest tests/test_gks_kreiss.py -x -q -k "TestKreissMatrix"`
 
-- [ ] **41.3c-followup** Fix empty `test_defective_raises` in `TestKreissMatrix` (test body is `pass`, tests nothing):
+- [x] **41.3c-followup** Fix empty `test_defective_raises` in `TestKreissMatrix` (test body is `pass`, tests nothing):
   - Replace the empty body with an actual test that engineers a stencil producing defective admissible roots and asserts `kreiss_matrix` raises `DefectiveKappaError`. Approach: reverse-engineer weights from a polynomial with a known double root inside the unit disk (e.g., `(κ-0.3)²(κ-5)` ↔ a 3-point stencil with offsets `[-1, 0, 1]`; solve for `weights` and `s` that produce this `Q`).
   - Add `test_min_singular_value_defective_returns_inf` verifying that `min_singular_value` returns `np.inf` on the `DefectiveKappaError` path (currently only the `ValueError`/shape-mismatch path is tested).
   - File: `scripts/stencil_gen/tests/test_gks_kreiss.py`

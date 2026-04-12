@@ -247,19 +247,35 @@ class TestKreissMatrix:
             kreiss_matrix(interior_weights, interior_offsets, boundary_rows, s=1.0)
 
     def test_defective_raises(self):
-        """DefectiveKappaError when admissible roots coalesce."""
-        # Use the 2x2 stencil but at an s value giving near-defective roots.
-        # Construct a polynomial (kappa - 0.3)^2 * (kappa - 5) so 2 admissible
-        # roots coalesce at 0.3. We'll need to reverse-engineer the stencil.
-        # Easier: test via _kappa_roots_from_poly to confirm defective, then
-        # verify kreiss_matrix raises for a stencil producing defective roots.
-        #
-        # Use a stencil with offsets [-1, 0, 1] and weights such that at some s
-        # the polynomial has a double root. Instead, test the error path by
-        # using a stencil known to produce defective roots at s=0.
-        # This is hard to engineer; just test that min_singular_value returns
-        # inf on the shape-mismatch path.
-        pass
+        """DefectiveKappaError when admissible roots coalesce.
+
+        Reverse-engineer a stencil whose characteristic polynomial is
+        (kappa - 0.3)^2 * (kappa - 5) at s = 0.4, giving a double admissible
+        root at kappa = 0.3.
+
+        For offsets [-2, -1, 0, 1] with L_left=2, shifted=[0,1,2,3]:
+          Q(kappa) = w_{-2} + w_{-1}*k + (w_0 + s)*k^2 + w_1*k^3
+        Target:    -0.45   + 3.09*k    - 5.6*k^2       + k^3
+        So w_{-2}=-0.45, w_{-1}=3.09, w_0=-6.0 (since w_0+s=-5.6), w_1=1.0.
+        """
+        interior_weights = np.array([-0.45, 3.09, -6.0, 1.0])
+        interior_offsets = np.array([-2, -1, 0, 1])
+        s = 0.4
+
+        # Confirm kappa_roots detects defective roots
+        _, admissible, is_defective = kappa_roots(
+            interior_weights, interior_offsets, s
+        )
+        assert len(admissible) == 2
+        assert is_defective is True
+
+        # kreiss_matrix must raise DefectiveKappaError
+        boundary_rows = [
+            (np.array([1.0]), np.array([0])),
+            (np.array([1.0]), np.array([0])),
+        ]
+        with pytest.raises(DefectiveKappaError):
+            kreiss_matrix(interior_weights, interior_offsets, boundary_rows, s)
 
     def test_min_singular_value_1x1(self):
         """min_singular_value returns |M[0,0]| for a 1x1 matrix."""
@@ -297,4 +313,21 @@ class TestKreissMatrix:
             (np.array([1.0]), np.array([0])),
         ]
         sv = min_singular_value(interior_weights, interior_offsets, boundary_rows, s=1.0)
+        assert sv == np.inf
+
+    def test_min_singular_value_defective_returns_inf(self):
+        """min_singular_value returns inf on the DefectiveKappaError path.
+
+        Uses the same engineered stencil as test_defective_raises:
+        Q(kappa) = (kappa - 0.3)^2 * (kappa - 5) at s = 0.4.
+        """
+        interior_weights = np.array([-0.45, 3.09, -6.0, 1.0])
+        interior_offsets = np.array([-2, -1, 0, 1])
+        boundary_rows = [
+            (np.array([1.0]), np.array([0])),
+            (np.array([1.0]), np.array([0])),
+        ]
+        sv = min_singular_value(
+            interior_weights, interior_offsets, boundary_rows, s=0.4
+        )
         assert sv == np.inf
