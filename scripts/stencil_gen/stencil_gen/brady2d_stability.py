@@ -4,20 +4,26 @@ Implements a multi-layer analytical stability pipeline for the Brady & Livescu
 2019 §4.3 two-dimensional varying-coefficient scalar advection test.  Each layer
 is strictly cheaper than the next, allowing early rejection of unstable schemes.
 
-Layer 1 (this module's first implementation): interior + boundary group velocity
-error as a coarse dispersion-quality filter.
-
-Dataclass will be expanded in 41.10a to include layer2 through layer7 fields,
-kreiss, and non_normality.
+Layers:
+    L1 — Interior + boundary group velocity error (1D, per direction)
+    L2 — Rigorous GKS Kreiss determinant test
+    L3 — 1D eigenvalue max Re(lambda(-D_bc)) at multiple N
+    L4 — Per-point local GV error on the 2D varying-coefficient field
+    L5 — 2D anisotropy over the coefficient field
+    L6 — Non-normality diagnostics (spectral/numerical abscissa, Kreiss constant)
+    L7 — Sparse 2D Arnoldi eigenvalue of the full BL operator
 """
 
 from __future__ import annotations
 
 import logging
-from dataclasses import dataclass
+import time
+from dataclasses import dataclass, field
+from typing import Literal
 
 import numpy as np
 
+from stencil_gen.gks_kreiss import KreissResult
 from stencil_gen.group_velocity import (
     GroupVelocityProfile,
     anisotropy_over_coefficient_field,
@@ -71,15 +77,112 @@ _RESOLVED_FRAC = 0.1
 class StabilityReport:
     """Result of the layered stability analysis.
 
-    Minimal skeleton — only layer1 fields for now.
-    Full fields (layer2 through layer7, kreiss, non_normality) will be
-    added in 41.10a.
+    Each layer populates its corresponding field with a dict of per-layer
+    metrics.  If a layer is not run (skipped or short-circuited), its field
+    remains None.
     """
 
     layer1: dict | None = None
+    layer2: KreissResult | None = None
+    layer3: dict | None = None
+    layer4: dict | None = None
+    layer5: dict | None = None
+    layer6: dict | None = None  # reserved for standalone non-normality
+    layer7: dict | None = None
+    non_normality: NonNormalityReport | None = None
+    kreiss: KreissResult | None = None
+    overall_verdict: Literal["pass", "fail", "unknown"] = "unknown"
     failed_layer: int | None = None
-    overall_verdict: str = "unknown"
+    failed_reason: str = ""
     compute_time: float = 0.0
+
+    @classmethod
+    def empty(cls) -> StabilityReport:
+        """Create an empty report with all layers set to None."""
+        return cls()
+
+    def __str__(self) -> str:
+        """Per-layer summary table."""
+        lines = ["Brady-Livescu 2D Stability Report"]
+        lines.append("=" * 60)
+
+        # Layer 1
+        if self.layer1 is not None:
+            d = self.layer1
+            status = "PASS" if d.get("boundary_gv_err", 1.0) <= L1_TOL else "FAIL"
+            lines.append(
+                f"L1  GV error        : {status:4s}  "
+                f"boundary_gv_err={d.get('boundary_gv_err', float('nan')):.4e}"
+            )
+
+        # Layer 2 (Kreiss)
+        if self.layer2 is not None:
+            kr = self.layer2
+            status = "PASS" if kr.is_stable else "FAIL"
+            lines.append(
+                f"L2  Kreiss GKS      : {status:4s}  "
+                f"sigma_min={kr.witness_sigma_min:.4e}  "
+                f"verdict={kr.imaginary_axis_perturbation_verdict}"
+            )
+
+        # Layer 3
+        if self.layer3 is not None:
+            d = self.layer3
+            mse = d.get("max_stab_eig", float("nan"))
+            status = "PASS" if mse <= STABILITY_TOL else "FAIL"
+            lines.append(
+                f"L3  1D eigenvalue   : {status:4s}  "
+                f"max_stab_eig={mse:.4e}"
+            )
+
+        # Layer 4
+        if self.layer4 is not None:
+            d = self.layer4
+            err = d.get("max_local_gv_error", float("nan"))
+            status = "PASS" if err <= L4_TOL else "FAIL"
+            lines.append(
+                f"L4  Local GV 2D     : {status:4s}  "
+                f"max_local_gv_error={err:.4e}"
+            )
+
+        # Layer 5
+        if self.layer5 is not None:
+            d = self.layer5
+            err = d.get("max_aligned_error", float("nan"))
+            status = "PASS" if err <= L5_TOL else "FAIL"
+            lines.append(
+                f"L5  Anisotropy      : {status:4s}  "
+                f"max_aligned_error={err:.4e}"
+            )
+
+        # Layer 7
+        if self.layer7 is not None:
+            d = self.layer7
+            msa = d.get("max_spectral_abscissa", float("nan"))
+            status = "PASS" if msa <= L7_TOL else "FAIL"
+            lines.append(
+                f"L7  2D eigenvalue   : {status:4s}  "
+                f"max_spectral_abscissa={msa:.4e}"
+            )
+
+        # Non-normality
+        if self.non_normality is not None:
+            nn = self.non_normality
+            lines.append(
+                f"L6  Non-normality   :       "
+                f"kreiss_K={nn.kreiss_constant:.2f}  "
+                f"tgb={nn.transient_growth_bound:.2f}  "
+                f"henrici={nn.henrici_departure:.4e}"
+            )
+
+        lines.append("-" * 60)
+        lines.append(
+            f"Overall: {self.overall_verdict.upper()}"
+            + (f"  (failed at layer {self.failed_layer}: {self.failed_reason})"
+               if self.failed_layer is not None else "")
+        )
+        lines.append(f"Compute time: {self.compute_time:.2f}s")
+        return "\n".join(lines)
 
 
 def _gv_error_scalar(profile: GroupVelocityProfile) -> float:

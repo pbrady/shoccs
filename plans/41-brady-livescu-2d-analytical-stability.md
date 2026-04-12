@@ -382,7 +382,7 @@ Implementing Trefethen 1983 (pp. 206–207). For the semi-discrete problem `u_t 
 
 ### 41.10 — Unified orchestrator and `StabilityReport`
 
-- [ ] **41.10a** Flesh out `StabilityReport` in `brady2d_stability.py`:
+- [x] **41.10a** Flesh out `StabilityReport` in `brady2d_stability.py`:
   - Fields: `layer1: dict | None`, …, `layer7: dict | None`, `non_normality: NonNormalityReport | None`, `kreiss: KreissResult | None`, `overall_verdict: Literal["pass", "fail"]`, `failed_layer: int | None`, `failed_reason: str`, `compute_time: float`.
   - Factory classmethod `empty() -> StabilityReport`.
   - `__str__` method that produces a per-layer summary table.

@@ -22,6 +22,8 @@ from stencil_gen.brady2d_stability import (
     layer7_sparse_2d_eigenvalue,
     layer7_with_non_normality,
 )
+from stencil_gen.gks_kreiss import KreissResult
+from stencil_gen.non_normality import NonNormalityReport
 from stencil_gen.group_velocity import local_group_velocity_2d_varying
 
 
@@ -106,12 +108,28 @@ class TestLayer1:
 
 
 class TestStabilityReport:
-    """Basic tests for the StabilityReport dataclass."""
+    """Tests for the StabilityReport dataclass."""
 
     def test_default_values(self):
         report = StabilityReport()
         assert report.layer1 is None
+        assert report.layer2 is None
+        assert report.layer3 is None
+        assert report.layer4 is None
+        assert report.layer5 is None
+        assert report.layer6 is None
+        assert report.layer7 is None
+        assert report.non_normality is None
+        assert report.kreiss is None
         assert report.failed_layer is None
+        assert report.failed_reason == ""
+        assert report.overall_verdict == "unknown"
+        assert report.compute_time == 0.0
+
+    def test_empty_factory(self):
+        report = StabilityReport.empty()
+        assert report.layer1 is None
+        assert report.layer7 is None
         assert report.overall_verdict == "unknown"
         assert report.compute_time == 0.0
 
@@ -120,6 +138,81 @@ class TestStabilityReport:
         report = StabilityReport(layer1=result, overall_verdict="pass")
         assert report.layer1 == result
         assert report.overall_verdict == "pass"
+
+    def test_with_kreiss_result(self):
+        kr = KreissResult(is_stable=True, compute_time=0.5)
+        report = StabilityReport(layer2=kr, kreiss=kr, overall_verdict="pass")
+        assert report.layer2 is kr
+        assert report.kreiss is kr
+        assert report.layer2.is_stable is True
+
+    def test_with_non_normality(self):
+        nn = NonNormalityReport(
+            spectral_abscissa=-1.0,
+            numerical_abscissa=5.0,
+            henrici_departure=0.1,
+            eigenvector_condition=10.0,
+            pseudospectral_abscissae={1e-2: -0.5},
+            kreiss_constant=3.0,
+            transient_growth_bound=3.0 * np.e,
+            n=100,
+            compute_time=1.0,
+        )
+        report = StabilityReport(non_normality=nn, overall_verdict="pass")
+        assert report.non_normality is nn
+        assert report.non_normality.kreiss_constant == 3.0
+
+    def test_failed_report(self):
+        report = StabilityReport(
+            layer1={"boundary_gv_err": 0.01},
+            layer3={"max_stab_eig": 0.5},
+            overall_verdict="fail",
+            failed_layer=3,
+            failed_reason="max_stab_eig=0.5 > STABILITY_TOL",
+        )
+        assert report.overall_verdict == "fail"
+        assert report.failed_layer == 3
+        assert "max_stab_eig" in report.failed_reason
+
+    def test_str_minimal(self):
+        """__str__ works on a minimal (empty) report."""
+        report = StabilityReport.empty()
+        s = str(report)
+        assert "Brady-Livescu 2D Stability Report" in s
+        assert "UNKNOWN" in s
+
+    def test_str_with_layers(self):
+        """__str__ shows layer summaries when populated."""
+        report = StabilityReport(
+            layer1={"boundary_gv_err": 0.01, "interior_gv_err_x": 0.001},
+            layer3={"max_stab_eig": -1e-14},
+            layer4={"max_local_gv_error": 0.003},
+            layer5={"max_aligned_error": 0.02},
+            layer7={"max_spectral_abscissa": -0.001},
+            overall_verdict="pass",
+            compute_time=2.5,
+        )
+        s = str(report)
+        assert "L1" in s
+        assert "L3" in s
+        assert "L4" in s
+        assert "L5" in s
+        assert "L7" in s
+        assert "PASS" in s
+        assert "2.50s" in s
+
+    def test_str_failed_report(self):
+        """__str__ shows failure info when a layer fails."""
+        report = StabilityReport(
+            layer1={"boundary_gv_err": 0.01},
+            overall_verdict="fail",
+            failed_layer=3,
+            failed_reason="max_stab_eig > STABILITY_TOL",
+            compute_time=0.1,
+        )
+        s = str(report)
+        assert "FAIL" in s
+        assert "layer 3" in s
 
 
 class TestLayer3:
