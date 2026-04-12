@@ -22,6 +22,7 @@ from stencil_gen.group_velocity import (
     group_velocity_exact_nonuniform,
     interior_group_velocity,
     local_group_velocity,
+    anisotropy_over_coefficient_field,
     local_group_velocity_2d_varying,
     max_local_gv_error_2d,
     modified_wavenumber,
@@ -1900,3 +1901,73 @@ class TestLocal2DVarying:
             assert max_err > 0.0, f"p={p}: max error should be positive"
 
 
+class TestAnisotropyOverField:
+    """Tests for anisotropy_over_coefficient_field (41.7a)."""
+
+    def test_constant_coefficient_uniform(self):
+        """Uniform (c_x, c_y) = (1, 0) gives error matching anisotropy at theta=0."""
+        N = 11
+        c_x = np.ones((N, N))
+        c_y = np.zeros((N, N))
+
+        theta = np.linspace(0.01, np.pi / 2 - 0.01, 100)
+        xi_mag = 1.0
+        result = anisotropy_over_coefficient_field("E4", c_x, c_y, theta, xi_mag)
+
+        # All local angles are 0.  The error at theta=0 should be the
+        # anisotropy profile error at theta=0.
+        ref = anisotropy_profile(2, 1, theta, xi_mag)
+        err_at_0 = np.sqrt(
+            (ref.C_x[0] - np.cos(theta[0])) ** 2
+            + (ref.C_y[0] - np.sin(theta[0])) ** 2
+        )
+        assert result["max_aligned_error"] == pytest.approx(err_at_0, abs=1e-10)
+
+    def test_radial_flow_field(self):
+        """BL radial flow field produces finite positive max_aligned_error."""
+        from stencil_gen.benchmarks.brady_livescu_2d import make_coefficient_field
+
+        _, _, c_x, c_y = make_coefficient_field(31)
+        theta = np.linspace(0.01, np.pi / 2 - 0.01, 200)
+        xi_mag = 1.0
+        result = anisotropy_over_coefficient_field("E4", c_x, c_y, theta, xi_mag)
+
+        assert np.isfinite(result["max_aligned_error"])
+        assert result["max_aligned_error"] > 0.0
+        # E4 at xi_mag=1 has small but nonzero anisotropy
+        assert result["max_aligned_error"] < 1.0
+        # worst_point should be a valid index
+        i, j = result["worst_point"]
+        assert 0 <= i < 31
+        assert 0 <= j < 31
+
+    def test_higher_xi_mag_increases_error(self):
+        """Anisotropy error grows with wavenumber magnitude."""
+        from stencil_gen.benchmarks.brady_livescu_2d import make_coefficient_field
+
+        _, _, c_x, c_y = make_coefficient_field(21)
+        theta = np.linspace(0.01, np.pi / 2 - 0.01, 100)
+
+        err_low = anisotropy_over_coefficient_field(
+            "E4", c_x, c_y, theta, xi_mag=0.5
+        )["max_aligned_error"]
+        err_high = anisotropy_over_coefficient_field(
+            "E4", c_x, c_y, theta, xi_mag=2.0
+        )["max_aligned_error"]
+        assert err_high > err_low
+
+    def test_e2_larger_error_than_e4(self):
+        """E2 has worse anisotropy than E4 at a given xi_mag."""
+        N = 21
+        c_x = np.ones((N, N)) * 0.7
+        c_y = np.ones((N, N)) * 0.7
+        theta = np.linspace(0.01, np.pi / 2 - 0.01, 100)
+        xi_mag = 1.5
+
+        err_e2 = anisotropy_over_coefficient_field(
+            "E2", c_x, c_y, theta, xi_mag
+        )["max_aligned_error"]
+        err_e4 = anisotropy_over_coefficient_field(
+            "E4", c_x, c_y, theta, xi_mag
+        )["max_aligned_error"]
+        assert err_e2 > err_e4

@@ -1182,3 +1182,82 @@ def max_local_gv_error_2d(result: dict) -> float:
     max_x = float(np.max(np.abs(result["gv_error_x_field"])))
     max_y = float(np.max(np.abs(result["gv_error_y_field"])))
     return max(max_x, max_y)
+
+
+# Scheme → half-bandwidth mapping (duplicated from brady2d_stability to avoid
+# circular dependency; only E2 and E4 are in scope).
+_SCHEME_P = {"E2": 1, "E4": 2}
+
+
+def anisotropy_over_coefficient_field(
+    scheme: str,
+    c_x_field: np.ndarray,
+    c_y_field: np.ndarray,
+    theta_array: np.ndarray,
+    xi_mag: float,
+) -> dict:
+    """Evaluate 2D anisotropy error projected onto a spatially varying advection field.
+
+    For each grid point ``(i, j)`` the local propagation direction is
+    ``(c_x[i,j], c_y[i,j]) / |(c_x, c_y)|``.  The scheme's
+    :func:`anisotropy_profile` — computed once at wavenumber magnitude
+    *xi_mag* — gives the numerical group velocity error as a function of
+    propagation angle.  This function interpolates that error at each
+    grid point's local angle and returns the maximum over the field.
+
+    The aligned error at a point is the Euclidean norm of the group
+    velocity error vector ``|C_numerical - C_exact|`` at the local
+    propagation angle, which captures both speed and angular deviations.
+
+    Parameters
+    ----------
+    scheme : str
+        Scheme name (``"E2"`` or ``"E4"``).
+    c_x_field, c_y_field : np.ndarray, shape (Ny, Nx)
+        Spatially varying advection velocity components.
+    theta_array : np.ndarray
+        Propagation angles (radians) at which the anisotropy profile
+        is evaluated.  Should cover at least the range of local angles
+        in ``arctan2(c_y_field, c_x_field)``.
+    xi_mag : float
+        Wavenumber magnitude in ``[0, pi]``.
+
+    Returns
+    -------
+    dict
+        ``max_aligned_error`` : float
+            Maximum ``|C_numerical - C_exact|`` over all grid points.
+        ``worst_point`` : tuple[int, int]
+            ``(i, j)`` index of the grid point with the largest error.
+        ``worst_theta`` : float
+            Local propagation angle at the worst point.
+    """
+    p = _SCHEME_P[scheme]
+    anis = anisotropy_profile(p, nu=1, theta_array=theta_array, xi_mag=xi_mag)
+
+    # Error vector magnitude at each theta in theta_array:
+    # exact GV = (cos(theta), sin(theta)), numerical = (C_x, C_y)
+    err_mag = np.sqrt(
+        (anis.C_x - np.cos(anis.theta)) ** 2
+        + (anis.C_y - np.sin(anis.theta)) ** 2
+    )
+
+    # Local propagation angle at each grid point
+    theta_local = np.arctan2(c_y_field, c_x_field)  # shape (Ny, Nx)
+
+    # Interpolate err_mag onto local angles.  np.interp requires sorted
+    # xp, so sort theta_array and err_mag together.
+    sort_idx = np.argsort(theta_array)
+    theta_sorted = theta_array[sort_idx]
+    err_sorted = err_mag[sort_idx]
+    aligned_error = np.interp(theta_local, theta_sorted, err_sorted)
+
+    # Scalar reduction
+    flat_idx = int(np.argmax(aligned_error))
+    worst_ij = np.unravel_index(flat_idx, aligned_error.shape)
+
+    return {
+        "max_aligned_error": float(np.max(aligned_error)),
+        "worst_point": (int(worst_ij[0]), int(worst_ij[1])),
+        "worst_theta": float(theta_local[worst_ij]),
+    }

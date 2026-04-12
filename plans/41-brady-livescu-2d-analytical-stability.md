@@ -271,7 +271,7 @@ Implementing Trefethen 1983 (pp. 206–207). For the semi-discrete problem `u_t 
 
 ### 41.7 — L5 2D anisotropy over the coefficient field
 
-- [ ] **41.7a** Add `anisotropy_over_coefficient_field(scheme, c_x_field, c_y_field, theta_array, xi_mag) -> dict` to `group_velocity.py`:
+- [x] **41.7a** Add `anisotropy_over_coefficient_field(scheme, c_x_field, c_y_field, theta_array, xi_mag) -> dict` to `group_velocity.py`:
   - Builds `anisotropy_profile(p, nu=1, theta_array, xi_mag)` once (the raw anisotropy is scheme-property, field-independent).
   - Then evaluates the directional alignment: at each grid point, the radial propagation direction is `(c_x[i,j], c_y[i,j])/|c|` — project the anisotropy error onto this direction.
   - Returns `{max_aligned_error: float, worst_point: tuple[int, int], worst_theta: float}`.
