@@ -20,6 +20,7 @@ import numpy as np
 
 from stencil_gen.group_velocity import (
     GroupVelocityProfile,
+    anisotropy_over_coefficient_field,
     boundary_group_velocity,
     boundary_group_velocity_classical,
     interior_group_velocity,
@@ -49,6 +50,9 @@ STABILITY_TOL = 1e-10
 # Layer-4 threshold: 10% — looser than L1 because the varying-coefficient
 # scaling amplifies the baseline dispersion error.
 L4_TOL = 0.1
+
+# Layer-5 threshold: 5% anisotropy error projected onto local propagation direction.
+L5_TOL = 0.05
 
 # Fraction of the resolved band over which to measure max |gv_error|.
 # Using 10% of the cutoff restricts evaluation to very well-resolved
@@ -369,3 +373,58 @@ def layer4_local_gv_2d(
         "worst_point": (int(i), int(j)),
         "worst_xi": float(xi_array[k]),
     }
+
+
+def layer5_anisotropy(
+    scheme: str,
+    kernel: str,
+    params: dict,
+    N: int = 31,
+) -> dict:
+    """L5: 2D anisotropy error projected onto the Brady-Livescu coefficient field.
+
+    Evaluates the scheme's angular group velocity error at a representative
+    wavenumber, then projects onto the local propagation direction at each
+    grid point of the varying-coefficient field.  This detects grid anisotropy
+    interacting with the radial flow pattern of the BL benchmark.
+
+    Parameters
+    ----------
+    scheme : str
+        Scheme name ("E2" or "E4").
+    kernel : str
+        Kernel type (unused — interior anisotropy is scheme-determined — but
+        kept for API consistency with other layers).
+    params : dict
+        Kernel-specific parameters (unused at this layer).
+    N : int
+        Grid resolution for the coefficient field.
+
+    Returns
+    -------
+    dict with keys:
+        max_aligned_error : float
+            Maximum |C_numerical - C_exact| projected onto local propagation.
+        worst_point : tuple[int, int]
+            (i, j) index of the grid point with the largest error.
+        worst_theta : float
+            Local propagation angle at the worst point.
+    """
+    from stencil_gen.benchmarks.brady_livescu_2d import make_coefficient_field
+
+    sp = _SCHEME_PARAMS[scheme]
+    p, nu = sp["p"], sp["nu"]
+
+    _, _, c_x, c_y = make_coefficient_field(N)
+
+    # Cover the range of local propagation angles in the BL field.
+    # The BL field has angles in (0, pi/4) approximately (first quadrant,
+    # below the diagonal), so [0.01, pi/2 - 0.01] comfortably covers it.
+    theta_array = np.linspace(0.01, np.pi / 2 - 0.01, 200)
+
+    # Use a representative wavenumber at 20% of the cutoff — inside the
+    # well-resolved band but large enough for anisotropy to be visible.
+    profile = interior_group_velocity(p, nu, np.linspace(0.01, np.pi, 200))
+    xi_mag = profile.cutoff_xi * 0.2
+
+    return anisotropy_over_coefficient_field(scheme, c_x, c_y, theta_array, xi_mag)

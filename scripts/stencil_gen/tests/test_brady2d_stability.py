@@ -9,11 +9,13 @@ import pytest
 from stencil_gen.brady2d_stability import (
     L1_TOL,
     L4_TOL,
+    L5_TOL,
     STABILITY_TOL,
     StabilityReport,
     layer1_interior_boundary_gv,
     layer3_1d_eigenvalue,
     layer4_local_gv_2d,
+    layer5_anisotropy,
 )
 from stencil_gen.group_velocity import local_group_velocity_2d_varying
 
@@ -225,3 +227,52 @@ class TestLayer4:
             f"Synthetic bad stencil max GV error {max_err:.4f} "
             f"should exceed L4_TOL={L4_TOL}"
         )
+
+
+class TestLayer5:
+    """Layer 5: 2D anisotropy over the Brady-Livescu coefficient field."""
+
+    def test_classical_e4_passes(self):
+        """Classical E4 passes L5 on the BL coefficient field."""
+        result = layer5_anisotropy("E4", "classical", {})
+        assert result["max_aligned_error"] <= L5_TOL, (
+            f"E4 anisotropy error {result['max_aligned_error']:.6f} exceeds L5_TOL={L5_TOL}"
+        )
+
+    def test_tension_e4_passes(self):
+        """Tension E4 at sigma=3.0 passes L5."""
+        result = layer5_anisotropy("E4", "tension", {"sigma": 3.0})
+        assert result["max_aligned_error"] <= L5_TOL, (
+            f"Tension E4 anisotropy error {result['max_aligned_error']:.6f} exceeds L5_TOL={L5_TOL}"
+        )
+
+    def test_e2_has_larger_anisotropy_than_e4(self):
+        """E2 has larger anisotropy error than E4 (lower-order → more anisotropic)."""
+        r2 = layer5_anisotropy("E2", "tension", {"sigma": 0.0}, N=21)
+        r4 = layer5_anisotropy("E4", "tension", {"sigma": 3.0}, N=21)
+        assert r2["max_aligned_error"] > r4["max_aligned_error"], (
+            "E2 should have larger anisotropy error than E4"
+        )
+
+    def test_return_keys(self):
+        """Layer 5 returns expected keys."""
+        result = layer5_anisotropy("E4", "tension", {"sigma": 3.0}, N=11)
+        expected_keys = {"max_aligned_error", "worst_point", "worst_theta"}
+        assert set(result.keys()) == expected_keys
+        assert isinstance(result["worst_point"], tuple)
+        assert len(result["worst_point"]) == 2
+
+    def test_worst_point_in_range(self):
+        """worst_point indices should be within the grid dimensions."""
+        N = 21
+        result = layer5_anisotropy("E4", "tension", {"sigma": 3.0}, N=N)
+        i, j = result["worst_point"]
+        assert 0 <= i < N
+        assert 0 <= j < N
+
+    def test_worst_theta_in_range(self):
+        """worst_theta should be in a reasonable angular range."""
+        result = layer5_anisotropy("E4", "tension", {"sigma": 3.0}, N=11)
+        # BL field has angles roughly in (0, pi/4), so worst_theta
+        # should be in the first quadrant.
+        assert 0.0 < result["worst_theta"] < np.pi / 2

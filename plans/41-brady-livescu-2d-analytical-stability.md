@@ -278,7 +278,7 @@ Implementing Trefethen 1983 (pp. 206–207). For the semi-discrete problem `u_t 
   - File: `scripts/stencil_gen/stencil_gen/group_velocity.py`
   - Test: `cd scripts/stencil_gen && uv run pytest tests/test_group_velocity.py -x -q -k "TestAnisotropyOverField"`
 
-- [ ] **41.7b** Add `layer5_anisotropy(scheme, kernel, params, N=31) -> dict` to `brady2d_stability.py`:
+- [x] **41.7b** Add `layer5_anisotropy(scheme, kernel, params, N=31) -> dict` to `brady2d_stability.py`:
   - Wraps `anisotropy_over_coefficient_field`. Failure threshold: `max_aligned_error > 0.05`.
   - File: `scripts/stencil_gen/stencil_gen/brady2d_stability.py`
   - Test: `cd scripts/stencil_gen && uv run pytest tests/test_brady2d_stability.py -x -q -k "TestLayer5"`
