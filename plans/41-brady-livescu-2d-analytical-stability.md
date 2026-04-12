@@ -136,6 +136,12 @@ Implementing Trefethen 1983 (pp. 206–207). For the semi-discrete problem `u_t 
   - File: `scripts/stencil_gen/stencil_gen/gks_kreiss.py`, `scripts/stencil_gen/tests/test_gks_kreiss.py`
   - Test: `cd scripts/stencil_gen && uv run pytest tests/test_gks_kreiss.py -x -q -k "TestKreissMatrix"`
 
+- [ ] **41.3c-followup** Fix empty `test_defective_raises` in `TestKreissMatrix` (test body is `pass`, tests nothing):
+  - Replace the empty body with an actual test that engineers a stencil producing defective admissible roots and asserts `kreiss_matrix` raises `DefectiveKappaError`. Approach: reverse-engineer weights from a polynomial with a known double root inside the unit disk (e.g., `(κ-0.3)²(κ-5)` ↔ a 3-point stencil with offsets `[-1, 0, 1]`; solve for `weights` and `s` that produce this `Q`).
+  - Add `test_min_singular_value_defective_returns_inf` verifying that `min_singular_value` returns `np.inf` on the `DefectiveKappaError` path (currently only the `ValueError`/shape-mismatch path is tested).
+  - File: `scripts/stencil_gen/tests/test_gks_kreiss.py`
+  - Test: `cd scripts/stencil_gen && uv run pytest tests/test_gks_kreiss.py -x -q -k "test_defective_raises or test_min_singular_value_defective_returns_inf"`
+
 - [ ] **41.3d** Implement `make_s_grid(s_max=10.0, n_radial=40, n_imag=120, imag_max=20.0, eps_imag=1e-6) -> np.ndarray` and `_sweep_grid(...)`:
   - L-shaped contour: half-disk `Re(s) ∈ logspace(-4, log10(s_max), n_radial) × Im(s) ∈ linspace(-imag_max, imag_max, n_imag)` plus dense imaginary-axis strip at `Re(s) = eps_imag`.
   - `_sweep_grid` evaluates `min_singular_value` at every grid point, returns `(sigma_field, argmin_idx)`.
