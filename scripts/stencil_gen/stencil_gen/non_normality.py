@@ -153,7 +153,46 @@ def numerical_abscissa_sparse(L) -> float:
     float
         The numerical abscissa (instantaneous growth rate).
     """
-    raise NotImplementedError("numerical_abscissa_sparse: 41.8c")
+    import scipy.sparse as sp
+    from scipy.sparse.linalg import eigsh, ArpackNoConvergence, ArpackError
+
+    n = L.shape[0]
+
+    # Build Hermitian part H = (L + L^T) / 2
+    if sp.issparse(L):
+        H = (L + L.T) / 2.0
+    else:
+        A = np.asarray(L, dtype=float)
+        H = (A + A.T) / 2.0
+
+    # Dense path for small matrices
+    if n <= 900 and (not sp.issparse(H) or n <= 2):
+        H_dense = H.toarray() if sp.issparse(H) else np.asarray(H)
+        evals = np.linalg.eigvalsh(H_dense)
+        return float(evals[-1])
+
+    if not sp.issparse(H):
+        H = sp.csr_matrix(H)
+
+    k_use = min(1, n - 2) if n > 2 else 1
+    try:
+        evals = eigsh(H, k=k_use, which="LA", return_eigenvectors=False)
+        return float(np.max(evals))
+    except (ArpackNoConvergence, ArpackError) as exc:
+        logger.debug("eigsh(which='LA') failed: %s", exc)
+        if isinstance(exc, ArpackNoConvergence) and exc.eigenvalues is not None and len(exc.eigenvalues) > 0:
+            return float(np.max(exc.eigenvalues))
+
+    # Dense fallback
+    if n <= 900:
+        H_dense = H.toarray() if sp.issparse(H) else np.asarray(H)
+        evals = np.linalg.eigvalsh(H_dense)
+        return float(evals[-1])
+
+    raise RuntimeError(
+        f"numerical_abscissa_sparse: eigsh failed for {n}x{n} matrix "
+        f"and N > 900 prevents dense fallback"
+    )
 
 
 def henrici_departure(L) -> float:
@@ -169,7 +208,24 @@ def henrici_departure(L) -> float:
     float
         Non-negative scalar; 0 for normal operators.
     """
-    raise NotImplementedError("henrici_departure: 41.8c")
+    import scipy.sparse as sp
+    from scipy.sparse.linalg import norm as sp_norm
+
+    if sp.issparse(L):
+        LLt = L @ L.T
+        LtL = L.T @ L
+        diff = LLt - LtL
+        numer = sp_norm(diff, "fro")
+        denom = sp_norm(L, "fro") ** 2
+    else:
+        A = np.asarray(L, dtype=float)
+        diff = A @ A.T - A.T @ A
+        numer = np.linalg.norm(diff, "fro")
+        denom = np.linalg.norm(A, "fro") ** 2
+
+    if denom == 0.0:
+        return 0.0
+    return float(numer / denom)
 
 
 def eigenvector_condition(L, small_dense_threshold: int = 900) -> float:
@@ -187,7 +243,15 @@ def eigenvector_condition(L, small_dense_threshold: int = 900) -> float:
     float
         cond(V) where L = V diag(lambda) V^{-1}, or np.nan if N too large.
     """
-    raise NotImplementedError("eigenvector_condition: 41.8c")
+    import scipy.sparse as sp
+
+    n = L.shape[0]
+    if n > small_dense_threshold:
+        return np.nan
+
+    A = L.toarray() if sp.issparse(L) else np.asarray(L, dtype=float)
+    evals, V = np.linalg.eig(A)
+    return float(np.linalg.cond(V))
 
 
 def _sigma_field(L, s_grid: np.ndarray) -> np.ndarray:

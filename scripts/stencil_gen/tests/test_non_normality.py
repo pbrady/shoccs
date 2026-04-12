@@ -6,7 +6,12 @@ import numpy as np
 import pytest
 import scipy.sparse as sp
 
-from stencil_gen.non_normality import spectral_abscissa_sparse
+from stencil_gen.non_normality import (
+    spectral_abscissa_sparse,
+    numerical_abscissa_sparse,
+    henrici_departure,
+    eigenvector_condition,
+)
 
 
 # ---------------------------------------------------------------------------
@@ -84,3 +89,85 @@ class TestSpectralAbscissa:
         # Largest eigenvalue is at k=1: -2 + 2*cos(pi/(n+1))
         expected_max = -2.0 + 2.0 * np.cos(np.pi / (n + 1))
         assert max_re == pytest.approx(expected_max, abs=1e-8)
+
+
+# ---------------------------------------------------------------------------
+# TestNormMetrics (41.8c)
+# ---------------------------------------------------------------------------
+
+
+class TestNormMetrics:
+    """Tests for numerical_abscissa_sparse, henrici_departure, eigenvector_condition."""
+
+    def test_diagonal_numerical_abscissa(self):
+        """Diagonal -diag(1..50): numerical abscissa = spectral abscissa = -1."""
+        diag_vals = -np.arange(1, 51, dtype=float)
+        L = sp.diags(diag_vals, format="csr")
+        na = numerical_abscissa_sparse(L)
+        # For a real diagonal (hence symmetric) matrix, numerical abscissa
+        # equals spectral abscissa: max eigenvalue of H = max eigenvalue of L.
+        assert na == pytest.approx(-1.0, abs=1e-10)
+
+    def test_diagonal_henrici_zero(self):
+        """Diagonal matrix is normal: Henrici departure = 0."""
+        diag_vals = -np.arange(1, 51, dtype=float)
+        L = sp.diags(diag_vals, format="csr")
+        h = henrici_departure(L)
+        assert h == pytest.approx(0.0, abs=1e-12)
+
+    def test_diagonal_eigenvector_condition_one(self):
+        """Diagonal matrix has eigenvector condition number ≈ 1."""
+        diag_vals = -np.arange(1, 51, dtype=float)
+        L = sp.diags(diag_vals, format="csr")
+        cond_v = eigenvector_condition(L)
+        # Eigenvectors of a diagonal matrix are the identity columns,
+        # so V = permutation of I, cond(V) = 1.
+        assert cond_v == pytest.approx(1.0, abs=1e-8)
+
+    def test_numerical_abscissa_dense_input(self):
+        """numerical_abscissa_sparse works with dense ndarray input."""
+        A = np.diag([-3.0, -2.0, -1.0])
+        na = numerical_abscissa_sparse(A)
+        assert na == pytest.approx(-1.0, abs=1e-10)
+
+    def test_henrici_dense_input(self):
+        """henrici_departure works with dense ndarray input."""
+        A = np.diag([1.0, 2.0, 3.0])
+        h = henrici_departure(A)
+        assert h == pytest.approx(0.0, abs=1e-12)
+
+    def test_eigenvector_condition_large_returns_nan(self):
+        """eigenvector_condition returns NaN when N exceeds threshold."""
+        L = sp.eye(1000, format="csr")
+        cond_v = eigenvector_condition(L, small_dense_threshold=500)
+        assert np.isnan(cond_v)
+
+    def test_non_normal_matrix_positive_henrici(self):
+        """A non-normal matrix (upper triangular shift) has Henrici > 0."""
+        n = 30
+        # Upper-shift matrix: L[i, i+1] = 1
+        L = sp.diags([np.ones(n - 1)], [1], shape=(n, n), format="csr")
+        h = henrici_departure(L)
+        assert h > 0.0
+
+    def test_non_normal_matrix_large_eigenvector_condition(self):
+        """A non-normal matrix has cond(V) >> 1."""
+        n = 30
+        # Jordan-like: -I + nilpotent shift
+        A = -np.eye(n) + n * np.diag(np.ones(n - 1), 1)
+        cond_v = eigenvector_condition(A)
+        assert cond_v > 10.0
+
+    def test_numerical_abscissa_ge_spectral_abscissa(self):
+        """Numerical abscissa >= spectral abscissa (fundamental inequality)."""
+        rng = np.random.default_rng(99)
+        A = rng.standard_normal((30, 30)) - 3.0 * np.eye(30)
+        na = numerical_abscissa_sparse(A)
+        sa, _ = spectral_abscissa_sparse(A)
+        assert na >= sa - 1e-9
+
+    def test_zero_matrix_henrici(self):
+        """Zero matrix: henrici_departure returns 0 (guard against div-by-zero)."""
+        L = sp.csr_matrix((10, 10))
+        h = henrici_departure(L)
+        assert h == pytest.approx(0.0, abs=1e-12)

@@ -306,7 +306,7 @@ Implementing Trefethen 1983 (pp. 206–207). For the semi-discrete problem `u_t 
   - File: `scripts/stencil_gen/stencil_gen/non_normality.py`, `scripts/stencil_gen/tests/test_non_normality.py` (new)
   - Test: `cd scripts/stencil_gen && uv run pytest tests/test_non_normality.py -x -q -k "TestSpectralAbscissa"`
 
-- [ ] **41.8c** Implement `numerical_abscissa_sparse(L) -> float`, `henrici_departure(L) -> float`, `eigenvector_condition(L, small_dense_threshold=900) -> float`:
+- [x] **41.8c** Implement `numerical_abscissa_sparse(L) -> float`, `henrici_departure(L) -> float`, `eigenvector_condition(L, small_dense_threshold=900) -> float`:
   - `numerical_abscissa_sparse` — `H = 0.5 * (L + L.T)`; `eigsh(H, k=1, which="LA")`; sparse → scalar.
   - `henrici_departure` — `‖L L^T - L^T L‖_F / ‖L‖_F^2`; guard division by zero.
   - `eigenvector_condition` — if `N > threshold` return `np.nan`; else dense `np.linalg.eig` and `np.linalg.cond(V)`.
