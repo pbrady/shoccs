@@ -90,14 +90,14 @@ cd scripts/stencil_gen && uv run python -m stencil_gen.brady2d --scheme E4 --ker
 
 ### 41.2 — L1 wrapper: interior + boundary group velocity error
 
-- [ ] **41.2a** Create `stencil_gen/brady2d_stability.py` with a **minimal** skeleton:
+- [x] **41.2a** Create `stencil_gen/brady2d_stability.py` with a **minimal** skeleton:
   - `StabilityReport` dataclass with *only* `layer1: dict | None = None`, `failed_layer: int | None = None`, `overall_verdict: str = "unknown"`, `compute_time: float = 0.0`. **Full fields (layer2 through layer8, kreiss, non_normality) are intentionally deferred to 41.10a — do not add them here.** A short module comment should note "dataclass will be expanded in 41.10a".
   - `layer1_interior_boundary_gv(scheme: str, kernel: str, params: dict, n_xi: int = 200) -> dict` — returns `{interior_gv_err_x: float, interior_gv_err_y: float, boundary_gv_err: float, cutoff_fraction: float}`. Uses existing `interior_group_velocity` and `boundary_group_velocity` from `group_velocity.py`. Wraps `boundary_group_velocity_classical` for classical-alpha family.
   - Layer-1 failure criterion: any metric > `L1_TOL = 0.05` (dispersion error > 5%).
   - File: `scripts/stencil_gen/stencil_gen/brady2d_stability.py` (new)
   - Test: `cd scripts/stencil_gen && uv run pytest tests/test_brady2d_stability.py -x -q -k "TestLayer1"`
 
-- [ ] **41.2b** Add `tests/test_brady2d_stability.py::TestLayer1` with:
+- [x] **41.2b** Add `tests/test_brady2d_stability.py::TestLayer1` with:
   - `test_layer1_classical_e4_passes` — classical E4 alpha from `known_values.json` produces `boundary_gv_err < 0.05`.
   - `test_layer1_tension_e4_passes` — tension E4 at sigma=3.0 passes.
   - `test_layer1_gaussian_e4_known_unstable_still_passes_at_this_layer` — Gaussian ε=0.1 (known_unstable per `known_values.json`) passes L1 (confirms L1 is necessary but not sufficient).
