@@ -8,10 +8,12 @@ import pytest
 
 from stencil_gen.brady2d_stability import (
     L1_TOL,
+    L4_TOL,
     STABILITY_TOL,
     StabilityReport,
     layer1_interior_boundary_gv,
     layer3_1d_eigenvalue,
+    layer4_local_gv_2d,
 )
 
 
@@ -162,3 +164,36 @@ class TestLayer3:
             "E4", "tension", {"sigma": 3.0}, n_values=(15, 30),
         )
         assert set(result["eigenvalues"].keys()) == {15, 30}
+
+
+class TestLayer4:
+    """Layer 4: per-point local GV error on the Brady-Livescu 2D field."""
+
+    def test_classical_e4_passes(self):
+        """Classical E4 passes L4 on the BL coefficient field."""
+        result = layer4_local_gv_2d("E4", "classical", {})
+        assert result["max_local_gv_error"] <= L4_TOL, (
+            f"E4 local GV error {result['max_local_gv_error']:.4f} exceeds L4_TOL={L4_TOL}"
+        )
+
+    def test_e2_has_larger_error_than_e4(self):
+        """E2 has larger local GV error than E4 (lower-order → worse dispersion)."""
+        r2 = layer4_local_gv_2d("E2", "tension", {"sigma": 0.0}, N=21)
+        r4 = layer4_local_gv_2d("E4", "tension", {"sigma": 3.0}, N=21)
+        assert r2["max_local_gv_error"] > r4["max_local_gv_error"], (
+            "E2 should have larger local GV error than E4"
+        )
+
+    def test_return_keys(self):
+        """Layer 4 returns expected keys."""
+        result = layer4_local_gv_2d("E4", "tension", {"sigma": 3.0}, N=11)
+        assert "max_local_gv_error" in result
+        assert "worst_point" in result
+        assert "worst_xi" in result
+        assert isinstance(result["worst_point"], tuple)
+        assert len(result["worst_point"]) == 2
+
+    def test_worst_xi_in_range(self):
+        """worst_xi should be in (0, pi]."""
+        result = layer4_local_gv_2d("E4", "tension", {"sigma": 3.0}, N=11)
+        assert 0.0 < result["worst_xi"] <= np.pi

@@ -1095,3 +1095,90 @@ def gks_group_velocity_check(
         )
 
     return results
+
+
+def local_group_velocity_2d_varying(
+    interior_stencil_x: tuple[np.ndarray, np.ndarray],
+    interior_stencil_y: tuple[np.ndarray, np.ndarray],
+    c_x_field: np.ndarray,
+    c_y_field: np.ndarray,
+    xi_array: np.ndarray,
+) -> dict:
+    """Compute local group velocity error on a 2D varying-coefficient field.
+
+    For the PDE ``u_t + c_x(x,y) u_x + c_y(x,y) u_y = 0`` discretized with
+    tensor-product interior stencils, the local (frozen-coefficient) group
+    velocity at grid point ``(i,j)`` is ``(c_x[i,j]*C_x(xi), c_y[i,j]*C_y(xi))``
+    where ``C_x`` and ``C_y`` are the 1D interior group velocity profiles.
+
+    For smooth ``(c_x, c_y)`` fields, this local-frozen-coefficient analysis
+    is the first-order WKB approximation to the varying-coefficient dispersion
+    relation (see e.g. Trefethen 1982, Vichnevetsky & Bowles 1982).
+
+    Parameters
+    ----------
+    interior_stencil_x : (weights, offsets)
+        Interior stencil for the x-direction.
+    interior_stencil_y : (weights, offsets)
+        Interior stencil for the y-direction.
+    c_x_field : np.ndarray, shape (Ny, Nx)
+        x-component of the coefficient field.
+    c_y_field : np.ndarray, shape (Ny, Nx)
+        y-component of the coefficient field.
+    xi_array : np.ndarray, shape (N_xi,)
+        Wavenumber values in [0, pi].
+
+    Returns
+    -------
+    dict with keys:
+        C_x_field : np.ndarray, shape (Ny, Nx, N_xi)
+            Local group velocity in x at each grid point.
+        C_y_field : np.ndarray, shape (Ny, Nx, N_xi)
+            Local group velocity in y at each grid point.
+        gv_error_x_field : np.ndarray, shape (Ny, Nx, N_xi)
+            ``c_x[i,j] * gv_error_x(xi)`` — absolute GV error in x.
+        gv_error_y_field : np.ndarray, shape (Ny, Nx, N_xi)
+            ``c_y[i,j] * gv_error_y(xi)`` — absolute GV error in y.
+    """
+    w_x, off_x = np.asarray(interior_stencil_x[0]), np.asarray(interior_stencil_x[1])
+    w_y, off_y = np.asarray(interior_stencil_y[0]), np.asarray(interior_stencil_y[1])
+
+    # 1D GV profiles (same for all grid points)
+    C_x_1d = group_velocity_exact_nonuniform(w_x, off_x, xi_array)  # shape (N_xi,)
+    C_y_1d = group_velocity_exact_nonuniform(w_y, off_y, xi_array)
+
+    # 1D GV error: (C - 1) / 1
+    gv_err_x_1d = group_velocity_error(C_x_1d)  # shape (N_xi,)
+    gv_err_y_1d = group_velocity_error(C_y_1d)
+
+    # Broadcast: c_field[i,j] * profile[xi] → (Ny, Nx, N_xi)
+    C_x_out = c_x_field[:, :, np.newaxis] * C_x_1d[np.newaxis, np.newaxis, :]
+    C_y_out = c_y_field[:, :, np.newaxis] * C_y_1d[np.newaxis, np.newaxis, :]
+
+    gv_err_x_out = c_x_field[:, :, np.newaxis] * gv_err_x_1d[np.newaxis, np.newaxis, :]
+    gv_err_y_out = c_y_field[:, :, np.newaxis] * gv_err_y_1d[np.newaxis, np.newaxis, :]
+
+    return {
+        "C_x_field": C_x_out,
+        "C_y_field": C_y_out,
+        "gv_error_x_field": gv_err_x_out,
+        "gv_error_y_field": gv_err_y_out,
+    }
+
+
+def max_local_gv_error_2d(result: dict) -> float:
+    """Scalar reduction: max absolute local GV error over all points and wavenumbers.
+
+    Parameters
+    ----------
+    result : dict
+        Output of :func:`local_group_velocity_2d_varying`.
+
+    Returns
+    -------
+    float
+        ``max(|gv_error_x_field|, |gv_error_y_field|)`` over all (i, j, xi).
+    """
+    max_x = float(np.max(np.abs(result["gv_error_x_field"])))
+    max_y = float(np.max(np.abs(result["gv_error_y_field"])))
+    return max(max_x, max_y)

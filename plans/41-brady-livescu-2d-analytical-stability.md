@@ -229,7 +229,7 @@ Implementing Trefethen 1983 (pp. 206–207). For the semi-discrete problem `u_t 
   - File: `scripts/stencil_gen/tests/test_brady2d_stability.py`
   - Test: `cd scripts/stencil_gen && uv run pytest tests/test_brady2d_stability.py -x -q -k "TestLayer3"`
 
-- [ ] **41.5c** Fix `_build_classical_diff_matrix` crash for E2 (p=1) and remove E2 classical from 41.11a FAMILIES:
+- [x] **41.5c** Fix `_build_classical_diff_matrix` crash for E2 (p=1) and remove E2 classical from 41.11a FAMILIES:
   - **Problem:** `_build_classical_diff_matrix` calls `_derive_classical_boundary(p=1, ...)` → `derive_boundary(p=1)` which computes `n_alpha = (r-2) + n_active_penultimate = -1`, then crashes in `symbols("alpha_0:-1")`. E2 has no free alpha parameters — the boundary weights are fully determined.
   - **Fix option A (preferred):** Remove the `("E2", "classical", ...)` entry from 41.11a's `FAMILIES` list. E2 classical has no free parameters, so there is no classical-alpha family to calibrate. The E2 PHS k=2 entry (`("E2", "tension", {"sigma": 0.0})`) already covers the E2 case with fully-determined boundary weights. Add a comment in `_build_classical_diff_matrix` docstring noting it requires `p >= 2` (E4+).
   - **Fix option B (if E2 classical calibration is actually needed):** Handle the no-alpha case in `_derive_classical_boundary` by bypassing `derive_boundary` and directly constructing the unique E2 boundary row.
@@ -238,7 +238,7 @@ Implementing Trefethen 1983 (pp. 206–207). For the semi-discrete problem `u_t 
 
 ### 41.6 — L4 2D varying-coefficient local group velocity
 
-- [ ] **41.6a** Add `local_group_velocity_2d_varying(interior_stencil_x, interior_stencil_y, c_x_field, c_y_field, xi_array) -> dict` to `group_velocity.py`:
+- [x] **41.6a** Add `local_group_velocity_2d_varying(interior_stencil_x, interior_stencil_y, c_x_field, c_y_field, xi_array) -> dict` to `group_velocity.py`:
   - For each grid point `(i, j)`, compute the *local* group velocity error by freezing coefficients: `C_local_x(xi) = c_x[i,j] * group_velocity_exact(interior_stencil_x, xi) - c_x[i,j]`.
   - Similarly for `C_local_y`.
   - Return `{C_x_field: shape (Ny, Nx, N_xi), C_y_field: shape (Ny, Nx, N_xi), gv_error_x_field, gv_error_y_field}`.
@@ -248,14 +248,14 @@ Implementing Trefethen 1983 (pp. 206–207). For the semi-discrete problem `u_t 
   - File: `scripts/stencil_gen/stencil_gen/group_velocity.py`
   - Test: `cd scripts/stencil_gen && uv run pytest tests/test_group_velocity.py -x -q -k "TestLocal2DVarying"`
 
-- [ ] **41.6b** Tests `TestLocal2DVarying`:
+- [x] **41.6b** Tests `TestLocal2DVarying`:
   - `test_constant_coefficient_reduces_to_interior` — set `c_x == 1`, `c_y == 0` everywhere, verify output matches `interior_group_velocity` applied to the x-stencil.
   - `test_radial_flow_field` — use `make_coefficient_field(31)` from 41.1, verify `max_local_gv_error_2d` finite and within expected range for classical E4.
   - `test_scalar_reduction_finite_for_both_schemes` — E2 and E4 both produce finite positive `max_local_gv_error_2d` on the BL field (property assertion only; no monotonicity claim between schemes since that is not a theorem).
   - File: `scripts/stencil_gen/tests/test_group_velocity.py`
   - Test: `cd scripts/stencil_gen && uv run pytest tests/test_group_velocity.py -x -q -k "TestLocal2DVarying"`
 
-- [ ] **41.6c** Add `layer4_local_gv_2d(scheme, kernel, params, N=31) -> dict` to `brady2d_stability.py`:
+- [x] **41.6c** Add `layer4_local_gv_2d(scheme, kernel, params, N=31) -> dict` to `brady2d_stability.py`:
   - Builds `(c_x_field, c_y_field)` from `make_coefficient_field(N)`.
   - Calls `local_group_velocity_2d_varying` with the scheme's interior stencils.
   - Returns `{max_local_gv_error: float, worst_point: tuple[int, int], worst_xi: float}`.
@@ -400,7 +400,7 @@ The point of this phase is to run `brady2d_stability_score` on every (scheme, ke
 - [ ] **41.11a** Create `stencil_gen/benchmarks/brady2d_calibration.py` with:
   - `FAMILIES: list[tuple[str, str, dict]]` — the enumeration. **Note on PHS k=2:** `phs._rbf_weights_numeric` dispatches PHS via `kernel="tension"` with `epsilon=0.0` (see `phs.py:407–423`), not via a distinct `"phs_k2"` kernel string. The `FAMILIES` entries must use the actual kernel string accepted by the dispatcher:
     ```
-    ("E2", "classical", {"alpha": <loaded from alpha_extraction production values>}),
+    # NOTE: E2 classical removed per 41.5c — E2 has no free alpha parameters.
     ("E4", "classical", {"alpha": <loaded from alpha_extraction production values>}),
     ("E2", "tension",      {"sigma":   0.0}),  # ε=0 → dispatches to PHS k=2
     ("E4", "tension",      {"sigma":   0.0}),

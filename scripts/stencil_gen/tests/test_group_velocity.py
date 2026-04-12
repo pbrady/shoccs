@@ -22,6 +22,8 @@ from stencil_gen.group_velocity import (
     group_velocity_exact_nonuniform,
     interior_group_velocity,
     local_group_velocity,
+    local_group_velocity_2d_varying,
+    max_local_gv_error_2d,
     modified_wavenumber,
     modified_wavenumber_nonuniform,
     phase_velocity,
@@ -1814,5 +1816,87 @@ class TestVaryingCoefficientGroupVelocity:
         # xi should be monotonically changing (refraction is one-way here)
         dxi = np.diff(result.xi)
         assert np.all(dxi < 0), "xi should decrease monotonically for eps > 0"
+
+
+class TestLocal2DVarying:
+    """Tests for local_group_velocity_2d_varying and max_local_gv_error_2d."""
+
+    @staticmethod
+    def _interior_stencil(p: int, nu: int = 1):
+        """Return (weights, offsets) for the interior scheme with half-bandwidth p."""
+        from stencil_gen.interior import derive_interior, full_gamma_array
+
+        coeffs = derive_interior(0, p, nu)
+        w = np.array([float(c) for c in full_gamma_array(coeffs)])
+        offsets = np.arange(-p, p + 1, dtype=float)
+        return (w, offsets)
+
+    def test_constant_coefficient_reduces_to_interior(self):
+        """With c_x == 1, c_y == 0, the result should match interior_group_velocity."""
+        p, nu = 2, 1  # E4
+        stencil = self._interior_stencil(p, nu)
+        xi = np.linspace(0.01, np.pi, 100)
+
+        Ny, Nx = 5, 7
+        c_x = np.ones((Ny, Nx))
+        c_y = np.zeros((Ny, Nx))
+
+        result = local_group_velocity_2d_varying(stencil, stencil, c_x, c_y, xi)
+
+        # Reference: 1D interior profile
+        ref_profile = interior_group_velocity(p, nu, xi)
+
+        # C_x_field should be C_x(xi) at every point (c_x == 1)
+        for i in range(Ny):
+            for j in range(Nx):
+                np.testing.assert_allclose(
+                    result["C_x_field"][i, j, :],
+                    ref_profile.group_velocity,
+                    atol=1e-14,
+                )
+        # gv_error_x_field should match gv_error (c_x == 1)
+        for i in range(Ny):
+            for j in range(Nx):
+                np.testing.assert_allclose(
+                    result["gv_error_x_field"][i, j, :],
+                    ref_profile.gv_error,
+                    atol=1e-14,
+                )
+        # C_y_field and gv_error_y_field should be zero (c_y == 0)
+        np.testing.assert_allclose(result["C_y_field"], 0.0, atol=1e-14)
+        np.testing.assert_allclose(result["gv_error_y_field"], 0.0, atol=1e-14)
+
+    def test_radial_flow_field(self):
+        """max_local_gv_error_2d on the Brady-Livescu field is finite and reasonable."""
+        from stencil_gen.benchmarks.brady_livescu_2d import make_coefficient_field
+
+        p, nu = 2, 1  # E4
+        stencil = self._interior_stencil(p, nu)
+        xi = np.linspace(0.01, np.pi, 100)
+
+        _, _, c_x, c_y = make_coefficient_field(31)
+        result = local_group_velocity_2d_varying(stencil, stencil, c_x, c_y, xi)
+
+        max_err = max_local_gv_error_2d(result)
+        assert np.isfinite(max_err), "max_local_gv_error_2d should be finite"
+        assert max_err > 0.0, "max_local_gv_error_2d should be positive"
+        # E4 interior has some dispersion error, and c_x, c_y are O(1).
+        # Near xi=pi the GV error is large (negative C), so the max over all
+        # wavenumbers can exceed 2. Bound is a loose sanity check.
+        assert max_err < 5.0, f"max_local_gv_error_2d unexpectedly large: {max_err}"
+
+    def test_scalar_reduction_finite_for_both_schemes(self):
+        """E2 and E4 both produce finite positive max_local_gv_error_2d on BL field."""
+        from stencil_gen.benchmarks.brady_livescu_2d import make_coefficient_field
+
+        xi = np.linspace(0.01, np.pi, 100)
+        _, _, c_x, c_y = make_coefficient_field(31)
+
+        for p in (1, 2):  # E2 (p=1), E4 (p=2)
+            stencil = self._interior_stencil(p, nu=1)
+            result = local_group_velocity_2d_varying(stencil, stencil, c_x, c_y, xi)
+            max_err = max_local_gv_error_2d(result)
+            assert np.isfinite(max_err), f"p={p}: max error should be finite"
+            assert max_err > 0.0, f"p={p}: max error should be positive"
 
 

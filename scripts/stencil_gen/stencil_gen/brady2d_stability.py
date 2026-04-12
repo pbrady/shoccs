@@ -23,6 +23,8 @@ from stencil_gen.group_velocity import (
     boundary_group_velocity,
     boundary_group_velocity_classical,
     interior_group_velocity,
+    local_group_velocity_2d_varying,
+    max_local_gv_error_2d,
 )
 from stencil_gen.phs import (
     build_diff_matrix_rbf,
@@ -43,6 +45,10 @@ L1_TOL = 0.05  # 5% dispersion error
 
 # Layer-3 threshold: max Re(eigenvalue of -D_bc) must be non-positive
 STABILITY_TOL = 1e-10
+
+# Layer-4 threshold: 10% — looser than L1 because the varying-coefficient
+# scaling amplifies the baseline dispersion error.
+L4_TOL = 0.1
 
 # Fraction of the resolved band over which to measure max |gv_error|.
 # Using 10% of the cutoff restricts evaluation to very well-resolved
@@ -198,6 +204,11 @@ def _build_classical_diff_matrix(
     Uses the TEMO boundary derivation with conservation enforcement,
     substitutes alpha values, and assembles the full matrix with
     antisymmetric (nu=1) right boundary closure.
+
+    Requires p >= 2 (E4+).  For E2 (p=1) the boundary closure has zero free
+    alpha parameters — ``derive_boundary(p=1)`` computes a negative symbol
+    count and crashes.  Use the RBF path (``kernel="tension"``, ``sigma=0.0``)
+    for E2 instead.
     """
     from stencil_gen.interior import derive_interior, full_gamma_array
 
@@ -285,4 +296,76 @@ def layer3_1d_eigenvalue(
     return {
         "eigenvalues": eigenvalues,
         "max_stab_eig": max(eigenvalues.values()),
+    }
+
+
+def layer4_local_gv_2d(
+    scheme: str,
+    kernel: str,
+    params: dict,
+    N: int = 31,
+) -> dict:
+    """L4: per-point local group velocity error on the Brady-Livescu 2D field.
+
+    Freezes coefficients at each grid point and evaluates the interior stencil's
+    group velocity error scaled by the local wave speed.  This is the first-order
+    WKB approximation to the varying-coefficient dispersion error.
+
+    Parameters
+    ----------
+    scheme : str
+        Scheme name ("E2" or "E4").
+    kernel : str
+        Kernel type (unused for interior stencil — interior weights are
+        scheme-determined — but kept for API consistency with other layers).
+    params : dict
+        Kernel-specific parameters (unused at this layer).
+    N : int
+        Grid resolution for the coefficient field.
+
+    Returns
+    -------
+    dict with keys:
+        max_local_gv_error : float
+            Maximum absolute local GV error over all grid points and wavenumbers.
+        worst_point : tuple[int, int]
+            (i, j) indices of the grid point with the largest error.
+        worst_xi : float
+            Wavenumber at which the largest error occurs.
+    """
+    from stencil_gen.benchmarks.brady_livescu_2d import make_coefficient_field
+    from stencil_gen.interior import derive_interior, full_gamma_array
+
+    sp = _SCHEME_PARAMS[scheme]
+    p, nu = sp["p"], sp["nu"]
+
+    # Build interior stencil (same for x and y on Cartesian grid)
+    coeffs = derive_interior(0, p, nu)
+    w = np.array([float(c) for c in full_gamma_array(coeffs)])
+    offsets = np.arange(-p, p + 1, dtype=float)
+    stencil = (w, offsets)
+
+    # Compute the interior GV profile to determine the resolved band cutoff
+    profile = interior_group_velocity(p, nu, np.linspace(0.01, np.pi, 200))
+    xi_max = profile.cutoff_xi * _RESOLVED_FRAC
+    xi_array = np.linspace(0.01, xi_max, 200)
+
+    _, _, c_x, c_y = make_coefficient_field(N)
+
+    result = local_group_velocity_2d_varying(stencil, stencil, c_x, c_y, xi_array)
+
+    # Compute max absolute error over all points and the resolved band
+    err_x = np.abs(result["gv_error_x_field"])
+    err_y = np.abs(result["gv_error_y_field"])
+    combined = np.maximum(err_x, err_y)
+    max_err = float(np.max(combined))
+
+    # Find the worst point and wavenumber
+    flat_idx = int(np.argmax(combined))
+    i, j, k = np.unravel_index(flat_idx, combined.shape)
+
+    return {
+        "max_local_gv_error": max_err,
+        "worst_point": (int(i), int(j)),
+        "worst_xi": float(xi_array[k]),
     }
