@@ -329,7 +329,7 @@ Implementing Trefethen 1983 (pp. 206–207). For the semi-discrete problem `u_t 
   - File: `scripts/stencil_gen/stencil_gen/non_normality.py`, `scripts/stencil_gen/tests/test_non_normality.py`
   - Test: `cd scripts/stencil_gen && uv run pytest tests/test_non_normality.py -x -q -k "test_dense_large_input"`
 
-- [ ] **41.8e** Implement `pseudospectral_abscissa_estimate(L, epsilon_values, s_grid) -> dict[float, float]` and `kreiss_constant_estimate(L, s_grid) -> float`:
+- [x] **41.8e** Implement `pseudospectral_abscissa_estimate(L, epsilon_values, s_grid) -> dict[float, float]` and `kreiss_constant_estimate(L, s_grid) -> float`:
   - Both reuse `_sigma_field` to avoid duplicate SVD cost.
   - `pseudospectral_abscissa_estimate`: for each ε, `α_ε = max{ Re(s) : s in s_grid, sigma_field[s] <= ε }`, or `-inf` if no point satisfies.
   - `kreiss_constant_estimate`: `max{ Re(s) / sigma_field[s] : Re(s) > 0 }`.

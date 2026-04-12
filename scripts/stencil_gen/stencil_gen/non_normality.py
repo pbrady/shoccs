@@ -328,6 +328,8 @@ def pseudospectral_abscissa_estimate(
     """Estimate pseudospectral abscissa for each epsilon.
 
     For each epsilon, alpha_epsilon = max Re(s) such that sigma_min(sI - L) <= epsilon.
+    Both functions share the same ``_sigma_field`` evaluation to avoid
+    duplicate SVD cost.
 
     Parameters
     ----------
@@ -343,7 +345,18 @@ def pseudospectral_abscissa_estimate(
     dict[float, float]
         epsilon -> alpha_epsilon.  -inf if no grid point satisfies.
     """
-    raise NotImplementedError("pseudospectral_abscissa_estimate: 41.8e")
+    sigma = _sigma_field(L, s_grid)
+    flat_sigma = sigma.ravel()
+    flat_re = s_grid.ravel().real
+
+    result: dict[float, float] = {}
+    for eps in epsilon_values:
+        mask = flat_sigma <= eps
+        if np.any(mask):
+            result[eps] = float(np.max(flat_re[mask]))
+        else:
+            result[eps] = float("-inf")
+    return result
 
 
 def kreiss_constant_estimate(L, s_grid: np.ndarray) -> float:
@@ -359,9 +372,20 @@ def kreiss_constant_estimate(L, s_grid: np.ndarray) -> float:
     Returns
     -------
     float
-        Estimated Kreiss constant.
+        Estimated Kreiss constant.  Returns 0.0 if no grid point has Re(s) > 0.
     """
-    raise NotImplementedError("kreiss_constant_estimate: 41.8e")
+    sigma = _sigma_field(L, s_grid)
+    flat_sigma = sigma.ravel()
+    flat_re = s_grid.ravel().real
+
+    # Only consider points in the open right half-plane
+    mask = flat_re > 0
+    if not np.any(mask):
+        return 0.0
+
+    # K(L) = max_{Re(s) > 0} Re(s) / sigma_min(sI - L)
+    ratios = flat_re[mask] / np.maximum(flat_sigma[mask], 1e-300)
+    return float(np.max(ratios))
 
 
 # ---------------------------------------------------------------------------

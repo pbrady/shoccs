@@ -12,6 +12,8 @@ from stencil_gen.non_normality import (
     henrici_departure,
     eigenvector_condition,
     _sigma_field,
+    pseudospectral_abscissa_estimate,
+    kreiss_constant_estimate,
 )
 
 
@@ -293,3 +295,129 @@ class TestSigmaField:
             M = s * np.eye(n) - L_dense
             sv_ref = np.linalg.svd(M, compute_uv=False)[-1]
             assert result[idx] == pytest.approx(sv_ref, abs=1e-6)
+
+
+# ---------------------------------------------------------------------------
+# TestPseudoAndKreiss (41.8e)
+# ---------------------------------------------------------------------------
+
+
+class TestPseudoAndKreiss:
+    """Tests for pseudospectral_abscissa_estimate and kreiss_constant_estimate.
+
+    Uses the Wilkinson bidiagonal matrix  L = -I + N*upper_shift  at N=30,
+    which is spectrally stable (spectral abscissa = -1) but highly non-normal
+    (numerical abscissa >> 0, Kreiss constant >> 1).
+    """
+
+    @staticmethod
+    def _wilkinson_bidiagonal(n: int = 30):
+        """Build L = -I + n * upper-shift (bidiagonal).
+
+        Returns a dense ndarray because this matrix is so non-normal that
+        Arnoldi (ARPACK) fails to converge to the true eigenvalues.  Dense
+        eigensolver handles it correctly.
+        """
+        return -np.eye(n) + float(n) * np.diag(np.ones(n - 1), 1)
+
+    @staticmethod
+    def _make_rhs_grid(re_max: float = 2.0, n_re: int = 30,
+                       im_max: float = 5.0, n_im: int = 40):
+        """Build a right-half-plane grid for resolvent sampling."""
+        re_vals = np.linspace(1e-3, re_max, n_re)
+        im_vals = np.linspace(-im_max, im_max, n_im)
+        return re_vals[:, None] + 1j * im_vals[None, :]
+
+    def test_wilkinson_spectral_abscissa_minus_one(self):
+        """Wilkinson bidiagonal has spectral abscissa ≈ -1."""
+        L = self._wilkinson_bidiagonal(30)
+        sa, _ = spectral_abscissa_sparse(L)
+        assert sa == pytest.approx(-1.0, abs=1e-8)
+
+    def test_wilkinson_numerical_abscissa_strongly_positive(self):
+        """Wilkinson bidiagonal has strongly positive numerical abscissa."""
+        L = self._wilkinson_bidiagonal(30)
+        na = numerical_abscissa_sparse(L)
+        assert na > 5.0  # much larger than spectral abscissa
+
+    def test_pseudospectral_abscissa_monotone_in_epsilon(self):
+        """alpha_eps is non-decreasing in epsilon (larger perturbation => larger pseudospectrum)."""
+        L = self._wilkinson_bidiagonal(30)
+        s_grid = self._make_rhs_grid()
+        epsilons = [1e-4, 1e-3, 1e-2, 1e-1]
+        result = pseudospectral_abscissa_estimate(L, epsilons, s_grid)
+
+        # Monotonicity: alpha_eps1 <= alpha_eps2 when eps1 < eps2
+        prev = float("-inf")
+        for eps in epsilons:
+            assert result[eps] >= prev - 1e-12
+            prev = result[eps]
+
+    def test_pseudospectral_abscissa_returns_neg_inf_for_tiny_epsilon(self):
+        """For extremely small epsilon, no grid point satisfies => -inf."""
+        L = self._wilkinson_bidiagonal(30)
+        # Grid far from spectrum: sigma_min is large at all points
+        s_grid = np.array([10.0 + 0j, 10.0 + 5j])
+        result = pseudospectral_abscissa_estimate(L, [1e-20], s_grid)
+        assert result[1e-20] == float("-inf")
+
+    def test_pseudospectral_abscissa_at_eigenvalue(self):
+        """alpha_eps includes the eigenvalue vicinity for large enough epsilon."""
+        # Diagonal L: eigenvalues at -1, -2, -3
+        L = sp.diags([-1.0, -2.0, -3.0], format="csr")
+        # Grid includes a point near eigenvalue -1
+        s_grid = np.array([-1.0 + 0j, -0.99 + 0j, -0.5 + 0j, 0.5 + 0j])
+        result = pseudospectral_abscissa_estimate(L, [0.1], s_grid)
+        # sigma_min(sI - L) at s = -0.99 is min(|0.01|, |1.01|, |2.01|) = 0.01 < 0.1
+        assert result[0.1] >= -1.0
+
+    def test_kreiss_constant_wilkinson_large(self):
+        """Wilkinson bidiagonal has Kreiss constant >> 1 (strong transient growth)."""
+        L = self._wilkinson_bidiagonal(30)
+        s_grid = self._make_rhs_grid()
+        K = kreiss_constant_estimate(L, s_grid)
+        assert K > 10.0  # highly non-normal => large Kreiss constant
+
+    def test_kreiss_constant_stable_diagonal(self):
+        """Stable normal matrix has Kreiss constant ≈ 1."""
+        # L = -I: all eigenvalues at -1, normal matrix
+        n = 30
+        L = -sp.eye(n, format="csr")
+        # Grid in right half-plane: Re(s) > 0
+        re_vals = np.linspace(0.01, 2.0, 20)
+        im_vals = np.linspace(-3.0, 3.0, 30)
+        s_grid = re_vals[:, None] + 1j * im_vals[None, :]
+        K = kreiss_constant_estimate(L, s_grid)
+        # For a normal matrix with spectral abscissa -1:
+        # sigma_min(sI - L) = min|s - lambda_i| = |s + 1| >= Re(s) + 1
+        # so Re(s) / sigma_min <= Re(s) / (Re(s) + 1) < 1
+        assert K < 1.0
+
+    def test_kreiss_constant_no_rhs_returns_zero(self):
+        """If no grid points have Re(s) > 0, Kreiss constant is 0."""
+        L = sp.eye(5, format="csr")
+        s_grid = np.array([-1.0 + 0j, -0.5 + 1j])  # all Re(s) <= 0
+        K = kreiss_constant_estimate(L, s_grid)
+        assert K == 0.0
+
+    def test_shared_sigma_field_consistency(self):
+        """Both functions produce results consistent with direct _sigma_field call."""
+        L = self._wilkinson_bidiagonal(30)
+        s_grid = self._make_rhs_grid(re_max=1.5, n_re=15, im_max=3.0, n_im=20)
+
+        sigma = _sigma_field(L, s_grid)
+        flat_sigma = sigma.ravel()
+        flat_re = s_grid.ravel().real
+
+        # Manual pseudospectral abscissa for eps=0.1
+        eps = 0.1
+        mask = flat_sigma <= eps
+        expected_alpha = float(np.max(flat_re[mask])) if np.any(mask) else float("-inf")
+        result = pseudospectral_abscissa_estimate(L, [eps], s_grid)
+        assert result[eps] == pytest.approx(expected_alpha, abs=1e-12)
+
+        # Manual Kreiss constant
+        rhs_mask = flat_re > 0
+        expected_K = float(np.max(flat_re[rhs_mask] / np.maximum(flat_sigma[rhs_mask], 1e-300)))
+        K = kreiss_constant_estimate(L, s_grid)
+        assert K == pytest.approx(expected_K, abs=1e-12)
