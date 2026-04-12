@@ -11,6 +11,7 @@ from stencil_gen.non_normality import (
     numerical_abscissa_sparse,
     henrici_departure,
     eigenvector_condition,
+    _sigma_field,
 )
 
 
@@ -171,3 +172,100 @@ class TestNormMetrics:
         L = sp.csr_matrix((10, 10))
         h = henrici_departure(L)
         assert h == pytest.approx(0.0, abs=1e-12)
+
+
+# ---------------------------------------------------------------------------
+# TestSigmaField (41.8d)
+# ---------------------------------------------------------------------------
+
+
+class TestSigmaField:
+    """Tests for _sigma_field: sigma_min(sI - L) over a complex grid."""
+
+    def test_diagonal_matches_brute_force(self):
+        """On a small diagonal matrix, compare _sigma_field to dense SVD."""
+        diag_vals = np.array([-3.0, -2.0, -1.0, 0.5, 1.5])
+        L = sp.diags(diag_vals, format="csr")
+        n = L.shape[0]
+
+        # Build a small grid
+        re_vals = np.linspace(-1, 3, 5)
+        im_vals = np.linspace(-2, 2, 5)
+        s_grid = re_vals[:, None] + 1j * im_vals[None, :]
+
+        result = _sigma_field(L, s_grid)
+        assert result.shape == s_grid.shape
+
+        # Brute-force reference
+        for i in range(s_grid.shape[0]):
+            for j in range(s_grid.shape[1]):
+                s = s_grid[i, j]
+                M = s * np.eye(n) - np.diag(diag_vals)
+                sv_ref = np.linalg.svd(M, compute_uv=False)[-1]
+                assert result[i, j] == pytest.approx(sv_ref, abs=1e-10)
+
+    def test_dense_input(self):
+        """_sigma_field works with a dense ndarray as L."""
+        A = np.diag([-2.0, -1.0, 0.0])
+        s_grid = np.array([0.0 + 0j, 1.0 + 0j, 0.0 + 1j])
+
+        result = _sigma_field(A, s_grid)
+        assert result.shape == s_grid.shape
+
+        # Check each point via brute-force
+        for idx, s in enumerate(s_grid):
+            M = s * np.eye(3) - A
+            sv_ref = np.linalg.svd(M, compute_uv=False)[-1]
+            assert result[idx] == pytest.approx(sv_ref, abs=1e-10)
+
+    def test_at_eigenvalue_sigma_min_near_zero(self):
+        """sigma_min(sI - L) ≈ 0 when s is an eigenvalue of L."""
+        diag_vals = np.array([-3.0, -1.0, 2.0])
+        L = sp.diags(diag_vals, format="csr")
+
+        # Evaluate exactly at each eigenvalue
+        s_grid = np.array([-3.0 + 0j, -1.0 + 0j, 2.0 + 0j])
+        result = _sigma_field(L, s_grid)
+
+        for val in result:
+            assert val == pytest.approx(0.0, abs=1e-10)
+
+    def test_identity_sigma_min(self):
+        """For L = I, sigma_min(sI - I) = |s - 1| (all singular values equal)."""
+        n = 10
+        L = sp.eye(n, format="csr")
+        s_grid = np.array([0.5 + 0j, 1.0 + 0j, 2.0 + 1j, -1.0 + 0.5j])
+
+        result = _sigma_field(L, s_grid)
+        for idx, s in enumerate(s_grid):
+            expected = abs(s - 1.0)
+            assert result[idx] == pytest.approx(expected, abs=1e-10)
+
+    def test_2d_grid_shape_preserved(self):
+        """Output shape matches a 2D input grid shape."""
+        L = sp.diags([-1.0, -2.0, -3.0], format="csr")
+        s_grid = np.zeros((4, 7), dtype=complex)
+        s_grid.real = np.linspace(-1, 1, 4)[:, None]
+        s_grid.imag = np.linspace(-3, 3, 7)[None, :]
+
+        result = _sigma_field(L, s_grid)
+        assert result.shape == (4, 7)
+
+    def test_sparse_medium_size(self):
+        """Sparse path exercised for N > 200 (if we make L sparse and large)."""
+        n = 250
+        # Stable tridiagonal
+        diag_main = -2.0 * np.ones(n)
+        diag_off = np.ones(n - 1)
+        L = sp.diags([diag_off, diag_main, diag_off], [-1, 0, 1], format="csc")
+
+        # Small grid — just a few points to keep test fast
+        s_grid = np.array([0.0 + 0j, 0.0 + 1j, -1.0 + 0j])
+        result = _sigma_field(L, s_grid)
+
+        # Compare to dense
+        L_dense = L.toarray()
+        for idx, s in enumerate(s_grid):
+            M = s * np.eye(n) - L_dense
+            sv_ref = np.linalg.svd(M, compute_uv=False)[-1]
+            assert result[idx] == pytest.approx(sv_ref, abs=1e-6)

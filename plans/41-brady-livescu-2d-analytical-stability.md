@@ -314,7 +314,7 @@ Implementing Trefethen 1983 (pp. 206–207). For the semi-discrete problem `u_t 
   - File: `scripts/stencil_gen/stencil_gen/non_normality.py`, `scripts/stencil_gen/tests/test_non_normality.py`
   - Test: `cd scripts/stencil_gen && uv run pytest tests/test_non_normality.py -x -q -k "TestNormMetrics"`
 
-- [ ] **41.8d** Implement `_sigma_field(L, s_grid) -> np.ndarray` shared helper:
+- [x] **41.8d** Implement `_sigma_field(L, s_grid) -> np.ndarray` shared helper:
   - For each `s` in `s_grid`, compute `σ_min(s*I - L)` via `scipy.sparse.linalg.svds(s*sp.eye(L.shape[0]) - L, k=1, which="SM", return_singular_vectors=False)` (or dense SVD for small N).
   - Handle `ArpackError` by densifying the shifted operator for small N.
   - Return `sigma_field` of shape `s_grid.shape`.

@@ -257,6 +257,10 @@ def eigenvector_condition(L, small_dense_threshold: int = 900) -> float:
 def _sigma_field(L, s_grid: np.ndarray) -> np.ndarray:
     """Compute sigma_min(sI - L) over a grid of complex s values.
 
+    For each complex *s* in *s_grid*, forms ``M = sI - L`` and returns
+    the smallest singular value of *M*.  This is the resolvent norm
+    ``||R(s, L)||^{-1}`` used to define ε-pseudospectra.
+
     Parameters
     ----------
     L : scipy.sparse matrix or dense ndarray
@@ -269,7 +273,49 @@ def _sigma_field(L, s_grid: np.ndarray) -> np.ndarray:
     np.ndarray
         Array of same shape as s_grid with sigma_min values.
     """
-    raise NotImplementedError("_sigma_field: 41.8d")
+    import scipy.sparse as sp
+    from scipy.sparse.linalg import svds, ArpackError
+
+    n = L.shape[0]
+    use_dense = (not sp.issparse(L) and n <= 900) or (sp.issparse(L) and n <= 200)
+
+    if sp.issparse(L):
+        L_sp = L.tocsc()
+        I_sp = sp.eye(n, format="csc")
+    else:
+        L_dense = np.asarray(L, dtype=complex)
+
+    flat = s_grid.ravel()
+    result = np.empty(flat.shape[0], dtype=float)
+
+    for idx, s in enumerate(flat):
+        if use_dense:
+            if sp.issparse(L):
+                M = (s * I_sp - L_sp).toarray()
+            else:
+                M = s * np.eye(n) - L_dense
+            sv = np.linalg.svd(M, compute_uv=False)
+            result[idx] = float(sv[-1])
+        else:
+            M_sp = s * I_sp - L_sp
+            try:
+                sv = svds(M_sp, k=1, which="SM",
+                          return_singular_vectors=False)
+                result[idx] = float(sv[0])
+            except (ArpackError, Exception) as exc:
+                # Fallback: densify if small enough
+                if n <= 900:
+                    logger.debug("svds failed at s=%s, densifying: %s", s, exc)
+                    M_dense = M_sp.toarray()
+                    sv = np.linalg.svd(M_dense, compute_uv=False)
+                    result[idx] = float(sv[-1])
+                else:
+                    raise RuntimeError(
+                        f"_sigma_field: svds failed at s={s} for {n}x{n} "
+                        f"matrix and N > 900 prevents dense fallback"
+                    ) from exc
+
+    return result.reshape(s_grid.shape)
 
 
 def pseudospectral_abscissa_estimate(
