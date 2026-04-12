@@ -463,12 +463,13 @@ The point of this phase is to run `brady2d_stability_score` on every (scheme, ke
   - File: `scripts/stencil_gen/sweeps/known_values.json`
   - Test: `cd scripts/stencil_gen && uv run python -c "import json; d = json.load(open('sweeps/known_values.json')); assert 'brady2d_calibration' in d; print(list(d['brady2d_calibration'].keys()))"`
 
-- [ ] **41.11d** Add `TestRegressionBrady2DCalibration` in `test_phs.py`:
+- [x] **41.11d** Add `TestRegressionBrady2DCalibration` in `test_phs.py`:
   - Loads `brady2d_calibration` from `known_values.json`, iterates each family, re-runs `brady2d_stability_score` at `max_layer=3` (fast subset to keep tests under 10s), asserts the overall verdict matches the stored value.
   - Graceful skip if key is absent.
   - File: `scripts/stencil_gen/tests/test_phs.py`
   - Test: `cd scripts/stencil_gen && uv run pytest tests/test_phs.py -x -q -k "TestRegressionBrady2DCalibration"`
 
+<!-- RALPH-SKIP: manual calibration run; do not attempt -->
 - [ ] **41.11e** *(manual — explicitly OUT of the ralph_wiggum loop.)* Run the full calibration at `max_layer=7` (includes L7 sparse 2D eigs) to produce the authoritative reference scores for plan 42:
   - The invocation is: `cd scripts/stencil_gen && uv run python -m stencil_gen.brady2d_cli --run-calibration --max-layer 7 --update-known-values`
   - Expected runtime: 10–30 minutes total across all families (each family L7 scales as sparse-Arnoldi at multiple N).
@@ -478,7 +479,7 @@ The point of this phase is to run `brady2d_stability_score` on every (scheme, ke
 
 ### 41.12 — Documentation
 
-- [ ] **41.12a** Create `scripts/stencil_gen/docs/brady2d_stability_reference.md`:
+- [x] **41.12a** Create `scripts/stencil_gen/docs/brady2d_stability_reference.md`:
   - Problem statement from Brady-Livescu 2019 §4.3 (paraphrased, with page citation).
   - Layered pipeline table (L1–L7, what each catches, cost).
   - Failure threshold rationale for each layer.
@@ -487,7 +488,7 @@ The point of this phase is to run `brady2d_stability_score` on every (scheme, ke
   - File: `scripts/stencil_gen/docs/brady2d_stability_reference.md` (new)
   - Test: (no test — doc only)
 
-- [ ] **41.12b** Update `scripts/stencil_gen/docs/group_velocity_reference.md`:
+- [x] **41.12b** Update `scripts/stencil_gen/docs/group_velocity_reference.md`:
   - Cross-reference `gks_kreiss.py` (L2) and `local_group_velocity_2d_varying` (L4) alongside existing sections.
   - Clarify that `gks_group_velocity_check` is the heuristic and `kreiss_stability_check` is the rigorous test, citing Trefethen 1983 pp. 206–207.
   - File: `scripts/stencil_gen/docs/group_velocity_reference.md`
@@ -498,11 +499,13 @@ The point of this phase is to run `brady2d_stability_score` on every (scheme, ke
   - Add one bullet about the `brady2d_stability_score` entry point.
   - File: `.claude/skills/group-velocity-analysis/SKILL.md`
   - Test: (no test)
+  - **Note:** ralph_wiggum blocked by file permissions on `.claude/skills/` — needs manual edit.
 
 - [ ] **41.12d** Update the `stencil-sweeps` skill SKILL.md with the new `python -m stencil_gen.brady2d_cli` command:
   - One line under CLI quick reference.
   - File: `.claude/skills/stencil-sweeps/SKILL.md`
   - Test: (no test)
+  - **Note:** ralph_wiggum blocked by file permissions on `.claude/skills/` — needs manual edit.
 
 ---
 

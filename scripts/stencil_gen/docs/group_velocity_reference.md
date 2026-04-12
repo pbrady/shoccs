@@ -352,6 +352,44 @@ For the semi-discrete problem `du/dt = -D*u` with Dirichlet inflow BC (row/colum
 
 The left boundary is "outgoing" when `C > 0` (rightward into domain); the right boundary is "outgoing" when `C < 0` (leftward into domain). Only positive-imaginary members of conjugate pairs are kept.
 
+**Heuristic vs. rigorous test:** `gks_group_velocity_check` is a *heuristic* diagnostic (necessary but not sufficient for instability). For the rigorous GKS determinant condition, use `kreiss_stability_check` from `stencil_gen.gks_kreiss`, which implements Trefethen 1983 pp. 206-207: it sweeps the right half-plane for `s` where `sigma_min(M(s)) < tol`, refines witnesses via Nelder-Mead, and classifies imaginary-axis modes as incoming or outgoing. See `docs/brady2d_stability_reference.md` for the full API.
+
+---
+
+#### `local_group_velocity_2d_varying(interior_stencil_x, interior_stencil_y, c_x_field, c_y_field, xi_array)`
+
+Compute **per-point local group velocity error** across a 2D varying-coefficient field. At each grid point `(i, j)`, the local dispersion error is `c_*[i,j] * gv_error(xi)` — the factor of `c_*` scales the baseline interior error by the local wave speed. This is the first-order WKB approximation for smooth coefficient fields.
+
+Used by Layer 4 (L4) of the Brady-Livescu 2D stability pipeline. See `docs/brady2d_stability_reference.md`.
+
+| Parameter | Type | Description |
+|---|---|---|
+| `interior_stencil_x` | tuple | `(weights, offsets)` for x-direction interior stencil |
+| `interior_stencil_y` | tuple | `(weights, offsets)` for y-direction interior stencil |
+| `c_x_field` | `np.ndarray` | x-component of varying coefficient field, shape `(Ny, Nx)` |
+| `c_y_field` | `np.ndarray` | y-component of varying coefficient field, shape `(Ny, Nx)` |
+| `xi_array` | `np.ndarray` | Wavenumber array |
+
+**Returns:** `dict` with keys `C_x_field`, `C_y_field`, `gv_error_x_field`, `gv_error_y_field` (all shape `(Ny, Nx, N_xi)`) and scalar reduction `max_local_gv_error_2d(result) -> float`.
+
+---
+
+#### `anisotropy_over_coefficient_field(scheme, c_x_field, c_y_field, theta_array, xi_mag)`
+
+Evaluate the directional alignment between the grid anisotropy profile and the local propagation direction across a 2D coefficient field. At each grid point, the radial propagation direction is `(c_x[i,j], c_y[i,j])/|c|` — the anisotropy error is projected onto this direction.
+
+Used by Layer 5 (L5) of the Brady-Livescu 2D stability pipeline. See `docs/brady2d_stability_reference.md`.
+
+| Parameter | Type | Description |
+|---|---|---|
+| `scheme` | `str` | Scheme name (e.g. "E2", "E4") for looking up order `p` |
+| `c_x_field` | `np.ndarray` | x-component of varying coefficient field |
+| `c_y_field` | `np.ndarray` | y-component of varying coefficient field |
+| `theta_array` | `np.ndarray` | Propagation angles |
+| `xi_mag` | `float` | Wavenumber magnitude |
+
+**Returns:** `dict` with `max_aligned_error`, `worst_point`, `worst_theta`.
+
 ---
 
 ## 3. Dataclasses
@@ -689,6 +727,13 @@ If you want to use the GKS check as a hard gate in your own tooling, call
 `gks_group_velocity_check` directly from this module and apply your own
 policy — do not add a feasibility branch to the sweep helpers.
 
+For a **rigorous** GKS stability test (necessary *and* sufficient for the 1D
+reduction), use `kreiss_stability_check` from `stencil_gen.gks_kreiss` (see
+`docs/brady2d_stability_reference.md`). The Kreiss determinant test sweeps
+`s` in the right half-plane, refines witnesses, and classifies imaginary-axis
+perturbations per Trefethen 1983 pp. 206-207. It is used as Layer 2 (L2) of
+the Brady-Livescu 2D stability pipeline.
+
 ### 5.3 `known_values.json` Cross-Reference
 
 The persisted `*.gv_error` fields, `tension_gv` / `{kernel}_gv` /
@@ -748,7 +793,11 @@ Gustafsson, Kreiss, and Sundstrom (1972) showed that IBVP stability requires che
 2. The mode is localized near the boundary.
 3. The interior stencil's group velocity at the mode's dominant wavenumber directs energy **from the boundary into the domain**.
 
-The `gks_group_velocity_check` function automates this three-step diagnostic.
+The `gks_group_velocity_check` function automates this three-step diagnostic
+as a heuristic. The rigorous formulation is the Kreiss determinant test in
+`stencil_gen.gks_kreiss`: for each `s` with `Re(s) >= 0`, it assembles the
+Kreiss matrix from admissible roots (`|kappa| < 1`) and checks whether
+`sigma_min(M(s))` vanishes, confirming a genuine GKS violation.
 
 ### Non-Uniform Offsets (Cut Cells)
 

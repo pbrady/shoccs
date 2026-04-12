@@ -1880,3 +1880,49 @@ if _KNOWN is not None:
                 checked += 1
             if checked == 0:
                 pytest.skip("no tension_penalty.gv_error fields in known_values.json")
+
+    class TestRegressionBrady2DCalibration:
+        """Regression tests for Brady-Livescu 2D calibration results.
+
+        Loads ``brady2d_calibration`` from ``known_values.json``, iterates
+        each family, re-runs ``brady2d_stability_score`` at ``max_layer=3``
+        (fast subset — keeps total runtime under 10 s), and asserts the
+        overall verdict matches the stored value.
+        """
+
+        _CAL = _KNOWN.get("brady2d_calibration")
+
+        @pytest.fixture(autouse=True)
+        def _skip_if_absent(self):
+            if self._CAL is None:
+                pytest.skip("brady2d_calibration key absent from known_values.json")
+
+        def test_all_families_verdict_matches(self):
+            """Each family's max_layer=3 verdict matches stored calibration."""
+            from stencil_gen.benchmarks.brady2d_calibration import FAMILIES
+            from stencil_gen.brady2d_stability import brady2d_stability_score
+
+            for scheme, kernel, params, label in FAMILIES:
+                if label not in self._CAL:
+                    continue
+                stored = self._CAL[label]
+                report = brady2d_stability_score(
+                    scheme, kernel, params,
+                    max_layer=3, short_circuit=True,
+                )
+                stored_verdict = stored["overall_verdict"]
+                stored_failed = stored.get("failed_layer")
+                # A family that failed at layer > 3 would pass at max_layer=3.
+                # Only families that failed at layer <= 3 should fail here.
+                if stored_failed is not None and stored_failed <= 3:
+                    assert report.overall_verdict == "fail", (
+                        f"{label}: expected fail (stored failed_layer="
+                        f"{stored_failed}), got {report.overall_verdict}"
+                    )
+                else:
+                    assert report.overall_verdict == "pass", (
+                        f"{label}: expected pass at max_layer=3, "
+                        f"got {report.overall_verdict} "
+                        f"(failed_layer={report.failed_layer}, "
+                        f"reason={report.failed_reason})"
+                    )
