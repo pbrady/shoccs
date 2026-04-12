@@ -375,25 +375,30 @@ def _classify_imag_axis(
         'defective'.
     """
     unit_tol = 1e-4  # how close to |kappa|=1 a root must be to count
+    repeat_tol = 1e-7  # defective threshold for near-unit roots
 
     # Roots at s_0
-    all_0, _, is_defective_0 = kappa_roots(
+    all_0, _, _ = kappa_roots(
         interior_weights, interior_offsets, s_candidate
     )
-    if is_defective_0:
-        return "defective"
 
     # Find near-unit-circle roots at s_0
     near_unit = [k for k in all_0 if abs(abs(k) - 1.0) < unit_tol]
     if not near_unit:
         return "no_candidates"
 
+    # Defective check restricted to near-unit-circle roots only.
+    # (The kappa_roots defective flag checks all admissible roots, which
+    # would false-positive on roots deep inside the unit disk.)
+    for i in range(len(near_unit)):
+        for j in range(i + 1, len(near_unit)):
+            if abs(near_unit[i] - near_unit[j]) < repeat_tol:
+                return "defective"
+
     # Roots at s_0 + delta (perturb into the right half-plane)
-    all_delta, _, is_defective_delta = kappa_roots(
+    all_delta, _, _ = kappa_roots(
         interior_weights, interior_offsets, s_candidate + delta
     )
-    if is_defective_delta:
-        return "defective"
 
     # Match near-unit roots to perturbed roots by nearest-neighbor
     for k0 in near_unit:

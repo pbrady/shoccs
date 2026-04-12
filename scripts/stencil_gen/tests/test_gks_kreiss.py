@@ -535,16 +535,22 @@ class TestClassifyImagAxis:
         )
         assert result == "no_candidates"
 
-    def test_defective_roots_returns_defective(self):
-        """When kappa roots are defective, return 'defective'."""
-        # Same engineered defective stencil from TestKreissMatrix
+    def test_defective_roots_far_from_unit_circle_returns_no_candidates(self):
+        """When defective roots are far from unit circle, return 'no_candidates'.
+
+        The engineered defective stencil has a double root at |kappa|=0.3,
+        which is far from the unit circle. The defective check should only
+        fire for near-unit-circle roots, so this returns 'no_candidates'.
+        """
+        # Same engineered defective stencil from TestKreissMatrix:
+        # double root at kappa=0.3 (|kappa|=0.3, far from unit circle)
         interior_weights = np.array([-0.45, 3.09, -6.0, 1.0])
         interior_offsets = np.array([-2, -1, 0, 1])
 
         result = _classify_imag_axis(
             interior_weights, interior_offsets, s_candidate=0.4 + 0j
         )
-        assert result == "defective"
+        assert result == "no_candidates"
 
 
 class TestKreissStabilityCheck:
@@ -761,4 +767,4 @@ class TestKreissIntegration:
             interior_weights, interior_offsets, boundary_rows, s=0.0
         )
         # At s=0, only 1 admissible root vs 2 boundary rows → inf (shape mismatch)
-        assert sv == np.inf or sv > 0, f"sigma_min(M(0)) = {sv}, expected > 0 or inf"
+        assert sv == np.inf, f"sigma_min(M(0)) = {sv}, expected inf"
