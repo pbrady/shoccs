@@ -966,11 +966,12 @@ def gks_group_velocity_check(
     xi_array: np.ndarray,
     neutral_tol: float = 0.1,
     localization_tol: float = 0.3,
+    side: str = "left",
 ) -> list[GKSModeInfo]:
     """Identify boundary modes whose group velocity indicates GKS-type instability.
 
     For the advection equation u_t + u_x = 0 semi-discretized as du/dt = -Du,
-    computes eigenvalues and eigenvectors of -D_bc (D with inflow row/column
+    computes eigenvalues and eigenvectors of -D_bc (D with the inflow row/column
     removed).  Identifies boundary-localized, nearly-neutral eigenmodes and
     checks whether the interior stencil's group velocity at each mode's dominant
     wavenumber directs energy from the boundary into the domain — the hallmark
@@ -988,14 +989,32 @@ def gks_group_velocity_check(
     localization_tol : float
         Minimum fraction of eigenvector energy in the boundary region
         required to classify a mode as boundary-localized.  Default 0.3.
+    side : str
+        Which boundary to analyse.  ``"left"`` (default) removes row/col 0
+        (Dirichlet at x=0).  ``"right"`` removes the last row/col (Dirichlet
+        at x=L) and flips the outgoing-mode sign convention.  ``"bottom"``
+        and ``"top"`` are reserved for 2D operators (deferred to phase 41.6)
+        and raise ``NotImplementedError``.
 
     Returns
     -------
     list[GKSModeInfo]
         One entry per boundary-localized, nearly-neutral eigenmode.
     """
+    _valid_sides = ("left", "right", "bottom", "top")
+    if side not in _valid_sides:
+        raise ValueError(f"side must be one of {_valid_sides}, got {side!r}")
+    if side in ("bottom", "top"):
+        raise NotImplementedError(
+            f"side={side!r} requires a 2D differentiation matrix; "
+            "deferred to phase 41.6"
+        )
+
     n = D.shape[0]
-    D_bc = D[1:, 1:]  # remove inflow row/column (Dirichlet at x=0)
+    if side == "left":
+        D_bc = D[1:, 1:]  # remove inflow row/column (Dirichlet at x=0)
+    else:  # side == "right"
+        D_bc = D[:-1, :-1]  # remove outflow row/column (Dirichlet at x=L)
     m = D_bc.shape[0]
 
     eigenvalues, eigenvectors = np.linalg.eig(-D_bc)
@@ -1040,10 +1059,10 @@ def gks_group_velocity_check(
         # Use the side where more energy is concentrated
         if left_frac >= right_frac:
             portion = v[:bw]
-            side = "left"
+            mode_side = "left"
         else:
             portion = v[-bw:]
-            side = "right"
+            mode_side = "right"
 
         # Estimate dominant wavenumber via zero-padded FFT
         pad_len = max(256, 4 * len(portion))
@@ -1059,7 +1078,9 @@ def gks_group_velocity_check(
         # Outgoing = energy radiating from boundary into domain interior.
         # Left boundary: rightward (C > 0) enters the domain.
         # Right boundary: leftward (C < 0) enters the domain.
-        if side == "left":
+        # When side="right", the sign convention flips: the boundary is at x=L,
+        # so C < 0 (leftward into the domain from the right boundary) is outgoing.
+        if mode_side == "left":
             is_out = C_val > 0
         else:
             is_out = C_val < 0

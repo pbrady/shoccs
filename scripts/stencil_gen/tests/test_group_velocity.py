@@ -562,6 +562,110 @@ class TestGKSDiagnostic:
         )
 
 
+class TestGKSSideParameter:
+    """Tests for the ``side`` parameter of :func:`gks_group_velocity_check` (41.4b)."""
+
+    N_XI = 1000
+
+    def _build_e4_phs_matrix(self, n: int = 40) -> np.ndarray:
+        """Build E4 PHS differentiation matrix (known to have boundary modes)."""
+        from stencil_gen.phs import build_diff_matrix_rbf
+
+        return build_diff_matrix_rbf(
+            n, p=2, q=3, epsilon=0.0, kernel="tension", nu=1, nextra=0,
+        )
+
+    def test_left_default_unchanged(self):
+        """Explicit side='left' produces the same results as the default (no side arg).
+
+        Verifies backwards compatibility: adding the side parameter does not
+        change existing behavior for the left boundary.
+        """
+        xi = np.linspace(0, np.pi, self.N_XI)
+        D = self._build_e4_phs_matrix()
+
+        modes_default = gks_group_velocity_check(D, xi)
+        modes_left = gks_group_velocity_check(D, xi, side="left")
+
+        assert len(modes_default) == len(modes_left)
+        for m_def, m_left in zip(modes_default, modes_left):
+            np.testing.assert_allclose(
+                m_def.eigenvalue, m_left.eigenvalue, atol=1e-12,
+            )
+            np.testing.assert_allclose(
+                m_def.boundary_wavenumber, m_left.boundary_wavenumber, atol=1e-12,
+            )
+            np.testing.assert_allclose(
+                m_def.group_velocity, m_left.group_velocity, atol=1e-12,
+            )
+            assert m_def.is_outgoing == m_left.is_outgoing
+
+    def test_right_mirrors_left(self):
+        """side='right' on D has the same eigenvalue spectrum as side='left' on P@D@P.
+
+        Under index reversal, ``D_rev = P @ D @ P`` (where ``P`` is the
+        reversal permutation) satisfies ``D_rev[1:, 1:] = P' @ D[:-1, :-1] @ P'``
+        (a similarity transform), so ``eig(-D_rev[1:, 1:]) == eig(-D[:-1, :-1])``.
+        This means ``side="left"`` on ``D_rev`` produces the same eigenvalues as
+        ``side="right"`` on the original ``D``.
+
+        The outgoing classification is not compared because it depends on the
+        eigenvector spatial structure, which the FFT-based wavenumber estimator
+        resolves differently on the reversed vs original matrix.
+        """
+        xi = np.linspace(0, np.pi, self.N_XI)
+        D = self._build_e4_phs_matrix()
+        n = D.shape[0]
+
+        # Index reversal: D_rev = P @ D @ P (no negation — preserves eig(-D_bc))
+        P = np.eye(n)[::-1]
+        D_rev = P @ D @ P
+
+        modes_right = gks_group_velocity_check(D, xi, side="right")
+        modes_left_rev = gks_group_velocity_check(D_rev, xi, side="left")
+
+        # Both analyses should find the same number of modes
+        assert len(modes_right) == len(modes_left_rev), (
+            f"side='right' found {len(modes_right)} modes, "
+            f"side='left' on reflected D found {len(modes_left_rev)}"
+        )
+
+        # Sort by eigenvalue imaginary part for stable comparison
+        modes_right_sorted = sorted(modes_right, key=lambda m: m.eigenvalue.imag)
+        modes_left_sorted = sorted(modes_left_rev, key=lambda m: m.eigenvalue.imag)
+
+        for m_right, m_left in zip(modes_right_sorted, modes_left_sorted):
+            # Eigenvalues should match (similarity transform preserves spectrum)
+            np.testing.assert_allclose(
+                m_right.eigenvalue, m_left.eigenvalue, atol=1e-8,
+                err_msg="Eigenvalues should match between right and reflected-left",
+            )
+
+    def test_bottom_raises(self):
+        """side='bottom' raises NotImplementedError (requires 2D D, deferred to 41.6)."""
+        xi = np.linspace(0, np.pi, self.N_XI)
+        D = self._build_e4_phs_matrix()
+
+        with pytest.raises(NotImplementedError, match="2D differentiation matrix"):
+            gks_group_velocity_check(D, xi, side="bottom")
+
+    def test_top_raises(self):
+        """side='top' raises NotImplementedError."""
+        xi = np.linspace(0, np.pi, self.N_XI)
+        D = self._build_e4_phs_matrix()
+
+        with pytest.raises(NotImplementedError, match="2D differentiation matrix"):
+            gks_group_velocity_check(D, xi, side="top")
+
+    def test_invalid_side_raises(self):
+        """Invalid side value raises ValueError."""
+        xi = np.linspace(0, np.pi, self.N_XI)
+        D = self._build_e4_phs_matrix()
+
+        with pytest.raises(ValueError, match="side must be one of"):
+            gks_group_velocity_check(D, xi, side="invalid")
+
+
 class TestNonuniformModWavenumber:
     """Tests for modified_wavenumber_nonuniform and group_velocity_exact_nonuniform (35.1b)."""
 

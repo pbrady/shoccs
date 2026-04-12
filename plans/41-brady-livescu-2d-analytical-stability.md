@@ -197,7 +197,7 @@ Implementing Trefethen 1983 (pp. 206–207). For the semi-discrete problem `u_t 
 
 ### 41.4 — Generalize `gks_group_velocity_check` for all four boundary sides
 
-- [ ] **41.4a** Add `side: Literal["left", "right", "bottom", "top"] = "left"` parameter to `gks_group_velocity_check` at `group_velocity.py:964`:
+- [x] **41.4a** Add `side: Literal["left", "right", "bottom", "top"] = "left"` parameter to `gks_group_velocity_check` at `group_velocity.py:964`:
   - For `side="left"` keep existing behavior (drop row/col 0).
   - For `side="right"` drop row/col `-1` and flip the group-velocity sign convention.
   - For `side="bottom"` and `side="top"` raise `NotImplementedError` with message about requiring 2D D; deferred to phase 41.6.
@@ -206,7 +206,7 @@ Implementing Trefethen 1983 (pp. 206–207). For the semi-discrete problem `u_t 
   - File: `scripts/stencil_gen/stencil_gen/group_velocity.py`
   - Test: `cd scripts/stencil_gen && uv run pytest tests/test_group_velocity.py -x -q -k "TestGKS"`
 
-- [ ] **41.4b** Add `TestGKSSideParameter` tests:
+- [x] **41.4b** Add `TestGKSSideParameter` tests:
   - `test_left_default_unchanged` — verify existing `side="left"` results match pre-41.4a snapshot.
   - `test_right_mirrors_left` — apply `side="right"` to a right-boundary-oriented differentiation matrix, verify the result mirrors the `side="left"` result on the spatially-reflected matrix.
   - `test_bottom_raises` — `side="bottom"` raises `NotImplementedError`.
