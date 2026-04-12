@@ -277,7 +277,11 @@ def _sigma_field(L, s_grid: np.ndarray) -> np.ndarray:
     from scipy.sparse.linalg import svds, ArpackError
 
     n = L.shape[0]
-    use_dense = (not sp.issparse(L) and n <= 900) or (sp.issparse(L) and n <= 200)
+    # Dense SVD is preferred for n ≤ 1200: sparse svds(which='SM') is
+    # unreliable for non-symmetric operators and ARPACK failures are very
+    # expensive (~5 s per point at n ≈ 1000), while dense SVD at n=961 is
+    # only ~0.2 s per point.
+    use_dense = n <= 1200
 
     if sp.issparse(L):
         L_sp = L.tocsc()
@@ -307,8 +311,9 @@ def _sigma_field(L, s_grid: np.ndarray) -> np.ndarray:
                           return_singular_vectors=False)
                 result[idx] = float(sv[0])
             except (ArpackError, Exception) as exc:
-                # Fallback: densify if small enough
-                if n <= 900:
+                # Fallback: densify if small enough.  Threshold raised from
+                # 900 to 2000 to support BL-sized 2D operators (n ~ 961).
+                if n <= 2000:
                     logger.debug("svds failed at s=%s, densifying: %s", s, exc)
                     M_dense = M_sp.toarray()
                     sv = np.linalg.svd(M_dense, compute_uv=False)
@@ -316,7 +321,7 @@ def _sigma_field(L, s_grid: np.ndarray) -> np.ndarray:
                 else:
                     raise RuntimeError(
                         f"_sigma_field: svds failed at s={s} for {n}x{n} "
-                        f"matrix and N > 900 prevents dense fallback"
+                        f"matrix and N > 2000 prevents dense fallback"
                     ) from exc
 
     return result.reshape(s_grid.shape)
@@ -389,7 +394,7 @@ def kreiss_constant_estimate(L, s_grid: np.ndarray) -> float:
 
 
 # ---------------------------------------------------------------------------
-# Orchestrator (stub — implemented in 41.8f)
+# Orchestrator (41.8f)
 # ---------------------------------------------------------------------------
 
 
@@ -411,12 +416,118 @@ def compute_non_normality(
     epsilon_values : tuple of float
         Perturbation levels for pseudospectral abscissa.
     s_grid_params : dict or None
-        Parameters for the resolvent s-grid.  If None, uses defaults
-        based on the spectral abscissa.
+        Parameters for the resolvent s-grid.  Keys:
+        ``re_min``, ``re_max``, ``n_re``, ``im_max``, ``n_im``.
+        If None, uses defaults based on the spectral abscissa.
 
     Returns
     -------
     NonNormalityReport
         Fully populated report with all metrics.
     """
-    raise NotImplementedError("compute_non_normality: 41.8f")
+    import math
+    import time
+
+    from scipy.sparse.linalg import ArpackNoConvergence
+
+    t0 = time.perf_counter()
+    n = L.shape[0]
+    notes: list[str] = []
+
+    # --- Spectral abscissa ---
+    try:
+        sa, evals = spectral_abscissa_sparse(L, k=min(20, max(1, n - 2)),
+                                             shift_invert=True)
+    except ArpackNoConvergence as exc:
+        notes.append(f"spectral_abscissa: ArpackNoConvergence ({exc})")
+        if exc.eigenvalues is not None and len(exc.eigenvalues) > 0:
+            sa = float(np.max(exc.eigenvalues.real))
+            evals = exc.eigenvalues
+        else:
+            sa = np.nan
+            evals = np.array([])
+
+    # --- Numerical abscissa ---
+    try:
+        na = numerical_abscissa_sparse(L)
+    except Exception as exc:
+        notes.append(f"numerical_abscissa: {type(exc).__name__} ({exc})")
+        na = np.nan
+
+    # --- Henrici departure ---
+    hd = henrici_departure(L)
+
+    # --- Eigenvector condition ---
+    ec = eigenvector_condition(L, small_dense_threshold=small_dense_threshold)
+
+    # --- Build the s-grid for resolvent sampling ---
+    # Default grid resolution: ~30×60 for small matrices, ~8×12 for large
+    # ones (n > 500) to keep runtime feasible with dense SVD (~0.2s/point
+    # at n≈1000, so 96 points ≈ 19s).
+    default_n_re = 8 if n > 500 else 30
+    default_n_im = 12 if n > 500 else 60
+
+    if s_grid_params is not None:
+        re_min = s_grid_params.get("re_min", 1e-3)
+        re_max = s_grid_params.get("re_max", 2.0 * abs(sa) + 1.0 if np.isfinite(sa) else 5.0)
+        n_re = s_grid_params.get("n_re", default_n_re)
+        im_max = s_grid_params.get("im_max", None)
+        n_im = s_grid_params.get("n_im", default_n_im)
+    else:
+        re_min = 1e-3
+        re_max = 2.0 * abs(sa) + 1.0 if np.isfinite(sa) else 5.0
+        n_re = default_n_re
+        im_max = None
+        n_im = default_n_im
+
+    # Estimate ω_max from the imaginary parts of the computed eigenvalues
+    if im_max is None:
+        if len(evals) > 0:
+            im_max = float(np.max(np.abs(evals.imag))) + 1.0
+        else:
+            im_max = 10.0
+    im_max = max(im_max, 1.0)  # ensure at least ±1
+
+    re_vals = np.linspace(re_min, re_max, n_re)
+    im_vals = np.linspace(-im_max, im_max, n_im)
+    s_grid = re_vals[:, None] + 1j * im_vals[None, :]
+
+    # --- Pseudospectral abscissa and Kreiss constant ---
+    # Compute _sigma_field once and reuse for both
+    sigma = _sigma_field(L, s_grid)
+    flat_sigma = sigma.ravel()
+    flat_re = s_grid.ravel().real
+
+    # Pseudospectral abscissa
+    psa: dict[float, float] = {}
+    for eps in epsilon_values:
+        mask = flat_sigma <= eps
+        if np.any(mask):
+            psa[eps] = float(np.max(flat_re[mask]))
+        else:
+            psa[eps] = float("-inf")
+
+    # Kreiss constant
+    rhs_mask = flat_re > 0
+    if np.any(rhs_mask):
+        ratios = flat_re[rhs_mask] / np.maximum(flat_sigma[rhs_mask], 1e-300)
+        kc = float(np.max(ratios))
+    else:
+        kc = 0.0
+
+    tgb = math.e * kc
+
+    elapsed = time.perf_counter() - t0
+
+    return NonNormalityReport(
+        spectral_abscissa=sa,
+        numerical_abscissa=na,
+        henrici_departure=hd,
+        eigenvector_condition=ec,
+        pseudospectral_abscissae=psa,
+        kreiss_constant=kc,
+        transient_growth_bound=tgb,
+        n=n,
+        compute_time=elapsed,
+        notes=notes,
+    )

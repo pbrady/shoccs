@@ -14,6 +14,8 @@ from stencil_gen.non_normality import (
     _sigma_field,
     pseudospectral_abscissa_estimate,
     kreiss_constant_estimate,
+    compute_non_normality,
+    NonNormalityReport,
 )
 
 
@@ -421,3 +423,152 @@ class TestPseudoAndKreiss:
         expected_K = float(np.max(flat_re[rhs_mask] / np.maximum(flat_sigma[rhs_mask], 1e-300)))
         K = kreiss_constant_estimate(L, s_grid)
         assert K == pytest.approx(expected_K, abs=1e-12)
+
+
+# ---------------------------------------------------------------------------
+# TestComputeNonNormality (41.8f)
+# ---------------------------------------------------------------------------
+
+
+class TestComputeNonNormality:
+    """Tests for compute_non_normality orchestrator."""
+
+    def test_small_diagonal(self):
+        """Diagonal -diag(1..30): normal matrix, all diagnostics consistent."""
+        diag_vals = -np.arange(1, 31, dtype=float)
+        L = sp.diags(diag_vals, format="csr")
+
+        report = compute_non_normality(L)
+        assert isinstance(report, NonNormalityReport)
+        assert report.n == 30
+
+        # Spectral abscissa = max eigenvalue = -1
+        assert report.spectral_abscissa == pytest.approx(-1.0, abs=1e-8)
+
+        # For a normal matrix, numerical abscissa == spectral abscissa
+        assert report.numerical_abscissa == pytest.approx(-1.0, abs=1e-8)
+
+        # Henrici departure ≈ 0 for normal matrix
+        assert report.henrici_departure == pytest.approx(0.0, abs=1e-10)
+
+        # Eigenvector condition ≈ 1 for normal matrix
+        assert report.eigenvector_condition == pytest.approx(1.0, abs=1e-6)
+
+        # Kreiss constant should be < 1 for stable normal matrix
+        assert report.kreiss_constant < 1.0
+
+        # Transient growth bound = e * K
+        import math
+        assert report.transient_growth_bound == pytest.approx(
+            math.e * report.kreiss_constant, rel=1e-12
+        )
+
+        # compute_time recorded
+        assert report.compute_time > 0.0
+
+        # Cross-check: numerical_abscissa >= spectral_abscissa
+        assert report.numerical_abscissa >= report.spectral_abscissa - 1e-9
+
+    def test_non_normal_wilkinson(self):
+        """Wilkinson bidiagonal: non-normal, large Kreiss constant."""
+        n = 30
+        L = -np.eye(n) + float(n) * np.diag(np.ones(n - 1), 1)
+
+        report = compute_non_normality(L)
+
+        # Spectral abscissa ≈ -1 (all eigenvalues at -1)
+        assert report.spectral_abscissa == pytest.approx(-1.0, abs=1e-6)
+
+        # Numerical abscissa strongly positive (non-normal transient growth)
+        assert report.numerical_abscissa > 5.0
+
+        # Henrici departure > 0
+        assert report.henrici_departure > 0.0
+
+        # Kreiss constant >> 1
+        assert report.kreiss_constant > 10.0
+
+        # Transient growth bound >> 1
+        assert report.transient_growth_bound > 10.0
+
+        # Cross-check: numerical_abscissa >= spectral_abscissa
+        assert report.numerical_abscissa >= report.spectral_abscissa - 1e-9
+
+        # Pseudospectral abscissae monotone in epsilon
+        prev = float("-inf")
+        for eps in sorted(report.pseudospectral_abscissae.keys()):
+            assert report.pseudospectral_abscissae[eps] >= prev - 1e-12
+            prev = report.pseudospectral_abscissae[eps]
+
+    def test_custom_s_grid_params(self):
+        """Custom s_grid_params are respected."""
+        L = sp.diags([-2.0, -1.0, -0.5], format="csr")
+        report = compute_non_normality(
+            L,
+            s_grid_params={"re_min": 0.1, "re_max": 3.0, "n_re": 10,
+                           "im_max": 2.0, "n_im": 15},
+            epsilon_values=(1e-2, 1e-1),
+        )
+        assert isinstance(report, NonNormalityReport)
+        assert len(report.pseudospectral_abscissae) == 2
+        assert 1e-2 in report.pseudospectral_abscissae
+        assert 1e-1 in report.pseudospectral_abscissae
+
+    def test_cross_check_numerical_ge_spectral(self):
+        """Numerical abscissa >= spectral abscissa for random matrix."""
+        rng = np.random.default_rng(42)
+        A = rng.standard_normal((40, 40)) - 3.0 * np.eye(40)
+        report = compute_non_normality(A)
+        assert report.numerical_abscissa >= report.spectral_abscissa - 1e-9
+
+    @pytest.mark.slow
+    def test_compute_non_normality_on_bl_sized_matrix(self):
+        """BL-sized 2D test matrix via kron(D, I) + kron(I, D) at n=31.
+
+        Builds a representative 2D advection operator and verifies that
+        compute_non_normality completes within 30 seconds with all fields
+        populated.
+        """
+        from stencil_gen.phs import build_diff_matrix_rbf
+
+        n_1d = 31
+        D = build_diff_matrix_rbf(n_1d, p=2, q=3, epsilon=3.0,
+                                  kernel="tension", nu=1, nextra=0)
+        I_1d = np.eye(n_1d)
+        # 2D operator: D_x (x) I_y + I_x (x) D_y
+        L_2d = np.kron(D, I_1d) + np.kron(I_1d, D)
+
+        # Convert to sparse for the orchestrator
+        L_sp = sp.csr_matrix(L_2d)
+        n_2d = n_1d * n_1d  # 961
+
+        report = compute_non_normality(L_sp, small_dense_threshold=900)
+
+        assert report.n == n_2d
+        assert report.compute_time < 30.0
+
+        # Spectral abscissa should be finite
+        assert np.isfinite(report.spectral_abscissa)
+
+        # Numerical abscissa should be finite
+        assert np.isfinite(report.numerical_abscissa)
+
+        # Henrici departure should be finite and positive (non-normal operator)
+        assert np.isfinite(report.henrici_departure)
+        assert report.henrici_departure > 0.0
+
+        # Eigenvector condition should be NaN (N=961 > threshold=900)
+        assert np.isnan(report.eigenvector_condition)
+
+        # Kreiss constant should be finite
+        assert np.isfinite(report.kreiss_constant)
+
+        # Transient growth bound should be finite
+        assert np.isfinite(report.transient_growth_bound)
+
+        # All pseudospectral abscissae should be finite or -inf
+        for eps, alpha in report.pseudospectral_abscissae.items():
+            assert np.isfinite(alpha) or alpha == float("-inf")
+
+        # Cross-check
+        assert report.numerical_abscissa >= report.spectral_abscissa - 1e-9

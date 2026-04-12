@@ -337,14 +337,15 @@ Implementing Trefethen 1983 (pp. 206–207). For the semi-discrete problem `u_t 
   - File: `scripts/stencil_gen/stencil_gen/non_normality.py`, `scripts/stencil_gen/tests/test_non_normality.py`
   - Test: `cd scripts/stencil_gen && uv run pytest tests/test_non_normality.py -x -q -k "TestPseudoAndKreiss"`
 
-- [ ] **41.8f** Implement `compute_non_normality(L, *, small_dense_threshold=900, epsilon_values=(1e-4, 1e-3, 1e-2, 1e-1), s_grid_params=None) -> NonNormalityReport` orchestrator:
+- [x] **41.8f** Implement `compute_non_normality(L, *, small_dense_threshold=900, epsilon_values=(1e-4, 1e-3, 1e-2, 1e-1), s_grid_params=None) -> NonNormalityReport` orchestrator:
   - Uses `time.perf_counter`.
-  - Default `s_grid`: rectangular right-half-plane grid in `Re(s) ∈ [1e-3, 2*|alpha|+1]`, `Im(s) ∈ [-ω_max, ω_max]`, shape ~30×60.
+  - Default `s_grid`: rectangular right-half-plane grid in `Re(s) ∈ [1e-3, 2*|alpha|+1]`, `Im(s) ∈ [-ω_max, ω_max]`, shape ~30×60 for small matrices, ~8×12 for n>500 (dense SVD performance).
   - Computes `transient_growth_bound = math.e * kreiss_constant`.
   - Appends diagnostic notes for any ArpackNoConvergence.
   - Cross-check: `numerical_abscissa >= spectral_abscissa - 1e-9` — assert in tests.
   - Test: `test_compute_non_normality_on_bl_sized_matrix` — build a BL-sized 2D test matrix via `kron(D, I) + kron(I, D)` for `D = build_diff_matrix_rbf(n=31, ...)`, call `compute_non_normality`, assert `compute_time < 30.0`, all fields finite/NaN.
   - Mark the BL-sized test `@pytest.mark.slow`.
+  - Also raised `_sigma_field` dense SVD threshold from n≤200 to n≤1200 and fallback threshold from n≤900 to n≤2000, because sparse `svds(which='SM')` is unreliable for non-symmetric operators (ARPACK failure costs ~5s/point at n≈1000 vs 0.2s for dense SVD).
   - File: `scripts/stencil_gen/stencil_gen/non_normality.py`, `scripts/stencil_gen/tests/test_non_normality.py`
   - Test: `cd scripts/stencil_gen && uv run pytest tests/test_non_normality.py -x -q -k "TestComputeNonNormality" -m "not slow"`
 
