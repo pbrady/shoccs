@@ -322,6 +322,13 @@ Implementing Trefethen 1983 (pp. 206–207). For the semi-discrete problem `u_t 
   - File: `scripts/stencil_gen/stencil_gen/non_normality.py`, `scripts/stencil_gen/tests/test_non_normality.py`
   - Test: `cd scripts/stencil_gen && uv run pytest tests/test_non_normality.py -x -q -k "TestSigmaField"`
 
+- [ ] **41.8d-followup** Fix `_sigma_field` NameError for dense input with `n > 900`:
+  - **Bug:** When `L` is a dense ndarray and `n > 900`, `use_dense` is `False` so the else branch (line 300) runs and references `I_sp`/`L_sp` which were never defined (only set in the `if sp.issparse(L)` block at line 282). This crashes with `NameError: cannot access local variable 'I_sp'`.
+  - **Fix:** At the top of the else branch (sparse-svds path), convert `L` to sparse if it isn't already, e.g. `if not sp.issparse(L): L_sp = sp.csc_matrix(L); I_sp = sp.eye(n, format="csc")`. Alternatively, move the `I_sp`/`L_sp` setup outside the `if sp.issparse` guard so it always runs when `use_dense` is `False`.
+  - **Test:** Add `test_dense_large_input` in `TestSigmaField` that passes a dense 901×901 diagonal matrix and verifies correctness (no crash, result matches `np.linalg.svd`).
+  - File: `scripts/stencil_gen/stencil_gen/non_normality.py`, `scripts/stencil_gen/tests/test_non_normality.py`
+  - Test: `cd scripts/stencil_gen && uv run pytest tests/test_non_normality.py -x -q -k "test_dense_large_input"`
+
 - [ ] **41.8e** Implement `pseudospectral_abscissa_estimate(L, epsilon_values, s_grid) -> dict[float, float]` and `kreiss_constant_estimate(L, s_grid) -> float`:
   - Both reuse `_sigma_field` to avoid duplicate SVD cost.
   - `pseudospectral_abscissa_estimate`: for each ε, `α_ε = max{ Re(s) : s in s_grid, sigma_field[s] <= ε }`, or `-inf` if no point satisfies.
