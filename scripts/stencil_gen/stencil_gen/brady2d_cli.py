@@ -1,15 +1,21 @@
 """CLI entry point for Brady-Livescu 2D stability scoring.
 
 Usage:
+    # Score a single scheme/kernel combination
     uv run python -m stencil_gen.brady2d_cli --scheme E4 --kernel tension --sigma 3.0 --max-layer 3
     uv run python -m stencil_gen.brady2d_cli --scheme E4 --kernel classical --alpha 0.3487 --max-layer 6
     uv run python -m stencil_gen.brady2d_cli --scheme E4 --kernel tension --sigma 3.0 --max-layer 7 --json-output result.json
+
+    # Run calibration across all families
+    uv run python -m stencil_gen.brady2d_cli --run-calibration --max-layer 3
+    uv run python -m stencil_gen.brady2d_cli --run-calibration --max-layer 6 --update-known-values
 """
 
 from __future__ import annotations
 
 import argparse
 import json
+import pathlib
 import sys
 from dataclasses import asdict
 
@@ -43,6 +49,49 @@ def _build_params(args: argparse.Namespace) -> dict:
     return params
 
 
+_KNOWN_VALUES_PATH = pathlib.Path(__file__).resolve().parent.parent / "sweeps" / "known_values.json"
+
+
+def _run_calibration_mode(args: argparse.Namespace) -> int:
+    """Run calibration across all families and optionally update known_values.json."""
+    from stencil_gen.benchmarks.brady2d_calibration import (
+        format_calibration_table,
+        run_calibration,
+    )
+
+    results = run_calibration(
+        max_layer=args.max_layer,
+        short_circuit=args.short_circuit,
+    )
+
+    print(format_calibration_table(results))
+
+    if args.update_known_values:
+        # Load existing known_values.json, add/overwrite the brady2d_calibration key
+        if _KNOWN_VALUES_PATH.exists():
+            with open(_KNOWN_VALUES_PATH) as f:
+                known = json.load(f)
+        else:
+            known = {}
+
+        known["brady2d_calibration"] = results
+
+        with open(_KNOWN_VALUES_PATH, "w") as f:
+            json.dump(known, f, indent=2)
+            f.write("\n")
+
+        print(f"\nCalibration results written to: {_KNOWN_VALUES_PATH}")
+
+    if args.json_output:
+        with open(args.json_output, "w") as f:
+            json.dump(results, f, indent=2, default=_json_serializer)
+        print(f"\nJSON output written to: {args.json_output}")
+
+    # Return 0 if all families passed, 1 if any failed
+    any_fail = any(r.get("overall_verdict") != "pass" for r in results.values())
+    return 1 if any_fail else 0
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(
         prog="brady2d_cli",
@@ -51,14 +100,14 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument(
         "--scheme",
         choices=["E2", "E4"],
-        required=True,
-        help="Scheme name",
+        default=None,
+        help="Scheme name (required unless --run-calibration)",
     )
     parser.add_argument(
         "--kernel",
         choices=["classical", "tension", "gaussian", "multiquadric", "phs"],
-        required=True,
-        help="Kernel type",
+        default=None,
+        help="Kernel type (required unless --run-calibration)",
     )
     parser.add_argument(
         "--sigma",
@@ -96,8 +145,32 @@ def main(argv: list[str] | None = None) -> int:
         default=None,
         help="Path to write JSON output",
     )
+    parser.add_argument(
+        "--run-calibration",
+        action="store_true",
+        default=False,
+        help="Run calibration across all families instead of scoring a single scheme",
+    )
+    parser.add_argument(
+        "--update-known-values",
+        action="store_true",
+        default=False,
+        help="Write calibration results to known_values.json under 'brady2d_calibration' key",
+    )
 
     args = parser.parse_args(argv)
+
+    if args.run_calibration:
+        return _run_calibration_mode(args)
+
+    # --- Single-scheme scoring mode ---
+    if args.scheme is None:
+        print("Error: --scheme is required (unless using --run-calibration)", file=sys.stderr)
+        return 1
+    if args.kernel is None:
+        print("Error: --kernel is required (unless using --run-calibration)", file=sys.stderr)
+        return 1
+
     params = _build_params(args)
 
     # Validate that at least one parameter is provided for non-classical kernels

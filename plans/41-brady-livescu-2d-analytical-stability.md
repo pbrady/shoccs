@@ -450,7 +450,7 @@ The point of this phase is to run `brady2d_stability_score` on every (scheme, ke
   - File: `scripts/stencil_gen/stencil_gen/benchmarks/brady2d_calibration.py` (new)
   - Test: `cd scripts/stencil_gen && uv run pytest tests/test_benchmarks.py -x -q -k "TestCalibrationDataclass"`
 
-- [ ] **41.11b** Add `--run-calibration` and `--update-known-values` flags to `brady2d_cli.py`:
+- [x] **41.11b** Add `--run-calibration` and `--update-known-values` flags to `brady2d_cli.py`:
   - `--run-calibration` runs `run_calibration(max_layer=6)` and prints a markdown table of results.
   - `--update-known-values` writes the full calibration dict to `known_values.json` under top-level key `"brady2d_calibration"` (additive; does not touch existing keys).
   - File: `scripts/stencil_gen/stencil_gen/brady2d_cli.py`
