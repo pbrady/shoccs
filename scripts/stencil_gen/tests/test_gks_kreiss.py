@@ -7,8 +7,10 @@ from stencil_gen.gks_kreiss import (
     KreissResult,
     DefectiveKappaError,
     _kappa_roots_from_poly,
+    _sweep_grid,
     kappa_roots,
     kreiss_matrix,
+    make_s_grid,
     min_singular_value,
 )
 
@@ -331,3 +333,86 @@ class TestKreissMatrix:
             interior_weights, interior_offsets, boundary_rows, s=0.4
         )
         assert sv == np.inf
+
+
+class TestSGridSweep:
+    """Tests for make_s_grid and _sweep_grid (41.3d)."""
+
+    def test_grid_shape_default(self):
+        """Default grid shape is (n_imag, n_radial + 1) = (120, 41)."""
+        grid = make_s_grid()
+        assert grid.shape == (120, 41)
+        assert grid.dtype == complex
+
+    def test_grid_shape_custom(self):
+        """Custom parameters produce the expected shape."""
+        grid = make_s_grid(n_radial=10, n_imag=30)
+        assert grid.shape == (30, 11)
+
+    def test_grid_real_parts_positive(self):
+        """All grid points have Re(s) > 0 (right half-plane)."""
+        grid = make_s_grid()
+        assert np.all(grid.real > 0)
+
+    def test_grid_imaginary_axis_strip(self):
+        """Column 0 is the imaginary-axis strip at Re(s) = eps_imag."""
+        eps = 1e-6
+        grid = make_s_grid(eps_imag=eps, n_radial=10, n_imag=20)
+        np.testing.assert_allclose(grid[:, 0].real, eps)
+
+    def test_grid_imaginary_range(self):
+        """Imaginary parts span [-imag_max, imag_max]."""
+        grid = make_s_grid(imag_max=15.0, n_imag=50, n_radial=5)
+        assert grid.imag.min() == pytest.approx(-15.0)
+        assert grid.imag.max() == pytest.approx(15.0)
+
+    def test_grid_real_log_spacing(self):
+        """Re(s) values in columns 1..n_radial are logarithmically spaced."""
+        grid = make_s_grid(s_max=10.0, n_radial=20, n_imag=5)
+        # All rows share the same Re values; check row 0
+        re_vals = grid[0, 1:].real  # skip imaginary-axis strip column
+        assert re_vals[0] == pytest.approx(1e-4)
+        assert re_vals[-1] == pytest.approx(10.0)
+        # Log-spacing means ratios between consecutive values are approximately constant
+        ratios = re_vals[1:] / re_vals[:-1]
+        np.testing.assert_allclose(ratios, ratios[0], rtol=1e-10)
+
+    def test_sweep_grid_upwind_stable(self):
+        """First-order upwind with natural boundary is stable: min(sigma) > 0.01.
+
+        Interior: weights=[-1, 1], offsets=[-1, 0] (first-order upwind).
+        Boundary row 0: weights=[1], offsets=[0] (identity = Dirichlet at left).
+        This is GKS-stable, so sigma_min should be bounded away from zero.
+        """
+        interior_weights = np.array([-1.0, 1.0])
+        interior_offsets = np.array([-1, 0])
+        # Dirichlet boundary: u_0 = prescribed → the boundary equation
+        # is simply u_0(t) = g(t), which in the homogeneous stability problem
+        # becomes u_0 = 0. Row: [1]*[kappa^0] = kappa^0 = 1.
+        boundary_rows = [(np.array([1.0]), np.array([0]))]
+
+        # Small grid for speed
+        grid = make_s_grid(s_max=5.0, n_radial=10, n_imag=20, imag_max=10.0)
+        sigma_field, argmin_idx = _sweep_grid(
+            interior_weights, interior_offsets, boundary_rows, grid
+        )
+
+        assert sigma_field.shape == grid.shape
+        assert np.all(np.isfinite(sigma_field))
+        assert sigma_field.min() > 0.01, (
+            f"Expected stable scheme, got min(sigma) = {sigma_field.min()}"
+        )
+
+    def test_sweep_grid_argmin_consistent(self):
+        """argmin_idx points to the actual minimum of sigma_field."""
+        interior_weights = np.array([-1.0, 1.0])
+        interior_offsets = np.array([-1, 0])
+        boundary_rows = [(np.array([1.0]), np.array([0]))]
+
+        grid = make_s_grid(s_max=3.0, n_radial=5, n_imag=10, imag_max=5.0)
+        sigma_field, argmin_idx = _sweep_grid(
+            interior_weights, interior_offsets, boundary_rows, grid
+        )
+
+        flat = sigma_field.ravel()
+        assert flat[argmin_idx] == flat.min()

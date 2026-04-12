@@ -246,8 +246,20 @@ def make_s_grid(
     The grid combines a logarithmically-spaced radial sweep with a dense
     imaginary-axis strip at Re(s) = eps_imag, covering Im(s) in
     [-imag_max, imag_max].
+
+    Returns a 2D array of shape ``(n_imag, n_radial + 1)`` where:
+    - Column 0 is the imaginary-axis strip at ``Re(s) = eps_imag``.
+    - Columns 1..n_radial are logarithmically spaced from ``1e-4`` to ``s_max``.
     """
-    raise NotImplementedError
+    # Real parts: imaginary-axis strip, then log-spaced into the right half-plane
+    re_values = np.concatenate(
+        [[eps_imag], np.logspace(-4, np.log10(s_max), n_radial)]
+    )
+    # Imaginary parts: uniform spacing
+    im_values = np.linspace(-imag_max, imag_max, n_imag)
+    # Meshgrid → 2D grid of complex s values
+    Re, Im = np.meshgrid(re_values, im_values)
+    return Re + 1j * Im
 
 
 def _sweep_grid(
@@ -265,7 +277,15 @@ def _sweep_grid(
     argmin_idx : int
         Flat index of the global minimum in sigma_field.
     """
-    raise NotImplementedError
+    flat = s_grid.ravel()
+    sigma_flat = np.empty(len(flat))
+    for i, s in enumerate(flat):
+        sigma_flat[i] = min_singular_value(
+            interior_weights, interior_offsets, boundary_rows, s
+        )
+    sigma_field = sigma_flat.reshape(s_grid.shape)
+    argmin_idx = int(np.argmin(sigma_flat))
+    return sigma_field, argmin_idx
 
 
 def _refine_witness(
