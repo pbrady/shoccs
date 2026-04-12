@@ -229,6 +229,13 @@ Implementing Trefethen 1983 (pp. 206–207). For the semi-discrete problem `u_t 
   - File: `scripts/stencil_gen/tests/test_brady2d_stability.py`
   - Test: `cd scripts/stencil_gen && uv run pytest tests/test_brady2d_stability.py -x -q -k "TestLayer3"`
 
+- [ ] **41.5c** Fix `_build_classical_diff_matrix` crash for E2 (p=1) and remove E2 classical from 41.11a FAMILIES:
+  - **Problem:** `_build_classical_diff_matrix` calls `_derive_classical_boundary(p=1, ...)` → `derive_boundary(p=1)` which computes `n_alpha = (r-2) + n_active_penultimate = -1`, then crashes in `symbols("alpha_0:-1")`. E2 has no free alpha parameters — the boundary weights are fully determined.
+  - **Fix option A (preferred):** Remove the `("E2", "classical", ...)` entry from 41.11a's `FAMILIES` list. E2 classical has no free parameters, so there is no classical-alpha family to calibrate. The E2 PHS k=2 entry (`("E2", "tension", {"sigma": 0.0})`) already covers the E2 case with fully-determined boundary weights. Add a comment in `_build_classical_diff_matrix` docstring noting it requires `p >= 2` (E4+).
+  - **Fix option B (if E2 classical calibration is actually needed):** Handle the no-alpha case in `_derive_classical_boundary` by bypassing `derive_boundary` and directly constructing the unique E2 boundary row.
+  - File: `scripts/stencil_gen/stencil_gen/brady2d_stability.py`, `plans/41-brady-livescu-2d-analytical-stability.md`
+  - Test: `cd scripts/stencil_gen && uv run pytest tests/test_brady2d_stability.py -x -q -k "TestLayer3"`
+
 ### 41.6 — L4 2D varying-coefficient local group velocity
 
 - [ ] **41.6a** Add `local_group_velocity_2d_varying(interior_stencil_x, interior_stencil_y, c_x_field, c_y_field, xi_array) -> dict` to `group_velocity.py`:
