@@ -398,6 +398,13 @@ Implementing Trefethen 1983 (pp. 206–207). For the semi-discrete problem `u_t 
   - File: `scripts/stencil_gen/stencil_gen/brady2d_stability.py`
   - Test: `cd scripts/stencil_gen && uv run pytest tests/test_brady2d_stability.py -x -q -k "TestStabilityScoreOrchestrator"`
 
+- [ ] **41.10b-followup** Wire Layer 6 into the orchestrator so `max_layer=6` runs non-normality diagnostics:
+  - **Problem:** The orchestrator jumps from L5 (`if max_layer >= 5`) directly to L7 (`if max_layer >= 7`). There is no `if max_layer >= 6` block. Consequently `max_layer=6` produces identical results to `max_layer=5`, the `layer6` field in `StabilityReport` is always `None`, and the `__str__` method labels non-normality as "L6" but it only appears when `max_layer >= 7`. The plan's pipeline table, CLI test commands (`--max-layer 6`), and completion criteria all expect L6 to be a distinct, cheaper-than-L7 non-normality layer.
+  - **Fix:** Add `layer6_non_normality(scheme, kernel, params, n=80) -> dict` that runs `compute_non_normality` on the **1D** differentiation matrix (not the full 2D BL operator — that's L7's job). This matches the pipeline table's L6 cost (~seconds) vs L7 (~few seconds per N). Wire it into the orchestrator under `if max_layer >= 6:`, populating `report.layer6` and checking `spectral_abscissa > STABILITY_TOL` and `transient_growth_bound > L6_TRANSIENT_GROWTH_TOL` (define an appropriate threshold). Also populate `report.non_normality` from the 1D result at L6, upgrading it to the 2D result at L7 if L7 runs.
+  - **Tests:** Add `test_max_layer_6_runs_non_normality` in `TestStabilityScoreOrchestrator` asserting `report.layer6 is not None` and `report.non_normality is not None` when `max_layer=6`. Add `test_max_layer_6_differs_from_5` asserting the two produce different populated fields.
+  - File: `scripts/stencil_gen/stencil_gen/brady2d_stability.py`, `scripts/stencil_gen/tests/test_brady2d_stability.py`
+  - Test: `cd scripts/stencil_gen && uv run pytest tests/test_brady2d_stability.py -x -q -k "test_max_layer_6"`
+
 - [ ] **41.10c** Integration tests `TestBrady2DScoreIntegration`:
   - `test_classical_e4_passes_all_layers_1_through_7` — overall `pass`, `failed_layer is None`.
   - `test_gaussian_eps_01_fails_at_layer_2_or_3` — overall `fail`, `failed_layer in (2, 3)`.
