@@ -420,7 +420,7 @@ Implementing Trefethen 1983 (pp. 206–207). For the semi-discrete problem `u_t 
   - File: `scripts/stencil_gen/stencil_gen/brady2d_cli.py` (new)
   - Test: `cd scripts/stencil_gen && uv run python -m stencil_gen.brady2d_cli --scheme E4 --kernel tension --sigma 3.0 --max-layer 3`
 
-- [ ] **41.10d-followup** Register `python -m stencil_gen.brady2d` module entry point:
+- [x] **41.10d-followup** Register `python -m stencil_gen.brady2d` module entry point:
   - **Problem:** 41.10d created `brady2d_cli.py` with a working `if __name__ == "__main__"` block, but did not register the `python -m stencil_gen.brady2d` path that the plan's test commands section (line 62) and 41.10d itself both specify. Running `python -m stencil_gen.brady2d` fails with "No module named stencil_gen.brady2d". Only `python -m stencil_gen.brady2d_cli` works.
   - **Fix:** Create `scripts/stencil_gen/stencil_gen/brady2d/__init__.py` (empty) and `scripts/stencil_gen/stencil_gen/brady2d/__main__.py` containing `from stencil_gen.brady2d_cli import main; import sys; sys.exit(main())`. This lets `python -m stencil_gen.brady2d` delegate to the existing CLI.
   - File: `scripts/stencil_gen/stencil_gen/brady2d/__init__.py` (new), `scripts/stencil_gen/stencil_gen/brady2d/__main__.py` (new)
