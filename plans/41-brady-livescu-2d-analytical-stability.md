@@ -264,7 +264,7 @@ Implementing Trefethen 1983 (pp. 206–207). For the semi-discrete problem `u_t 
   - File: `scripts/stencil_gen/stencil_gen/brady2d_stability.py`, `scripts/stencil_gen/tests/test_brady2d_stability.py`
   - Test: `cd scripts/stencil_gen && uv run pytest tests/test_brady2d_stability.py -x -q -k "TestLayer4"`
 
-- [ ] **41.6c-followup** Add missing L4 failure test in `TestLayer4`:
+- [x] **41.6c-followup** Add missing L4 failure test in `TestLayer4`:
   - The plan specifies "deliberately large-error scheme fails" but no failure test was implemented. All real schemes pass easily within the resolved band (E2: 0.012, E4: 0.0002 vs `L4_TOL=0.1`), so a synthetic bad stencil is needed. Approach: construct a stencil with deliberately poor group velocity (e.g., weights `[0.5, -0.5]` with offsets `[-1, 0]` which has `C(xi) = cos(xi/2)`, giving GV error up to 100% near `xi = pi`) and call `local_group_velocity_2d_varying` directly with `c_x == 1` everywhere so that `max_local_gv_error > L4_TOL`. Wrap in a test `test_synthetic_bad_stencil_fails` that asserts the max error exceeds `L4_TOL`.
   - File: `scripts/stencil_gen/tests/test_brady2d_stability.py`
   - Test: `cd scripts/stencil_gen && uv run pytest tests/test_brady2d_stability.py -x -q -k "test_synthetic_bad_stencil_fails"`

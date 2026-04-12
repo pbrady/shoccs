@@ -15,6 +15,7 @@ from stencil_gen.brady2d_stability import (
     layer3_1d_eigenvalue,
     layer4_local_gv_2d,
 )
+from stencil_gen.group_velocity import local_group_velocity_2d_varying
 
 
 KNOWN_VALUES_PATH = Path(__file__).parent.parent / "sweeps" / "known_values.json"
@@ -197,3 +198,30 @@ class TestLayer4:
         """worst_xi should be in (0, pi]."""
         result = layer4_local_gv_2d("E4", "tension", {"sigma": 3.0}, N=11)
         assert 0.0 < result["worst_xi"] <= np.pi
+
+    def test_synthetic_bad_stencil_fails(self):
+        """A synthetic stencil with poor GV exceeds L4_TOL.
+
+        Weights [0.5, -0.5] with offsets [-1, 0] give C(xi) = -0.5*cos(xi),
+        which deviates massively from the exact GV of 1.  With c_x == 1
+        everywhere the scaled error is |C(xi) - 1| > 1 for all xi, far
+        exceeding L4_TOL = 0.1.
+        """
+        bad_weights = np.array([0.5, -0.5])
+        bad_offsets = np.array([-1.0, 0.0])
+        bad_stencil = (bad_weights, bad_offsets)
+
+        N = 11
+        c_x = np.ones((N, N))
+        c_y = np.zeros((N, N))
+        xi_array = np.linspace(0.01, np.pi, 50)
+
+        result = local_group_velocity_2d_varying(
+            bad_stencil, bad_stencil, c_x, c_y, xi_array,
+        )
+        err_x = np.abs(result["gv_error_x_field"])
+        max_err = float(np.max(err_x))
+        assert max_err > L4_TOL, (
+            f"Synthetic bad stencil max GV error {max_err:.4f} "
+            f"should exceed L4_TOL={L4_TOL}"
+        )
