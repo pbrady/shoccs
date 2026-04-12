@@ -129,7 +129,7 @@ Implementing Trefethen 1983 (pp. 206–207). For the semi-discrete problem `u_t 
   - File: `scripts/stencil_gen/stencil_gen/gks_kreiss.py`, `scripts/stencil_gen/tests/test_gks_kreiss.py` (new)
   - Test: `cd scripts/stencil_gen && uv run pytest tests/test_gks_kreiss.py -x -q -k "TestKappaRoots"`
 
-- [ ] **41.3c** Implement `kreiss_matrix(interior_weights, interior_offsets, boundary_rows, s) -> np.ndarray` and `min_singular_value(...) -> float`:
+- [x] **41.3c** Implement `kreiss_matrix(interior_weights, interior_offsets, boundary_rows, s) -> np.ndarray` and `min_singular_value(...) -> float`:
   - `kreiss_matrix` calls `kappa_roots`, validates `len(admissible) == len(boundary_rows)` (raise `ValueError` otherwise), builds `M[i, ℓ] = s*κ_ℓ^i + Σ_j w_{ij}*κ_ℓ^j`.
   - `min_singular_value` returns `float(np.linalg.svd(M, compute_uv=False)[-1])`; on defective or shape error returns `np.inf`.
   - Tests: for an explicit small (2×2) case with hand-computed `M(s=1)`, verify exact match to `1e-12`.

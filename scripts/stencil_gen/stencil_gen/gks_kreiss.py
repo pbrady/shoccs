@@ -189,7 +189,31 @@ def kreiss_matrix(
 
     Raises ValueError if len(admissible) != len(boundary_rows).
     """
-    raise NotImplementedError
+    _, admissible, is_defective = kappa_roots(interior_weights, interior_offsets, s)
+    if is_defective:
+        raise DefectiveKappaError(
+            f"Defective admissible kappa roots at s={s}"
+        )
+
+    r = len(boundary_rows)
+    if len(admissible) != r:
+        raise ValueError(
+            f"Number of admissible roots ({len(admissible)}) != "
+            f"number of boundary rows ({r})"
+        )
+
+    M = np.zeros((r, r), dtype=complex)
+    for i, (weights, col_offsets) in enumerate(boundary_rows):
+        weights = np.asarray(weights, dtype=complex)
+        col_offsets = np.asarray(col_offsets, dtype=int)
+        for ell, kappa in enumerate(admissible):
+            # Temporal contribution: s * kappa^i
+            M[i, ell] = s * kappa**i
+            # Spatial operator contribution: sum_j w_{ij} * kappa^j
+            for w, j in zip(weights, col_offsets):
+                M[i, ell] += w * kappa**j
+
+    return M
 
 
 def min_singular_value(
@@ -202,7 +226,12 @@ def min_singular_value(
 
     Returns np.inf on DefectiveKappaError or shape mismatch.
     """
-    raise NotImplementedError
+    try:
+        M = kreiss_matrix(interior_weights, interior_offsets, boundary_rows, s)
+    except (DefectiveKappaError, ValueError):
+        return np.inf
+    svs = np.linalg.svd(M, compute_uv=False)
+    return float(svs[-1])
 
 
 def make_s_grid(
