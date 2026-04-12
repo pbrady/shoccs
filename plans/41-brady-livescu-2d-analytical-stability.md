@@ -108,7 +108,7 @@ cd scripts/stencil_gen && uv run python -m stencil_gen.brady2d --scheme E4 --ker
 
 Implementing Trefethen 1983 (pp. 206–207). For the semi-discrete problem `u_t = -Σ a_k u_{n+k}` a mode `u_n(t) = e^(s t) κ^n` requires `s + Σ a_k κ^k = 0`. For each `s` in the right half plane, keep the `r` admissible roots (`|κ| < 1`), assemble the `r × r` Kreiss matrix `M(s)[i, ℓ] = s·κ_ℓ^i + Σ_j w_{ij}·κ_ℓ^j`, and check `σ_min(M(s))`. Failure = a candidate `s` with `Re(s) ≥ 0` and `σ_min(M(s)) < tol`, with imaginary-axis perturbation confirming the violation.
 
-- [ ] **41.3a** Create `stencil_gen/gks_kreiss.py` skeleton:
+- [x] **41.3a** Create `stencil_gen/gks_kreiss.py` skeleton:
   - Module docstring citing Trefethen 1983 pp. 206–207.
   - `BoundaryRow = tuple[np.ndarray, np.ndarray]` (weights, column offsets).
   - `DefectiveKappaError(RuntimeError)`.
