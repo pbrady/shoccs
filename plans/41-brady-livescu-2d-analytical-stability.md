@@ -290,7 +290,7 @@ Implementing Trefethen 1983 (pp. 206–207). For the semi-discrete problem `u_t 
 
 ### 41.8 — L6 non-normality diagnostics module (`non_normality.py`)
 
-- [ ] **41.8a** Create `stencil_gen/non_normality.py` skeleton:
+- [x] **41.8a** Create `stencil_gen/non_normality.py` skeleton:
   - Module docstring citing Trefethen & Embree, *Spectra and Pseudospectra* (2005), ch. 14 for calibration bands.
   - `@dataclass(frozen=True) class NonNormalityReport` — fields: `spectral_abscissa, numerical_abscissa, henrici_departure, eigenvector_condition, pseudospectral_abscissae: dict[float, float], kreiss_constant, transient_growth_bound, n, compute_time, notes: list[str]`.
   - All function stubs raise `NotImplementedError`.
