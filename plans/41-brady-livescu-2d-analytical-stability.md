@@ -215,14 +215,14 @@ Implementing Trefethen 1983 (pp. 206–207). For the semi-discrete problem `u_t 
 
 ### 41.5 — L3 wrapper: 1D eigenvalue check at multiple grid sizes
 
-- [ ] **41.5a** Add `layer3_1d_eigenvalue(scheme, kernel, params, n_values=(20, 40, 80)) -> dict` to `brady2d_stability.py`:
+- [x] **41.5a** Add `layer3_1d_eigenvalue(scheme, kernel, params, n_values=(20, 40, 80)) -> dict` to `brady2d_stability.py`:
   - For each `n`, call `stability_eigenvalue(n, p, q, epsilon=params["sigma"], kernel=kernel, nu=1, nextra=0)` (or classical-alpha variant via `stability_eigenvalue_from_matrix` when `kernel=="classical"`).
   - Return `{n: stab_eig for n in n_values}` plus `max_stab_eig = max(values)`.
   - Layer-3 failure: `max_stab_eig > STABILITY_TOL = 1e-10`.
   - File: `scripts/stencil_gen/stencil_gen/brady2d_stability.py`
   - Test: `cd scripts/stencil_gen && uv run pytest tests/test_brady2d_stability.py -x -q -k "TestLayer3"`
 
-- [ ] **41.5b** Tests `TestLayer3`:
+- [x] **41.5b** Tests `TestLayer3`:
   - `test_classical_e4_stable` at all three n.
   - `test_tension_e4_sigma_3_stable` at all three n.
   - `test_gaussian_e4_eps_01_unstable` — explicit fail case matches `known_unstable` entry.

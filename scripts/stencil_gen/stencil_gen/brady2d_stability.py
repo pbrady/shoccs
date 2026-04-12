@@ -24,6 +24,11 @@ from stencil_gen.group_velocity import (
     boundary_group_velocity_classical,
     interior_group_velocity,
 )
+from stencil_gen.phs import (
+    build_diff_matrix_rbf,
+    stability_eigenvalue,
+    stability_eigenvalue_from_matrix,
+)
 
 logger = logging.getLogger("stencil_gen.brady2d_stability")
 
@@ -35,6 +40,9 @@ _SCHEME_PARAMS = {
 
 # Layer-1 thresholds
 L1_TOL = 0.05  # 5% dispersion error
+
+# Layer-3 threshold: max Re(eigenvalue of -D_bc) must be non-positive
+STABILITY_TOL = 1e-10
 
 # Fraction of the resolved band over which to measure max |gv_error|.
 # Using 10% of the cutoff restricts evaluation to very well-resolved
@@ -176,4 +184,105 @@ def layer1_interior_boundary_gv(
         "interior_gv_err_y": interior_err,
         "boundary_gv_err": max_boundary_err,
         "cutoff_fraction": cutoff_frac,
+    }
+
+
+def _build_classical_diff_matrix(
+    n: int,
+    p: int,
+    nu: int,
+    alpha_list: list[float],
+) -> np.ndarray:
+    """Build an n×n differentiation matrix for the classical-alpha family.
+
+    Uses the TEMO boundary derivation with conservation enforcement,
+    substitutes alpha values, and assembles the full matrix with
+    antisymmetric (nu=1) right boundary closure.
+    """
+    from stencil_gen.interior import derive_interior, full_gamma_array
+
+    boundary_rows, alpha_values = _derive_classical_boundary(p, nu, alpha_list)
+
+    # Dimensions come from the boundary derivation itself
+    r = len(boundary_rows)
+    t = len(boundary_rows[0].coefficients)
+
+    # Build numeric boundary block
+    B = np.zeros((r, t))
+    for i, brow in enumerate(boundary_rows):
+        for j, coeff in enumerate(brow.coefficients):
+            B[i, j] = float(coeff.subs(alpha_values))
+
+    # Interior weights
+    interior_coeffs = derive_interior(0, p, nu)
+    interior_w = [float(c) for c in full_gamma_array(interior_coeffs)]
+
+    # Assemble full matrix
+    D = np.zeros((n, n))
+    # Left boundary
+    for i in range(r):
+        for j in range(t):
+            D[i, j] = B[i, j]
+    # Interior
+    for i in range(r, n - r):
+        for k_idx, j in enumerate(range(i - p, i + p + 1)):
+            D[i, j] = interior_w[k_idx]
+    # Right boundary (antisymmetric for nu=1)
+    sign = -1 if nu % 2 == 1 else 1
+    for i in range(r):
+        row = n - 1 - i
+        for j in range(t):
+            D[row, n - 1 - j] = sign * B[i, j]
+    return D
+
+
+def layer3_1d_eigenvalue(
+    scheme: str,
+    kernel: str,
+    params: dict,
+    n_values: tuple[int, ...] = (20, 40, 80),
+) -> dict:
+    """L3: 1D eigenvalue stability check at multiple grid sizes.
+
+    For each grid size n, computes the maximum real part of eigenvalues of
+    -D_bc (the semi-discrete advection operator with inflow BC removed).
+    A non-positive value means the 1D constant-coefficient scheme is stable.
+
+    Parameters
+    ----------
+    scheme : str
+        Scheme name ("E2" or "E4").
+    kernel : str
+        Kernel type ("classical", "tension", "gaussian", "multiquadric").
+    params : dict
+        Kernel-specific parameters.  For classical: {"alpha": [float, ...]}.
+        For RBF kernels: {"sigma": float} or {"epsilon": float}.
+    n_values : tuple[int, ...]
+        Grid sizes at which to evaluate stability.
+
+    Returns
+    -------
+    dict with keys:
+        eigenvalues : dict[int, float]
+            {n: max_real_eigenvalue} for each grid size.
+        max_stab_eig : float
+            Maximum over all grid sizes.
+    """
+    sp = _SCHEME_PARAMS[scheme]
+    p, q, nextra, nu = sp["p"], sp["q"], sp["nextra"], sp["nu"]
+
+    eigenvalues = {}
+    for n in n_values:
+        if kernel == "classical":
+            alpha_list = params["alpha"]
+            D = _build_classical_diff_matrix(n, p, nu, alpha_list)
+            se = stability_eigenvalue_from_matrix(D)
+        else:
+            epsilon = params.get("sigma", params.get("epsilon", 0.0))
+            se = stability_eigenvalue(n, p, q, epsilon, kernel, nu, nextra)
+        eigenvalues[n] = se
+
+    return {
+        "eigenvalues": eigenvalues,
+        "max_stab_eig": max(eigenvalues.values()),
     }
