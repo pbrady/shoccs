@@ -14,8 +14,10 @@ from stencil_gen.brady2d_stability import (
     L7_TRANSIENT_GROWTH_TOL,
     STABILITY_TOL,
     StabilityReport,
+    brady2d_stability_score,
     build_sparse_2d_operator,
     layer1_interior_boundary_gv,
+    layer2_kreiss_gks,
     layer3_1d_eigenvalue,
     layer4_local_gv_2d,
     layer5_anisotropy,
@@ -591,3 +593,142 @@ class TestLayer7WithNonNormality:
         assert report.compute_time > 0.0
         assert isinstance(report.pseudospectral_abscissae, dict)
         assert len(report.pseudospectral_abscissae) > 0
+
+
+class TestLayer2:
+    """Layer 2: rigorous GKS Kreiss determinant stability check."""
+
+    def test_tension_e4_stable(self):
+        """Tension E4 at sigma=3.0 is GKS-stable."""
+        result = layer2_kreiss_gks("E4", "tension", {"sigma": 3.0})
+        assert result.is_stable is True
+
+    def test_gaussian_e4_gks_stable(self):
+        """Gaussian E4 eps=0.1 is GKS-stable (instability is eigenvalue, not boundary).
+
+        The Gaussian eps=0.1 closure is boundary-stable in the GKS sense —
+        its instability is caught at Layer 3 (eigenvalue check), not here.
+        """
+        kv = _load_known_values()
+        unstable = kv["E4_1"]["known_unstable"][0]
+        assert unstable["kernel"] == "gaussian"
+        eps = unstable["epsilon"]
+        result = layer2_kreiss_gks("E4", "gaussian", {"epsilon": eps})
+        assert result.is_stable is True
+
+    def test_returns_kreiss_result(self):
+        """Layer 2 returns a KreissResult."""
+        result = layer2_kreiss_gks("E4", "tension", {"sigma": 3.0})
+        assert isinstance(result, KreissResult)
+        assert result.compute_time > 0.0
+
+
+class TestStabilityScoreOrchestrator:
+    """Tests for brady2d_stability_score orchestrator (41.10b)."""
+
+    def test_tension_e4_passes_layer1(self):
+        """Tension E4 at sigma=3.0 passes at max_layer=1."""
+        report = brady2d_stability_score(
+            "E4", "tension", {"sigma": 3.0}, max_layer=1,
+        )
+        assert report.overall_verdict == "pass"
+        assert report.failed_layer is None
+        assert report.layer1 is not None
+        assert report.layer2 is None  # not run
+        assert report.compute_time > 0.0
+
+    def test_tension_e4_passes_layers_1_through_3(self):
+        """Tension E4 at sigma=3.0 passes layers 1-3."""
+        report = brady2d_stability_score(
+            "E4", "tension", {"sigma": 3.0}, max_layer=3,
+        )
+        assert report.overall_verdict == "pass"
+        assert report.failed_layer is None
+        assert report.layer1 is not None
+        assert report.layer2 is not None
+        assert report.layer3 is not None
+        assert report.layer4 is None  # not run
+
+    def test_tension_e4_passes_layers_1_through_5(self):
+        """Tension E4 at sigma=3.0 passes layers 1-5."""
+        report = brady2d_stability_score(
+            "E4", "tension", {"sigma": 3.0}, max_layer=5,
+        )
+        assert report.overall_verdict == "pass"
+        assert report.failed_layer is None
+        assert report.layer1 is not None
+        assert report.layer2 is not None
+        assert report.layer3 is not None
+        assert report.layer4 is not None
+        assert report.layer5 is not None
+        assert report.layer7 is None  # not run
+
+    def test_gaussian_eps_01_fails_at_layer_3(self):
+        """Gaussian E4 eps=0.1 (known_unstable) fails at layer 3.
+
+        GKS-stable (passes L2) but eigenvalue-unstable (fails L3).
+        With short_circuit=True, layers 4+ are not run.
+        """
+        kv = _load_known_values()
+        unstable = kv["E4_1"]["known_unstable"][0]
+        assert unstable["kernel"] == "gaussian"
+        eps = unstable["epsilon"]
+
+        report = brady2d_stability_score(
+            "E4", "gaussian", {"epsilon": eps}, max_layer=5,
+        )
+        assert report.overall_verdict == "fail"
+        assert report.failed_layer == 3
+        assert "max_stab_eig" in report.failed_reason
+        # Short-circuited: layers 1-3 populated, 4+ not run
+        assert report.layer1 is not None
+        assert report.layer2 is not None
+        assert report.layer3 is not None
+        assert report.layer4 is None
+        assert report.layer5 is None
+
+    def test_short_circuit_false_runs_all_layers(self):
+        """With short_circuit=False, all layers run even on failure."""
+        kv = _load_known_values()
+        unstable = kv["E4_1"]["known_unstable"][0]
+        assert unstable["kernel"] == "gaussian"
+        eps = unstable["epsilon"]
+
+        report = brady2d_stability_score(
+            "E4", "gaussian", {"epsilon": eps},
+            max_layer=5, short_circuit=False,
+        )
+        assert report.overall_verdict == "fail"
+        # First failure is at layer 3
+        assert report.failed_layer == 3
+        # But all layers up to max_layer are populated
+        assert report.layer1 is not None
+        assert report.layer2 is not None
+        assert report.layer3 is not None
+        assert report.layer4 is not None
+        assert report.layer5 is not None
+
+    def test_compute_time_positive(self):
+        """compute_time is positive."""
+        report = brady2d_stability_score(
+            "E4", "tension", {"sigma": 3.0}, max_layer=1,
+        )
+        assert report.compute_time > 0.0
+
+    def test_str_representation(self):
+        """The report __str__ works after orchestration."""
+        report = brady2d_stability_score(
+            "E4", "tension", {"sigma": 3.0}, max_layer=3,
+        )
+        s = str(report)
+        assert "Brady-Livescu 2D Stability Report" in s
+        assert "PASS" in s
+
+    def test_kreiss_field_populated(self):
+        """The kreiss field is populated when layer 2 runs."""
+        report = brady2d_stability_score(
+            "E4", "tension", {"sigma": 3.0}, max_layer=2,
+        )
+        assert report.kreiss is not None
+        assert report.kreiss is report.layer2
+        assert report.kreiss.is_stable is True

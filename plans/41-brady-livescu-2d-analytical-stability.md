@@ -389,11 +389,12 @@ Implementing Trefethen 1983 (pp. 206–207). For the semi-discrete problem `u_t 
   - File: `scripts/stencil_gen/stencil_gen/brady2d_stability.py`
   - Test: `cd scripts/stencil_gen && uv run pytest tests/test_brady2d_stability.py -x -q -k "TestStabilityReport"`
 
-- [ ] **41.10b** Implement `brady2d_stability_score(scheme, kernel, params, *, max_layer=7, short_circuit=True) -> StabilityReport`:
+- [x] **41.10b** Implement `brady2d_stability_score(scheme, kernel, params, *, max_layer=7, short_circuit=True) -> StabilityReport`:
   - Runs layers 1 → `max_layer` in order.
   - Each layer populates the corresponding field in `StabilityReport`.
   - If `short_circuit and layer fails`, set `failed_layer` + `failed_reason` and return without running later layers.
   - `compute_time` is the total wall-clock.
+  - Also added `layer2_kreiss_gks(scheme, kernel, params, n=20)` wrapper and `_extract_stencil_data(D, p)` helper to bridge the scheme/kernel API to the raw-stencil Kreiss check.
   - File: `scripts/stencil_gen/stencil_gen/brady2d_stability.py`
   - Test: `cd scripts/stencil_gen && uv run pytest tests/test_brady2d_stability.py -x -q -k "TestStabilityScoreOrchestrator"`
 

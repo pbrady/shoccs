@@ -23,7 +23,7 @@ from typing import Literal
 
 import numpy as np
 
-from stencil_gen.gks_kreiss import KreissResult
+from stencil_gen.gks_kreiss import BoundaryRow, KreissResult, kreiss_stability_check
 from stencil_gen.group_velocity import (
     GroupVelocityProfile,
     anisotropy_over_coefficient_field,
@@ -303,6 +303,85 @@ def layer1_interior_boundary_gv(
         "boundary_gv_err": max_boundary_err,
         "cutoff_fraction": cutoff_frac,
     }
+
+
+def _extract_stencil_data(
+    D: np.ndarray, p: int,
+) -> tuple[np.ndarray, np.ndarray, list[BoundaryRow]]:
+    """Extract interior weights/offsets and boundary rows from a D matrix.
+
+    Uses the middle row for interior weights and the first p rows as
+    boundary rows (matching the number of admissible kappa roots for a
+    2p+1-point centered stencil in the GKS framework).
+
+    Parameters
+    ----------
+    D : np.ndarray
+        Full N×N differentiation matrix.
+    p : int
+        Interior half-bandwidth.
+
+    Returns
+    -------
+    (interior_weights, interior_offsets, boundary_rows)
+    """
+    n = D.shape[0]
+    mid = n // 2
+    offsets = np.arange(-p, p + 1)
+    interior_weights = D[mid, mid + offsets]
+
+    boundary_rows: list[BoundaryRow] = []
+    for i in range(p):
+        brow = D[i, :]
+        bcols = np.nonzero(np.abs(brow) > 1e-15)[0]
+        boundary_rows.append((brow[bcols], bcols))
+
+    return interior_weights, offsets, boundary_rows
+
+
+def layer2_kreiss_gks(
+    scheme: str,
+    kernel: str,
+    params: dict,
+    n: int = 20,
+) -> KreissResult:
+    """L2: rigorous GKS Kreiss determinant stability check.
+
+    Builds the 1D differentiation matrix, extracts the interior stencil and
+    boundary rows, and runs the full Kreiss determinant sweep to test for
+    boundary-closure instability.
+
+    Parameters
+    ----------
+    scheme : str
+        Scheme name ("E2" or "E4").
+    kernel : str
+        Kernel type ("classical", "tension", "gaussian", "multiquadric").
+    params : dict
+        Kernel-specific parameters.
+    n : int
+        Grid size for the 1D differentiation matrix.
+
+    Returns
+    -------
+    KreissResult
+        Full Kreiss determinant result including stability verdict.
+    """
+    sp = _SCHEME_PARAMS[scheme]
+    p, q, nextra, nu = sp["p"], sp["q"], sp["nextra"], sp["nu"]
+
+    if kernel == "classical":
+        D = _build_classical_diff_matrix(n, p, nu, params["alpha"])
+    else:
+        epsilon = params.get("sigma", params.get("epsilon", 0.0))
+        D = build_diff_matrix_rbf(n, p, q, epsilon, kernel, nu, nextra)
+
+    interior_weights, interior_offsets, boundary_rows = _extract_stencil_data(D, p)
+
+    return kreiss_stability_check(
+        interior_weights, interior_offsets, boundary_rows,
+        s_grid_params={"s_max": 10.0, "n_radial": 30, "n_imag": 80, "imag_max": 15.0},
+    )
 
 
 def _build_classical_diff_matrix(
@@ -725,4 +804,136 @@ def layer7_with_non_normality(
         report.transient_growth_bound, report.kreiss_constant,
         report.compute_time,
     )
+    return report
+
+
+def brady2d_stability_score(
+    scheme: str,
+    kernel: str,
+    params: dict,
+    *,
+    max_layer: int = 7,
+    short_circuit: bool = True,
+) -> StabilityReport:
+    """Run the layered stability analysis pipeline.
+
+    Executes layers 1 through ``max_layer`` in order, populating the
+    corresponding fields of a :class:`StabilityReport`.  If
+    ``short_circuit`` is True (default), execution stops at the first
+    failing layer.
+
+    Parameters
+    ----------
+    scheme : str
+        Scheme name ("E2" or "E4").
+    kernel : str
+        Kernel type ("classical", "tension", "gaussian", "multiquadric").
+    params : dict
+        Kernel-specific parameters.
+    max_layer : int
+        Highest layer to run (1–7).
+    short_circuit : bool
+        If True, stop at the first failing layer.
+
+    Returns
+    -------
+    StabilityReport
+        Populated report with per-layer results and overall verdict.
+    """
+    t0 = time.perf_counter()
+    report = StabilityReport.empty()
+
+    def _record_failure(layer_num: int, reason: str) -> None:
+        """Record a failure if this is the first one."""
+        if report.failed_layer is None:
+            report.failed_layer = layer_num
+            report.failed_reason = reason
+
+    def _should_stop() -> bool:
+        return short_circuit and report.failed_layer is not None
+
+    # --- Layer 1: interior + boundary group velocity error ---
+    if max_layer >= 1:
+        report.layer1 = layer1_interior_boundary_gv(scheme, kernel, params)
+        err = report.layer1["boundary_gv_err"]
+        if err > L1_TOL:
+            _record_failure(1, f"boundary_gv_err={err:.4e} > L1_TOL={L1_TOL}")
+        if _should_stop():
+            report.overall_verdict = "fail"
+            report.compute_time = time.perf_counter() - t0
+            return report
+
+    # --- Layer 2: rigorous GKS Kreiss determinant test ---
+    if max_layer >= 2:
+        kr = layer2_kreiss_gks(scheme, kernel, params)
+        report.layer2 = kr
+        report.kreiss = kr
+        if not kr.is_stable:
+            _record_failure(
+                2, f"Kreiss GKS unstable: sigma_min={kr.witness_sigma_min:.4e}"
+            )
+        if _should_stop():
+            report.overall_verdict = "fail"
+            report.compute_time = time.perf_counter() - t0
+            return report
+
+    # --- Layer 3: 1D eigenvalue check at multiple grid sizes ---
+    if max_layer >= 3:
+        report.layer3 = layer3_1d_eigenvalue(scheme, kernel, params)
+        mse = report.layer3["max_stab_eig"]
+        if mse > STABILITY_TOL:
+            _record_failure(3, f"max_stab_eig={mse:.4e} > STABILITY_TOL={STABILITY_TOL}")
+        if _should_stop():
+            report.overall_verdict = "fail"
+            report.compute_time = time.perf_counter() - t0
+            return report
+
+    # --- Layer 4: per-point local GV error on 2D varying-coefficient field ---
+    if max_layer >= 4:
+        report.layer4 = layer4_local_gv_2d(scheme, kernel, params)
+        gv_err = report.layer4["max_local_gv_error"]
+        if gv_err > L4_TOL:
+            _record_failure(4, f"max_local_gv_error={gv_err:.4e} > L4_TOL={L4_TOL}")
+        if _should_stop():
+            report.overall_verdict = "fail"
+            report.compute_time = time.perf_counter() - t0
+            return report
+
+    # --- Layer 5: 2D anisotropy over the coefficient field ---
+    if max_layer >= 5:
+        report.layer5 = layer5_anisotropy(scheme, kernel, params)
+        aniso_err = report.layer5["max_aligned_error"]
+        if aniso_err > L5_TOL:
+            _record_failure(5, f"max_aligned_error={aniso_err:.4e} > L5_TOL={L5_TOL}")
+        if _should_stop():
+            report.overall_verdict = "fail"
+            report.compute_time = time.perf_counter() - t0
+            return report
+
+    # --- Layer 7: sparse 2D Arnoldi eigenvalue ---
+    if max_layer >= 7:
+        report.layer7 = layer7_sparse_2d_eigenvalue(scheme, kernel, params)
+        msa = report.layer7["max_spectral_abscissa"]
+        if msa > L7_TOL:
+            _record_failure(
+                7, f"max_spectral_abscissa={msa:.4e} > L7_TOL={L7_TOL}"
+            )
+        if _should_stop():
+            report.overall_verdict = "fail"
+            report.compute_time = time.perf_counter() - t0
+            return report
+
+        # Non-normality diagnostics on the 2D BL operator (combined L6+L7)
+        report.non_normality = layer7_with_non_normality(scheme, kernel, params)
+        if report.non_normality.transient_growth_bound > L7_TRANSIENT_GROWTH_TOL:
+            _record_failure(
+                7,
+                f"transient_growth_bound="
+                f"{report.non_normality.transient_growth_bound:.2f} "
+                f"> L7_TRANSIENT_GROWTH_TOL={L7_TRANSIENT_GROWTH_TOL}",
+            )
+
+    # Final verdict
+    report.overall_verdict = "fail" if report.failed_layer is not None else "pass"
+    report.compute_time = time.perf_counter() - t0
     return report
