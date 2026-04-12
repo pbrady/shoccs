@@ -118,7 +118,7 @@ Implementing Trefethen 1983 (pp. 206–207). For the semi-discrete problem `u_t 
   - File: `scripts/stencil_gen/stencil_gen/gks_kreiss.py` (new)
   - Test: `cd scripts/stencil_gen && uv run python -c "from stencil_gen.gks_kreiss import KreissResult, DefectiveKappaError; print('ok')"`
 
-- [ ] **41.3b** Implement `kappa_roots(interior_weights, interior_offsets, s, *, repeat_tol=1e-7) -> tuple[np.ndarray, np.ndarray, bool]`:
+- [x] **41.3b** Implement `kappa_roots(interior_weights, interior_offsets, s, *, repeat_tol=1e-7) -> tuple[np.ndarray, np.ndarray, bool]`:
   - Shift offsets to start at zero: `shifted = offsets - min(offsets)`, `L_left = -min(offsets)`.
   - Build polynomial coefficients `Q` of degree `L_left + R_right` such that `Q(κ) = Σ w_k κ^{k+L_left} + s·κ^{L_left}` — i.e., multiply the interior stencil symbol by `κ^L_left` to clear negative powers, add the `s` term.
   - Call `numpy.roots(Q)` to get all roots.

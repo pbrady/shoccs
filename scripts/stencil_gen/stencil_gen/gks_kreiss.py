@@ -109,7 +109,70 @@ def kappa_roots(
     is_defective : bool
         True if any pair of admissible roots has separation < repeat_tol.
     """
-    raise NotImplementedError
+    offsets = np.asarray(interior_offsets, dtype=int)
+    weights = np.asarray(interior_weights, dtype=complex)
+    L_left = -int(np.min(offsets))
+    shifted = offsets + L_left  # now all >= 0
+
+    # Polynomial degree
+    degree = int(np.max(shifted))
+    # If the s*kappa^L_left term contributes at a higher degree, extend
+    degree = max(degree, L_left)
+
+    # Build coefficient array: Q(kappa) = sum_k a_k * kappa^shifted[k] + s * kappa^L_left
+    # numpy.roots expects coefficients from highest to lowest degree
+    coeffs = np.zeros(degree + 1, dtype=complex)
+    for w, sh in zip(weights, shifted):
+        coeffs[sh] += w
+    coeffs[L_left] += s
+
+    # numpy.roots expects [c_n, c_{n-1}, ..., c_1, c_0] (highest degree first)
+    poly_coeffs = coeffs[::-1]
+
+    all_roots = np.roots(poly_coeffs)
+
+    # Admissible: strictly inside the unit disk
+    admissible = all_roots[np.abs(all_roots) < 1.0 - 1e-12]
+
+    # Defective check: any pair of admissible roots with separation < repeat_tol
+    is_defective = False
+    if len(admissible) > 1:
+        for i in range(len(admissible)):
+            for j in range(i + 1, len(admissible)):
+                if abs(admissible[i] - admissible[j]) < repeat_tol:
+                    is_defective = True
+                    break
+            if is_defective:
+                break
+
+    return all_roots, admissible, is_defective
+
+
+def _kappa_roots_from_poly(
+    poly_coeffs: np.ndarray,
+    *,
+    repeat_tol: float = 1e-7,
+) -> tuple[np.ndarray, np.ndarray, bool]:
+    """Find roots from explicit polynomial coefficients (highest degree first).
+
+    Helper for testing defective-root detection without constructing stencils.
+
+    Returns same tuple as kappa_roots: (all_roots, admissible, is_defective).
+    """
+    all_roots = np.roots(poly_coeffs)
+    admissible = all_roots[np.abs(all_roots) < 1.0 - 1e-12]
+
+    is_defective = False
+    if len(admissible) > 1:
+        for i in range(len(admissible)):
+            for j in range(i + 1, len(admissible)):
+                if abs(admissible[i] - admissible[j]) < repeat_tol:
+                    is_defective = True
+                    break
+            if is_defective:
+                break
+
+    return all_roots, admissible, is_defective
 
 
 def kreiss_matrix(
