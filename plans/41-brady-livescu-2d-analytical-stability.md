@@ -548,7 +548,7 @@ Parallelizable strands after 41.1 completes:
 - `stencil_gen/gks_kreiss.py` exists with a passing `kreiss_stability_check` that distinguishes the classical-E4 stable closure from the Gaussian ε=0.1 known-unstable closure (integration test `TestKreissIntegration`).
 - `stencil_gen/non_normality.py` exists and `compute_non_normality` returns a fully-populated `NonNormalityReport` on a BL-sized (N=31) 2D test matrix within 30 seconds.
 - `stencil_gen/brady2d_stability.py` exposes `brady2d_stability_score` that successfully runs at `max_layer=7` for every family in `FAMILIES`.
-- All 10 family entries from the calibration phase are persisted under `known_values.json["brady2d_calibration"]`, with `TestRegressionBrady2DCalibration` verifying they re-compute within tolerance.
+- All 9 family entries from the calibration phase are persisted under `known_values.json["brady2d_calibration"]`, with `TestRegressionBrady2DCalibration` verifying they re-compute within tolerance. (Originally 10; E2 classical removed per 41.5c — no free alpha parameters.)
 - `cd scripts/stencil_gen && uv run pytest tests/ -x -q` passes in under 60 seconds (new slow tests marked appropriately; `-m "not slow"` stays under 30 seconds).
 - `cd scripts/stencil_gen && uv run python -m stencil_gen.brady2d_cli --scheme E4 --kernel tension --sigma 3.0 --max-layer 6` prints a full `StabilityReport` with all layers populated and `overall_verdict="pass"`.
 - `gks_group_velocity_check` accepts `side` parameter without breaking any existing callers (40.X and 41.4a backward compatible).
