@@ -105,6 +105,15 @@ cd scripts/stencil_gen && uv run pytest tests/test_phs.py -x -q -k "TestRegressi
   - File: `scripts/stencil_gen/stencil_gen/optimizer.py`
   - Test: `cd scripts/stencil_gen && uv run pytest tests/test_optimizer.py -x -q -k "TestExtractField"`
 
+### 43.1d — Prerequisite: reconcile kernel scope with `brady2d_stability_score`
+
+- [ ] **43.1d** `params_from_vector` / `DEFAULT_BOUNDS` now expose six kernels, but the objective in 43.2a routes through `brady2d_stability_score`, which today only dispatches `kernel ∈ {"classical", "tension", "gaussian", "multiquadric"}`. `layer1_interior_boundary_gv`/`layer3_1d_eigenvalue`/etc. will pass `kernel="tension-penalty"` or `"mixed-epsilon"` straight into `boundary_group_velocity` / `build_diff_matrix_rbf` / `uniform_boundary_weights_rbf`, which do not recognise those names. Before 43.2a is implementable end-to-end for the full scope, decide one of:
+  - (a) Extend `brady2d_stability_score` (and its layer helpers) to route `"tension-penalty"` through `build_diff_matrix_rbf_penalty` and `"mixed-epsilon"` through `build_diff_matrix_mixed_epsilon`, including matching group-velocity paths, so the existing 4-kernel call sites keep working and the new 2 kernels produce valid `StabilityReport`s. Add regression tests covering `brady2d_stability_score("E4", "tension-penalty", {"sigma":…, "gamma":…}, max_layer=3)` and mixed-epsilon analogs returning finite, feasible values at known-good parameters taken from `known_values.json`.
+  - (b) Explicitly narrow the 43.2–43.10 scope (and the plan's top-of-file parameter-spaces table and completion criteria) to the four kernels currently supported, drop the `"tension-penalty"` and `"mixed-epsilon"` rows from `DEFAULT_BOUNDS`, prune the corresponding `params_from_vector` / `vector_from_params` branches and tests, and note the deferral under "What this plan does NOT do".
+  - Do not skip this decision by relying on the 43.2a `try/except Exception → +inf` shim — silently infeasible kernels masquerading as feasibility-cliff failures would make every multi-start / SHGO / DE run on those kernels return `converged=False` with no diagnostic.
+  - File(s): `scripts/stencil_gen/stencil_gen/brady2d_stability.py` (+ layer helpers) **or** `plans/43-stability-optimization-framework.md` + `scripts/stencil_gen/stencil_gen/optimizer.py` + `scripts/stencil_gen/tests/test_optimizer.py`.
+  - Test: if (a), `cd scripts/stencil_gen && uv run pytest tests/ -x -q -k "brady2d and (tension_penalty or mixed_epsilon)"`; if (b), `cd scripts/stencil_gen && uv run pytest tests/test_optimizer.py -x -q` still passes with the pruned parametrisations.
+
 ### 43.2 — Objective factory with feasibility cliff
 
 - [ ] **43.2a** Implement `make_objective(scheme, kernel, report_field, *, gate_layer=3, max_layer=None) -> Callable[[np.ndarray], float]`:
@@ -328,7 +337,7 @@ cd scripts/stencil_gen && uv run pytest tests/test_phs.py -x -q -k "TestRegressi
 ## Ordering
 
 ```
-43.1a → 43.1b → 43.1c                 # skeleton + primitives
+43.1a → 43.1b → 43.1c → 43.1d         # skeleton + primitives + scope reconcile
   ↓
 43.2a → 43.2b                          # objective factory
   ↓
