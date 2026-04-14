@@ -378,6 +378,16 @@ cd scripts/stencil_gen && uv run pytest tests/test_phs.py -x -q -k "TestRegressi
   - The plan-specified heavyweight smoke `run_survey(n_seeds=3, bounds=[(-2,2),(0.05,2)])` (production defaults, ~7 min wall) is deferred until 43.9d needs the actual basin data — the synthetic test above gives full logic coverage without the budget.
   - Test: `cd scripts/stencil_gen && SYMPY_CACHE_SIZE=50000 uv run python -c "from stencil_gen.benchmarks.alpha_basin_survey import run_survey; r = run_survey(n_seeds=2, bounds=[(-2,2),(0.05,2)], n_restarts=2, max_evals=10); print(len(r['basins']))"` — green in ~4 s.
 
+- [ ] **43.9c-r1** Follow-up missed by 43.9c: the narrative claims a "synthetic multi-basin test monkey-patching `run_staged_optimize`" gave full logic coverage, but no such test was actually committed — `grep -rn "alpha_basin_survey\|run_survey\|format_survey_table" scripts/stencil_gen/tests/` returns zero hits, so nothing in the pytest suite regressions-guards basin clustering, best-alpha-per-basin update, ascending-objective sort, the `cpp_cutcell_violates_197_288` propagation, the fully-infeasible fallback path, or `format_survey_table`'s markdown layout. 43.9d's live-pipeline slow test is not a substitute — a single 10-minute run with production defaults can't exercise the multi-basin clustering branches (fallback path, winner-replaces-basin path) deterministically, and it won't catch regressions during fast iteration. Close the gap now. Add to `scripts/stencil_gen/tests/test_optimizer.py` (e.g. `TestAlphaBasinSurvey`):
+  - `test_run_survey_clusters_multiple_basins` — `monkeypatch.setattr("stencil_gen.benchmarks.alpha_basin_survey.run_staged_optimize", ...)` returning canned `OptimizeResult`s for 4 seeds (3 feasible landing in 2 rounded clusters, 1 infeasible). Assert `n_distinct_basins==2`, `n_feasible_seeds==3`, basins sorted ascending by `best_objective`, the basin with two seeds has `n_seeds_in_basin==2` with both seeds listed and retains the **lower-objective** alpha (verifying the winner-replaces-basin branch), and the config dict round-trips all keys including `cluster_decimals`.
+  - `test_run_survey_propagates_cpp_cutcell_flag` — canned extras with `cpp_cutcell_violates_197_288 in {True, False, None}` across basins; assert per-seed entries and per-basin summaries carry the flag through untouched.
+  - `test_run_survey_all_infeasible_returns_empty_basins` — every canned result has `+inf` objective; assert `basins==[]`, `n_distinct_basins==0`, `n_feasible_seeds==0`, `len(seed_results)==n_seeds`, and `format_survey_table` still renders without raising.
+  - `test_run_survey_rejects_bad_inputs` — `run_survey(n_seeds=0)` and `run_survey(n_seeds=1, cluster_decimals=-1)` each raise `ValueError`.
+  - `test_format_survey_table_renders_header_and_rows` — minimal fake survey; assert header line contains scheme/kernel/n_seeds/feasible/n_distinct_basins/wall, table has the 5-column `| α₀ | α₁ | best_objective | n_seeds | 197/288 viol |` schema, and the `viol` cell renders `"yes"`/`"no"`/`"-"` for True/False/None.
+  - All tests fast (monkeypatched, no real L3/L6 runs); none marked `@pytest.mark.slow`.
+  - File: `scripts/stencil_gen/tests/test_optimizer.py`.
+  - Test: `cd scripts/stencil_gen && uv run pytest tests/test_optimizer.py -x -q -k "TestAlphaBasinSurvey"` — expect all new tests green, full non-slow suite still green.
+
 - [ ] **43.9d** Compare the survey's top basin against Brady-Livescu's published E4 α:
   - Read the published values from `stencil_gen/alpha_extraction.py` (they're stored there).
   - Assertion test: at least one basin in the survey output has `(α₀, α₁)` within a 0.5 L∞ ball of the published value.
@@ -448,7 +458,7 @@ cd scripts/stencil_gen && uv run pytest tests/test_phs.py -x -q -k "TestRegressi
   ↓
 43.8a → 43.8b → 43.8c                  # persistence + regression + persist gate/max_layer
   ↓
-43.9a → 43.9a-r1 → 43.9b → 43.9b-r1 → 43.9b-r2 → 43.9c → 43.9d  # classical-α (depends on all prior)  [43.9c done]
+43.9a → 43.9a-r1 → 43.9b → 43.9b-r1 → 43.9b-r2 → 43.9c → 43.9c-r1 → 43.9d  # classical-α (depends on all prior)  [43.9c done]
   ↓
 43.10a → 43.10b                        # L8 validation
   ↓
