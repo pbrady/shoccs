@@ -229,6 +229,16 @@ The strategy: the constructor takes `real sigma` from Lua, builds the small (r=5
   - Test: `cmake --build build --target t-tension_E4u_1 && ctest --test-dir build -R t-tension_E4u_1` → **PASSED** (3 Catch2 cases; test executable reports `All tests passed (assertions in 3 test cases)` and ctest reports `100% tests passed, 0 tests failed out of 1` in 0.01 s).
   - Note: the test drives the stencil through `from_lua` (mirroring `E4u_1.t.cpp`'s pattern) rather than instantiating the `tension_E4u_1` struct directly, because the struct lives in the .cpp's anonymous-namespace scope and is not exposed in the header. With `h=1.0` and `right=false`, `nbs_floating` copies `cached_coeffs` verbatim into the output span, so the reference-match test at `h=1.0` equivalently asserts `cached_coeffs == REFERENCE_SIGMA3_COEFFS` within `1e-12`. The third test additionally spot-checks the `1/h` scaling at `h=0.1` on the classical-interior row (row 4) so regressions in the `nbs_floating` transform get caught without rederiving the whole block at a second h.
 
+- [ ] **42.5g** Extend `t-tension_E4u_1` to cover the `Dirichlet` and `right=true` paths:
+  - Brady-Livescu §4.3 uses `xmin/ymin = "dirichlet"` (and mirrored max faces), so `nbs_dirichlet` and the `right=true` negate+reverse branch in `nbs_floating`/`nbs_dirichlet` (`tension_E4u_1.cpp:251-253, 266-268`) are on this phase's hot path but currently untested. 42.6d/42.6h clone these tests, so closing the gap here prevents it from propagating to gaussian/multiquadric.
+  - Add `TEST_CASE("tension_E4u_1 Dirichlet query and nbs at sigma=3")`:
+    - Assert `query(bcs::Dirichlet)` returns `(p=2, r=4, t=7, x=0)`.
+    - Call `nbs(h=1.0, bcs::Dirichlet, psi=1.0, right=false, c, ex)` with a 28-entry buffer; assert the 28 output values equal `REFERENCE_SIGMA3_COEFFS[7..34]` (rows 1..4 of the 5×7 block, matching `nbs_dirichlet`'s "drop first row" behavior) within `1e-12`.
+  - Add `TEST_CASE("tension_E4u_1 right=true flips Floating block")`:
+    - Call `nbs(h=1.0, bcs::Floating, psi=1.0, right=true, c, ex)` with a 35-entry buffer; assert the output equals `-REFERENCE_SIGMA3_COEFFS` reversed end-to-end within `1e-12` (i.e. `c[i] == -REFERENCE_SIGMA3_COEFFS[34 - i]`).
+  - File: `src/stencils/tension_E4u_1.t.cpp`
+  - Test: `cmake --build build --target t-tension_E4u_1 && ctest --test-dir build -R t-tension_E4u_1`
+
 ### 42.6 — Second and third spline families: `gaussian_E4u_1`, `multiquadric_E4u_1`
 
 Each family follows the same 4-item pattern as 42.5b–f (minus the split reference-generation step, which is combined into the first item per family). The kernel function changes; everything else mirrors `tension_E4u_1`.
@@ -252,9 +262,9 @@ Each family follows the same 4-item pattern as 42.5b–f (minus the split refere
   - File: `src/stencils/stencil.hpp`, `src/stencils/stencil.cpp`, `src/stencils/gaussian_E4u_1.cpp`
   - Test: `cmake --build build --target shoccs-exe`
 
-- [ ] **42.6d** Add `t-gaussian_E4u_1` unit test mirroring `t-tension_E4u_1`:
+- [ ] **42.6d** Add `t-gaussian_E4u_1` unit test mirroring `t-tension_E4u_1` (including the 42.5g Dirichlet + `right=true` cases):
   - Append `add_unit_test(gaussian_E4u_1 "stencils" shoccs-stencils)` to CMakeLists.
-  - Create `src/stencils/gaussian_E4u_1.t.cpp` with the same three Catch2 tests, hard-coded against the 42.6a reference.
+  - Create `src/stencils/gaussian_E4u_1.t.cpp` with the five Catch2 tests from 42.5f + 42.5g, hard-coded against the 42.6a reference.
   - File: `src/stencils/CMakeLists.txt`, `src/stencils/gaussian_E4u_1.t.cpp` (new)
   - Test: `cmake --build build --target t-gaussian_E4u_1 && ctest --test-dir build -R t-gaussian_E4u_1`
 
@@ -272,7 +282,7 @@ Each family follows the same 4-item pattern as 42.5b–f (minus the split refere
   - File: `src/stencils/stencil.hpp`, `src/stencils/stencil.cpp`, `src/stencils/multiquadric_E4u_1.cpp`
   - Test: `cmake --build build --target shoccs-exe`
 
-- [ ] **42.6h** Add `t-multiquadric_E4u_1` unit test (mirrors 42.6d):
+- [ ] **42.6h** Add `t-multiquadric_E4u_1` unit test (mirrors 42.6d — five Catch2 tests including the Dirichlet + `right=true` cases from 42.5g):
   - File: `src/stencils/CMakeLists.txt`, `src/stencils/multiquadric_E4u_1.t.cpp` (new)
   - Test: `cmake --build build --target t-multiquadric_E4u_1 && ctest --test-dir build -R t-multiquadric_E4u_1`
 
@@ -377,7 +387,7 @@ Each family follows the same 4-item pattern as 42.5b–f (minus the split refere
   ↓
 42.4a → 42.4b → 42.4c → 42.4d      # Codegen scalar-params support
   ↓
-42.5a → 42.5b → 42.5c → 42.5d → 42.5e → 42.5f   # First spline family (tension_E4u_1)
+42.5a → 42.5b → 42.5c → 42.5d → 42.5e → 42.5f → 42.5g   # First spline family (tension_E4u_1)
   ↓
 42.6a → 42.6b → 42.6c → 42.6d      # Gaussian (4 items: fixture+skeleton, solver, register, test)
   ↓
