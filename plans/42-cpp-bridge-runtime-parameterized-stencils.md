@@ -265,11 +265,11 @@ Each family follows the same 4-item pattern as 42.5b–f (minus the split refere
   - Test: `cmake --build build --target shoccs-exe` → **PASSED** (clean full link of `src/app/shoccs` after incremental compile of `gaussian_E4u_1.cpp` + `stencil.cpp`). End-to-end smoke: a minimal 2D scalar-wave Lua with `scheme = { order=1, type="gaussian_E4u", epsilon=0.9 }` runs to `t=1.0` at N=21, emitting `builder: gaussian_E4u first scheme chosen (epsilon = 0.9)` and completing cleanly in 1.7 s.
   - Note: dispatch branch inserted in `stencil.cpp` immediately after `tension_E4u`; factory `make_gaussian_E4u_1` declared in `stencil.hpp:283` (after `make_tension_E4u_1`) and defined at `gaussian_E4u_1.cpp:239` before the closing `} // namespace ccs::stencils`, mirroring the `tension_E4u_1.cpp:277` pattern. Unit tests covering this dispatch (via `from_lua`) are 42.6d's job.
 
-- [ ] **42.6d** Add `t-gaussian_E4u_1` unit test mirroring `t-tension_E4u_1` (including the 42.5g Dirichlet + `right=true` cases):
+- [x] **42.6d** Add `t-gaussian_E4u_1` unit test mirroring `t-tension_E4u_1` (including the 42.5g Dirichlet + `right=true` cases):
   - Append `add_unit_test(gaussian_E4u_1 "stencils" shoccs-stencils)` to CMakeLists.
   - Create `src/stencils/gaussian_E4u_1.t.cpp` with the five Catch2 tests from 42.5f + 42.5g, hard-coded against the 42.6a reference.
   - File: `src/stencils/CMakeLists.txt`, `src/stencils/gaussian_E4u_1.t.cpp` (new)
-  - Test: `cmake --build build --target t-gaussian_E4u_1 && ctest --test-dir build -R t-gaussian_E4u_1`
+  - Test: `cmake --build build --target t-gaussian_E4u_1 && ctest --test-dir build -R t-gaussian_E4u_1` → **PASSED** (5 Catch2 cases; ctest reports `100% tests passed, 0 tests failed out of 1` in 0.01 s). Mirrors `tension_E4u_1.t.cpp` exactly with `epsilon=0.9` fixture substituted for `sigma=3.0` and the Lua script using `type="gaussian_E4u"` + `epsilon = ...`.
 
 - [ ] **42.6e** Generate the Python reference for `multiquadric_E4u_1` at `epsilon=1.0` and create `src/stencils/multiquadric_E4u_1.cpp` skeleton + CMake registration (mirrors 42.6a):
   - Generate reference via the same one-liner with `kernel='multiquadric'`, store in `tests/fixtures/multiquadric_e4u1_reference.py`.
