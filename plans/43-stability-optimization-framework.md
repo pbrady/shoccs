@@ -91,8 +91,6 @@ cd scripts/stencil_gen && uv run pytest tests/test_phs.py -x -q -k "TestRegressi
 
 - [x] **43.1b** Implement `params_from_vector(kernel: str, x: np.ndarray) -> dict` and `vector_from_params(kernel: str, params: dict) -> np.ndarray`:
   - `kernel="tension"` / `"gaussian"` / `"multiquadric"`: 1D, `x=[σ]` or `x=[ε]` → `{"sigma": x[0]}` or `{"epsilon": x[0]}`.
-  - `kernel="tension-penalty"`: 2D `x=[σ, γ]` → `{"sigma": x[0], "gamma": x[1]}`.
-  - `kernel="mixed-epsilon"`: variable-dim `x=[ε₀, ε₁, ...]` → `{"epsilons": list(x)}`.
   - `kernel="classical"`: 2D `x=[α₀, α₁]` → `{"alpha": [float(x[0]), float(x[1])]}`.
   - Inverse functions mirror exactly. Add a round-trip test: `params_from_vector(k, vector_from_params(k, p)) == p` for each kernel.
   - File: `scripts/stencil_gen/stencil_gen/optimizer.py`
@@ -112,7 +110,7 @@ cd scripts/stencil_gen && uv run pytest tests/test_phs.py -x -q -k "TestRegressi
   - Files: `scripts/stencil_gen/stencil_gen/optimizer.py`, `scripts/stencil_gen/tests/test_optimizer.py`, `plans/43-stability-optimization-framework.md`.
   - Test: `cd scripts/stencil_gen && uv run pytest tests/test_optimizer.py -x -q` — green, 32 tests.
 
-- [ ] **43.1e** Follow-up cleanup missed by 43.1d: two downstream task specs still reference the pruned `tension-penalty` / `mixed-epsilon` kernels and must be reconciled with option (b) before the next work pass proceeds.
+- [x] **43.1e** Follow-up cleanup missed by 43.1d: two downstream task specs still reference the pruned `tension-penalty` / `mixed-epsilon` kernels and must be reconciled with option (b) before the next work pass proceeds.
   - In **43.1b** (lines 93–96) delete the two bullets for `kernel="tension-penalty"` and `kernel="mixed-epsilon"`; the spec should match the actual implementation in `optimizer.py` (tension / gaussian / multiquadric / classical only). Leave the round-trip test bullet intact.
   - In **43.7a** (the `--kernel` argparse choices bullet) change `{tension,gaussian,multiquadric,tension-penalty,mixed-epsilon,classical}` to `{tension,gaussian,multiquadric,classical}` so a literal reading of the CLI spec cannot reintroduce the pruned kernels when 43.7a is implemented.
   - File: `plans/43-stability-optimization-framework.md` only (no code changes).
@@ -215,7 +213,7 @@ cd scripts/stencil_gen && uv run pytest tests/test_phs.py -x -q -k "TestRegressi
 - [ ] **43.7a** Create `scripts/stencil_gen/sweeps/optimize.py::main(argv) -> int`:
   - Args:
     - `--scheme {E2,E4}` (required)
-    - `--kernel {tension,gaussian,multiquadric,tension-penalty,mixed-epsilon,classical}` (required)
+    - `--kernel {tension,gaussian,multiquadric,classical}` (required)
     - `--objective FIELD` (required; dotted path like `layer6.spectral_abscissa`)
     - `--gate-layer INT` (default 3)
     - `--max-layer INT` (default: layer implied by objective)
