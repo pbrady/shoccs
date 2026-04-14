@@ -283,9 +283,10 @@ Each family follows the same 4-item pattern as 42.5b–f (minus the split refere
   - Test: `cmake --build build --target shoccs-stencils` → **PASSED** (clean incremental build of `multiquadric_E4u_1.cpp` + relink of `libshoccs-stencils.a`, no warnings). Standalone numerical check: reproducing the solver in Python at `epsilon=1.0` yields max abs diff of `1.7e-15` vs `REFERENCE_MULTIQUADRIC_E4U1_EPS1_COEFFS` across all 35 entries. `nbs_floating` already reads from `cached_coeffs` (wired in 42.6e's skeleton). Full fixture-vs-solver Catch2 assertion is 42.6h's job.
   - Note: structure is a direct clone of `solve_gaussian_coefficients` with kernel swapped to `multiquadric_phi(r,eps) = sqrt(1 + (eps*r)^2)` and `multiquadric_dphi(r,eps) = eps^2 * r / sqrt(1 + (eps*r)^2)`. Like gaussian, no small-r Taylor path needed (kernel is smooth at r=0 — `phi(0)=1`, `dphi(0)=0`). The `gauss_solve<N,NRHS>` template is once again duplicated in-anonymous-namespace; shared-header refactor remains out of scope for plan 42.
 
-- [ ] **42.6g** Register `multiquadric_E4u_1` in `stencil.hpp` / `stencil.cpp` dispatch (type `"multiquadric_E4u"`, default `epsilon=1.0`, inserted after `gaussian_E4u` branch):
+- [x] **42.6g** Register `multiquadric_E4u_1` in `stencil.hpp` / `stencil.cpp` dispatch (type `"multiquadric_E4u"`, default `epsilon=1.0`, inserted after `gaussian_E4u` branch):
   - File: `src/stencils/stencil.hpp`, `src/stencils/stencil.cpp`, `src/stencils/multiquadric_E4u_1.cpp`
-  - Test: `cmake --build build --target shoccs-exe`
+  - Test: `cmake --build build --target shoccs` → **PASSED** (full chain compiles and links; `libshoccs-stencils.a` rebuilds and `src/app/shoccs` relinks with no warnings). End-to-end smoke: a minimal 2D scalar-wave Lua with `scheme = { order=1, type="multiquadric_E4u", epsilon=1.0 }` runs to `t=1.0` at N=21, emitting `builder: multiquadric_E4u first scheme chosen (epsilon = 1)` and completing cleanly.
+  - Note: dispatch branch inserted in `stencil.cpp` immediately after `gaussian_E4u`; factory `make_multiquadric_E4u_1` declared in `stencil.hpp` (after `make_gaussian_E4u_1`) and defined at the end of `multiquadric_E4u_1.cpp` before the closing `} // namespace ccs::stencils`, mirroring the gaussian pattern. Unit tests covering this dispatch (via `from_lua`) are 42.6h's job.
 
 - [ ] **42.6h** Add `t-multiquadric_E4u_1` unit test (mirrors 42.6d — five Catch2 tests including the Dirichlet + `right=true` cases from 42.5g):
   - File: `src/stencils/CMakeLists.txt`, `src/stencils/multiquadric_E4u_1.t.cpp` (new)
