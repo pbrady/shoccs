@@ -80,7 +80,7 @@ cd scripts/stencil_gen && uv run pytest tests/test_brady2d_stability.py -x -q -k
 
 ### 42.2 — Python → C++ bridge (first cut: classical-alpha stencils only)
 
-- [ ] **42.2a** Create `scripts/stencil_gen/stencil_gen/cpp_bridge.py` with:
+- [x] **42.2a** Create `scripts/stencil_gen/stencil_gen/cpp_bridge.py` with:
   - `REPO_ROOT: Path` computed via `Path(__file__).parents[3]`.
   - `LUA_TEMPLATE_DIR = REPO_ROOT / "lua-configs"`.
   - `BRADY_LIVESCU_TEMPLATE = LUA_TEMPLATE_DIR / "brady_livescu_4_3.lua"`.
@@ -88,7 +88,9 @@ cd scripts/stencil_gen && uv run pytest tests/test_brady2d_stability.py -x -q -k
   - `@dataclass class BridgeResult: final_linf: float, linf_trace: np.ndarray, t_trace: np.ndarray, stable: bool, wall_time_s: float, exit_code: int, stderr: str`.
   - `make_brady2d_lua(scheme_type: str, params: dict, *, N: int, t_final: float, template: Path = BRADY_LIVESCU_TEMPLATE) -> str` — **strategy: explicit placeholder token substitution.** Add to 42.1a's template file the exact markers `--{{N}}--`, `--{{T_FINAL}}--`, `--{{SCHEME_TABLE}}--`; `make_brady2d_lua` does `template.read_text().replace(...)` on these three markers with the appropriate values. Returns the Lua source as a string. No regex, no Lua AST parsing.
   - File: `scripts/stencil_gen/stencil_gen/cpp_bridge.py` (new)
-  - Test: `cd scripts/stencil_gen && uv run pytest tests/test_cpp_bridge.py -x -q -k "TestMakeBrady2DLua"`
+  - Test: `cd scripts/stencil_gen && uv run pytest tests/test_cpp_bridge.py -x -q -k "TestMakeBrady2DLua"` → **PASSED** (14 tests: path constants, marker substitution for alpha/sigma/epsilon params, balanced braces, BridgeResult defaults). End-to-end sanity: rendered template fed to `./build/src/app/shoccs` runs to completion with exit 0.
+  - Note: params dict now recognizes three shapes — `{"alpha": [...]}` for classical schemes, `{"sigma": float}` for tension, `{"epsilon": float}` for gaussian/multiquadric. The scheme_table emitter handles all three. `scheme_type` is passed through verbatim to Lua `type=...`; mapping to Lua strings is 42.3a/42.7a's responsibility.
+  - Note: classical E4u alpha (alpha[1] ≈ 0.162) violates E4_1's interior denominator constraint (alpha[1] >= 197/288 ≈ 0.684), so 42.3a's dispatch must map `("E4", "classical") → "E4u"` (NOT `"E4"`). Plan text at 42.3a currently says `"E4"`; update to `"E4u"` when implementing 42.3a. Same for 42.2c's smoke test: use `scheme_type="E4u"` or the simulation will fail.
 
 - [ ] **42.2b** Implement `run_cpp_brady2d(scheme_type: str, params: dict, *, N: int = 31, t_final: float = 10.0, timeout: float = 300.0) -> BridgeResult`:
   - Writes the Lua config to a `tempfile.NamedTemporaryFile` with suffix `.lua`, invokes `subprocess.run([str(SHOCCS_BINARY), lua_path], cwd=REPO_ROOT, capture_output=True, text=True, timeout=timeout)`.
