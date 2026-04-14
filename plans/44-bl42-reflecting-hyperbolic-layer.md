@@ -138,32 +138,33 @@ cd scripts/stencil_gen && uv run python -m sweeps optimize \
   - File: `scripts/stencil_gen/stencil_gen/brady2d_stability.py`
   - Test: `cd scripts/stencil_gen && uv run python -c "from stencil_gen.brady2d_stability import BL42_TOL; assert BL42_TOL == 1e-10; print('ok')"` ✓
 
-- [ ] **44.4b** Add `layer_bl42: dict | None = None` field to `StabilityReport` dataclass:
+- [x] **44.4b** Add `layer_bl42: dict | None = None` field to `StabilityReport` dataclass:
   - Insert alphabetically or at the end of the `layer*` fields (after `layer8`). The field is *optionally* used as a cascade-participating layer, not bound by numeric ordering.
   - Update the class docstring to explain the naming: "numeric `layerN` are the primary cascade; `layer_bl42` runs during the L3 tier (parallel 1D eigenvalue check on the Brady-Livescu §4.2 reflecting-hyperbolic model problem)".
   - File: `scripts/stencil_gen/stencil_gen/brady2d_stability.py`
-  - Test: `cd scripts/stencil_gen && uv run python -c "from stencil_gen.brady2d_stability import StabilityReport; r = StabilityReport.empty(); assert r.layer_bl42 is None; print('ok')"`
+  - Test: `cd scripts/stencil_gen && uv run python -c "from stencil_gen.brady2d_stability import StabilityReport; r = StabilityReport.empty(); assert r.layer_bl42 is None; print('ok')"` ✓
 
-- [ ] **44.4c** Update `StabilityReport.__str__` to print L3r/BL42 results when populated:
+- [x] **44.4c** Update `StabilityReport.__str__` to print L3r/BL42 results when populated:
   - Insert a new line after L3's printout, formatted similarly: `L3r BL42 reflecting : PASS/FAIL max_re=... per_n=...`.
   - Only printed if `layer_bl42 is not None`.
   - File: `scripts/stencil_gen/stencil_gen/brady2d_stability.py`
-  - Test: `cd scripts/stencil_gen && uv run pytest tests/test_brady2d_stability.py -x -q -k "TestStabilityReportStr"`
+  - Test: `cd scripts/stencil_gen && uv run pytest tests/test_brady2d_stability.py -x -q -k "TestStabilityReportStr"` ✓
 
-- [ ] **44.4d** Extend `brady2d_stability_score` cascade to run L3r after L3, before L4:
+- [x] **44.4d** Extend `brady2d_stability_score` cascade to run L3r after L3, before L4:
   - After the existing L3 block (currently at line ~1105), add a new block: `if max_layer >= 3: report.layer_bl42 = layer_bl42_reflecting_hyperbolic(scheme, kernel, params); max_re = report.layer_bl42["max_spectral_abscissa"]; if max_re > BL42_TOL: _record_failure(3, f"BL42 max_spectral_abscissa={max_re:.4e} > BL42_TOL={BL42_TOL}"); if _should_stop(): ...`
   - `failed_layer = 3` in this case — semantically L3r is grouped with L3 for gate purposes. The `failed_reason` string disambiguates.
   - Preserves the `max_layer` semantics: L3r runs whenever L3 runs (`max_layer >= 3`).
   - File: `scripts/stencil_gen/stencil_gen/brady2d_stability.py`
-  - Test: `cd scripts/stencil_gen && uv run pytest tests/test_brady2d_stability.py -x -q -k "TestBrady2DScoreL3rCascade"`
+  - Test: `cd scripts/stencil_gen && uv run pytest tests/test_brady2d_stability.py -x -q -k "TestBrady2DScoreL3rCascade"` ✓
 
-- [ ] **44.4e** Integration tests `TestBrady2DScoreL3rCascade`:
+- [x] **44.4e** Integration tests `TestBrady2DScoreL3rCascade`:
   - `test_classical_e4_passes_l3r` — `brady2d_stability_score(..., max_layer=3)` on classical E4 populates `report.layer_bl42` and `failed_layer is None`.
   - `test_gaussian_eps_01_fails_at_l3_or_l3r` — `brady2d_stability_score(..., max_layer=3, short_circuit=True)` on Gaussian ε=0.1 fails with `failed_layer == 3`; the `failed_reason` string contains either "max_stab_eig" or "BL42" (L3 or L3r tripping first is acceptable).
   - `test_l3r_not_run_when_max_layer_is_2` — `brady2d_stability_score(..., max_layer=2)` leaves `layer_bl42 is None`.
   - `test_short_circuit_after_l3r_skips_l4` — a candidate that passes L1+L2+L3 but fails L3r with `short_circuit=True` has `layer4 is None`.
+  - All 4 tests pass. ✓
   - File: `scripts/stencil_gen/tests/test_brady2d_stability.py`
-  - Test: `cd scripts/stencil_gen && uv run pytest tests/test_brady2d_stability.py -x -q -k "TestBrady2DScoreL3rCascade"`
+  - Test: `cd scripts/stencil_gen && uv run pytest tests/test_brady2d_stability.py -x -q -k "TestBrady2DScoreL3rCascade"` ✓
 
 ### 44.5 — Optimizer integration
 

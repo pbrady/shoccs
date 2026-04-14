@@ -948,6 +948,74 @@ class TestLayer6:
         assert nn.n == 29  # n=30 minus inflow row
 
 
+class TestStabilityReportStr:
+    """Tests for StabilityReport.__str__ rendering of layer_bl42."""
+
+    def test_layer_bl42_pass_printed(self):
+        report = StabilityReport.empty()
+        report.layer_bl42 = {
+            "max_spectral_abscissa": 1e-12,
+            "purely_imaginary": True,
+            "spectral_abscissa_by_n": {21: 1e-12, 41: 5e-13, 81: 2e-14},
+        }
+        text = str(report)
+        assert "L3r BL42 reflecting" in text
+        assert "PASS" in text
+        assert "1.0000e-12" in text
+
+    def test_layer_bl42_fail_printed(self):
+        report = StabilityReport.empty()
+        report.layer_bl42 = {
+            "max_spectral_abscissa": 0.5,
+            "purely_imaginary": False,
+            "spectral_abscissa_by_n": {21: 0.1, 41: 0.3, 81: 0.5},
+        }
+        text = str(report)
+        assert "FAIL" in text
+        assert "5.0000e-01" in text
+
+    def test_layer_bl42_absent_not_printed(self):
+        report = StabilityReport.empty()
+        text = str(report)
+        assert "BL42" not in text
+
+
+class TestBrady2DScoreL3rCascade:
+    """Integration tests for layer_bl42 wiring in the cascade."""
+
+    def test_classical_e4_passes_l3r(self):
+        alpha = [-0.7733323791884821, 0.1623961700641681]
+        report = brady2d_stability_score(
+            "E4", "classical", {"alpha": alpha}, max_layer=3,
+        )
+        assert report.layer_bl42 is not None
+        assert report.layer_bl42["max_spectral_abscissa"] < 1e-8
+        assert report.failed_layer is None
+
+    def test_gaussian_eps_01_fails_at_l3_or_l3r(self):
+        report = brady2d_stability_score(
+            "E4", "gaussian", {"epsilon": 0.1}, max_layer=3,
+            short_circuit=True,
+        )
+        assert report.failed_layer == 3
+        assert "max_stab_eig" in report.failed_reason or "BL42" in report.failed_reason
+
+    def test_l3r_not_run_when_max_layer_is_2(self):
+        alpha = [-0.7733323791884821, 0.1623961700641681]
+        report = brady2d_stability_score(
+            "E4", "classical", {"alpha": alpha}, max_layer=2,
+        )
+        assert report.layer_bl42 is None
+
+    def test_short_circuit_after_l3r_skips_l4(self):
+        report = brady2d_stability_score(
+            "E4", "tension", {"sigma": 3.0}, max_layer=4,
+            short_circuit=True,
+        )
+        if report.layer_bl42 is not None and report.layer_bl42["max_spectral_abscissa"] > BL42_TOL:
+            assert report.layer4 is None
+
+
 class TestBrady2DScoreIntegration:
     """End-to-end integration tests for the full brady2d_stability_score pipeline.
 

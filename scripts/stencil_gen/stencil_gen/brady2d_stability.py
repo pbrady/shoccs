@@ -84,6 +84,10 @@ class StabilityReport:
     Each layer populates its corresponding field with a dict of per-layer
     metrics.  If a layer is not run (skipped or short-circuited), its field
     remains None.
+
+    Numeric ``layerN`` are the primary cascade; ``layer_bl42`` runs during
+    the L3 tier (parallel 1D eigenvalue check on the Brady-Livescu §4.2
+    reflecting-hyperbolic model problem).
     """
 
     layer1: dict | None = None
@@ -94,6 +98,7 @@ class StabilityReport:
     layer6: dict | None = None  # reserved for standalone non-normality
     layer7: dict | None = None
     layer8: dict | None = None
+    layer_bl42: dict | None = None
     non_normality: NonNormalityReport | None = None
     kreiss: KreissResult | None = None
     overall_verdict: Literal["pass", "fail", "unknown"] = "unknown"
@@ -138,6 +143,20 @@ class StabilityReport:
             lines.append(
                 f"L3  1D eigenvalue   : {status:4s}  "
                 f"max_stab_eig={mse:.4e}"
+            )
+
+        # Layer 3r (BL §4.2 reflecting hyperbolic)
+        if self.layer_bl42 is not None:
+            d = self.layer_bl42
+            msa = d.get("max_spectral_abscissa", float("nan"))
+            status = "PASS" if msa <= BL42_TOL else "FAIL"
+            per_n = ", ".join(
+                f"{n}:{v:.2e}"
+                for n, v in sorted(d.get("spectral_abscissa_by_n", {}).items())
+            )
+            lines.append(
+                f"L3r BL42 reflecting: {status:4s}  "
+                f"max_re={msa:.4e}  per_n=[{per_n}]"
             )
 
         # Layer 4
@@ -1204,6 +1223,22 @@ def brady2d_stability_score(
         mse = report.layer3["max_stab_eig"]
         if mse > STABILITY_TOL:
             _record_failure(3, f"max_stab_eig={mse:.4e} > STABILITY_TOL={STABILITY_TOL}")
+        if _should_stop():
+            report.overall_verdict = "fail"
+            report.compute_time = time.perf_counter() - t0
+            return report
+
+    # --- Layer 3r: BL §4.2 reflecting-hyperbolic eigenvalue check ---
+    if max_layer >= 3:
+        report.layer_bl42 = layer_bl42_reflecting_hyperbolic(
+            scheme, kernel, params,
+        )
+        max_re = report.layer_bl42["max_spectral_abscissa"]
+        if max_re > BL42_TOL:
+            _record_failure(
+                3,
+                f"BL42 max_spectral_abscissa={max_re:.4e} > BL42_TOL={BL42_TOL}",
+            )
         if _should_stop():
             report.overall_verdict = "fail"
             report.compute_time = time.perf_counter() - t0
