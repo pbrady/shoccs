@@ -153,6 +153,15 @@ cd scripts/stencil_gen && uv run pytest tests/test_phs.py -x -q -k "TestRegressi
   - File: `scripts/stencil_gen/stencil_gen/optimizer.py`, `scripts/stencil_gen/tests/test_optimizer.py`
   - Test: `cd scripts/stencil_gen && uv run pytest tests/test_optimizer.py -x -q -k "COBYQA"` — 3 tests green (2 COBYQA-available + 1 unavailable-gate).
 
+- [ ] **43.3c** Plan-file cleanup missed by 43.3a/43.3b: the "σ=3.0 is the tension-E4 optimum" assumption that 43.3b refuted for `layer1.boundary_gv_err` still survives in several downstream task specs and the completion criteria, and those references will silently reintroduce a broken test invariant when 43.4/43.5/43.6 are implemented. Reconcile them now so the next work pass starts from a consistent spec. No code changes.
+  - In the plan-header **Test commands** block (lines 67–72), change the CLI smoke example's objective from `layer1.boundary_gv_err` to one whose minimum is actually interior and stability-driven (e.g. `--objective layer3.max_stab_eig` with `--max-layer 3`); the current invocation would drive σ to the lower bound and defeats the "smoke" purpose.
+  - In **43.4b** (`test_multi_start_finds_known_optimum`, line 167) replace "expects `best_x[0]` within 1.0 of σ=3.0" with "expects a finite feasible result, bound-respecting, and no worse than the best random restart's starting objective." If a specific-σ convergence test is still desired, specify the objective explicitly as a stability-margin field (e.g. `layer3.max_stab_eig` or a weighted composite) and cite the sweep-known optimum for *that* field, not the generic σ=3.0.
+  - In **43.5c** (lines 189–191): `test_shgo_finds_tension_optimum` and `test_de_finds_tension_optimum` similarly drop the "within 5% / 10% of σ=3.0" acceptance — either pin an explicit objective whose minimum is σ=3.0, or assert only "finds a finite feasible global minimum, bound-respecting."
+  - In **43.6b** (line 206) `test_staged_tension_e4_convergence` drop "finds σ within 10% of 3.0" and replace with "validator stage returns a finite feasible best that improves on or ties the inner stage's best at the same point."
+  - In the **Completion Criteria** (line 376): either (a) rewrite the tension-E4 CLI smoke-convergence bullet to match whatever objective 43.3c's edits pick for the header (with a correct expected optimum), or (b) relax it to "runs end-to-end, prints a feasible `best_params`, and respects the stated bounds" — dropping the σ=3.0 figure entirely.
+  - File: `plans/43-stability-optimization-framework.md` only.
+  - Test: `grep -n "σ=3.0\|σ within\|of σ=3\|of 3.0\|within 5% of 3\|within 10% of 3" plans/43-stability-optimization-framework.md` — every surviving hit must be inside the 43.3b resolution narrative or the 43.3c item itself (i.e. archival text), not in an active task spec or completion criterion.
+
 ### 43.4 — Multi-start wrapper
 
 - [ ] **43.4a** Implement `multi_start_optimize(f, bounds, n_restarts=10, *, method="Nelder-Mead", seed=0) -> OptimizeResult`:
