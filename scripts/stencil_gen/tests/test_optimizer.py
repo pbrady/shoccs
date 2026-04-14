@@ -1521,3 +1521,49 @@ class TestOptimizeCLI:
         assert staged_opt["gate_layer"] == 3
         assert staged_opt["max_layer"] == 3
         assert staged_opt["validator_max_layer"] == 7
+
+        # Plan 43.9b-r2: the cpp_cutcell_violates_197_288 diagnostic flag
+        # (recorded in extras for E4 classical-alpha by
+        # _record_cpp_cutcell_diagnostic) is serialised into the persisted
+        # entry so 43.10 consumers reading known_values.json can see it
+        # without recomputing.  An E4-classical OptimizeResult with the flag
+        # set should round-trip; tension results (no such flag) must not
+        # carry the key.
+        cutcell_canned = OptimizeResult(
+            best_params={"alpha": [-0.8, 0.1]},
+            best_x=np.array([-0.8, 0.1]),
+            best_objective=-1.0,
+            best_report={"layer3": {"max_stab_eig": -1.0}},
+            method="staged",
+            converged=True,
+            n_evals=5,
+            compute_time=0.05,
+            history=[(np.array([-0.8, 0.1]), -1.0)],
+            extras={"cpp_cutcell_violates_197_288": True, "n_restarts": 1},
+        )
+        monkeypatch.setattr(
+            optimize_mod, "_run_method", lambda args, bounds: cutcell_canned
+        )
+        rc4 = optimize_mod.main(
+            [
+                "--scheme", "E4",
+                "--kernel", "classical",
+                "--objective", "layer3.max_stab_eig",
+                "--bounds", "-2", "2", "0.05", "2",
+                "--method", "staged",
+                "--n-restarts", "1",
+                "--max-evals", "4",
+                "--update-known-values",
+            ]
+        )
+        assert rc4 == 0
+        classical_opt = store["brady2d_optima"]["E4"]["classical"][
+            "layer3.max_stab_eig"
+        ]
+        assert classical_opt["cpp_cutcell_violates_197_288"] is True
+
+        # Tension entries (already persisted above without the flag in extras)
+        # must not carry the key.
+        assert "cpp_cutcell_violates_197_288" not in opt
+        assert "cpp_cutcell_violates_197_288" not in second_opt
+        assert "cpp_cutcell_violates_197_288" not in staged_opt
