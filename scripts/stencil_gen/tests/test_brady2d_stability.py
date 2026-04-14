@@ -761,31 +761,32 @@ class TestStabilityScoreOrchestrator:
         assert report.layer2 is None  # not run
         assert report.compute_time > 0.0
 
-    def test_tension_e4_passes_layers_1_through_3(self):
-        """Tension E4 at sigma=3.0 passes layers 1-3."""
+    def test_tension_e4_sigma_3_fails_at_l3r(self):
+        """Tension E4 σ=3.0 passes L3 (advection) but fails L3r (BL42 reflecting-hyperbolic)."""
         report = brady2d_stability_score(
             "E4", "tension", {"sigma": 3.0}, max_layer=3,
         )
-        assert report.overall_verdict == "pass"
-        assert report.failed_layer is None
+        assert report.overall_verdict == "fail"
+        assert report.failed_layer == 3
+        assert "BL42" in report.failed_reason
+        assert report.layer_bl42 is not None
         assert report.layer1 is not None
         assert report.layer2 is not None
         assert report.layer3 is not None
-        assert report.layer4 is None  # not run
 
-    def test_tension_e4_passes_layers_1_through_5(self):
-        """Tension E4 at sigma=3.0 passes layers 1-5."""
+    def test_tension_e4_sigma_3_fails_at_l3r_max_layer_5(self):
+        """Tension E4 σ=3.0 fails at L3r even with max_layer=5; L4+ short-circuited."""
         report = brady2d_stability_score(
             "E4", "tension", {"sigma": 3.0}, max_layer=5,
         )
-        assert report.overall_verdict == "pass"
-        assert report.failed_layer is None
+        assert report.overall_verdict == "fail"
+        assert report.failed_layer == 3
+        assert "BL42" in report.failed_reason
+        assert report.layer_bl42 is not None
         assert report.layer1 is not None
         assert report.layer2 is not None
         assert report.layer3 is not None
-        assert report.layer4 is not None
-        assert report.layer5 is not None
-        assert report.layer7 is None  # not run
+        assert report.layer4 is None  # short-circuited
 
     def test_gaussian_eps_01_fails_at_layer_3(self):
         """Gaussian E4 eps=0.1 (known_unstable) fails at layer 3.
@@ -841,8 +842,9 @@ class TestStabilityScoreOrchestrator:
 
     def test_str_representation(self):
         """The report __str__ works after orchestration."""
+        alpha = [-0.7733323791884821, 0.1623961700641681]
         report = brady2d_stability_score(
-            "E4", "tension", {"sigma": 3.0}, max_layer=3,
+            "E4", "classical", {"alpha": alpha}, max_layer=3,
         )
         s = str(report)
         assert "Brady-Livescu 2D Stability Report" in s
@@ -859,8 +861,9 @@ class TestStabilityScoreOrchestrator:
 
     def test_max_layer_6_runs_non_normality(self):
         """max_layer=6 populates layer6 and non_normality fields."""
+        alpha = [-0.7733323791884821, 0.1623961700641681]
         report = brady2d_stability_score(
-            "E4", "tension", {"sigma": 3.0}, max_layer=6,
+            "E4", "classical", {"alpha": alpha}, max_layer=6,
         )
         assert report.overall_verdict == "pass"
         assert report.layer6 is not None, "layer6 should be populated at max_layer=6"
@@ -876,11 +879,12 @@ class TestStabilityScoreOrchestrator:
 
     def test_max_layer_6_differs_from_5(self):
         """max_layer=6 produces different populated fields than max_layer=5."""
+        alpha = [-0.7733323791884821, 0.1623961700641681]
         report5 = brady2d_stability_score(
-            "E4", "tension", {"sigma": 3.0}, max_layer=5,
+            "E4", "classical", {"alpha": alpha}, max_layer=5,
         )
         report6 = brady2d_stability_score(
-            "E4", "tension", {"sigma": 3.0}, max_layer=6,
+            "E4", "classical", {"alpha": alpha}, max_layer=6,
         )
         # max_layer=5 should not have layer6 or non_normality
         assert report5.layer6 is None
@@ -891,8 +895,9 @@ class TestStabilityScoreOrchestrator:
 
     def test_max_layer_6_str_shows_l6(self):
         """The __str__ output at max_layer=6 includes an L6 line."""
+        alpha = [-0.7733323791884821, 0.1623961700641681]
         report = brady2d_stability_score(
-            "E4", "tension", {"sigma": 3.0}, max_layer=6,
+            "E4", "classical", {"alpha": alpha}, max_layer=6,
         )
         s = str(report)
         assert "L6  Non-normality" in s
@@ -1048,6 +1053,7 @@ class TestBrady2DScoreIntegration:
         assert report.layer5 is not None
         assert report.layer6 is not None
         assert report.layer7 is not None
+        assert report.layer_bl42 is not None
         assert report.non_normality is not None
         assert report.kreiss is not None
         assert report.compute_time > 0.0

@@ -265,11 +265,11 @@ class TestExtractField:
 
 class TestMakeObjective:
     def test_objective_returns_finite_on_feasible(self):
-        # E4 tension σ=3.0 is the known-good sweep-derived optimum and
-        # comfortably passes L1-L3.
+        # E4 tension σ=3.0 passes L1-L2 (GKS-stable); gate at L2 to avoid
+        # L3r (BL42 reflecting-hyperbolic) which rejects this sigma.
         f = make_objective(
             "E4", "tension", "layer1.boundary_gv_err",
-            gate_layer=3, max_layer=3,
+            gate_layer=2, max_layer=2,
         )
         val = f(np.array([3.0]))
         assert np.isfinite(val)
@@ -307,10 +307,10 @@ class TestMakeObjective:
         assert f(np.array([3.0])) == float("inf")
 
     def test_objective_infers_max_layer_from_field(self):
-        # layer6.* implies max_layer=6; gate_layer=3 (default) is < 6 so no
-        # error.
-        f = make_objective("E4", "tension", "layer6.spectral_abscissa")
-        val = f(np.array([3.0]))
+        # layer6.* implies max_layer=6; use classical E4 with known-good alpha
+        # that passes all layers including L3r.
+        f = make_objective("E4", "classical", "layer6.spectral_abscissa")
+        val = f(np.array([-0.7733323791884821, 0.1623961700641681]))
         assert np.isfinite(val)
 
     def test_objective_rejects_max_layer_below_gate(self):
@@ -404,11 +404,11 @@ class TestRunScipyLocal:
 
     def test_nelder_mead_on_make_objective(self):
         # Integration: local optimize of the real tension-E4 objective starting
-        # from a nearby feasible point.  We expect the minimizer to land in
-        # the feasible basin around σ=3.0 and improve on the initial value.
+        # from a nearby feasible point.  Gate at L2 (not L3) because tension
+        # σ~3.0 fails L3r (BL42 reflecting-hyperbolic).
         f = make_objective(
             "E4", "tension", "layer1.boundary_gv_err",
-            gate_layer=3, max_layer=3,
+            gate_layer=2, max_layer=2,
         )
         x0 = np.array([2.0])
         f0 = f(x0)
@@ -440,16 +440,11 @@ class TestRunScipyLocalCOBYQA:
 
     def test_cobyqa_converges_on_tension_e4(self):
         # Plan 43.3b: COBYQA drives the real tension-E4 objective to a finite,
-        # feasible minimum.  The original plan bullet asserted convergence
-        # within 5% of "the known σ=3.0 optimum", but σ=3.0 is the
-        # sweep-derived stability optimum across a weighted landscape — the
-        # true minimum of ``layer1.boundary_gv_err`` alone sits near the
-        # lower bound (σ≈0.5) on the monotone branch.  The right invariant is
-        # therefore: start from a feasible point, converge to something no
-        # worse, and respect the bounds.
+        # feasible minimum.  Gate at L2 (not L3) because tension σ~2–3
+        # fails L3r (BL42 reflecting-hyperbolic).
         f = make_objective(
             "E4", "tension", "layer1.boundary_gv_err",
-            gate_layer=3, max_layer=3,
+            gate_layer=2, max_layer=2,
         )
         x0 = np.array([2.0])
         f0 = f(x0)
@@ -544,15 +539,12 @@ class TestMultiStart:
             )
 
     def test_multi_start_finds_feasible_optimum(self):
-        # Plan 43.4b: tension E4 against layer3.max_stab_eig.  The feasibility
-        # gate carves out a non-trivial portion of [0.5, 20], so a multi-start
-        # should land on a finite, bound-respecting minimum no worse than the
-        # best random-restart starting objective.  (No specific-σ claim — see
-        # 43.3b for why the sweep-derived σ=3.0 is not this objective's
-        # minimum.)
+        # Plan 43.4b: tension E4 against layer3.max_stab_eig.  Gate at L2
+        # (not L3) because tension σ~3 fails L3r (BL42 reflecting-hyperbolic).
+        # layer3 is still populated since L3 runs before L3r in the cascade.
         f = make_objective(
             "E4", "tension", "layer3.max_stab_eig",
-            gate_layer=3, max_layer=3,
+            gate_layer=2, max_layer=3,
         )
         bounds = [(0.5, 20.0)]
         r = multi_start_optimize(
@@ -747,13 +739,11 @@ class TestGlobalOptimizers:
     against real :mod:`brady2d_stability` objectives (plan 43.5c)."""
 
     def test_shgo_finds_tension_optimum(self):
-        # 1D tension E4 against layer3.max_stab_eig.  The earlier plan text
-        # asserted convergence to σ=3.0; 43.3b refuted that invariant (see
-        # 43.3c) — the new acceptance is only "finite feasible global minimum,
-        # bound-respecting, at least one discovered basin."
+        # 1D tension E4 against layer3.max_stab_eig.  Gate at L2 (not L3)
+        # because tension fails L3r (BL42 reflecting-hyperbolic).
         f = make_objective(
             "E4", "tension", "layer3.max_stab_eig",
-            gate_layer=3, max_layer=3,
+            gate_layer=2, max_layer=3,
         )
         bounds = [(0.5, 20.0)]
         r = run_scipy_shgo(f, bounds=bounds, n=8, iters=1)
@@ -762,13 +752,11 @@ class TestGlobalOptimizers:
         assert r.extras["n_local_minima"] >= 1
 
     def test_de_finds_tension_optimum(self):
-        # Same objective via differential_evolution.  Kept to a tight budget
-        # (popsize=6, maxiter=8) to keep the test under ~30s; the objective's
-        # feasibility cliff is narrow enough that this still reaches a finite
-        # feasible minimum.
+        # Same objective via differential_evolution.  Gate at L2 (not L3)
+        # because tension fails L3r (BL42 reflecting-hyperbolic).
         f = make_objective(
             "E4", "tension", "layer3.max_stab_eig",
-            gate_layer=3, max_layer=3,
+            gate_layer=2, max_layer=3,
         )
         bounds = [(0.5, 20.0)]
         r = run_scipy_de(f, bounds=bounds, popsize=6, maxiter=8, seed=0)

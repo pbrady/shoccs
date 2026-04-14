@@ -181,29 +181,48 @@ cd scripts/stencil_gen && uv run python -m sweeps optimize \
 
 ### 44.4-followup2 — Fix pre-existing tests broken by L3r cascade wiring
 
-- [ ] **44.4g** Fix `test_tension_e4_passes_layers_1_through_3` in `TestStabilityScoreOrchestrator` (line ~764):
+- [x] **44.4g** Fix `test_tension_e4_passes_layers_1_through_3` in `TestStabilityScoreOrchestrator` (line ~764):
   - **Bug:** Tension E4 σ=3.0 passes L3 (advection eigenvalue) but fails L3r (BL42 reflecting-hyperbolic), so the cascade now reports `failed_layer=3` and `overall_verdict="fail"`. This pre-existing test was not updated in 44.4d.
-  - Update the test to expect `overall_verdict == "fail"`, `failed_layer == 3`, and `"BL42" in report.failed_reason`. Assert `report.layer_bl42 is not None`. This documents the expected behavior: tension E4 σ=3.0 passes L3 but fails L3r, which is the whole point of BL42 as a stricter discriminator.
-  - Rename test to `test_tension_e4_sigma_3_fails_at_l3r` for clarity.
+  - Updated test to expect `overall_verdict == "fail"`, `failed_layer == 3`, and `"BL42" in report.failed_reason`. Assert `report.layer_bl42 is not None`.
+  - Renamed test to `test_tension_e4_sigma_3_fails_at_l3r`. ✓
   - File: `scripts/stencil_gen/tests/test_brady2d_stability.py`
-  - Test: `cd scripts/stencil_gen && uv run pytest tests/test_brady2d_stability.py -x -q -k "test_tension_e4_sigma_3_fails_at_l3r"`
+  - Test: `cd scripts/stencil_gen && uv run pytest tests/test_brady2d_stability.py -x -q -k "test_tension_e4_sigma_3_fails_at_l3r"` ✓
 
-- [ ] **44.4h** Fix `test_tension_e4_passes_layers_1_through_5` in `TestStabilityScoreOrchestrator` (line ~776):
+- [x] **44.4h** Fix `test_tension_e4_passes_layers_1_through_5` in `TestStabilityScoreOrchestrator` (line ~776):
   - **Bug:** Same root cause as 44.4g — tension E4 σ=3.0 fails L3r, so `max_layer=5` also produces `overall_verdict="fail"`.
-  - Update to expect failure at layer 3 (BL42). Assert `report.layer4 is None` (short-circuited). Rename to `test_tension_e4_sigma_3_fails_at_l3r_max_layer_5`.
+  - Updated to expect failure at layer 3 (BL42). Assert `report.layer4 is None` (short-circuited). Renamed to `test_tension_e4_sigma_3_fails_at_l3r_max_layer_5`. ✓
   - File: `scripts/stencil_gen/tests/test_brady2d_stability.py`
-  - Test: `cd scripts/stencil_gen && uv run pytest tests/test_brady2d_stability.py -x -q -k "test_tension_e4_sigma_3_fails_at_l3r_max_layer_5"`
+  - Test: `cd scripts/stencil_gen && uv run pytest tests/test_brady2d_stability.py -x -q -k "test_tension_e4_sigma_3_fails_at_l3r_max_layer_5"` ✓
 
-- [ ] **44.4i** Add `layer_bl42` assertion to `test_classical_e4_passes_all_layers_1_through_7` in `TestBrady2DScoreIntegration` (line ~1027):
-  - The slow integration positive test checks that `layer1` through `layer7`, `non_normality`, and `kreiss` are all populated, but never asserts `report.layer_bl42 is not None`. If L3r silently failed to populate the field, this test would not catch it.
-  - Add `assert report.layer_bl42 is not None` alongside the existing layer assertions.
+- [x] **44.4i** Add `layer_bl42` assertion to `test_classical_e4_passes_all_layers_1_through_7` in `TestBrady2DScoreIntegration` (line ~1027):
+  - Added `assert report.layer_bl42 is not None` alongside the existing layer assertions. ✓
   - File: `scripts/stencil_gen/tests/test_brady2d_stability.py`
-  - Test: `cd scripts/stencil_gen && uv run pytest tests/test_brady2d_stability.py -x -q -k "test_classical_e4_passes_all_layers_1_through_7" -m slow`
+  - Test: `cd scripts/stencil_gen && uv run pytest tests/test_brady2d_stability.py -x -q -k "test_classical_e4_passes_all_layers_1_through_7" -m slow` ✓
 
-- [ ] **44.4j** Verify full test suite passes after 44.4g–44.4i:
-  - `cd scripts/stencil_gen && SYMPY_CACHE_SIZE=50000 uv run pytest tests/ -x -q` must show 0 failures.
-  - File: (no file modification; verification step)
-  - Test: `cd scripts/stencil_gen && SYMPY_CACHE_SIZE=50000 uv run pytest tests/ -x -q`
+- [x] **44.4j** Verify full test suite passes after 44.4g–44.4i:
+  - Required additional fixes beyond 44.4g–44.4i (see 44.4k–44.4m below).
+  - `cd scripts/stencil_gen && SYMPY_CACHE_SIZE=50000 uv run pytest tests/ -x -q` — 767 passed, 0 failures. ✓
+
+### 44.4-followup3 — Additional tests broken by L3r cascade (discovered during 44.4j)
+
+- [x] **44.4k** Fix orchestrator tests that used tension E4 σ=3.0 to test layer 6 behavior:
+  - `test_str_representation`, `test_max_layer_6_runs_non_normality`, `test_max_layer_6_differs_from_5`, `test_max_layer_6_str_shows_l6` — all used tension σ=3.0 through the orchestrator at max_layer ≥ 3. Now short-circuited at L3r before reaching layers 5/6.
+  - Switched to classical E4 with known-good alpha `[-0.7733323791884821, 0.1623961700641681]` which passes all layers including L3r.
+  - File: `scripts/stencil_gen/tests/test_brady2d_stability.py`
+  - Test: `cd scripts/stencil_gen && uv run pytest tests/test_brady2d_stability.py -x -q -k "test_str_representation or test_max_layer_6"` ✓
+
+- [x] **44.4l** Fix optimizer tests that used tension E4 with `gate_layer=3`:
+  - `test_objective_returns_finite_on_feasible`, `test_objective_infers_max_layer_from_field`, `test_nelder_mead_on_make_objective`, `test_cobyqa_converges_on_tension_e4`, `test_multi_start_finds_feasible_optimum`, `test_shgo_finds_tension_optimum`, `test_de_finds_tension_optimum` — all used tension with gate_layer=3, which now rejects σ~3.0 via L3r.
+  - For optimizer-mechanism tests (convergence, multi-start): lowered `gate_layer` to 2 (tension σ=3.0 still passes L1-L2). Layer3 data is still populated since L3 runs before L3r in the cascade.
+  - For `test_objective_infers_max_layer_from_field`: switched to classical E4 with known-good alpha (needs layer6 populated, requires passing L3r).
+  - File: `scripts/stencil_gen/tests/test_optimizer.py`
+  - Test: `cd scripts/stencil_gen && uv run pytest tests/test_optimizer.py -x -q` ✓
+
+- [x] **44.4m** Update `known_values.json` calibration verdicts for families now failing L3r:
+  - E4_phs_k2, E4_tension_3, E4_gaussian_09, E4_multiquadric_1 all passed L3 (advection) but fail L3r (BL42). Updated stored verdicts to `"fail"` with `failed_layer=3` and BL42-specific `failed_reason`. Removed layer4–layer6 data (now short-circuited).
+  - Only E4_classical and E2_phs_k2 pass all layers through L3r — consistent with BL42 being a stricter discriminator.
+  - File: `scripts/stencil_gen/sweeps/known_values.json`
+  - Test: `cd scripts/stencil_gen && uv run pytest tests/test_phs.py -x -q -k "test_all_families_verdict_matches"` ✓
 
 ### 44.5 — Optimizer integration
 
