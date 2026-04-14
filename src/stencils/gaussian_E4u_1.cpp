@@ -236,4 +236,6 @@ struct gaussian_E4u_1 {
     void nbs_neumann(real, real, std::span<real>, std::span<real>, bool) const {}
 };
 
+stencil make_gaussian_E4u_1(real epsilon) { return gaussian_E4u_1{epsilon}; }
+
 } // namespace ccs::stencils

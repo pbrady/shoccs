@@ -63,6 +63,12 @@ std::optional<stencil> stencil::from_lua(const sol::table& tbl, const logs& logg
                    "tension_E4u first scheme chosen (sigma = {})",
                    sigma);
             return make_tension_E4u_1(sigma);
+        } else if (type == "gaussian_E4u") {
+            real epsilon = m["epsilon"].get_or(0.9);
+            logger(spdlog::level::info,
+                   "gaussian_E4u first scheme chosen (epsilon = {})",
+                   epsilon);
+            return make_gaussian_E4u_1(epsilon);
         }
         if (type == "E2-poly") {
             logger(spdlog::level::info, "E2-poly scheme chosen");
