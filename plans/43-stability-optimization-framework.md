@@ -338,13 +338,14 @@ cd scripts/stencil_gen && uv run pytest tests/test_phs.py -x -q -k "TestRegressi
   - File: `plans/43-stability-optimization-framework.md` only (no code changes).
   - Test: `grep -n "197/288\|197\.0/288" plans/43-stability-optimization-framework.md` — every surviving hit must be inside the 43.9a resolution narrative, the `TestClassicalAlphaBounds` description, the `Classical-α` parameter-spaces Constraints cell (which now cites 197/288 as an L8 diagnostic only), or this 43.9a-r1 item. No surviving hit may appear in an active (unchecked) task spec or in the `Completion Criteria` as a bound/assertion.
 
-- [ ] **43.9b** Single-seed optimization run on E4_1 classical-α:
-  - `run_staged_optimize(scheme="E4", kernel="classical", report_field="layer6.transient_growth_bound", bounds=DEFAULT_BOUNDS[("E4", "classical")], inner_gate=3, inner_max_layer=3, validator_max_layer=6, top_k=5, method="Nelder-Mead", n_restarts=20, seed=0)`.
-  - Assert converged result is feasible (finite `best_objective`), bound-respecting (`best_x[i]` within each `DEFAULT_BOUNDS[("E4","classical")]` interval), and records an L8 diagnostic flag `cpp_cutcell_violates_197_288 = bool(best_x[1] < 197.0/288.0)` in the result extras (informational — does not fail the test; see 43.9a / 43.9a-r1 for why).
-  - Record the result.
-  - Mark `@pytest.mark.slow`.
+- [x] **43.9b** Single-seed optimization run on E4_1 classical-α — added `TestStagedClassicalAlpha::test_staged_classical_e4_single_seed` in `scripts/stencil_gen/tests/test_optimizer.py`:
+  - Drives `run_staged_optimize(scheme="E4", kernel="classical", report_field="layer6.transient_growth_bound", bounds=DEFAULT_BOUNDS[("E4", "classical")], inner_gate=3, inner_max_layer=3, validator_max_layer=6, top_k=5, method="Nelder-Mead", n_restarts=20, seed=0, max_evals=60)`. `max_evals=60` (below the 200 default) keeps the slow run to ~2 min while still giving the inner multi-start enough budget to land on the Brady-Livescu basin at this seed.
+  - Asserts `method=="staged"`, finite feasible `best_objective`, `best_x[i]` within each `DEFAULT_BOUNDS[("E4","classical")]` interval, and `best_params == {"alpha": [...]}` (2-element list).
+  - Records the L8 cut-cell diagnostic `cpp_cutcell_violates_197_288 = bool(best_x[1] < 197/288)` into `r.extras` and asserts the flag is a `bool`. Purely informational — the Python analytical pipeline does not enforce the C++ cut-cell 197/288 floor (see 43.9a-r1); downstream plan 43.10 wiring can consume the flag.
+  - Observed at seed=0: validator winner ≈ `[-0.81, 0.09]` (flag=True, as expected — α₁ < 197/288), `best_objective ≈ 4.83`, stage=`validated`, 1 feasible restart of 20 on the full envelope, ~135 s. Extra budget would improve basin hit rate but isn't needed for the test's invariants.
+  - Marked `@pytest.mark.slow`.
   - File: `scripts/stencil_gen/tests/test_optimizer.py`
-  - Test: `cd scripts/stencil_gen && uv run pytest tests/test_optimizer.py -x -q -k "TestStagedClassicalAlpha" -m slow`
+  - Test: `cd scripts/stencil_gen && SYMPY_CACHE_SIZE=50000 uv run pytest tests/test_optimizer.py -x -q -k "TestStagedClassicalAlpha" --run-slow` — 1 passed in 138 s. Non-slow suite: `uv run pytest tests/test_optimizer.py -x -q` — 84 passed, 4 skipped, 77 s.
 
 - [ ] **43.9c** Multi-seed diversity study (analog of Brady-Livescu Table 4):
   - Create `scripts/stencil_gen/benchmarks/alpha_basin_survey.py` with a `run_survey(n_seeds=20, bounds=..., ...)` function.

@@ -1050,6 +1050,60 @@ class TestStaged:
         assert all(not np.isfinite(fv) for (_x, fv) in ranking)
 
 
+class TestStagedClassicalAlpha:
+    """Single-seed staged run on E4_1 classical-α (plan 43.9b).
+
+    Drives :func:`run_staged_optimize` against the full widened
+    ``DEFAULT_BOUNDS[("E4", "classical")]`` envelope (plan 43.9a) with the
+    inner gate at L3 and a ``layer6.transient_growth_bound`` validator.
+    Records the L8 cut-cell diagnostic flag ``cpp_cutcell_violates_197_288``
+    in ``r.extras`` for downstream plan-43.10 wiring; the flag is purely
+    informational here and does not fail the test (see 43.9a-r1).
+    """
+
+    @pytest.mark.slow
+    def test_staged_classical_e4_single_seed(self):
+        bounds = DEFAULT_BOUNDS[("E4", "classical")]
+        r = run_staged_optimize(
+            scheme="E4",
+            kernel="classical",
+            report_field="layer6.transient_growth_bound",
+            bounds=bounds,
+            inner_gate=3,
+            inner_max_layer=3,
+            validator_max_layer=6,
+            top_k=5,
+            method="Nelder-Mead",
+            n_restarts=20,
+            seed=0,
+            max_evals=60,
+        )
+
+        assert r.method == "staged"
+        assert np.isfinite(r.best_objective), (
+            "staged E4 classical-α on DEFAULT_BOUNDS should land on at least "
+            "one feasible validator candidate (the Brady-Livescu basin "
+            "α ≈ [-0.77, 0.16] sits inside the widened bounds)"
+        )
+        for i, (lo, hi) in enumerate(bounds):
+            assert lo <= r.best_x[i] <= hi, (
+                f"best_x[{i}]={r.best_x[i]} outside bound [{lo}, {hi}]"
+            )
+        # best_params is a 2-element ``alpha`` list built by
+        # ``params_from_vector`` on the classical kernel.
+        assert list(r.best_params.keys()) == ["alpha"]
+        assert len(r.best_params["alpha"]) == 2
+
+        # L8 cut-cell diagnostic flag — informational.  The 197/288 floor is a
+        # C++-side constraint (non-zero psi denominator in ``E4_1.cpp``) that
+        # the Python L1–L7 pipeline does not enforce, so an analytical winner
+        # with ``α₁ < 197/288`` is expected and *not* a failure (see 43.9a).
+        r.extras["cpp_cutcell_violates_197_288"] = bool(
+            r.best_x[1] < 197.0 / 288.0
+        )
+        assert isinstance(r.extras["cpp_cutcell_violates_197_288"], bool)
+
+
 class TestOptimizeCLI:
     """Smoke tests for ``sweeps.optimize`` (plan 43.7c).
 
