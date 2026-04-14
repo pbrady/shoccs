@@ -179,6 +179,32 @@ cd scripts/stencil_gen && uv run python -m sweeps optimize \
   - File: `scripts/stencil_gen/tests/test_brady2d_stability.py`
   - Test: `cd scripts/stencil_gen && uv run pytest tests/test_brady2d_stability.py -x -q -k "test_short_circuit_after_l3r_skips_l4"` ✓
 
+### 44.4-followup2 — Fix pre-existing tests broken by L3r cascade wiring
+
+- [ ] **44.4g** Fix `test_tension_e4_passes_layers_1_through_3` in `TestStabilityScoreOrchestrator` (line ~764):
+  - **Bug:** Tension E4 σ=3.0 passes L3 (advection eigenvalue) but fails L3r (BL42 reflecting-hyperbolic), so the cascade now reports `failed_layer=3` and `overall_verdict="fail"`. This pre-existing test was not updated in 44.4d.
+  - Update the test to expect `overall_verdict == "fail"`, `failed_layer == 3`, and `"BL42" in report.failed_reason`. Assert `report.layer_bl42 is not None`. This documents the expected behavior: tension E4 σ=3.0 passes L3 but fails L3r, which is the whole point of BL42 as a stricter discriminator.
+  - Rename test to `test_tension_e4_sigma_3_fails_at_l3r` for clarity.
+  - File: `scripts/stencil_gen/tests/test_brady2d_stability.py`
+  - Test: `cd scripts/stencil_gen && uv run pytest tests/test_brady2d_stability.py -x -q -k "test_tension_e4_sigma_3_fails_at_l3r"`
+
+- [ ] **44.4h** Fix `test_tension_e4_passes_layers_1_through_5` in `TestStabilityScoreOrchestrator` (line ~776):
+  - **Bug:** Same root cause as 44.4g — tension E4 σ=3.0 fails L3r, so `max_layer=5` also produces `overall_verdict="fail"`.
+  - Update to expect failure at layer 3 (BL42). Assert `report.layer4 is None` (short-circuited). Rename to `test_tension_e4_sigma_3_fails_at_l3r_max_layer_5`.
+  - File: `scripts/stencil_gen/tests/test_brady2d_stability.py`
+  - Test: `cd scripts/stencil_gen && uv run pytest tests/test_brady2d_stability.py -x -q -k "test_tension_e4_sigma_3_fails_at_l3r_max_layer_5"`
+
+- [ ] **44.4i** Add `layer_bl42` assertion to `test_classical_e4_passes_all_layers_1_through_7` in `TestBrady2DScoreIntegration` (line ~1027):
+  - The slow integration positive test checks that `layer1` through `layer7`, `non_normality`, and `kreiss` are all populated, but never asserts `report.layer_bl42 is not None`. If L3r silently failed to populate the field, this test would not catch it.
+  - Add `assert report.layer_bl42 is not None` alongside the existing layer assertions.
+  - File: `scripts/stencil_gen/tests/test_brady2d_stability.py`
+  - Test: `cd scripts/stencil_gen && uv run pytest tests/test_brady2d_stability.py -x -q -k "test_classical_e4_passes_all_layers_1_through_7" -m slow`
+
+- [ ] **44.4j** Verify full test suite passes after 44.4g–44.4i:
+  - `cd scripts/stencil_gen && SYMPY_CACHE_SIZE=50000 uv run pytest tests/ -x -q` must show 0 failures.
+  - File: (no file modification; verification step)
+  - Test: `cd scripts/stencil_gen && SYMPY_CACHE_SIZE=50000 uv run pytest tests/ -x -q`
+
 ### 44.5 — Optimizer integration
 
 - [ ] **44.5a** Verify `extract_field` in `optimizer.py` handles dotted paths rooted at `layer_bl42`:
@@ -267,6 +293,8 @@ cd scripts/stencil_gen && uv run python -m sweeps optimize \
 44.4a → 44.4b → 44.4c → 44.4d → 44.4e  # StabilityReport + cascade wiring
   ↓
 44.4f                                    # review fix: harden conditional test
+  ↓
+44.4g → 44.4h → 44.4i → 44.4j          # fix pre-existing tests broken by L3r
   ↓
 44.5a → 44.5b → 44.5c                  # optimizer integration
   ↓
