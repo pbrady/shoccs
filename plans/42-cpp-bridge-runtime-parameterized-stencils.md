@@ -294,15 +294,16 @@ Each family follows the same 4-item pattern as 42.5b–f (minus the split refere
 
 ### 42.7 — Closed-loop bridge for spline families
 
-- [ ] **42.7a** Extend `layer8_cpp_simulation` in `brady2d_stability.py` to handle the new families:
+- [x] **42.7a** Extend `layer8_cpp_simulation` in `brady2d_stability.py` to handle the new families:
   - Dispatch table:
-    - `("E4", "classical")` → Lua `type="E4"`, pass `alpha`
+    - `("E4", "classical")` → Lua `type="E4u"`, pass `alpha`
     - `("E4", "tension")` → Lua `type="tension_E4u"`, pass `sigma`
     - `("E4", "gaussian")` → Lua `type="gaussian_E4u"`, pass `epsilon`
     - `("E4", "multiquadric")` → Lua `type="multiquadric_E4u"`, pass `epsilon`
   - E2 variants deferred (pattern is identical; do in a follow-up phase if needed).
   - File: `scripts/stencil_gen/stencil_gen/brady2d_stability.py`
-  - Test: `cd scripts/stencil_gen && uv run pytest tests/test_brady2d_stability.py -x -q -k "TestLayer8Dispatch"`
+  - Test: `cd scripts/stencil_gen && uv run pytest tests/test_brady2d_stability.py -x -q -k "TestLayer8Dispatch"` → **PASSED** (4 tests: 3 parametrized spline-kernel dispatch cases + classical regression). `_scheme_table_for` in `cpp_bridge.py` already routed `sigma`/`epsilon` through to Lua, so 42.7a is purely a dispatch-table addition. Existing `test_unsupported_kernel_raises` changed its example from `tension` to `bogus` since `tension` is now a supported dispatch key. Full `test_brady2d_stability.py` run: 79 passed, 8 skipped.
+  - Note: the plan's draft dispatch table said `("E4", "classical") → "E4"`; corrected to `"E4u"` to match 42.3a's existing mapping. The `("E4", "tension") → "tension_E4u"` line is wired via the same `_scheme_table_for` shape already exercised by 42.2a's placeholder tests, so 42.7b is effectively a no-op extension (scheme_table emitter already handles sigma/epsilon).
 
 - [ ] **42.7b** Extend `make_brady2d_lua` in `cpp_bridge.py` to emit the new scheme tables:
   - For `tension_E4u` and `gaussian_E4u`/`multiquadric_E4u`, emit `scheme = { order = 1, type = "<name>", sigma = <val> }` or `epsilon = <val>` respectively.

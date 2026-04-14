@@ -988,9 +988,9 @@ class TestLayer8:
         assert out["final_linf"] == pytest.approx(42.0)
 
     def test_unsupported_kernel_raises(self):
-        with pytest.raises(NotImplementedError, match="tension"):
+        with pytest.raises(NotImplementedError, match="bogus"):
             layer8_cpp_simulation(
-                "E4", "tension", {"sigma": 3.0},
+                "E4", "bogus", {"sigma": 3.0},
             )
 
     def test_unsupported_scheme_raises(self):
@@ -1029,6 +1029,61 @@ class TestLayer8:
         br = out["bridge_result"]
         assert br.exit_code == 0
         assert br.linf_trace.size > 0
+
+
+class TestLayer8Dispatch:
+    """Plan 42.7a: (scheme, kernel) → Lua scheme.type dispatch for spline families.
+
+    The tension, gaussian, and multiquadric E4u kernels all share the same
+    dispatch plumbing as the classical branch; these tests assert that each
+    kernel maps to the correct Lua type string and forwards params unchanged.
+    """
+
+    def _patch_bridge(self, monkeypatch, result: BridgeResult) -> list[dict]:
+        calls: list[dict] = []
+
+        def fake(scheme_type, params, **kwargs):
+            calls.append({"scheme_type": scheme_type, "params": params, **kwargs})
+            return result
+
+        monkeypatch.setattr(
+            "stencil_gen.brady2d_stability.run_cpp_brady2d", fake,
+        )
+        return calls
+
+    @pytest.mark.parametrize(
+        "kernel, params, expected_type",
+        [
+            ("tension", {"sigma": 3.0}, "tension_E4u"),
+            ("gaussian", {"epsilon": 0.9}, "gaussian_E4u"),
+            ("multiquadric", {"epsilon": 1.0}, "multiquadric_E4u"),
+        ],
+    )
+    def test_spline_kernel_dispatch(self, monkeypatch, kernel, params, expected_type):
+        stub = BridgeResult(final_linf=1e-3, stable=True, wall_time_s=0.5, exit_code=0)
+        calls = self._patch_bridge(monkeypatch, stub)
+
+        out = layer8_cpp_simulation("E4", kernel, params, N=31, t_final=10.0)
+
+        assert len(calls) == 1
+        call = calls[0]
+        assert call["scheme_type"] == expected_type
+        assert call["params"] == params
+        assert call["N"] == 31
+        assert call["t_final"] == 10.0
+        assert out["stable"] is True
+        assert out["bridge_result"] is stub
+
+    def test_classical_still_dispatches(self, monkeypatch):
+        """Regression: 42.7a must not break the classical branch."""
+        stub = BridgeResult(final_linf=1e-3, stable=True, wall_time_s=0.5, exit_code=0)
+        calls = self._patch_bridge(monkeypatch, stub)
+
+        layer8_cpp_simulation(
+            "E4", "classical",
+            {"alpha": [-0.7733323791884821, 0.1623961700641681]},
+        )
+        assert calls[0]["scheme_type"] == "E4u"
 
 
 class TestStabilityScoreL8:

@@ -930,10 +930,13 @@ L8_FINAL_LINF_TOL = 1.0
 
 
 # Dispatch table: (scheme, kernel) → Lua scheme.type string understood by
-# stencil::from_lua. For plan 42 first cut only the classical uniform branch
-# is wired; spline families are filled in by 42.7a.
+# stencil::from_lua. Plan 42.7a wires the three spline families alongside
+# the classical branch; E2 variants remain deferred (plan 42.10a).
 _L8_SCHEME_TYPE = {
     ("E4", "classical"): "E4u",
+    ("E4", "tension"): "tension_E4u",
+    ("E4", "gaussian"): "gaussian_E4u",
+    ("E4", "multiquadric"): "multiquadric_E4u",
 }
 
 
@@ -958,11 +961,13 @@ def layer8_cpp_simulation(
         Scheme name ("E2" or "E4"). Plan 42 first cut supports "E4" only.
     kernel : str
         Kernel type ("classical", "tension", "gaussian", "multiquadric").
-        Plan 42 first cut supports "classical" only; spline families are
-        added by 42.7a once the matching C++ structs exist.
+        Plan 42.7a wires all four for the E4 scheme; E2 variants remain
+        deferred (plan 42.10a).
     params : dict
         Scheme-specific parameters; passed through verbatim to
-        :func:`run_cpp_brady2d`. Classical uses ``{"alpha": [...]}``.
+        :func:`run_cpp_brady2d`. Classical uses ``{"alpha": [...]}``,
+        tension uses ``{"sigma": ...}``, gaussian and multiquadric use
+        ``{"epsilon": ...}``.
     N : int
         Grid resolution (points per side). Default 31 matches the
         Brady-Livescu §4.3 coarsest grid.
