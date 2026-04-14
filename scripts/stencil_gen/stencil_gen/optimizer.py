@@ -29,8 +29,8 @@ from __future__ import annotations
 import operator
 import re
 import time
-from dataclasses import dataclass, field
-from typing import Callable
+from dataclasses import dataclass, field, replace
+from typing import Any, Callable
 
 import numpy as np
 import scipy
@@ -681,6 +681,77 @@ def run_scipy_de(
     )
 
 
+def _report_to_dict(report) -> dict[str, Any]:
+    """Serialise a :class:`StabilityReport` to a JSON-friendly dict.
+
+    Mirrors ``sweeps/brady2d_sweep._report_to_dict`` so staged/optimize output
+    can live in ``known_values.json`` beside the sweep records (plan 43.8a).
+    Duplicated deliberately: ``stencil_gen`` should not take a dependency on
+    ``sweeps``.
+    """
+    out: dict[str, Any] = {
+        "overall_verdict": getattr(report, "overall_verdict", "unknown"),
+        "failed_layer": getattr(report, "failed_layer", None),
+        "failed_reason": getattr(report, "failed_reason", ""),
+    }
+    if getattr(report, "layer1", None) is not None:
+        out["layer1"] = {
+            k: float(v) for k, v in report.layer1.items() if isinstance(v, (int, float))
+        }
+    if getattr(report, "layer2", None) is not None:
+        out["layer2"] = {"is_stable": bool(report.layer2.is_stable)}
+    if getattr(report, "layer3", None) is not None:
+        out["layer3"] = {"max_stab_eig": float(report.layer3["max_stab_eig"])}
+    if getattr(report, "layer4", None) is not None:
+        out["layer4"] = {"max_local_gv_error": float(report.layer4["max_local_gv_error"])}
+    if getattr(report, "layer5", None) is not None:
+        out["layer5"] = {"max_aligned_error": float(report.layer5["max_aligned_error"])}
+    if getattr(report, "layer6", None) is not None:
+        out["layer6"] = {
+            "spectral_abscissa": float(report.layer6.get("spectral_abscissa", float("nan"))),
+            "transient_growth_bound": float(
+                report.layer6.get("transient_growth_bound", float("nan"))
+            ),
+        }
+    if getattr(report, "layer7", None) is not None:
+        out["layer7"] = {
+            "max_spectral_abscissa": float(report.layer7["max_spectral_abscissa"]),
+        }
+    if getattr(report, "layer8", None) is not None:
+        out["layer8"] = {
+            "final_linf": float(report.layer8["final_linf"]),
+            "stable": bool(report.layer8["stable"]),
+            "wall_time_s": float(report.layer8.get("wall_time_s", float("nan"))),
+        }
+    return out
+
+
+def _top_k_candidates(
+    history: list[tuple[np.ndarray, float]],
+    top_k: int,
+    *,
+    decimals: int = 6,
+) -> list[tuple[np.ndarray, float]]:
+    """Deduplicate ``history`` by rounding ``x`` to ``decimals`` places and
+    return up to ``top_k`` finite entries ordered by ascending objective.
+
+    The rounded tuple is the dedup key; the representative stored per key is
+    the entry with the smallest objective (which matches our minimization
+    semantics and avoids re-validating two syntactically-identical points).
+    """
+    best_per_key: dict[tuple[float, ...], tuple[np.ndarray, float]] = {}
+    for x, fv in history:
+        if not np.isfinite(fv):
+            continue
+        x_arr = np.asarray(x, dtype=float).ravel()
+        key = tuple(np.round(x_arr, decimals).tolist())
+        prev = best_per_key.get(key)
+        if prev is None or fv < prev[1]:
+            best_per_key[key] = (x_arr.copy(), float(fv))
+    ordered = sorted(best_per_key.values(), key=lambda xy: xy[1])
+    return ordered[:top_k]
+
+
 def run_staged_optimize(
     scheme: str,
     kernel: str,
@@ -694,9 +765,174 @@ def run_staged_optimize(
     method: str = "Nelder-Mead",
     n_restarts: int = 20,
     seed: int = 0,
+    max_evals: int = 200,
+    tol: float = 1e-6,
 ) -> OptimizeResult:
-    """Cheap-inner + expensive-validator staged pipeline.
+    """Cheap-inner + expensive-validator staged pipeline (plan 43.6a).
 
-    Implemented in 43.6a.
+    Stage 1 — inner: build a feasibility-gated objective at
+    ``gate_layer=inner_gate, max_layer=inner_max_layer`` and drive it with
+    :func:`multi_start_optimize` (``n_restarts`` Sobol-seeded starts).
+
+    Stage 2 — validator: take the ``top_k`` distinct feasible candidates from
+    the inner ``history`` (deduplicated by rounding ``x`` to 6 decimals),
+    re-run :func:`brady2d_stability_score` at
+    ``max_layer=validator_max_layer``, and re-rank by ``report_field``.
+
+    The returned :class:`OptimizeResult` reports the winner of the validator
+    stage.  ``extras["stage"]`` is ``"validated"`` when the validator's top
+    pick differs from the inner's top pick (in ``x`` under the same 6-decimal
+    dedup), else ``"inner"``.  Diagnostics from the inner stage are forwarded
+    under ``extras["inner_*"]`` and the full validator ranking is exposed as
+    ``extras["validator_ranking"] = [(x, f_validator), ...]``.
+
+    Raises
+    ------
+    ValueError
+        If ``inner_max_layer < inner_gate`` or
+        ``validator_max_layer < inner_max_layer`` — the validator stage must
+        be at least as deep as the inner gate.  ``top_k < 1`` is also rejected.
     """
-    raise NotImplementedError("run_staged_optimize: implemented in 43.6")
+    if inner_max_layer < inner_gate:
+        raise ValueError(
+            f"run_staged_optimize: inner_max_layer={inner_max_layer} < "
+            f"inner_gate={inner_gate}"
+        )
+    if validator_max_layer < inner_max_layer:
+        raise ValueError(
+            f"run_staged_optimize: validator_max_layer={validator_max_layer} < "
+            f"inner_max_layer={inner_max_layer}"
+        )
+    if top_k < 1:
+        raise ValueError(f"run_staged_optimize: top_k must be >= 1, got {top_k}")
+
+    t0 = time.perf_counter()
+
+    # --- Stage 1: cheap inner multi-start -----------------------------------
+    # The inner objective short-circuits at inner_max_layer; make_objective
+    # itself will raise ``ValueError`` if the report_field implies a layer
+    # deeper than inner_max_layer, so wrap it and fall back to a pure L3
+    # gate field when the caller's report_field is validator-only (e.g.
+    # layer6.transient_growth_bound).  We use ``layer3.max_stab_eig`` as the
+    # inner ranking field in that case — it is the canonical stability-margin
+    # metric Brady-Livescu use for the inner short-circuit.
+    inner_field = report_field
+    inferred = _infer_max_layer(report_field)
+    if inferred is not None and inferred > inner_max_layer:
+        inner_field = "layer3.max_stab_eig"
+    f_inner = make_objective(
+        scheme,
+        kernel,
+        inner_field,
+        gate_layer=inner_gate,
+        max_layer=inner_max_layer,
+    )
+    inner_result = multi_start_optimize(
+        f_inner,
+        bounds=bounds,
+        n_restarts=n_restarts,
+        method=method,
+        seed=seed,
+        max_evals=max_evals,
+        tol=tol,
+    )
+
+    candidates = _top_k_candidates(inner_result.history, top_k=top_k)
+
+    # --- Stage 2: expensive validator re-ranking -----------------------------
+    validator_ranking: list[tuple[np.ndarray, float, dict]] = []
+    validator_evals = 0
+    for x, _f_inner in candidates:
+        validator_evals += 1
+        try:
+            params = params_from_vector(kernel, x)
+            report = brady2d_stability_score(
+                scheme,
+                kernel,
+                params,
+                max_layer=validator_max_layer,
+                short_circuit=True,
+            )
+        except Exception:
+            validator_ranking.append((x.copy(), float("inf"), {}))
+            continue
+        if (
+            report.failed_layer is not None
+            and report.failed_layer <= inner_gate
+        ):
+            fv = float("inf")
+        else:
+            fv = extract_field(report, report_field)
+        validator_ranking.append((x.copy(), float(fv), _report_to_dict(report)))
+
+    validator_ranking.sort(key=lambda xyr: xyr[1])
+    compute_time = time.perf_counter() - t0
+
+    # --- Stage outcome -------------------------------------------------------
+    if not validator_ranking or not np.isfinite(validator_ranking[0][1]):
+        # Every candidate blew up at the deeper layer.  Surface the inner
+        # result verbatim so the caller still has a diagnostic anchor.
+        fallback = replace(
+            inner_result,
+            method="staged",
+            best_params=(
+                params_from_vector(kernel, inner_result.best_x)
+                if np.isfinite(inner_result.best_objective)
+                else {}
+            ),
+            best_report={},
+            compute_time=compute_time,
+            n_evals=inner_result.n_evals + validator_evals,
+            extras={
+                "stage": "inner",
+                "validator_ranking": [(x, fv) for (x, fv, _r) in validator_ranking],
+                "inner_method": inner_result.extras.get("inner_method", method),
+                "inner_n_restarts": inner_result.extras.get("n_restarts", n_restarts),
+                "inner_seed": inner_result.extras.get("seed", seed),
+                "inner_n_feasible_restarts": inner_result.extras.get(
+                    "n_feasible_restarts", 0
+                ),
+                "inner_field": inner_field,
+                "validator_max_layer": validator_max_layer,
+                "inner_max_layer": inner_max_layer,
+            },
+        )
+        return fallback
+
+    best_x, best_obj, best_report = validator_ranking[0]
+
+    # Did the validator re-order the winner?  Compare against the inner's
+    # top-ranked feasible candidate (first entry of ``candidates``) under the
+    # same 6-decimal rounding that _top_k_candidates uses.
+    inner_top_key = (
+        tuple(np.round(candidates[0][0], 6).tolist()) if candidates else None
+    )
+    validated_top_key = tuple(np.round(best_x, 6).tolist())
+    stage = "validated" if inner_top_key != validated_top_key else "inner"
+
+    return OptimizeResult(
+        best_params=params_from_vector(kernel, best_x),
+        best_x=np.asarray(best_x, dtype=float).copy(),
+        best_objective=float(best_obj),
+        best_report=best_report,
+        method="staged",
+        converged=bool(np.isfinite(best_obj)),
+        n_evals=inner_result.n_evals + validator_evals,
+        compute_time=compute_time,
+        history=list(inner_result.history),
+        extras={
+            "stage": stage,
+            "validator_ranking": [(x, fv) for (x, fv, _r) in validator_ranking],
+            "inner_method": inner_result.extras.get("inner_method", method),
+            "inner_n_restarts": inner_result.extras.get("n_restarts", n_restarts),
+            "inner_seed": inner_result.extras.get("seed", seed),
+            "inner_n_feasible_restarts": inner_result.extras.get(
+                "n_feasible_restarts", 0
+            ),
+            "inner_field": inner_field,
+            "inner_best_objective": inner_result.best_objective,
+            "inner_best_x": np.asarray(inner_result.best_x, dtype=float).copy(),
+            "validator_max_layer": validator_max_layer,
+            "inner_max_layer": inner_max_layer,
+        },
+    )

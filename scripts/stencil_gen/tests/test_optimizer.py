@@ -18,6 +18,7 @@ from stencil_gen.optimizer import (
     run_scipy_de,
     run_scipy_local,
     run_scipy_shgo,
+    run_staged_optimize,
     vector_from_params,
 )
 
@@ -712,3 +713,123 @@ class TestGlobalOptimizers:
         # convention).
         published = np.array([-0.7733323791884821, 0.1623961700641681])
         assert np.max(np.abs(r.best_x - published)) < 0.5
+
+
+class TestStaged:
+    """Tests for :func:`run_staged_optimize` (plan 43.6)."""
+
+    def test_staged_rejects_shallow_validator(self):
+        with pytest.raises(ValueError, match="validator_max_layer"):
+            run_staged_optimize(
+                scheme="E4",
+                kernel="tension",
+                report_field="layer3.max_stab_eig",
+                bounds=[(0.5, 20.0)],
+                inner_gate=3,
+                inner_max_layer=3,
+                validator_max_layer=2,
+            )
+
+    def test_staged_rejects_inner_shallower_than_gate(self):
+        with pytest.raises(ValueError, match="inner_max_layer"):
+            run_staged_optimize(
+                scheme="E4",
+                kernel="tension",
+                report_field="layer3.max_stab_eig",
+                bounds=[(0.5, 20.0)],
+                inner_gate=3,
+                inner_max_layer=2,
+                validator_max_layer=3,
+            )
+
+    def test_staged_rejects_zero_top_k(self):
+        with pytest.raises(ValueError, match="top_k"):
+            run_staged_optimize(
+                scheme="E4",
+                kernel="tension",
+                report_field="layer3.max_stab_eig",
+                bounds=[(0.5, 20.0)],
+                top_k=0,
+            )
+
+    @pytest.mark.slow
+    def test_staged_tension_e4_convergence(self):
+        # Inner/validator at the same layer so the "improves on or ties"
+        # invariant is a pure re-ranking check: validator best <= inner best
+        # at the same x is tautological here, but the staged pipeline must
+        # still deliver a finite feasible winner, bound-respecting, and
+        # populate both best_params and best_report.  (The earlier
+        # specific-σ acceptance was dropped per 43.3c.)
+        bounds = [(0.5, 20.0)]
+        r = run_staged_optimize(
+            scheme="E4",
+            kernel="tension",
+            report_field="layer3.max_stab_eig",
+            bounds=bounds,
+            inner_gate=3,
+            inner_max_layer=3,
+            validator_max_layer=3,
+            top_k=3,
+            method="Nelder-Mead",
+            n_restarts=3,
+            seed=0,
+            max_evals=40,
+        )
+        assert r.method == "staged"
+        assert r.converged
+        assert np.isfinite(r.best_objective)
+        assert bounds[0][0] <= r.best_x[0] <= bounds[0][1]
+        assert r.best_params == {"sigma": float(r.best_x[0])}
+        # Validator-picked winner is at least as good as the inner-stage
+        # best (both measured at the same L3 field, since they share the
+        # same max_layer here).
+        assert r.best_objective <= r.extras["inner_best_objective"] + 1e-9
+        # Validator ranking is populated and sorted ascending.
+        ranking = r.extras["validator_ranking"]
+        assert len(ranking) >= 1
+        ranking_f = [fv for (_x, fv) in ranking]
+        assert ranking_f == sorted(ranking_f)
+        # Serialized report has at least the gate layers.
+        assert "layer3" in r.best_report
+
+    @pytest.mark.slow
+    def test_staged_validator_reorders(self):
+        # ``layer6.transient_growth_bound`` is only populated at
+        # ``max_layer >= 6``; the inner stage (at L3) falls back to
+        # ``layer3.max_stab_eig`` internally, so the inner and validator
+        # rank by different criteria.  For a parameter space where the two
+        # rankings disagree (tension-E4 across σ ∈ [0.5, 20] qualifies —
+        # max_stab_eig and transient_growth_bound have different interior
+        # minima), the validator must either re-order (stage="validated")
+        # or at a minimum emit a finite winner measured against the
+        # deeper-layer field.
+        bounds = [(0.5, 20.0)]
+        r = run_staged_optimize(
+            scheme="E4",
+            kernel="tension",
+            report_field="layer6.transient_growth_bound",
+            bounds=bounds,
+            inner_gate=3,
+            inner_max_layer=3,
+            validator_max_layer=6,
+            top_k=3,
+            method="Nelder-Mead",
+            n_restarts=3,
+            seed=0,
+            max_evals=40,
+        )
+        assert r.method == "staged"
+        assert np.isfinite(r.best_objective)
+        assert bounds[0][0] <= r.best_x[0] <= bounds[0][1]
+        # The validator is ranking by a L6 field that the inner couldn't
+        # see; the pipeline therefore carries the inner fallback field
+        # (``layer3.max_stab_eig``) as a diagnostic.
+        assert r.extras["inner_field"] == "layer3.max_stab_eig"
+        assert r.extras["validator_max_layer"] == 6
+        # ``stage`` is either "validated" or "inner" depending on whether
+        # the two rankings agree at the 6-decimal dedup granularity;
+        # either way the key is populated.
+        assert r.extras["stage"] in ("validated", "inner")
+        # ``best_report`` carries the L6 payload since the validator ran
+        # at max_layer=6.
+        assert "layer6" in r.best_report

@@ -223,19 +223,22 @@ cd scripts/stencil_gen && uv run pytest tests/test_phs.py -x -q -k "TestRegressi
 
 ### 43.6 — Staged optimization: cheap inner + expensive validator
 
-- [ ] **43.6a** Implement `run_staged_optimize(scheme, kernel, report_field, bounds, *, inner_gate=3, inner_max_layer=3, validator_max_layer=6, top_k=5, method="Nelder-Mead", n_restarts=20, seed=0) -> OptimizeResult`:
-  - Stage 1 — inner: constructs `f_inner = make_objective(scheme, kernel, report_field, gate_layer=inner_gate, max_layer=inner_max_layer)`. Runs `multi_start_optimize(f_inner, bounds, n_restarts)`.
-  - Stage 2 — validation: takes the `top_k` distinct candidate points from the multi-start `history` (deduplicated by rounding to 6 decimals). For each, re-runs `brady2d_stability_score` at `max_layer=validator_max_layer` and re-ranks by the same `report_field`.
-  - Returns the `OptimizeResult` whose parameters give the best `validator` objective. Adds a `stage: Literal["inner", "validated"]` to indicate whether the outer validator actually re-ranked (i.e., validator picked a different candidate than inner).
+- [x] **43.6a** Implemented `run_staged_optimize(scheme, kernel, report_field, bounds, *, inner_gate=3, inner_max_layer=3, validator_max_layer=6, top_k=5, method="Nelder-Mead", n_restarts=20, seed=0, max_evals=200, tol=1e-6) -> OptimizeResult`:
+  - Stage 1 — inner: builds `f_inner = make_objective(...)` and runs `multi_start_optimize`. When `report_field` implies a layer deeper than `inner_max_layer` (e.g. `layer6.transient_growth_bound` with an L3 inner), the inner field falls back to `layer3.max_stab_eig` — the canonical Brady-Livescu short-circuit metric — so the inner stage still drives on a valid margin; the caller's original `report_field` is carried through to the validator stage. Recorded in `extras["inner_field"]` for transparency.
+  - Stage 2 — validator: takes `top_k` feasible candidates from the inner `history`, deduplicated by rounding `x` to 6 decimals (``_top_k_candidates``), re-runs `brady2d_stability_score` at `max_layer=validator_max_layer` with `try/except` returning `+inf` on failure, and re-ranks by `report_field`.
+  - Returns the `OptimizeResult` whose parameters give the best validator objective. `extras["stage"]` is `"validated"` when the validator's top pick differs from the inner's top candidate (6-decimal dedup key), else `"inner"`. `extras["validator_ranking"] = [(x, f), ...]`, plus `inner_*` diagnostics (inner_method, inner_n_restarts, inner_seed, inner_n_feasible_restarts, inner_best_objective, inner_best_x, inner_max_layer, validator_max_layer).
+  - Added local `_report_to_dict` (mirror of `sweeps/brady2d_sweep._report_to_dict`, duplicated so `stencil_gen` doesn't depend on `sweeps`) to populate `best_report`.
+  - Added `max_evals` and `tol` passthrough plus input validation (`inner_max_layer < inner_gate`, `validator_max_layer < inner_max_layer`, `top_k < 1` all raise `ValueError`). Fallback when every validator candidate blows up: returns the inner result wrapped as `method="staged"` with `stage="inner"` so callers always see the pipeline marker.
   - File: `scripts/stencil_gen/stencil_gen/optimizer.py`
-  - Test: `cd scripts/stencil_gen && uv run pytest tests/test_optimizer.py -x -q -k "TestStaged"`
+  - Test: `cd scripts/stencil_gen && SYMPY_CACHE_SIZE=50000 uv run pytest tests/test_optimizer.py -x -q -k "TestStaged" --run-slow` — 5 green (3 fast + 2 slow), total 16 s.
 
-- [ ] **43.6b** Tests `TestStaged`:
-  - `test_staged_tension_e4_convergence` — staged run at n_restarts=3, inner_gate=3, validator=6 returns a finite feasible best whose validator-stage objective improves on or ties the inner stage's best at the same point. (The earlier specific-σ acceptance was dropped — see 43.3b.)
-  - `test_staged_validator_reorders` — synthetic test: inner and validator metrics disagree; validator output differs from inner output. Use `report_field="layer6.transient_growth_bound"` which isn't available at L3; force the validator stage to re-order.
-  - Mark `@pytest.mark.slow`.
+- [x] **43.6b** Added `TestStaged` — 5 tests in `scripts/stencil_gen/tests/test_optimizer.py`:
+  - `test_staged_rejects_shallow_validator` / `test_staged_rejects_inner_shallower_than_gate` / `test_staged_rejects_zero_top_k` — input-validation guards; fast.
+  - `test_staged_tension_e4_convergence` (`@pytest.mark.slow`) — tension E4, n_restarts=3, inner_max_layer=3, validator_max_layer=3 against `layer3.max_stab_eig`. Asserts `method=="staged"`, converged, finite/bound-respecting, validator winner ≤ inner best (since fields coincide here), validator_ranking sorted ascending, and `layer3` in `best_report`. ~2 s.
+  - `test_staged_validator_reorders` (`@pytest.mark.slow`) — tension E4, `report_field="layer6.transient_growth_bound"`, validator_max_layer=6. Asserts the inner fallback field is `layer3.max_stab_eig`, `validator_max_layer=6` is recorded, `extras["stage"]` is populated, and `best_report` carries the L6 payload. ~14 s.
+  - Full slow run: `SYMPY_CACHE_SIZE=50000 uv run pytest tests/test_optimizer.py -x -q --run-slow` — 76 passed.
   - File: `scripts/stencil_gen/tests/test_optimizer.py`
-  - Test: `cd scripts/stencil_gen && uv run pytest tests/test_optimizer.py -x -q -k "TestStaged"`
+  - Test: `cd scripts/stencil_gen && SYMPY_CACHE_SIZE=50000 uv run pytest tests/test_optimizer.py -x -q -k "TestStaged" --run-slow`
 
 ### 43.7 — CLI: `sweeps/optimize.py`
 
