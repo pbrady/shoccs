@@ -1263,3 +1263,72 @@ class TestBrady2DL8ClassicalE4:
         assert report.layer8 is not None
         assert report.layer8["stable"] is True
         assert 0.0 < report.layer8["final_linf"] < L8_FINAL_LINF_TOL
+
+
+class TestLayer8EndToEndSpline:
+    """End-to-end L1–L8 consistency for spline families (plan 42.7c).
+
+    For each (scheme, kernel, params) in the spline-family table, compare
+    the plan-42 empirical verdict (L8 C++ simulation) against the stored
+    plan-41 analytical calibration in ``brady2d_calibration``.  This is
+    the closed-loop consistency check: analytical L1–L7 should predict
+    the same overall outcome as the compiled shoccs run at L8.
+
+    Gracefully skipped when ``brady2d_calibration`` is absent (plan
+    41.11e not yet populated) or when the shoccs binary is missing.
+    """
+
+    # (scheme, kernel, params, calibration_label)
+    SPLINE_FAMILIES = [
+        ("E4", "tension", {"sigma": 3.0}, "E4_tension_3"),
+        ("E4", "gaussian", {"epsilon": 0.9}, "E4_gaussian_09"),
+        ("E4", "multiquadric", {"epsilon": 1.0}, "E4_multiquadric_1"),
+    ]
+
+    def _load_calibration(self):
+        if not KNOWN_VALUES_PATH.exists():
+            pytest.skip("known_values.json not present")
+        data = _load_known_values()
+        cal = data.get("brady2d_calibration")
+        if cal is None:
+            pytest.skip(
+                "brady2d_calibration not populated — run plan 41.11e manually",
+            )
+        return cal
+
+    @pytest.mark.slow
+    @pytest.mark.parametrize(
+        "scheme, kernel, params, label",
+        SPLINE_FAMILIES,
+        ids=[f[3] for f in SPLINE_FAMILIES],
+    )
+    def test_spline_family_l8_matches_calibration(
+        self, scheme, kernel, params, label,
+    ):
+        if not SHOCCS_BINARY.exists():
+            pytest.skip("shoccs binary not built")
+        cal = self._load_calibration()
+        if label not in cal:
+            pytest.skip(f"{label} not in brady2d_calibration")
+
+        stored_verdict = cal[label]["overall_verdict"]
+        report = brady2d_stability_score(
+            scheme, kernel, params,
+            max_layer=8, layer8_N=21, layer8_t_final=1.0,
+        )
+
+        if stored_verdict == "pass":
+            assert report.overall_verdict == "pass", (
+                f"{label}: plan-41 calibration says pass, plan-42 end-to-end "
+                f"got {report.overall_verdict} (failed_layer="
+                f"{report.failed_layer}, reason={report.failed_reason})"
+            )
+            assert report.failed_layer is None
+            assert report.layer8 is not None
+            assert report.layer8["stable"] is True
+            assert 0.0 < report.layer8["final_linf"] < L8_FINAL_LINF_TOL
+        else:
+            assert report.overall_verdict == "fail", (
+                f"{label}: plan-41 calibration says fail, plan-42 end-to-end "
+                f"got {report.overall_verdict}"
+            )

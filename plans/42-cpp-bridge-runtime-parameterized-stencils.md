@@ -311,14 +311,15 @@ Each family follows the same 4-item pattern as 42.5b–f (minus the split refere
   - Test: `cd scripts/stencil_gen && uv run pytest tests/test_cpp_bridge.py -x -q -k "TestMakeBrady2DLuaSpline"` → **PASSED** (8 tests: parametrized sigma/epsilon emission across all three spline families, balanced-brace sanity for each family, float-precision preservation via `repr()`). Full `test_cpp_bridge.py` run: 30 passed, 1 skipped (slow smoke).
   - Note: as 42.7a predicted, the emitter itself (`_scheme_table_for` in `cpp_bridge.py`) already handled `sigma`/`epsilon` from 42.2a — 42.7b was purely a test addition confirming the end-to-end rendering contract. Also hardened the test that the non-selected scalar ("sigma" when passing epsilon, vice versa) is never emitted in the scheme slice, and that the order=1 declaration survives the substitution.
 
-- [ ] **42.7c** Integration test `TestLayer8EndToEndSpline`:
+- [x] **42.7c** Integration test `TestLayer8EndToEndSpline`:
   - For each of (tension sigma=3.0), (gaussian eps=0.9), (multiquadric eps=1.0), call `brady2d_stability_score(..., max_layer=8)`.
   - **Graceful skip:** if `known_values.json["brady2d_calibration"]` is absent (plan 41.11e not run yet), each parameterized case calls `pytest.skip("brady2d_calibration not populated — run plan 41.11e manually")` and does not fail.
   - When present, asserts `overall_verdict=="pass"` if plan 41 calibration says it should pass, else `"fail"`.
   - Uses `known_values.json["brady2d_calibration"]` to decide the expected outcome — consistency check between plan 41 analytical and plan 42 empirical.
   - Mark `@pytest.mark.slow`.
   - File: `scripts/stencil_gen/tests/test_brady2d_stability.py`
-  - Test: `cd scripts/stencil_gen && uv run pytest tests/test_brady2d_stability.py -x -q -k "TestLayer8EndToEndSpline"`
+  - Test: `cd scripts/stencil_gen && uv run pytest tests/test_brady2d_stability.py -x -q -k "TestLayer8EndToEndSpline" --run-slow` → **PASSED** (3 parametrized cases: `E4_tension_3`, `E4_gaussian_09`, `E4_multiquadric_1`, all `overall_verdict=="pass"`, L8 `stable` and `final_linf < L8_FINAL_LINF_TOL`; total wall 81 s for full triple, 37 s for tension alone). Without `--run-slow`: 3 skipped cleanly.
+  - Note: test uses `layer8_N=21, layer8_t_final=1.0` matching the classical smoke to keep each C++ run under 1 s; most of the wall time is L7's 2D non-normality SVD (~20 s × 3 families). Verdict comparison uses the full L1–L8 pipeline result; stored calibration only recorded L1–L6 data, but the `overall_verdict` field is still the authoritative consistency signal between plan 41 and plan 42. Falls back to skip gracefully if `known_values.json` or the `brady2d_calibration` key is missing, or if a specific calibration label is not yet populated.
 
 ### 42.8 — New sweep subcommand `brady2d`
 
