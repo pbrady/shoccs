@@ -358,11 +358,12 @@ Each family follows the same 4-item pattern as 42.5b–f (minus the split refere
 
 ### 42.9 — Regression tests and documentation
 
-- [ ] **42.9a** Add `TestRegressionBrady2DSweep` in `test_phs.py`:
+- [x] **42.9a** Add `TestRegressionBrady2DSweep` in `test_phs.py`:
   - Loads `brady2d_sweep` from `known_values.json`, iterates each stored entry, re-runs `brady2d_stability_score` at `max_layer=3` (fast), asserts stored overall verdict matches recomputed.
   - Graceful skip if absent.
   - File: `scripts/stencil_gen/tests/test_phs.py`
-  - Test: `cd scripts/stencil_gen && uv run pytest tests/test_phs.py -x -q -k "TestRegressionBrady2DSweep"`
+  - Test: `cd scripts/stencil_gen && uv run pytest tests/test_phs.py -x -q -k "TestRegressionBrady2DSweep"` → **PASSED** (skips cleanly when `brady2d_sweep` key absent from `known_values.json`, as it currently is; 1 skipped in 0.84 s). Positive-path verified out-of-band by injecting a synthetic `brady2d_sweep.E4.classical` entry with `{"alpha": [-0.7733..., 0.1624...]}` and stored `overall_verdict="pass"` — test recomputes at `max_layer=3` and asserts match (1 passed in 1.49 s, `known_values.json` restored from backup afterward). Full `TestRegression*` suite still green: 16 passed, 7 skipped.
+  - Note: mirrors the structure of `TestRegressionBrady2DCalibration` just above — autouse skip fixture + single iteration test. Iterates `brady2d_sweep → scheme → kernel → points`, reads `params_dict` and stored `report.overall_verdict`/`failed_layer` from each point. Uses the same "if stored failure is reachable at layer ≤ 3 then expect fail, else expect pass" logic as the calibration test, since sweeps often record results at `max_layer > 3` where later layers might fail. `checked == 0` after iteration triggers a `pytest.skip` so an empty sweep bucket doesn't silently no-op.
 
 - [ ] **42.9b** Create `docs/brady2d_cpp_bridge_reference.md`:
   - Describes the bridge architecture (Python writes Lua, calls shoccs, parses CSV).

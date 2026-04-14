@@ -1926,3 +1926,60 @@ if _KNOWN is not None:
                         f"(failed_layer={report.failed_layer}, "
                         f"reason={report.failed_reason})"
                     )
+
+    class TestRegressionBrady2DSweep:
+        """Regression tests for Brady-Livescu 2D sweep results.
+
+        Loads ``brady2d_sweep`` from ``known_values.json``, iterates each
+        stored (scheme, kernel) entry and each swept point, re-runs
+        ``brady2d_stability_score`` at ``max_layer=3`` (fast subset), and
+        asserts that the stored overall verdict matches the recomputed one.
+        Graceful skip when the key is absent.
+        """
+
+        _SWEEP = _KNOWN.get("brady2d_sweep")
+
+        @pytest.fixture(autouse=True)
+        def _skip_if_absent(self):
+            if self._SWEEP is None:
+                pytest.skip("brady2d_sweep key absent from known_values.json")
+
+        def test_all_sweep_points_verdict_matches(self):
+            """Each stored sweep point's max_layer=3 verdict matches recompute."""
+            from stencil_gen.brady2d_stability import brady2d_stability_score
+
+            checked = 0
+            for scheme, kernels in self._SWEEP.items():
+                for kernel, bucket in kernels.items():
+                    for point in bucket.get("points", []):
+                        params = point["params_dict"]
+                        stored = point["report"]
+                        stored_verdict = stored["overall_verdict"]
+                        stored_failed = stored.get("failed_layer")
+                        report = brady2d_stability_score(
+                            scheme, kernel, params,
+                            max_layer=3, short_circuit=True,
+                        )
+                        # If the stored run failed at layer > 3, the fast
+                        # max_layer=3 recompute may pass — only assert fail
+                        # when the stored failure is reachable at layer <= 3.
+                        if (stored_verdict == "fail"
+                                and stored_failed is not None
+                                and stored_failed <= 3):
+                            assert report.overall_verdict == "fail", (
+                                f"{scheme}/{kernel} param={point['param']}: "
+                                f"expected fail (stored failed_layer="
+                                f"{stored_failed}), got "
+                                f"{report.overall_verdict}"
+                            )
+                        else:
+                            assert report.overall_verdict == "pass", (
+                                f"{scheme}/{kernel} param={point['param']}: "
+                                f"expected pass at max_layer=3, got "
+                                f"{report.overall_verdict} "
+                                f"(failed_layer={report.failed_layer}, "
+                                f"reason={report.failed_reason})"
+                            )
+                        checked += 1
+            if checked == 0:
+                pytest.skip("brady2d_sweep had no stored points")
