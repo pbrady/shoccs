@@ -93,15 +93,15 @@ cd scripts/stencil_gen && uv run pytest tests/test_brady2d_stability.py -x -q -k
   - Note: params dict now recognizes three shapes — `{"alpha": [...]}` for classical schemes, `{"sigma": float}` for tension, `{"epsilon": float}` for gaussian/multiquadric. The scheme_table emitter handles all three. `scheme_type` is passed through verbatim to Lua `type=...`; mapping to Lua strings is 42.3a/42.7a's responsibility.
   - Note: classical E4u alpha (alpha[1] ≈ 0.162) violates E4_1's interior denominator constraint (alpha[1] >= 197/288 ≈ 0.684), so 42.3a's dispatch must map `("E4", "classical") → "E4u"` (NOT `"E4"`). Plan text at 42.3a currently says `"E4"`; update to `"E4u"` when implementing 42.3a. Same for 42.2c's smoke test: use `scheme_type="E4u"` or the simulation will fail.
 
-- [ ] **42.2b** Implement `run_cpp_brady2d(scheme_type: str, params: dict, *, N: int = 31, t_final: float = 10.0, timeout: float = 300.0) -> BridgeResult`:
-  - Writes the Lua config to a `tempfile.NamedTemporaryFile` with suffix `.lua`, invokes `subprocess.run([str(SHOCCS_BINARY), lua_path], cwd=REPO_ROOT, capture_output=True, text=True, timeout=timeout)`.
-  - On nonzero exit, populates `BridgeResult(final_linf=float("nan"), stable=False, exit_code=..., stderr=...)` and returns. **Note (from 42.2a follow-up):** `BridgeResult.final_linf` currently has no default in `cpp_bridge.py` (line 26). Either add `= float("nan")` as a default to the dataclass field (preferred — simplifies the error path) or pass `float("nan")` explicitly on every error-path construction. Apply the same treatment to `run_cpp_brady2d` logic for timeouts and CSV-parse failures so the caller always gets a well-formed `BridgeResult`.
-  - On success, parses `REPO_ROOT / "logs" / "system.csv"` — expects header row and then time/Linf columns per `scalar_wave.cpp:67`. **Correction (verified from 42.1a's output):** actual columns 0-indexed are `Timestamp=0, Time=1, Step=2, Linf=3, Min=4, ...`. Use `Time = row[1]`, `Linf = row[3]`.
-  - `stable = (final_linf < 10.0 and not np.isnan(final_linf) and np.isfinite(final_linf))`.
-  - `wall_time_s` from `time.perf_counter` around the subprocess call.
-  - **Concurrency note:** `logs/system.csv` is written under `REPO_ROOT/logs/` by the shoccs binary, so concurrent invocations of `run_cpp_brady2d` race on the same file. For plan 42's sweep use case, serialize or run per-subprocess `cwd` in a tempdir; document the chosen approach in the docstring.
+- [x] **42.2b** Implement `run_cpp_brady2d(scheme_type: str, params: dict, *, N: int = 31, t_final: float = 10.0, timeout: float = 300.0) -> BridgeResult`:
+  - Writes the Lua config to a `tempfile.TemporaryDirectory` and invokes `subprocess.run([str(binary), lua_path], cwd=tmp, capture_output=True, text=True, timeout=timeout, check=False)`.
+  - On nonzero exit / timeout / missing CSV / empty CSV, returns `BridgeResult` with `final_linf=nan`, `stable=False`, and a diagnostic in `stderr`/`exit_code`.
+  - **`BridgeResult.final_linf` default changed to `float("nan")`** (42.2a note resolved) — callers always get a well-formed object even on the error path.
+  - Parses CSV with columns `Timestamp=0, Time=1, Step=2, Linf=3`; `stable = isfinite(final_linf) and final_linf < 10.0`.
+  - **Concurrency:** each call uses its own `tempfile.TemporaryDirectory` as cwd — shoccs writes `logs/system.csv` under that tempdir, so concurrent invocations don't race on `REPO_ROOT/logs/`. A dedicated test (`test_run_is_isolated_to_tempdir`) guards this invariant.
+  - Also exposes `binary` and `template` keyword arguments so tests can swap in a fake shoccs script.
   - File: `scripts/stencil_gen/stencil_gen/cpp_bridge.py`
-  - Test: `cd scripts/stencil_gen && uv run pytest tests/test_cpp_bridge.py -x -q -k "TestRunCppBrady2D"`
+  - Test: `cd scripts/stencil_gen && uv run pytest tests/test_cpp_bridge.py -x -q -k "TestRunCppBrady2D"` → **PASSED** (7 tests: success, nonzero exit, unstable Linf, missing CSV, empty CSV, timeout, tempdir isolation). Full `test_cpp_bridge.py` run: 22 passed.
 
 - [ ] **42.2c** Smoke test `TestCppBridgeSmoke`:
   - Skip if `SHOCCS_BINARY` does not exist (`pytest.skip("shoccs binary not built")`).
