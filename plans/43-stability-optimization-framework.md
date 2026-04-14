@@ -301,6 +301,13 @@ cd scripts/stencil_gen && uv run pytest tests/test_phs.py -x -q -k "TestRegressi
   - File: `scripts/stencil_gen/tests/test_phs.py`
   - Test: `cd scripts/stencil_gen && uv run pytest tests/test_phs.py -x -q -k "TestRegressionBrady2DOptima"` — 1 skipped (expected; no stored optima yet). Full suite `uv run pytest tests/test_phs.py tests/test_optimizer.py` — 158 passed, 14 skipped in 78 s.
 
+- [ ] **43.8c** Close the regression gate-config gap exposed by 43.8b: the persistence schema (`sweeps/optimize.py::_result_to_persist_dict`) currently omits `gate_layer`, `max_layer`, and — for the staged method — `validator_max_layer`, while `TestRegressionBrady2DOptima` rebuilds the objective via `make_objective(scheme, kernel, report_field=objective)` with only the defaults. If the CLI was ever invoked with `--gate-layer != 3`, an explicit `--max-layer` that diverges from `_infer_max_layer(report_field)`, or (staged) `--validator-max-layer != 6`, the regression test would silently rebuild against a different feasibility gate / layer depth — either asserting mismatch on a legitimate winner, or passing spuriously at a close-but-wrong objective value.
+  - Extend `_result_to_persist_dict` to record `gate_layer: int`, `max_layer: int` (the *effective* value — i.e. the inferred layer when `--max-layer` is None, so the persisted dict is self-describing and never records `None`), and, when `method == "staged"`, `validator_max_layer: int`. Use the resolved values from `args` (with inference via `_infer_max_layer` when `args.max_layer is None`), not the raw argparse strings.
+  - Update `TestRegressionBrady2DOptima` in `tests/test_phs.py` to read `entry["gate_layer"]` and `entry["max_layer"]` from each persisted entry and thread them into `make_objective(..., gate_layer=..., max_layer=...)`. Keep a graceful skip (with a clear message) when an older entry predates these fields so pre-43.8c JSON doesn't break CI, but fail loudly if the fields are present and inconsistent with what `make_objective` would produce.
+  - Extend the 43.8a contract test (`test_cli_update_known_values_additive_and_drops_history` in `tests/test_optimizer.py`) to assert the three new keys round-trip under both a non-staged and a staged path, including the inferred-vs-explicit `max_layer` branch.
+  - Files: `scripts/stencil_gen/sweeps/optimize.py`, `scripts/stencil_gen/tests/test_phs.py`, `scripts/stencil_gen/tests/test_optimizer.py`.
+  - Test: `cd scripts/stencil_gen && uv run pytest tests/test_optimizer.py tests/test_phs.py -x -q -k "TestRegressionBrady2DOptima or test_cli_update_known_values"`.
+
 ### 43.9 — Classical-α E4_1 2D optimization
 
 - [ ] **43.9a** Extend `params_from_vector`/`vector_from_params` for `kernel="classical"` and reconcile the 197/288 constraint with the Brady-Livescu published α:
@@ -395,7 +402,7 @@ cd scripts/stencil_gen && uv run pytest tests/test_phs.py -x -q -k "TestRegressi
   ↓
 43.7a → 43.7b → 43.7c                  # CLI
   ↓
-43.8a → 43.8b                          # persistence + regression
+43.8a → 43.8b → 43.8c                  # persistence + regression + persist gate/max_layer
   ↓
 43.9a → 43.9b → 43.9c → 43.9d          # classical-α (depends on all prior)
   ↓
