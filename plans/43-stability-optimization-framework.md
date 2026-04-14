@@ -269,12 +269,12 @@ cd scripts/stencil_gen && uv run pytest tests/test_phs.py -x -q -k "TestRegressi
   - File: `scripts/stencil_gen/sweeps/optimize.py` (new)
   - Test: run directly via `cd scripts/stencil_gen && SYMPY_CACHE_SIZE=50000 uv run python -m sweeps.optimize --scheme E4 --kernel tension --objective layer3.max_stab_eig --gate-layer 3 --max-layer 3 --bounds 0.5 20 --method Nelder-Mead --max-evals 40 --n-restarts 3` — succeeds, prints `best_objective = -1.220708e-04` at σ ≈ 1.644 in ~6 s. Top-level `python -m sweeps optimize ...` dispatch is wired in 43.7b.
 
-- [ ] **43.7b** Register `optimize` subcommand in `scripts/stencil_gen/sweeps/__main__.py`:
-  - Add `sub_opt = subparsers.add_parser("optimize", help="Optimize boundary-closure parameters against a stability objective")` with all args.
-  - Add dispatch block with lazy import.
-  - Do NOT add to `_run_all` in quick mode — optimization runs are not smoke tests.
+- [x] **43.7b** Registered the `optimize` subcommand in `scripts/stencil_gen/sweeps/__main__.py`:
+  - Added `sub_opt = subparsers.add_parser("optimize", ...)` mirroring every flag in `sweeps/optimize.py::main`, including the staged knobs (`--validator-max-layer`, `--top-k`, `--inner-method`), SHGO/DE knobs (`--shgo-n`, `--shgo-iters`, `--de-popsize`, `--de-maxiter`), and post-run flags (`--validate-with-cpp`, `--update-known-values`, `--json-output`).
+  - Added a dispatch block with a lazy `from .optimize import main as optimize_main`. Forwards all scalar args unconditionally and appends `--max-layer`, `--bounds`, `--json-output`, and the two boolean flags only when set — matching the argparse defaults in `optimize.py` so the forwarded argv never stomps on `None` defaults.
+  - Not added to `_run_all` (optimization runs are not smoke tests; plan spec).
   - File: `scripts/stencil_gen/sweeps/__main__.py`
-  - Test: `cd scripts/stencil_gen && uv run python -m sweeps optimize --help`
+  - Test: `cd scripts/stencil_gen && uv run python -m sweeps optimize --help` — prints the full argparse surface. End-to-end smoke: `SYMPY_CACHE_SIZE=50000 uv run python -m sweeps optimize --scheme E4 --kernel tension --objective layer3.max_stab_eig --gate-layer 3 --max-layer 3 --bounds 0.5 20 --method Nelder-Mead --max-evals 40 --n-restarts 2` → `best_objective = -1.220708e-04` at σ ≈ 1.644 in ~7 s (converged, 36 evals, 2 feasible restarts).
 
 - [ ] **43.7c** CLI smoke tests `TestOptimizeCLI`:
   - `test_cli_tension_nelder_mead` — subprocess invocation with a tiny budget completes and prints a summary containing "best".

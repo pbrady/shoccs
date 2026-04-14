@@ -123,6 +123,54 @@ def main() -> int:
         help='Persist results to known_values.json["brady2d_sweep"][scheme][kernel].',
     )
 
+    sub_opt = subparsers.add_parser(
+        "optimize",
+        help="Optimize boundary-closure parameters against a stability objective",
+    )
+    sub_opt.add_argument("--scheme", choices=["E2", "E4"], required=True)
+    sub_opt.add_argument(
+        "--kernel",
+        choices=["tension", "gaussian", "multiquadric", "classical"],
+        required=True,
+    )
+    sub_opt.add_argument(
+        "--objective",
+        required=True,
+        help='Dotted-path report field (e.g. "layer3.max_stab_eig", "layer6.transient_growth_bound").',
+    )
+    sub_opt.add_argument("--gate-layer", type=int, default=3)
+    sub_opt.add_argument("--max-layer", type=int, default=None)
+    sub_opt.add_argument(
+        "--bounds",
+        type=float,
+        nargs="+",
+        default=None,
+        metavar="VAL",
+        help="Flat list of bound pairs (lo hi [lo hi ...]). Falls back to DEFAULT_BOUNDS if absent.",
+    )
+    sub_opt.add_argument(
+        "--method",
+        choices=["Nelder-Mead", "COBYQA", "SHGO", "DE", "staged"],
+        default="staged",
+    )
+    sub_opt.add_argument("--n-restarts", type=int, default=10)
+    sub_opt.add_argument("--max-evals", type=int, default=200)
+    sub_opt.add_argument("--seed", type=int, default=0)
+    sub_opt.add_argument("--validator-max-layer", type=int, default=6)
+    sub_opt.add_argument("--top-k", type=int, default=5)
+    sub_opt.add_argument(
+        "--inner-method",
+        choices=["Nelder-Mead", "COBYQA"],
+        default="Nelder-Mead",
+    )
+    sub_opt.add_argument("--shgo-n", type=int, default=100)
+    sub_opt.add_argument("--shgo-iters", type=int, default=3)
+    sub_opt.add_argument("--de-popsize", type=int, default=15)
+    sub_opt.add_argument("--de-maxiter", type=int, default=100)
+    sub_opt.add_argument("--validate-with-cpp", action="store_true")
+    sub_opt.add_argument("--update-known-values", action="store_true")
+    sub_opt.add_argument("--json-output", type=str, default=None)
+
     sub_all = subparsers.add_parser("all", help="Run all sweeps")
     sub_all.add_argument("--quick", action="store_true", help="Reduced resolution for quick verification")
 
@@ -234,6 +282,39 @@ def main() -> int:
         if args.update_known_values:
             forwarded.append("--update-known-values")
         return brady2d_main(forwarded)
+
+    if args.command == "optimize":
+        from .optimize import main as optimize_main
+
+        forwarded: list[str] = [
+            "--scheme", args.scheme,
+            "--kernel", args.kernel,
+            "--objective", args.objective,
+            "--gate-layer", str(args.gate_layer),
+            "--method", args.method,
+            "--n-restarts", str(args.n_restarts),
+            "--max-evals", str(args.max_evals),
+            "--seed", str(args.seed),
+            "--validator-max-layer", str(args.validator_max_layer),
+            "--top-k", str(args.top_k),
+            "--inner-method", args.inner_method,
+            "--shgo-n", str(args.shgo_n),
+            "--shgo-iters", str(args.shgo_iters),
+            "--de-popsize", str(args.de_popsize),
+            "--de-maxiter", str(args.de_maxiter),
+        ]
+        if args.max_layer is not None:
+            forwarded.extend(["--max-layer", str(args.max_layer)])
+        if args.bounds is not None:
+            forwarded.append("--bounds")
+            forwarded.extend(str(v) for v in args.bounds)
+        if args.validate_with_cpp:
+            forwarded.append("--validate-with-cpp")
+        if args.update_known_values:
+            forwarded.append("--update-known-values")
+        if args.json_output is not None:
+            forwarded.extend(["--json-output", args.json_output])
+        return optimize_main(forwarded)
 
     if args.command == "all":
         return _run_all(quick=args.quick)
