@@ -211,12 +211,13 @@ The strategy: the constructor takes `real sigma` from Lua, builds the small (r=5
   - Test: `cmake --build build --target shoccs-stencils` → **PASSED** (clean incremental build, no warnings). Standalone numerical check: reproducing the solver in a throwaway `main` at sigma=3.0 produces the 5×7 block matching `REFERENCE_TENSION_E4U1_SIGMA3_COEFFS` to ≥14 significant digits row-for-row (byte-for-byte equality on rows 2..4). Full fixture-vs-solver assertion is the job of 42.5f's Catch2 test.
   - Note: `nbs_floating` copies the cached 35-entry block, divides by h, then applies the `right` flip (negate + reverse) matching `E4u_1.cpp:97`. `nbs_dirichlet` drops the first row (cols 0..6) of the cached block and applies the same h scaling + right flip, giving the 4×7=28-entry Dirichlet closure consistent with `E4u_1.cpp:105`'s "drop first row" pattern. Shared Taylor-vs-direct kernel evaluation mirrors `phs._tension_kernel_eval`/`_deriv` (z<2 threshold) so the C++ matches Python across the full sigma range the bridge will use.
 
-- [ ] **42.5e** Register `tension_E4u_1` in `stencil.hpp` and `stencil.cpp`:
+- [x] **42.5e** Register `tension_E4u_1` in `stencil.hpp` and `stencil.cpp`:
   - Add `stencil make_tension_E4u_1(real sigma)` factory declaration in `stencil.hpp`.
   - In `stencil::from_lua` at `stencil.cpp`, **insert a new `else if (type == "tension_E4u")` branch immediately after the `type == "E8u"` branch and before the final `logger(...err...)` fallthrough**. The branch reads `real sigma = m["sigma"].get_or(3.0)` and calls `make_tension_E4u_1(sigma)`. Verify no existing branches are affected by diffing the file after the edit.
   - Also add a `make_tension_E4u_1` factory definition at the bottom of `tension_E4u_1.cpp`.
   - File: `src/stencils/stencil.hpp`, `src/stencils/stencil.cpp`, `src/stencils/tension_E4u_1.cpp`
-  - Test: `cmake --build build --target shoccs-exe` (full chain compiles and links)
+  - Test: `cmake --build build --target shoccs` → **PASSED** (full chain compiles and links; `libshoccs-stencils.a` rebuilds and `src/app/shoccs` relinks with no warnings). End-to-end smoke: a minimal 2D scalar-wave Lua with `scheme = { order=1, type="tension_E4u", sigma=3.0 }` runs to `t=1.0` at N=21, producing log line `builder: tension_E4u first scheme chosen (sigma = 3)` and completing cleanly (wall=0.79s).
+  - Note: branch order in `stencil.cpp:57-64` — appended to the `order == 1` `else if` chain after `E8u` so the new type is only matched when `order == 1` (matching plan 42's uniform-1st-derivative scope). Factory at `tension_E4u_1.cpp:278` is a one-liner mirroring `make_E4u_1`.
 
 - [ ] **42.5f** Add unit test `t-tension_E4u_1`:
   - Add `add_unit_test(tension_E4u_1 "stencils" shoccs-stencils)` to `src/stencils/CMakeLists.txt`.

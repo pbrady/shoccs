@@ -274,4 +274,6 @@ struct tension_E4u_1 {
     void nbs_neumann(real, real, std::span<real>, std::span<real>, bool) const {}
 };
 
+stencil make_tension_E4u_1(real sigma) { return tension_E4u_1{sigma}; }
+
 } // namespace ccs::stencils

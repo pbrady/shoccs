@@ -57,6 +57,12 @@ std::optional<stencil> stencil::from_lua(const sol::table& tbl, const logs& logg
         } else if (type == "E8u") {
             logger(spdlog::level::info, "E8 uniform first scheme chosen");
             return make_E8u_1(alpha);
+        } else if (type == "tension_E4u") {
+            real sigma = m["sigma"].get_or(3.0);
+            logger(spdlog::level::info,
+                   "tension_E4u first scheme chosen (sigma = {})",
+                   sigma);
+            return make_tension_E4u_1(sigma);
         }
         if (type == "E2-poly") {
             logger(spdlog::level::info, "E2-poly scheme chosen");
