@@ -205,6 +205,14 @@ cd scripts/stencil_gen && uv run pytest tests/test_phs.py -x -q -k "TestRegressi
   - File: `scripts/stencil_gen/stencil_gen/optimizer.py`
   - Test: `cd scripts/stencil_gen && uv run pytest tests/test_optimizer.py -x -q -k "TestDE"` — 6 tests green.
 
+- [ ] **43.5b-r1** Fix the `run_scipy_de` docstring: it claims "a final Nelder-Mead polish (``polish=True``)", but `scipy.optimize.differential_evolution` polishes with **L-BFGS-B** (the documented scipy default when `polish=True` on a bounded, unconstrained problem). Replace the Nelder-Mead phrasing with L-BFGS-B, and note the scipy-documented fallback to `trust-constr` for constrained problems (we do not pass constraints today). Keep it a one-sentence correction — no API change.
+  - File: `scripts/stencil_gen/stencil_gen/optimizer.py` (docstring only).
+  - Test: existing `TestDE` remains green.
+
+- [ ] **43.5b-r2** Add `TestDE::test_de_handles_fully_infeasible` to cover the documented infeasibility contract: call `run_scipy_de(lambda x: float("inf"), bounds=[(0.0, 1.0)], popsize=4, maxiter=3, seed=0)` and assert `not np.isfinite(r.best_objective)`, `r.converged is False`, `r.best_x.shape == (1,)`, and `len(r.history) > 0` (recorder still captured the rejected evaluations). Parallels the existing `test_shgo_handles_fully_infeasible` for 43.5a.
+  - File: `scripts/stencil_gen/tests/test_optimizer.py`.
+  - Test: `cd scripts/stencil_gen && uv run pytest tests/test_optimizer.py -x -q -k "TestDE"`.
+
 - [ ] **43.5c** Integration tests `TestGlobalOptimizers`:
   - `test_shgo_finds_tension_optimum` — 1D tension E4 against an explicit stability-margin objective (e.g. `layer3.max_stab_eig`), bounds [0.5, 20]. Assert SHGO returns a finite feasible global minimum, bound-respecting, and reports `n_local_minima >= 1`. (The earlier specific-σ acceptance was dropped — see 43.3b. To pin a specific σ, pick an objective whose minimum is known for *that* field and cite the corresponding sweep value.)
   - `test_de_finds_tension_optimum` — same objective, DE with popsize=10, maxiter=20 (kept small for test speed). Same acceptance: finite feasible result, bound-respecting.
