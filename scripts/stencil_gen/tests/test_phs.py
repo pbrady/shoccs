@@ -2020,10 +2020,33 @@ if _KNOWN is not None:
                         )
                         best_x = np.asarray(entry["best_x"], dtype=float)
                         stored_obj = float(entry["best_objective"])
+                        # Plan 43.8c: rebuild the objective at the persisted
+                        # gate/max layers so older defaults can't drift.  Fall
+                        # back to make_objective's own defaults if the entry
+                        # predates 43.8c (no gate_layer / max_layer keys).  For
+                        # staged entries, use validator_max_layer since that is
+                        # the depth at which best_objective was evaluated.
+                        if "gate_layer" not in entry or "max_layer" not in entry:
+                            pytest.skip(
+                                f"{scheme}/{kernel}/{objective}: entry predates "
+                                "plan 43.8c (no gate_layer/max_layer); "
+                                "re-run optimizer to refresh"
+                            )
+                        gate_layer = int(entry["gate_layer"])
+                        if entry.get("method") == "staged":
+                            assert "validator_max_layer" in entry, (
+                                f"{scheme}/{kernel}/{objective}: staged entry "
+                                "missing validator_max_layer"
+                            )
+                            eval_max_layer = int(entry["validator_max_layer"])
+                        else:
+                            eval_max_layer = int(entry["max_layer"])
                         f = make_objective(
                             scheme=scheme,
                             kernel=kernel,
                             report_field=objective,
+                            gate_layer=gate_layer,
+                            max_layer=eval_max_layer,
                         )
                         recomputed = f(best_x)
                         assert np.isfinite(recomputed), (

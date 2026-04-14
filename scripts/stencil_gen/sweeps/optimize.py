@@ -22,6 +22,7 @@ import numpy as np
 from stencil_gen.optimizer import (
     DEFAULT_BOUNDS,
     OptimizeResult,
+    _infer_max_layer,
     make_objective,
     multi_start_optimize,
     params_from_vector,
@@ -84,6 +85,40 @@ def _validate_kernel_bounds_dim(
         )
 
 
+def _resolve_persisted_layers(
+    args: argparse.Namespace,
+) -> tuple[int, int, int | None]:
+    """Resolve the layer-configuration triple to persist with an optimum.
+
+    Returns ``(gate_layer, max_layer, validator_max_layer)`` where
+
+    - ``gate_layer`` and ``max_layer`` are always ``int`` (never ``None``):
+      ``max_layer`` falls back to ``_infer_max_layer(args.objective)`` for
+      non-staged methods when ``--max-layer`` is absent, and to the staged
+      inner-depth default of ``3`` for ``method == "staged"`` when absent.
+    - ``validator_max_layer`` is ``args.validator_max_layer`` iff
+      ``method == "staged"``, else ``None`` (and therefore omitted from the
+      persisted dict).
+
+    Raises ``ValueError`` if ``max_layer`` cannot be inferred (e.g. a
+    non-layer-prefixed objective without ``--max-layer``).
+    """
+    if args.method == "staged":
+        max_layer = args.max_layer if args.max_layer is not None else 3
+        return int(args.gate_layer), int(max_layer), int(args.validator_max_layer)
+    if args.max_layer is not None:
+        max_layer = int(args.max_layer)
+    else:
+        inferred = _infer_max_layer(args.objective)
+        if inferred is None:
+            raise ValueError(
+                f"cannot infer max_layer from objective={args.objective!r}; "
+                "pass --max-layer explicitly"
+            )
+        max_layer = int(inferred)
+    return int(args.gate_layer), max_layer, None
+
+
 def _result_to_persist_dict(
     result: OptimizeResult,
     *,
@@ -91,9 +126,20 @@ def _result_to_persist_dict(
     kernel: str,
     objective: str,
     bounds: list[tuple[float, float]],
+    gate_layer: int,
+    max_layer: int,
+    validator_max_layer: int | None = None,
 ) -> dict[str, Any]:
-    """Serialise ``result`` to a JSON-friendly dict, dropping ``history``."""
-    return {
+    """Serialise ``result`` to a JSON-friendly dict, dropping ``history``.
+
+    ``gate_layer`` and ``max_layer`` are the resolved feasibility-gate and
+    objective-evaluation depths (see :func:`_resolve_persisted_layers`).  They
+    are recorded explicitly so that :class:`TestRegressionBrady2DOptima` can
+    rebuild ``make_objective`` at the exact configuration the CLI used, rather
+    than silently relying on defaults that may drift.  ``validator_max_layer``
+    is only present for ``method == "staged"``.
+    """
+    d: dict[str, Any] = {
         "scheme": scheme,
         "kernel": kernel,
         "objective": objective,
@@ -102,11 +148,16 @@ def _result_to_persist_dict(
         "best_params": result.best_params,
         "best_objective": float(result.best_objective),
         "method": result.method,
+        "gate_layer": int(gate_layer),
+        "max_layer": int(max_layer),
         "n_evals": int(result.n_evals),
         "compute_time": float(result.compute_time),
         "converged": bool(result.converged),
         "best_report": result.best_report,
     }
+    if validator_max_layer is not None:
+        d["validator_max_layer"] = int(validator_max_layer)
+    return d
 
 
 def _print_summary(
@@ -327,12 +378,20 @@ def main(argv: list[str] | None = None) -> int:
         bounds=bounds,
     )
 
+    try:
+        gate_layer, max_layer, validator_max_layer = _resolve_persisted_layers(args)
+    except ValueError as exc:
+        parser.error(str(exc))
+
     persisted = _result_to_persist_dict(
         result,
         scheme=args.scheme,
         kernel=args.kernel,
         objective=args.objective,
         bounds=bounds,
+        gate_layer=gate_layer,
+        max_layer=max_layer,
+        validator_max_layer=validator_max_layer,
     )
 
     if args.validate_with_cpp:

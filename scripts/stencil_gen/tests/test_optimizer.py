@@ -1131,6 +1131,13 @@ class TestOptimizeCLI:
         assert opt["best_x"] == [pytest.approx(3.1)]
         # history is intentionally omitted from the persisted form.
         assert "history" not in opt
+        # Plan 43.8c: gate_layer and inferred max_layer round-trip (no
+        # --max-layer was passed for this call, so max_layer is the inferred
+        # layer3 from the "layer3.max_stab_eig" prefix).  Non-staged method,
+        # so validator_max_layer must be absent.
+        assert opt["gate_layer"] == 3
+        assert opt["max_layer"] == 3
+        assert "validator_max_layer" not in opt
         # Existing top-level keys are untouched.
         assert store["brady2d_calibration"] == {"E4": {"tension": [1.0, 2.0]}}
         assert store["brady2d_sweep"] == {"E4": {"tension": {"sigma": 3.0}}}
@@ -1166,3 +1173,46 @@ class TestOptimizeCLI:
         assert kernel_bucket["layer6.transient_growth_bound"][
             "best_objective"
         ] == pytest.approx(-0.75)
+        # Plan 43.8c: explicit --max-layer 6 on the second call must round-trip
+        # (no inference fallback).  Still non-staged, so no validator field.
+        second_opt = kernel_bucket["layer6.transient_growth_bound"]
+        assert second_opt["gate_layer"] == 3
+        assert second_opt["max_layer"] == 6
+        assert "validator_max_layer" not in second_opt
+
+        # Plan 43.8c: a staged call must round-trip gate_layer + max_layer
+        # (inner depth) + validator_max_layer.  Use a fresh objective bucket so
+        # this case is distinct from the two above.
+        staged_canned = replace(
+            canned,
+            method="staged",
+            best_objective=-2.25,
+            best_x=np.array([5.0]),
+            best_params={"sigma": 5.0},
+        )
+        monkeypatch.setattr(
+            optimize_mod, "_run_method", lambda args, bounds: staged_canned
+        )
+        rc3 = optimize_mod.main(
+            [
+                "--scheme", "E4",
+                "--kernel", "tension",
+                "--objective", "layer6.kreiss_constant",
+                "--bounds", "0.5", "20",
+                "--method", "staged",
+                "--n-restarts", "1",
+                "--max-evals", "4",
+                "--validator-max-layer", "7",
+                "--update-known-values",
+            ]
+        )
+        assert rc3 == 0
+        staged_opt = store["brady2d_optima"]["E4"]["tension"][
+            "layer6.kreiss_constant"
+        ]
+        # No --max-layer passed and method is staged, so the inner-depth
+        # default of 3 is persisted; validator_max_layer is the explicit 7.
+        assert staged_opt["method"] == "staged"
+        assert staged_opt["gate_layer"] == 3
+        assert staged_opt["max_layer"] == 3
+        assert staged_opt["validator_max_layer"] == 7
