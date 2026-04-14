@@ -1871,3 +1871,109 @@ class TestAlphaSurveyVsPublished:
             f"{published.tolist()}; basin distances={distances}, "
             f"basins={survey['basins']}"
         )
+
+
+class TestOptimizeCppValidation:
+    """Covers ``sweeps.optimize._run_cpp_validation`` banner criterion.
+
+    Created under plan 43.10a-r1 so the PASS/soft-failure/FAIL split is
+    tested alongside the code change.  43.10b will extend this class with
+    a live-pipeline case against the shoccs binary when the bridge
+    exercises the full E4-classical winner.
+    """
+
+    @staticmethod
+    def _fake_binary(tmp_path, monkeypatch):
+        """Make :data:`sweeps.optimize.SHOCCS_BINARY` appear to exist."""
+        from sweeps import optimize as opt_mod
+
+        fake = tmp_path / "shoccs"
+        fake.write_text("")
+        monkeypatch.setattr(opt_mod, "SHOCCS_BINARY", fake)
+
+    @staticmethod
+    def _fake_report(stable: bool, final_linf: float, wall_time_s: float = 0.1):
+        return StabilityReport(
+            layer8={
+                "stable": bool(stable),
+                "final_linf": float(final_linf),
+                "wall_time_s": float(wall_time_s),
+            },
+        )
+
+    def test_soft_failure_when_stable_but_linf_over_tol(
+        self, tmp_path, monkeypatch, capsys
+    ):
+        from stencil_gen import brady2d_stability as bs
+        from sweeps import optimize as opt_mod
+
+        self._fake_binary(tmp_path, monkeypatch)
+        tol = bs.L8_FINAL_LINF_TOL
+        monkeypatch.setattr(
+            opt_mod,
+            "brady2d_stability_score",
+            lambda *a, **k: self._fake_report(True, tol + 1.0),
+        )
+
+        result = opt_mod._run_cpp_validation(
+            scheme="E4",
+            kernel="tension",
+            best_params={"sigma": 1.0},
+            best_objective=-1e-4,
+        )
+
+        assert result is not None
+        assert result["stable"] is True
+        assert result["final_linf"] == pytest.approx(tol + 1.0)
+        out = capsys.readouterr().out
+        assert "soft-failure" in out
+        assert f"L8_FINAL_LINF_TOL={tol}" in out
+        assert "L8 PASS" not in out
+
+    def test_pass_when_stable_and_linf_within_tol(
+        self, tmp_path, monkeypatch, capsys
+    ):
+        from stencil_gen import brady2d_stability as bs
+        from sweeps import optimize as opt_mod
+
+        self._fake_binary(tmp_path, monkeypatch)
+        tol = bs.L8_FINAL_LINF_TOL
+        monkeypatch.setattr(
+            opt_mod,
+            "brady2d_stability_score",
+            lambda *a, **k: self._fake_report(True, tol * 0.5),
+        )
+
+        result = opt_mod._run_cpp_validation(
+            scheme="E4",
+            kernel="tension",
+            best_params={"sigma": 1.0},
+            best_objective=-1e-4,
+        )
+
+        assert result["stable"] is True
+        out = capsys.readouterr().out
+        assert "L8 PASS" in out
+        assert "soft-failure" not in out
+
+    def test_hard_fail_when_unstable(self, tmp_path, monkeypatch, capsys):
+        from sweeps import optimize as opt_mod
+
+        self._fake_binary(tmp_path, monkeypatch)
+        monkeypatch.setattr(
+            opt_mod,
+            "brady2d_stability_score",
+            lambda *a, **k: self._fake_report(False, float("nan")),
+        )
+
+        result = opt_mod._run_cpp_validation(
+            scheme="E4",
+            kernel="tension",
+            best_params={"sigma": 1.0},
+            best_objective=-1e-4,
+        )
+
+        assert result["stable"] is False
+        out = capsys.readouterr().out
+        assert "L8 FAIL" in out
+        assert "soft-failure" not in out

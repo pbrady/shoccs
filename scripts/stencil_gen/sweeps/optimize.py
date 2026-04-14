@@ -19,7 +19,10 @@ from typing import Any
 
 import numpy as np
 
-from stencil_gen.brady2d_stability import brady2d_stability_score
+from stencil_gen.brady2d_stability import (
+    L8_FINAL_LINF_TOL,
+    brady2d_stability_score,
+)
 from stencil_gen.cpp_bridge import SHOCCS_BINARY
 from stencil_gen.optimizer import (
     DEFAULT_BOUNDS,
@@ -202,10 +205,21 @@ def _run_cpp_validation(
         "final_linf": float(l8["final_linf"]),
         "wall_time_s": float(l8["wall_time_s"]),
     }
-    if cpp_validation["stable"]:
+    passed = cpp_validation["stable"] and (
+        cpp_validation["final_linf"] <= L8_FINAL_LINF_TOL
+    )
+    if passed:
         print(
             f"[optimize] L8 PASS: final_linf={cpp_validation['final_linf']:.4e} "
             f"(wall={cpp_validation['wall_time_s']:.1f}s)"
+        )
+    elif cpp_validation["stable"]:
+        print(
+            f"[optimize] WARNING: L8 soft-failure: "
+            f"final_linf={cpp_validation['final_linf']:.4e} > "
+            f"L8_FINAL_LINF_TOL={L8_FINAL_LINF_TOL} "
+            f"(wall={cpp_validation['wall_time_s']:.1f}s). "
+            "Analytical best_objective unchanged — L8 disagreement is diagnostic."
         )
     else:
         print(
