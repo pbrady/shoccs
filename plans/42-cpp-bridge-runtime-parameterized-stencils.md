@@ -271,11 +271,12 @@ Each family follows the same 4-item pattern as 42.5b–f (minus the split refere
   - File: `src/stencils/CMakeLists.txt`, `src/stencils/gaussian_E4u_1.t.cpp` (new)
   - Test: `cmake --build build --target t-gaussian_E4u_1 && ctest --test-dir build -R t-gaussian_E4u_1` → **PASSED** (5 Catch2 cases; ctest reports `100% tests passed, 0 tests failed out of 1` in 0.01 s). Mirrors `tension_E4u_1.t.cpp` exactly with `epsilon=0.9` fixture substituted for `sigma=3.0` and the Lua script using `type="gaussian_E4u"` + `epsilon = ...`.
 
-- [ ] **42.6e** Generate the Python reference for `multiquadric_E4u_1` at `epsilon=1.0` and create `src/stencils/multiquadric_E4u_1.cpp` skeleton + CMake registration (mirrors 42.6a):
+- [x] **42.6e** Generate the Python reference for `multiquadric_E4u_1` at `epsilon=1.0` and create `src/stencils/multiquadric_E4u_1.cpp` skeleton + CMake registration (mirrors 42.6a):
   - Generate reference via the same one-liner with `kernel='multiquadric'`, store in `tests/fixtures/multiquadric_e4u1_reference.py`.
   - Clone skeleton from `gaussian_E4u_1.cpp`, rename struct and kernel function.
   - File: `scripts/stencil_gen/tests/fixtures/multiquadric_e4u1_reference.py` (new), `src/stencils/multiquadric_E4u_1.cpp` (new), `src/stencils/CMakeLists.txt`
-  - Test: `cmake --build build --target shoccs-stencils`
+  - Test: `cmake --build build --target shoccs-stencils` → **PASSED** (clean incremental build: `Building CXX object .../multiquadric_E4u_1.cpp.o` → `Linking CXX static library libshoccs-stencils.a`, no compiler warnings). Fixture regenerates against `build_diff_matrix_rbf(kernel='multiquadric', epsilon=1.0)` with max abs diff = 6.9e-18.
+  - Note: skeleton stub `solve_multiquadric_coefficients` zero-fills rows 0..3 and hardcodes the row-4 classical E4 stencil; the real solve body comes in 42.6f. Struct is not yet dispatchable from Lua — registration is 42.6g. No `make_multiquadric_E4u_1` factory yet; that lands with 42.6g alongside the `stencil.hpp` declaration, following the 42.6a→42.6c pattern.
 
 - [ ] **42.6f** Implement `solve_multiquadric_coefficients` with kernel `sqrt(1 + (eps*r)^2)` and RHS `D^1 φ(i - x_j) = eps^2*(i - x_j) / sqrt(1 + (eps*(i - x_j))^2)`; wire into constructor (mirrors 42.6b — same 10×10 system and 5×7 layout with row 4 hardcoded and col 6 zero for rows 0..3):
   - File: `src/stencils/multiquadric_E4u_1.cpp`

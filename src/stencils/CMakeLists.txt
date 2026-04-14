@@ -9,6 +9,7 @@ add_library(shoccs-stencils
     polyE2_1.cpp
     tension_E4u_1.cpp
     gaussian_E4u_1.cpp
+    multiquadric_E4u_1.cpp
     stencil.cpp)
 
 target_include_directories(shoccs-stencils PUBLIC $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/..>)
