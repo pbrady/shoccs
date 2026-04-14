@@ -91,21 +91,22 @@ cd scripts/stencil_gen && uv run python -m sweeps optimize \
 
 ### 44.2 — 2×2 block operator construction
 
-- [ ] **44.2a** Add `build_bl42_operator(D: np.ndarray) -> scipy.sparse.csr_matrix` to `brady2d_stability.py` (anywhere between the existing layer-3 and layer-4 helpers; add a thematic section header comment):
+- [x] **44.2a** Add `build_bl42_operator(D: np.ndarray) -> scipy.sparse.csr_matrix` to `brady2d_stability.py` (anywhere between the existing layer-3 and layer-4 helpers; add a thematic section header comment):
   - Input: 1D differentiation matrix `D` of shape `(N, N)` approximating `d/dx` on a unit grid.
   - Scale by `1/h` where `h = L_DOMAIN / (N - 1)` — mirrors the h-scaling fix from the L7 path.
   - Build `L = [[0, D/h], [D/h, 0]]` as `scipy.sparse.bmat` from dense-or-sparse `D`. Total shape `(2N, 2N)`.
   - Remove DOFs: drop row/col index `0` (u at x=0) and row/col index `N + (N-1) = 2N - 1` (v at x=1). Use `np.ix_` indexing on the sparse matrix.
   - Return the reduced `(2N - 2) × (2N - 2)` sparse matrix (csr format).
   - File: `scripts/stencil_gen/stencil_gen/brady2d_stability.py`
-  - Test: `cd scripts/stencil_gen && uv run pytest tests/test_brady2d_stability.py -x -q -k "TestBuildBL42Operator"`
+  - Test: `cd scripts/stencil_gen && uv run pytest tests/test_brady2d_stability.py -x -q -k "TestBuildBL42Operator"` ✓
 
-- [ ] **44.2b** Tests `TestBuildBL42Operator`:
+- [x] **44.2b** Tests `TestBuildBL42Operator`:
   - `test_shape_at_n21` — N=21 returns (40, 40) sparse matrix.
-  - `test_block_structure_small_n` — N=5, build D as a known small matrix (simple centered difference `[-1/2, 0, 1/2]`), construct `build_bl42_operator(D)`, densify, inspect the block structure matches the expected `[[0, D_red], [D_red, 0]]` up to row/col removal.
+  - `test_block_structure_small_n` — N=5, centered difference D: verifies diagonal blocks are zero and off-diagonal blocks match D/h submatrices after row/col removal (top-right = D/h[1:,:-1], bottom-left = D/h[:-1,1:]).
   - `test_spectrum_near_imaginary_for_centered_scheme` — at N=21, use a 2nd-order centered D (no boundary closure) and verify `np.max(np.abs(np.linalg.eigvals(L_red.toarray()).real)) < 1e-10`. This confirms the construction produces a purely-imaginary spectrum for a conservative scheme.
+  - All 3 tests pass. ✓
   - File: `scripts/stencil_gen/tests/test_brady2d_stability.py`
-  - Test: `cd scripts/stencil_gen && uv run pytest tests/test_brady2d_stability.py -x -q -k "TestBuildBL42Operator"`
+  - Test: `cd scripts/stencil_gen && uv run pytest tests/test_brady2d_stability.py -x -q -k "TestBuildBL42Operator"` ✓
 
 ### 44.3 — L3r layer function `layer_bl42_reflecting_hyperbolic`
 

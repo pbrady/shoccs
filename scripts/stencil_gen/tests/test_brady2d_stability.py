@@ -17,6 +17,7 @@ from stencil_gen.brady2d_stability import (
     STABILITY_TOL,
     StabilityReport,
     brady2d_stability_score,
+    build_bl42_operator,
     build_sparse_2d_operator,
     layer1_interior_boundary_gv,
     layer2_kreiss_gks,
@@ -273,6 +274,62 @@ class TestLayer3:
             "E4", "tension", {"sigma": 3.0}, n_values=(15, 30),
         )
         assert set(result["eigenvalues"].keys()) == {15, 30}
+
+
+class TestBuildBL42Operator:
+    """Tests for the BL §4.2 reflecting-hyperbolic block operator."""
+
+    def test_shape_at_n21(self):
+        """N=21 returns (40, 40) sparse matrix."""
+        D = np.zeros((21, 21))
+        L = build_bl42_operator(D)
+        assert L.shape == (40, 40)
+
+    def test_block_structure_small_n(self):
+        """N=5, centered difference D: diagonal blocks are zero, off-diagonals are D submatrices."""
+        N = 5
+        D = np.zeros((N, N))
+        for i in range(1, N - 1):
+            D[i, i - 1] = -0.5
+            D[i, i + 1] = 0.5
+        D[0, 0] = -1.0; D[0, 1] = 1.0
+        D[N - 1, N - 2] = -1.0; D[N - 1, N - 1] = 1.0
+
+        L = build_bl42_operator(D)
+        L_dense = L.toarray()
+
+        assert L.shape == (2 * N - 2, 2 * N - 2)
+
+        n = N - 1
+        top_left = L_dense[:n, :n]
+        bottom_right = L_dense[n:, n:]
+        top_right = L_dense[:n, n:]
+        bottom_left = L_dense[n:, :n]
+
+        np.testing.assert_allclose(top_left, 0.0, atol=1e-15)
+        np.testing.assert_allclose(bottom_right, 0.0, atol=1e-15)
+
+        h = 1.0 / (N - 1)
+        D_h = D / h
+        # top-right = u eqs × v vars = D/h with row 0 removed, col N-1 removed
+        np.testing.assert_allclose(top_right, D_h[1:, :-1], atol=1e-15)
+        # bottom-left = v eqs × u vars = D/h with row N-1 removed, col 0 removed
+        np.testing.assert_allclose(bottom_left, D_h[:-1, 1:], atol=1e-15)
+
+    def test_spectrum_near_imaginary_for_centered_scheme(self):
+        """2nd-order centered D at N=21 gives purely imaginary spectrum."""
+        N = 21
+        D = np.zeros((N, N))
+        for i in range(1, N - 1):
+            D[i, i - 1] = -0.5
+            D[i, i + 1] = 0.5
+        D[0, 0] = -1.0; D[0, 1] = 1.0
+        D[N - 1, N - 2] = -1.0; D[N - 1, N - 1] = 1.0
+
+        L = build_bl42_operator(D)
+        eigvals = np.linalg.eigvals(L.toarray())
+        max_re = np.max(np.abs(eigvals.real))
+        assert max_re < 1e-10, f"max |Re(lambda)| = {max_re}"
 
 
 class TestLayer4:

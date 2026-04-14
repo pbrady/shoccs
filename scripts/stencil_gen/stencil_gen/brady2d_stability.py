@@ -519,6 +519,44 @@ def layer3_1d_eigenvalue(
     }
 
 
+# ---------------------------------------------------------------------------
+# BL §4.2 reflecting-hyperbolic block operator
+# ---------------------------------------------------------------------------
+
+
+def build_bl42_operator(D: np.ndarray) -> "scipy.sparse.csr_matrix":
+    """Build the reduced 2×2 block operator for Brady-Livescu §4.2.
+
+    Constructs L = [[0, D/h], [D/h, 0]] for the coupled hyperbolic system
+    u_t = v_x, v_t = u_x on [0, 1], then removes the Dirichlet DOFs
+    (u at x=0, v at x=1) to produce the (2N-2) × (2N-2) reduced operator.
+
+    Parameters
+    ----------
+    D : np.ndarray
+        1D differentiation matrix of shape (N, N) on a unit-spaced grid.
+
+    Returns
+    -------
+    scipy.sparse.csr_matrix
+        Reduced operator of shape (2N-2, 2N-2).
+    """
+    import scipy.sparse as sp
+
+    from stencil_gen.benchmarks.brady_livescu_4_2 import L_DOMAIN
+
+    N = D.shape[0]
+    h = L_DOMAIN / (N - 1)
+    D_scaled = sp.csr_matrix(D) / h
+
+    Z = sp.csr_matrix((N, N))
+    L_full = sp.bmat([[Z, D_scaled], [D_scaled, Z]], format="csr")
+
+    keep = np.concatenate([np.arange(1, N), np.arange(N, 2 * N - 1)])
+    L_red = L_full[np.ix_(keep, keep)]
+    return L_red.tocsr()
+
+
 def layer4_local_gv_2d(
     scheme: str,
     kernel: str,
