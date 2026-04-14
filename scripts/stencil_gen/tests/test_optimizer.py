@@ -848,7 +848,7 @@ class TestStaged:
             kernel="tension",
             report_field="layer3.max_stab_eig",
             bounds=bounds,
-            inner_gate=3,
+            inner_gate=2,
             inner_max_layer=3,
             validator_max_layer=3,
             top_k=3,
@@ -1288,7 +1288,7 @@ class TestOptimizeCLI:
                 "--scheme", "E4",
                 "--kernel", "tension",
                 "--objective", "layer3.max_stab_eig",
-                "--gate-layer", "3",
+                "--gate-layer", "2",
                 "--max-layer", "3",
                 "--bounds", "0.5", "20",
                 "--method", "Nelder-Mead",
@@ -1307,6 +1307,7 @@ class TestOptimizeCLI:
         )
         assert "best_objective" in proc.stdout
         assert "best_params" in proc.stdout
+        assert "inf" not in proc.stdout, "all evaluations returned +inf (vacuous run)"
 
     def test_cli_rejects_bad_objective(self):
         """Unknown objective prefix cannot infer max_layer → SystemExit.

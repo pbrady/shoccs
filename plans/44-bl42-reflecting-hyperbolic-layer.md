@@ -234,18 +234,18 @@ cd scripts/stencil_gen && uv run python -m sweeps optimize \
 
 ### 44.4-followup5 — Fix slow optimizer tests broken by L3r cascade
 
-- [ ] **44.4o** Fix `test_staged_tension_e4_convergence` in `test_optimizer.py` (line ~838, `@pytest.mark.slow`):
+- [x] **44.4o** Fix `test_staged_tension_e4_convergence` in `test_optimizer.py` (line ~838, `@pytest.mark.slow`):
   - **Bug:** Uses real scoring (no monkeypatch) with `inner_gate=3`, tension E4, σ ∈ [0.5, 20]. Now that L3r rejects tension at gate_layer=3, all evaluations may return `+inf`. The test asserts `np.isfinite(r.best_objective)` — will fail when run with `-m slow`.
   - Missed by 44.4l because `@pytest.mark.slow` tests were not included in the 44.4j full-suite verification (`uv run pytest tests/ -x -q` skips slow tests).
-  - Fix: lower `inner_gate` to 2 (tension σ~3.0 still passes L1-L2). Layer3 data is still populated since L3 runs before L3r. Consistent with the 44.4l fixes for in-process optimizer tests.
+  - Fix: lowered `inner_gate` to 2 (tension σ~3.0 still passes L1-L2). Layer3 data is still populated since L3 runs before L3r. Consistent with the 44.4l fixes for in-process optimizer tests.
   - File: `scripts/stencil_gen/tests/test_optimizer.py`
-  - Test: `cd scripts/stencil_gen && SYMPY_CACHE_SIZE=50000 uv run pytest tests/test_optimizer.py -x -q -k "test_staged_tension_e4_convergence" -m slow`
+  - Test: `cd scripts/stencil_gen && SYMPY_CACHE_SIZE=50000 uv run pytest tests/test_optimizer.py -x -q -k "test_staged_tension_e4_convergence" --run-slow` ✓
 
-- [ ] **44.4p** Fix `test_cli_tension_nelder_mead` in `test_optimizer.py` (line ~1268, `@pytest.mark.slow`):
+- [x] **44.4p** Fix `test_cli_tension_nelder_mead` in `test_optimizer.py` (line ~1268, `@pytest.mark.slow`):
   - **Bug:** Uses `--gate-layer 3` with tension E4 in a subprocess. Same class of bug as 44.4n — tension fails L3r, so all 10 evaluations return `+inf`. The test passes vacuously because it only checks `returncode == 0` and that "best_objective" appears in stdout (which it does, even with `+inf`).
-  - Fix: lower `--gate-layer` to 2, consistent with 44.4l. Optionally add `assert "inf" not in proc.stdout` or similar to guard against vacuous all-infeasible runs.
+  - Fix: lowered `--gate-layer` to 2, consistent with 44.4l. Added `assert "inf" not in proc.stdout` to guard against vacuous all-infeasible runs.
   - File: `scripts/stencil_gen/tests/test_optimizer.py`
-  - Test: `cd scripts/stencil_gen && SYMPY_CACHE_SIZE=50000 uv run pytest tests/test_optimizer.py -x -q -k "test_cli_tension_nelder_mead" -m slow`
+  - Test: `cd scripts/stencil_gen && SYMPY_CACHE_SIZE=50000 uv run pytest tests/test_optimizer.py -x -q -k "test_cli_tension_nelder_mead" --run-slow` ✓
 
 ### 44.5 — Optimizer integration
 
