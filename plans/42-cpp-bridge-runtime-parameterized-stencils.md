@@ -159,11 +159,12 @@ cd scripts/stencil_gen && uv run pytest tests/test_brady2d_stability.py -x -q -k
   - Test: `cd scripts/stencil_gen && uv run pytest tests/test_printer.py -x -q -k "TestScalarParams"` → **PASSED** (6 tests: single/multiple scalars, alongside array, no-subscript regression, default `None`, default-omitted backward-compat). Full `test_printer.py` + `test_codegen.py` still green (54 passed).
   - Note: `scalar_params` is keyword-only with default `None` (treated as empty) to preserve the existing two-positional-arg call site in `generate_stencil_cpp` prior to this change; callers new and old both work. `codegen.py:547` now passes `spec.scalar_params` as a keyword argument alongside `has_psi=not spec.is_uniform`.
 
-- [ ] **42.4d** Tests `TestScalarParamsCodegenEndToEnd`:
+- [x] **42.4d** Tests `TestScalarParamsCodegenEndToEnd`:
   - Build a synthetic `StencilGenSpec(name="TestStruct", scalar_params=["sigma"], interior_coeffs=[sympy.Symbol("sigma") * sympy.Symbol("h")], ...)`.
   - Call `generate_stencil_cpp(spec)` and assert the output contains `real sigma;` as a field, a constructor taking `real sigma`, and `sigma` (not `sigma[0]`) inside the interior body.
   - File: `scripts/stencil_gen/tests/test_codegen.py`
-  - Test: `cd scripts/stencil_gen && uv run pytest tests/test_codegen.py -x -q -k "TestScalarParamsCodegenEndToEnd"`
+  - Test: `cd scripts/stencil_gen && uv run pytest tests/test_codegen.py -x -q -k "TestScalarParamsCodegenEndToEnd"` → **PASSED** (3 tests: field + ctor + printer subscript-free body together, scalar inside compound expression, two-scalar parallel path). Full `test_codegen.py` still green (41 passed).
+  - Note: plan text sketched putting `sigma*h` in `interior_coeffs`, but `generate_interior_method` uses the `Rational(c)` / `float(c)` fast paths and cannot accept free symbols. The expression path that actually uses `StencilCodePrinter` (and so the scalar symbol map wired in 42.4c) is `nbs_floating` / `nbs_dirichlet` — the test places the scalar symbol there. Test-scope docstring documents this divergence.
 
 ### 42.5 — First spline family in C++: `tension_E4u_1` (construction-time runtime solve, hand-written)
 

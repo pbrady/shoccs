@@ -408,6 +408,83 @@ class TestScalarParamsEmission:
         assert "NoScalar(real " not in code
 
 
+# ── TestScalarParamsCodegenEndToEnd: struct + symbol-map path (42.4d) ────
+
+
+class TestScalarParamsCodegenEndToEnd:
+    """End-to-end: scalar_params flows from spec through preamble and printer.
+
+    Exercises both pieces wired in 42.4b (struct preamble emission) and 42.4c
+    (printer symbol-map). A scalar symbol placed in floating_coeffs must print
+    as `sigma` (not `sigma[0]`) in the generated nbs_floating body.
+
+    Note: the plan text sketches putting `sigma*h` in ``interior_coeffs``, but
+    ``generate_interior_method`` takes the uniform fast path of
+    ``Rational(c)`` / ``float(c)`` and cannot accept free symbols. The
+    expression path that actually uses the StencilCodePrinter (and therefore
+    the scalar symbol map) is ``nbs_floating`` / ``nbs_dirichlet``, so that's
+    where we place the scalar symbol for this test.
+    """
+
+    @staticmethod
+    def _spec_with_scalar_in_floating(name, scalars, floating_expr):
+        R, T = 3, 5
+        floating = [floating_expr] + [Integer(0)] * (R * T - 1)
+        return StencilGenSpec(
+            name=name,
+            P=2,
+            R=R,
+            T=T,
+            X=0,
+            derivative_order=1,
+            is_uniform=True,
+            param_arrays={},
+            interior_coeffs=[Integer(0)] * 5,
+            floating_coeffs=floating,
+            dirichlet_coeffs=[Integer(0)] * (R * T),
+            scalar_params=scalars,
+        )
+
+    def test_field_constructor_and_body_together(self):
+        sigma = Symbol("sigma")
+        spec = self._spec_with_scalar_in_floating("TestStruct", ["sigma"], sigma)
+        code = generate_stencil_cpp(spec)
+        assert "real sigma;" in code
+        assert "TestStruct(real sigma_)" in code
+        assert "sigma = sigma_;" in code
+        # Expression body prints the scalar as plain `sigma`, never subscripted
+        assert "c[0] = sigma;" in code
+        assert "sigma[0]" not in code
+
+    def test_scalar_inside_compound_expression(self):
+        sigma = Symbol("sigma")
+        spec = self._spec_with_scalar_in_floating(
+            "Compound", ["sigma"], sigma * Rational(1, 2)
+        )
+        code = generate_stencil_cpp(spec)
+        assert "real sigma;" in code
+        # Accept either `sigma / 2` or `sigma * (1.0 / 2)` depending on sympy
+        # print ordering — but never `sigma[0]`.
+        assert "sigma[0]" not in code
+        assert "sigma" in code.split("nbs_floating", 1)[1]
+
+    def test_two_scalars_both_subscript_free(self):
+        sigma = Symbol("sigma")
+        epsilon = Symbol("epsilon")
+        spec = self._spec_with_scalar_in_floating(
+            "TwoScalar", ["sigma", "epsilon"], sigma + epsilon
+        )
+        code = generate_stencil_cpp(spec)
+        assert "real sigma;" in code
+        assert "real epsilon;" in code
+        assert "TwoScalar(real sigma_," in code
+        assert "real epsilon_)" in code
+        assert "sigma[0]" not in code
+        assert "epsilon[0]" not in code
+        body = code.split("nbs_floating", 1)[1]
+        assert "sigma" in body and "epsilon" in body
+
+
 # ── StencilGenSpec fixtures for 20.4e ────────────────────────────────────
 
 e4u_spec = StencilGenSpec(
