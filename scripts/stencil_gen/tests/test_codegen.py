@@ -347,6 +347,67 @@ class TestStencilGenSpec:
         assert b.scalar_params == []
 
 
+# ── TestScalarParamsEmission: struct preamble emission (42.4b) ──────────
+
+
+class TestScalarParamsEmission:
+    """Struct preamble emits `real name;` fields and scalar constructors.
+
+    Scope intentionally limited to struct preamble — interior/nbs expression
+    bodies that use a scalar symbol require the printer symbol-map update
+    from 42.4c. That is exercised by the end-to-end test in 42.4d.
+    """
+
+    @staticmethod
+    def _spec_with_scalars(name, scalars):
+        return StencilGenSpec(
+            name=name,
+            P=2,
+            R=3,
+            T=5,
+            X=0,
+            derivative_order=1,
+            is_uniform=True,
+            param_arrays={},
+            interior_coeffs=[Integer(0)] * 5,
+            floating_coeffs=[Integer(0)] * 15,
+            dirichlet_coeffs=[Integer(0)] * 15,
+            scalar_params=scalars,
+        )
+
+    def test_single_scalar_field_emitted(self):
+        code = generate_stencil_cpp(self._spec_with_scalars("Tension", ["sigma"]))
+        assert "real sigma;" in code
+
+    def test_single_scalar_constructor_signature(self):
+        code = generate_stencil_cpp(self._spec_with_scalars("Tension", ["sigma"]))
+        assert "Tension(real sigma_)" in code
+
+    def test_multiple_scalar_fields_emitted(self):
+        code = generate_stencil_cpp(
+            self._spec_with_scalars("Multi", ["sigma", "epsilon"])
+        )
+        assert "real sigma;" in code
+        assert "real epsilon;" in code
+
+    def test_multiple_scalar_constructor_signature(self):
+        code = generate_stencil_cpp(
+            self._spec_with_scalars("Multi", ["sigma", "epsilon"])
+        )
+        assert "Multi(real sigma_," in code
+        assert "real epsilon_)" in code
+
+    def test_default_constructor_still_emitted(self):
+        code = generate_stencil_cpp(self._spec_with_scalars("Tension", ["sigma"]))
+        assert "Tension() = default;" in code
+
+    def test_no_scalars_emits_no_real_field(self):
+        spec = self._spec_with_scalars("NoScalar", [])
+        code = generate_stencil_cpp(spec)
+        assert "real sigma;" not in code
+        assert "NoScalar(real " not in code
+
+
 # ── StencilGenSpec fixtures for 20.4e ────────────────────────────────────
 
 e4u_spec = StencilGenSpec(

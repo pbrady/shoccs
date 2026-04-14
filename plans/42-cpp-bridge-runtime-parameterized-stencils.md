@@ -144,12 +144,13 @@ cd scripts/stencil_gen && uv run pytest tests/test_brady2d_stability.py -x -q -k
   - Test: `cd scripts/stencil_gen && uv run pytest tests/test_codegen.py -x -q -k "TestStencilGenSpec"` → **PASSED** (3 tests: default empty, accepts list, per-instance independence via `field(default_factory=list)`). Full `tests/test_codegen.py` still green (32 passed).
   - Note: placed `scalar_params` at the end of the optional-defaults block (after `interp_T`) rather than literally adjacent to `param_arrays`, because inserting a `field(...)`-default field between the non-default required fields and the `has_interp=False` defaults would violate dataclass ordering. Semantically it is still the "companion to `param_arrays`" and the docstring now documents the pairing explicitly.
 
-- [ ] **42.4b** Extend `_emit_struct_preamble` to emit `real {name};` for each `scalar_params` entry:
+- [x] **42.4b** Extend `_emit_struct_preamble` to emit `real {name};` for each `scalar_params` entry:
   - After the `param_arrays` emission block, add a loop over `spec.scalar_params` emitting a `real` field declaration.
   - Update constructor emission: when `scalar_params` is non-empty, emit a constructor overload `StructName(real {param0}, real {param1}, ...)`.
   - **Test scope limited to struct preamble only.** The `TestScalarParamsEmission` test must assert only that the emitted C++ text contains `"real sigma;"` as a field and a matching constructor signature string — **do not** assert on any expression body or interior coefficients that would depend on 42.4c's symbol-map update. Those are validated in 42.4d's end-to-end test.
   - File: `scripts/stencil_gen/stencil_gen/codegen.py`
-  - Test: `cd scripts/stencil_gen && uv run pytest tests/test_codegen.py -x -q -k "TestScalarParamsEmission"`
+  - Test: `cd scripts/stencil_gen && uv run pytest tests/test_codegen.py -x -q -k "TestScalarParamsEmission"` → **PASSED** (6 tests: single/multiple scalar field emission, single/multiple constructor signature, default ctor preserved, no-scalars negative check). Full `tests/test_codegen.py` still green (38 passed).
+  - Note: scalar constructor emits body-assignment (`sigma = sigma_;`) rather than an init list, matching the `copy_zero_padded` body style already used for array-param constructors. Parameter is named `{name}_` to avoid shadowing the member.
 
 - [ ] **42.4c** Extend `build_symbol_map` in `scripts/stencil_gen/stencil_gen/printer.py:68` to accept `scalar_params: list[str]`:
   - For each scalar param name, map `Symbol(name) → name` (no subscript).

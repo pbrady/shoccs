@@ -298,6 +298,11 @@ def _emit_struct_preamble(spec: StencilGenSpec) -> str:
         for name, count in spec.param_arrays.items():
             lines.append(f"{indent}std::array<real, {count}> {name};")
 
+    if spec.scalar_params:
+        lines.append("")
+        for name in spec.scalar_params:
+            lines.append(f"{indent}real {name};")
+
     lines.append("")
     lines.append(f"{indent}{spec.name}() = default;")
 
@@ -318,6 +323,25 @@ def _emit_struct_preamble(spec: StencilGenSpec) -> str:
         for n in names:
             lines.append(f"{indent}    copy_zero_padded({n}_, {n});")
         lines.append(f"{indent}}}")
+
+    if spec.scalar_params:
+        scalar_names = spec.scalar_params
+        ctor_indent = " " * (4 + len(spec.name) + 1)
+        if len(scalar_names) == 1:
+            n = scalar_names[0]
+            lines.append(f"{indent}{spec.name}(real {n}_)")
+            lines.append(f"{indent}{{")
+            lines.append(f"{indent}    {n} = {n}_;")
+            lines.append(f"{indent}}}")
+        else:
+            lines.append(f"{indent}{spec.name}(real {scalar_names[0]}_,")
+            for n in scalar_names[1:-1]:
+                lines.append(f"{ctor_indent}real {n}_,")
+            lines.append(f"{ctor_indent}real {scalar_names[-1]}_)")
+            lines.append(f"{indent}{{")
+            for n in scalar_names:
+                lines.append(f"{indent}    {n} = {n}_;")
+            lines.append(f"{indent}}}")
 
     return "\n".join(lines) + "\n"
 
