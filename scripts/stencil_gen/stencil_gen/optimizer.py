@@ -34,7 +34,7 @@ from typing import Callable
 
 import numpy as np
 import scipy
-from scipy.optimize import minimize, shgo
+from scipy.optimize import differential_evolution, minimize, shgo
 from scipy.stats import qmc
 
 from stencil_gen.brady2d_stability import brady2d_stability_score
@@ -617,9 +617,66 @@ def run_scipy_de(
 ) -> OptimizeResult:
     """Global optimization via ``scipy.optimize.differential_evolution``.
 
-    Implemented in 43.5b.
+    Population-based global search with Sobol initialization and a final
+    Nelder-Mead polish (``polish=True``).  Suited to 4-6D landscapes where
+    SHGO's simplicial decomposition becomes expensive.
+
+    The objective is wrapped in a recorder so every evaluation — including
+    feasibility-cliff rejections — shows up in ``history``.  ``n_evals`` is
+    taken from ``result.nfev`` (scipy's internal counter), which includes the
+    polish pass; fully-infeasible domains (``+inf`` everywhere) are surfaced
+    as ``best_objective=+inf`` with ``converged=False``.
     """
-    raise NotImplementedError("run_scipy_de: implemented in 43.5")
+    if not bounds:
+        raise ValueError("run_scipy_de: bounds must be non-empty")
+    if popsize < 1:
+        raise ValueError(f"run_scipy_de: popsize must be >= 1, got {popsize}")
+    if maxiter < 1:
+        raise ValueError(f"run_scipy_de: maxiter must be >= 1, got {maxiter}")
+
+    history: list[tuple[np.ndarray, float]] = []
+
+    def _recorder(x: np.ndarray) -> float:
+        fval = float(f(np.asarray(x, dtype=float)))
+        history.append((np.asarray(x, dtype=float).copy(), fval))
+        return fval
+
+    t0 = time.perf_counter()
+    result = differential_evolution(
+        _recorder,
+        bounds=bounds,
+        popsize=popsize,
+        maxiter=maxiter,
+        seed=seed,
+        strategy=strategy,
+        tol=1e-7,
+        init="sobol",
+        polish=True,
+    )
+    compute_time = time.perf_counter() - t0
+
+    best_x = np.asarray(result.x, dtype=float).ravel()
+    best_objective = float(result.fun)
+    converged = bool(result.success) and np.isfinite(best_objective)
+
+    return OptimizeResult(
+        best_params={},
+        best_x=best_x,
+        best_objective=best_objective,
+        best_report={},
+        method="DE",
+        converged=converged,
+        n_evals=int(getattr(result, "nfev", len(history))),
+        compute_time=compute_time,
+        history=history,
+        extras={
+            "popsize": popsize,
+            "maxiter": maxiter,
+            "seed": seed,
+            "strategy": strategy,
+            "scipy_message": str(getattr(result, "message", "")),
+        },
+    )
 
 
 def run_staged_optimize(

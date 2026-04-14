@@ -15,6 +15,7 @@ from stencil_gen.optimizer import (
     make_objective,
     multi_start_optimize,
     params_from_vector,
+    run_scipy_de,
     run_scipy_local,
     run_scipy_shgo,
     vector_from_params,
@@ -548,6 +549,76 @@ class TestSHGO:
         assert r.method == "SHGO"
         # Fallback best_x is the bound midpoint — a sensible placeholder.
         assert r.best_x.shape == (1,)
+
+
+class TestDE:
+    """Tests for :func:`run_scipy_de` (plan 43.5b)."""
+
+    @staticmethod
+    def _quadratic(x: np.ndarray) -> float:
+        return float((x[0] - 3.0) ** 2)
+
+    @staticmethod
+    def _rosenbrock(x: np.ndarray) -> float:
+        # Classic 2D Rosenbrock, minimum at (1, 1).
+        return float(100.0 * (x[1] - x[0] ** 2) ** 2 + (1.0 - x[0]) ** 2)
+
+    def test_de_converges_on_quadratic(self):
+        r = run_scipy_de(
+            self._quadratic,
+            bounds=[(0.0, 10.0)],
+            popsize=8,
+            maxiter=100,
+            seed=0,
+        )
+        assert r.method == "DE"
+        assert np.isfinite(r.best_objective)
+        # Population-convergence tolerance means DE may stop with success=False
+        # if maxiter runs out before the population collapses, even when the
+        # polish pass has already pinned the minimum — so require finite
+        # convergence-to-a-known-optimum rather than ``result.success``.
+        assert r.best_x[0] == pytest.approx(3.0, abs=1e-3)
+        assert r.best_objective == pytest.approx(0.0, abs=1e-6)
+        assert r.n_evals > 0
+        assert r.compute_time >= 0.0
+        assert r.extras["popsize"] == 8
+        assert r.extras["maxiter"] == 100
+        assert r.extras["seed"] == 0
+        assert r.extras["strategy"] == "best1bin"
+
+    def test_de_deterministic(self):
+        kwargs = dict(bounds=[(-5.0, 5.0), (-5.0, 5.0)], popsize=8, maxiter=10, seed=42)
+        r1 = run_scipy_de(self._rosenbrock, **kwargs)
+        r2 = run_scipy_de(self._rosenbrock, **kwargs)
+        assert r1.best_objective == pytest.approx(r2.best_objective, rel=0, abs=1e-12)
+        assert np.allclose(r1.best_x, r2.best_x)
+        assert r1.n_evals == r2.n_evals
+
+    def test_de_records_history(self):
+        r = run_scipy_de(
+            self._quadratic,
+            bounds=[(0.0, 10.0)],
+            popsize=5,
+            maxiter=5,
+            seed=0,
+        )
+        assert len(r.history) > 0
+        for x, fv in r.history:
+            assert isinstance(x, np.ndarray)
+            assert isinstance(fv, float)
+            assert 0.0 <= x[0] <= 10.0
+
+    def test_de_rejects_empty_bounds(self):
+        with pytest.raises(ValueError, match="bounds must be non-empty"):
+            run_scipy_de(self._quadratic, bounds=[])
+
+    def test_de_rejects_bad_popsize(self):
+        with pytest.raises(ValueError, match="popsize must be >= 1"):
+            run_scipy_de(self._quadratic, bounds=[(0.0, 1.0)], popsize=0)
+
+    def test_de_rejects_bad_maxiter(self):
+        with pytest.raises(ValueError, match="maxiter must be >= 1"):
+            run_scipy_de(self._quadratic, bounds=[(0.0, 1.0)], maxiter=0)
 
 
 class TestRunScipyLocalCOBYQAUnavailable:

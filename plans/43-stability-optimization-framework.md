@@ -196,11 +196,14 @@ cd scripts/stencil_gen && uv run pytest tests/test_phs.py -x -q -k "TestRegressi
   - File: `scripts/stencil_gen/stencil_gen/optimizer.py`
   - Test: `cd scripts/stencil_gen && uv run pytest tests/test_optimizer.py -x -q -k "TestSHGO"` — 4 tests green.
 
-- [ ] **43.5b** Implement `run_scipy_de(f, bounds, *, popsize=15, maxiter=100, seed=0, strategy="best1bin") -> OptimizeResult`:
-  - Wraps `scipy.optimize.differential_evolution(f, bounds, popsize=popsize, maxiter=maxiter, seed=seed, strategy=strategy, tol=1e-7, init="sobol", polish=True)`.
-  - Records `result.nfev` as `n_evals`.
+- [x] **43.5b** Implemented `run_scipy_de(f, bounds, *, popsize=15, maxiter=100, seed=0, strategy="best1bin") -> OptimizeResult`:
+  - Wraps `scipy.optimize.differential_evolution` with `tol=1e-7`, `init="sobol"`, `polish=True`; records each evaluation via the same history-recorder pattern as `run_scipy_local`/`run_scipy_shgo`.
+  - Uses `result.nfev` as `n_evals`; `converged = result.success and finite(best_objective)`.
+  - Input validation: `ValueError` on empty `bounds`, `popsize < 1`, `maxiter < 1`.
+  - `extras = {popsize, maxiter, seed, strategy, scipy_message}`.
+  - Tests note: scipy DE's population-convergence tolerance can leave `result.success=False` even after the polish pass has pinned the minimum, so `TestDE::test_de_converges_on_quadratic` asserts finite convergence-to-a-known-optimum rather than `r.converged`.
   - File: `scripts/stencil_gen/stencil_gen/optimizer.py`
-  - Test: `cd scripts/stencil_gen && uv run pytest tests/test_optimizer.py -x -q -k "TestDE"`
+  - Test: `cd scripts/stencil_gen && uv run pytest tests/test_optimizer.py -x -q -k "TestDE"` — 6 tests green.
 
 - [ ] **43.5c** Integration tests `TestGlobalOptimizers`:
   - `test_shgo_finds_tension_optimum` — 1D tension E4 against an explicit stability-margin objective (e.g. `layer3.max_stab_eig`), bounds [0.5, 20]. Assert SHGO returns a finite feasible global minimum, bound-respecting, and reports `n_local_minima >= 1`. (The earlier specific-σ acceptance was dropped — see 43.3b. To pin a specific σ, pick an objective whose minimum is known for *that* field and cite the corresponding sweep value.)
