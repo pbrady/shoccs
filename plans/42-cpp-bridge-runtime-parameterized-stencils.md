@@ -379,16 +379,16 @@ Each family follows the same 4-item pattern as 42.5b–f (minus the split refere
   - Test: (no test) → **DONE** (added ~85-line "Layer 8 — C++ simulation" section between the non-normality section and "CLI usage", covering architecture, `(scheme, kernel) → Lua type` dispatch table, failure thresholds, `BridgeResult` fields, cost knobs at `layer8_N=21, layer8_t_final=1.0`, and the `sweeps brady2d --validate-with-cpp` integration). Also updated the `brady2d_stability_score` signature snippet to advertise `max_layer=8` (with the new `layer8_N`/`layer8_t_final` kwargs from 42.3b) and added a `layer8` row to the `StabilityReport` fields table. Noted at the bottom of CLI usage that L8 is not exposed via `stencil_gen.brady2d_cli` and must be driven through the Python API or the sweep subcommand.
   - Note: deliberately kept the L8 section pointing at `docs/brady2d_cpp_bridge_reference.md` (42.9b's output) for the lower-level bridge mechanics rather than duplicating them — the stability-reference doc now focuses on where L8 sits in the layered pipeline and how to invoke it, while the bridge-reference doc owns the Lua template / CSV parsing / subprocess details.
 
-- [ ] **42.9d** Update `.claude/skills/stencil-sweeps/SKILL.md`:
+- [x] **42.9d** Update `.claude/skills/stencil-sweeps/SKILL.md`:
   - Add `brady2d` to the CLI quick reference.
   - Add one line about `--validate-with-cpp`.
   - File: `.claude/skills/stencil-sweeps/SKILL.md`
-  - Test: (no test)
+  - Test: (no test) → **DONE** (added two `brady2d` CLI entries — one L1-L7 analytical sweep `--kernel tension --param-range 2 4 3 --max-layer 3`, one with `--validate-with-cpp` for L8 end-to-end validation; also added a `sweeps/brady2d_sweep.py` row to the Key Files table noting the `--validate-with-cpp` top-3-survivors behaviour).
 
-- [ ] **42.9e** Update `.claude/skills/group-velocity-analysis/SKILL.md`:
+- [x] **42.9e** Update `.claude/skills/group-velocity-analysis/SKILL.md`:
   - Add one bullet about L8 C++ validation path.
   - File: `.claude/skills/group-velocity-analysis/SKILL.md`
-  - Test: (no test)
+  - Test: (no test) → **DONE** (added "Layer 8 closed-loop validation" bullet under "When to Use" pointing at `run_cpp_brady2d` and `sweeps brady2d --validate-with-cpp`; also added `docs/brady2d_cpp_bridge_reference.md` to the Detailed Reference list so the L8 bridge mechanics are one click away from the GV skill).
 
 ### 42.10 — E2 variants and follow-ups (optional / deferred)
 
