@@ -411,6 +411,13 @@ cd scripts/stencil_gen && uv run pytest tests/test_phs.py -x -q -k "TestRegressi
   - Full optimizer suite `SYMPY_CACHE_SIZE=50000 uv run pytest tests/test_optimizer.py -x -q` — 91 passed, 5 skipped in 76 s. Test class for this path (`TestOptimizeCppValidation`) lands in 43.10b.
   - File: `scripts/stencil_gen/sweeps/optimize.py`
 
+- [ ] **43.10a-r1** Fix `_run_cpp_validation` PASS/FAIL criterion to match the cascade's L8 verdict. Currently the helper prints "L8 PASS" / "L8 FAIL" based only on `l8["stable"]`, but the cascade in `brady2d_stability.brady2d_stability_score` (and the CLI summary formatter at `brady2d_stability.py:200`) treats PASS as `stable AND final_linf <= L8_FINAL_LINF_TOL` (=1.0). A winner that runs without blow-up but overshoots the accuracy ceiling is the exact analytical-vs-C++ disagreement `--validate-with-cpp` is meant to surface, and it is currently reported as PASS with no warning. Required changes:
+  - Import `L8_FINAL_LINF_TOL` from `stencil_gen.brady2d_stability` (or read it off the module) in `scripts/stencil_gen/sweeps/optimize.py` and reuse it in `_run_cpp_validation` — do not hard-code `1.0`.
+  - Redefine the banner criterion as `passed = stable and final_linf <= L8_FINAL_LINF_TOL`. When `stable=True` but `final_linf > L8_FINAL_LINF_TOL`, emit the same `WARNING:` line the hard-blow-up branch uses today, with the reason worded explicitly as `L8 soft-failure: final_linf=... > L8_FINAL_LINF_TOL=...` so the diagnostic reads as a cascade disagreement, not a pass.
+  - Leave the persisted schema alone (`cpp_validation: {stable, final_linf, wall_time_s}`) — consumers can re-derive the verdict, and the field name `stable` must keep its bridge-level meaning to match `brady2d_stability.BridgeResult`.
+  - File: `scripts/stencil_gen/sweeps/optimize.py`
+  - Test: extend `TestOptimizeCppValidation` (43.10b) with a case that monkeypatches `brady2d_stability_score` to return `layer8 = {"stable": True, "final_linf": 2.0, "wall_time_s": 0.1}` and asserts the CLI prints the soft-failure warning while leaving `best_objective` untouched.
+
 - [ ] **43.10b** Test `TestOptimizeCppValidation`:
   - Mock or skip if `build/shoccs` not present.
   - `test_validate_classical_e4_published_alpha` — optimizer winner passes L8 (final_linf < 1.0 at t=5, N=21).
@@ -467,7 +474,7 @@ cd scripts/stencil_gen && uv run pytest tests/test_phs.py -x -q -k "TestRegressi
   ↓
 43.9a → 43.9a-r1 → 43.9b → 43.9b-r1 → 43.9b-r2 → 43.9c → 43.9c-r1 → 43.9d → 43.9d-r1  # classical-α (depends on all prior)  [43.9d done; 43.9d-r1 plan-text reconcile]
   ↓
-43.10a → 43.10b                        # L8 validation
+43.10a → 43.10a-r1 → 43.10b            # L8 validation (r1 tightens PASS criterion)
   ↓
 43.11a → 43.11b → 43.11c → 43.11d      # docs
 ```
