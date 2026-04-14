@@ -945,9 +945,12 @@ class TestStaged:
         # present and mirror the inner result.
         assert "inner_best_objective" in r.extras
         assert "inner_best_x" in r.extras
-        assert r.extras["inner_best_objective"] == pytest.approx(
-            r.extras["inner_best_objective"]
-        )
+        # Fallback builds the result via ``replace(inner_result, method="staged",
+        # converged=False, ...)`` without touching ``best_objective`` / ``best_x``,
+        # so the exposed fields must match the ``inner_*`` extras.
+        assert r.extras["inner_best_objective"] == pytest.approx(r.best_objective)
+        assert np.allclose(r.extras["inner_best_x"], r.best_x)
+        assert r.extras["inner_best_x"].shape == r.best_x.shape
         assert np.isfinite(r.extras["inner_best_objective"])
         assert r.extras["inner_best_x"].shape == (1,)
         # Validator ranking entries are all infeasible.

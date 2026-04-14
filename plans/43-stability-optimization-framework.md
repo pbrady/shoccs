@@ -253,14 +253,9 @@ cd scripts/stencil_gen && uv run pytest tests/test_phs.py -x -q -k "TestRegressi
   - Files: `scripts/stencil_gen/tests/test_optimizer.py`.
   - Test: `cd scripts/stencil_gen && uv run pytest tests/test_optimizer.py -x -q -k "test_staged_validator_reorders"` — green in 1.7 s. Full `TestStaged --run-slow`: 6 passed in 8 s (was ~16 s).
 
-- [ ] **43.6e** Fix tautological assertion in `test_staged_validator_all_blowups` (added in 43.6c) so the test actually verifies the fallback extras-parity fix it was introduced to cover.
-  - The current assertion reads `assert r.extras["inner_best_objective"] == pytest.approx(r.extras["inner_best_objective"])` (test_optimizer.py, inside `test_staged_validator_all_blowups`). Comparing a value to itself is vacuously true and does not verify that the fallback extras mirror the inner result — exactly the property 43.6c was meant to guarantee. A regression that set `inner_best_objective = None`, to the wrong float, or to a shape-wrong array would still pass this assertion as long as `pytest.approx` of the value equals itself.
-  - Because the fallback is built via `replace(inner_result, method="staged", converged=False, ...)` without touching `best_objective` or `best_x`, the returned `r.best_objective` / `r.best_x` *are* the inner-stage values. Replace the tautology with assertions that tie the extras to those fields:
-    - `assert r.extras["inner_best_objective"] == pytest.approx(r.best_objective)` (or assert against a captured inner-stage value if the test is refactored to call `multi_start_optimize` directly).
-    - `assert np.allclose(r.extras["inner_best_x"], r.best_x)` and `assert r.extras["inner_best_x"].shape == r.best_x.shape`.
-    - Keep the existing `np.isfinite(r.extras["inner_best_objective"])` and `shape == (1,)` checks.
+- [x] **43.6e** Replaced the tautological `r.extras["inner_best_objective"] == pytest.approx(r.extras["inner_best_objective"])` assertion in `test_staged_validator_all_blowups` with assertions that tie the fallback extras to the result's public fields: `r.extras["inner_best_objective"] == pytest.approx(r.best_objective)` and `np.allclose(r.extras["inner_best_x"], r.best_x)` plus a shape-parity check. Kept the original finite/shape guards. These now actually verify the 43.6c extras-parity fix — since the fallback is built via `replace(inner_result, method="staged", converged=False, ...)` without touching `best_objective`/`best_x`, tying the extras to those public fields catches any regression that mutated them out of sync.
   - File: `scripts/stencil_gen/tests/test_optimizer.py`.
-  - Test: `cd scripts/stencil_gen && uv run pytest tests/test_optimizer.py -x -q -k "test_staged_validator_all_blowups"` — green with the strengthened assertions.
+  - Test: `cd scripts/stencil_gen && uv run pytest tests/test_optimizer.py -x -q -k "test_staged_validator_all_blowups"` — green in 1.65 s. Full `TestStaged --run-slow`: 6 passed in 8.0 s.
 
 ### 43.7 — CLI: `sweeps/optimize.py`
 
