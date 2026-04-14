@@ -97,7 +97,7 @@ cd scripts/stencil_gen && uv run pytest tests/test_phs.py -x -q -k "TestRegressi
   - File: `scripts/stencil_gen/stencil_gen/optimizer.py`
   - Test: `cd scripts/stencil_gen && uv run pytest tests/test_optimizer.py -x -q -k "TestParamsVector"`
 
-- [ ] **43.1c** Implement `extract_field(report: StabilityReport, dotted_path: str) -> float`:
+- [x] **43.1c** Implement `extract_field(report: StabilityReport, dotted_path: str) -> float`:
   - Supports `layer1.boundary_gv_err`, `layer3.max_stab_eig`, `layer6.spectral_abscissa`, `layer6.kreiss_constant`, `layer6.transient_growth_bound`, `layer7.max_spectral_abscissa`, `kreiss.witness_sigma_min`, etc.
   - Uses `operator.attrgetter` for the first segment and dict `[key]` for the remainder.
   - Returns `float("inf")` if any segment is missing (e.g., layer not run).

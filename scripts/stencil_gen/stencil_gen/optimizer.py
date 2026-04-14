@@ -26,6 +26,7 @@ The public API surface is:
 
 from __future__ import annotations
 
+import operator
 from dataclasses import dataclass, field
 from typing import Callable
 
@@ -171,12 +172,49 @@ def vector_from_params(kernel: str, params: dict) -> np.ndarray:
 
 # --- primitives: report field extraction -------------------------------------
 
-def extract_field(report, dotted_path: str) -> float:  # noqa: ARG001
+def extract_field(report, dotted_path: str) -> float:
     """Dotted-path lookup into a :class:`StabilityReport`.
 
-    Implemented in 43.1c.
+    The first segment resolves as an attribute on ``report`` (via
+    :func:`operator.attrgetter`); remaining segments walk the nested payload
+    — ``dict[key]`` when the current node is a mapping, ``getattr`` otherwise
+    so dataclass-valued fields like ``kreiss`` work the same as the dict-
+    valued layer payloads.  Returns ``float('inf')`` if any segment is
+    missing, the layer was not run (``None``), or the final value cannot be
+    coerced to ``float``.
+
+    Examples
+    --------
+    >>> extract_field(report, "layer1.boundary_gv_err")
+    >>> extract_field(report, "layer6.transient_growth_bound")
+    >>> extract_field(report, "kreiss.witness_sigma_min")
     """
-    raise NotImplementedError("extract_field: implemented in 43.1c")
+    segments = dotted_path.split(".")
+    if not segments or not segments[0]:
+        return float("inf")
+    first, *rest = segments
+    try:
+        node = operator.attrgetter(first)(report)
+    except AttributeError:
+        return float("inf")
+    if node is None:
+        return float("inf")
+    for seg in rest:
+        if isinstance(node, dict):
+            if seg not in node:
+                return float("inf")
+            node = node[seg]
+        else:
+            try:
+                node = getattr(node, seg)
+            except AttributeError:
+                return float("inf")
+        if node is None:
+            return float("inf")
+    try:
+        return float(node)
+    except (TypeError, ValueError):
+        return float("inf")
 
 
 # --- objective factory -------------------------------------------------------

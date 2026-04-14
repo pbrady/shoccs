@@ -5,8 +5,11 @@ from __future__ import annotations
 import numpy as np
 import pytest
 
+from stencil_gen.brady2d_stability import StabilityReport
+from stencil_gen.gks_kreiss import KreissResult
 from stencil_gen.optimizer import (
     DEFAULT_BOUNDS,
+    extract_field,
     params_from_vector,
     vector_from_params,
 )
@@ -94,3 +97,65 @@ class TestParamsVector:
             v = vector_from_params(kernel, params)
             assert v.shape == mid.shape, f"{scheme}/{kernel}: shape mismatch"
             np.testing.assert_array_equal(v, mid)
+
+
+class TestExtractField:
+    @staticmethod
+    def _populated_report() -> StabilityReport:
+        return StabilityReport(
+            layer1={"boundary_gv_err": 1.25e-3},
+            layer2=KreissResult(is_stable=True, witness_sigma_min=0.42),
+            layer3={"max_stab_eig": -1.5e-4},
+            layer6={
+                "spectral_abscissa": -2.0e-3,
+                "kreiss_constant": 3.7,
+                "transient_growth_bound": 12.5,
+                "henrici_departure": 0.01,
+            },
+            layer7={"max_spectral_abscissa": 5.0e-4},
+            kreiss=KreissResult(is_stable=True, witness_sigma_min=0.77),
+            overall_verdict="pass",
+        )
+
+    @pytest.mark.parametrize(
+        ("path", "expected"),
+        [
+            ("layer1.boundary_gv_err", 1.25e-3),
+            ("layer3.max_stab_eig", -1.5e-4),
+            ("layer6.spectral_abscissa", -2.0e-3),
+            ("layer6.kreiss_constant", 3.7),
+            ("layer6.transient_growth_bound", 12.5),
+            ("layer7.max_spectral_abscissa", 5.0e-4),
+            ("kreiss.witness_sigma_min", 0.77),
+        ],
+    )
+    def test_extract_populated_fields(self, path, expected):
+        r = self._populated_report()
+        assert extract_field(r, path) == pytest.approx(expected)
+
+    def test_extract_unknown_first_segment_returns_inf(self):
+        r = self._populated_report()
+        assert extract_field(r, "layer99.foo") == float("inf")
+
+    def test_extract_missing_key_returns_inf(self):
+        r = self._populated_report()
+        assert extract_field(r, "layer1.not_a_metric") == float("inf")
+
+    def test_extract_layer_not_run_returns_inf(self):
+        # layer4/layer5/layer8 were not populated above
+        r = self._populated_report()
+        assert extract_field(r, "layer4.max_local_gv_error") == float("inf")
+        assert extract_field(r, "layer8.final_linf") == float("inf")
+
+    def test_extract_empty_report_returns_inf(self):
+        r = StabilityReport.empty()
+        assert extract_field(r, "layer1.boundary_gv_err") == float("inf")
+        assert extract_field(r, "kreiss.witness_sigma_min") == float("inf")
+
+    def test_extract_empty_path_returns_inf(self):
+        r = self._populated_report()
+        assert extract_field(r, "") == float("inf")
+
+    def test_extract_missing_dataclass_attr_returns_inf(self):
+        r = self._populated_report()
+        assert extract_field(r, "kreiss.no_such_attr") == float("inf")
