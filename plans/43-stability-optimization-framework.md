@@ -64,11 +64,14 @@ candidate → L1 L2 L3 feasibility → L4 L5 L6 L7 metrics → top-k → L8 C++ 
 # Fast: the optimizer module in isolation
 cd scripts/stencil_gen && uv run pytest tests/test_optimizer.py -x -q
 
-# CLI smoke: optimize tension E4 GV error at a tiny budget
+# CLI smoke: optimize tension E4 stability margin at a tiny budget
+# (uses layer3.max_stab_eig — a stability-margin field with an interior
+# minimum — instead of layer1.boundary_gv_err, which is monotone over the
+# feasible region and drives σ to the lower bound; see 43.3b resolution.)
 cd scripts/stencil_gen && uv run python -m sweeps optimize \
     --scheme E4 --kernel tension \
-    --objective layer1.boundary_gv_err \
-    --gate-layer 3 --bounds 0.5 20 \
+    --objective layer3.max_stab_eig \
+    --gate-layer 3 --max-layer 3 --bounds 0.5 20 \
     --method Nelder-Mead --max-evals 40
 
 # Regression suite still green
@@ -127,7 +130,7 @@ cd scripts/stencil_gen && uv run pytest tests/test_phs.py -x -q -k "TestRegressi
   - Test: `cd scripts/stencil_gen && uv run pytest tests/test_optimizer.py -x -q -k "TestMakeObjective"`
 
 - [x] **43.2b** Tests for `make_objective`:
-  - `test_objective_returns_finite_on_feasible` — E4 tension σ=3.0 passes L1-L3, objective returns finite `layer1.boundary_gv_err`.
+  - `test_objective_returns_finite_on_feasible` — E4 tension at a sweep-known-feasible σ (e.g. σ=3) passes L1-L3, objective returns a finite `layer1.boundary_gv_err`. (Feasibility at that σ; not an optimum claim — see 43.3b.)
   - `test_objective_returns_inf_on_gate_failure` — deliberately-bad parameters (e.g., E4 Gaussian ε=0.01) fail L3, objective returns `+inf`.
   - `test_objective_catches_exception` — monkey-patch to raise, verify `+inf` returned.
   - `test_objective_raises_on_bad_field` — `"layer99.foo"` at `gate_layer=3, max_layer=3` returns +inf without error.
@@ -153,7 +156,7 @@ cd scripts/stencil_gen && uv run pytest tests/test_phs.py -x -q -k "TestRegressi
   - File: `scripts/stencil_gen/stencil_gen/optimizer.py`, `scripts/stencil_gen/tests/test_optimizer.py`
   - Test: `cd scripts/stencil_gen && uv run pytest tests/test_optimizer.py -x -q -k "COBYQA"` — 3 tests green (2 COBYQA-available + 1 unavailable-gate).
 
-- [ ] **43.3c** Plan-file cleanup missed by 43.3a/43.3b: the "σ=3.0 is the tension-E4 optimum" assumption that 43.3b refuted for `layer1.boundary_gv_err` still survives in several downstream task specs and the completion criteria, and those references will silently reintroduce a broken test invariant when 43.4/43.5/43.6 are implemented. Reconcile them now so the next work pass starts from a consistent spec. No code changes.
+- [x] **43.3c** Plan-file cleanup missed by 43.3a/43.3b: the "σ=3.0 is the tension-E4 optimum" assumption that 43.3b refuted for `layer1.boundary_gv_err` still survives in several downstream task specs and the completion criteria, and those references will silently reintroduce a broken test invariant when 43.4/43.5/43.6 are implemented. Reconcile them now so the next work pass starts from a consistent spec. No code changes.
   - In the plan-header **Test commands** block (lines 67–72), change the CLI smoke example's objective from `layer1.boundary_gv_err` to one whose minimum is actually interior and stability-driven (e.g. `--objective layer3.max_stab_eig` with `--max-layer 3`); the current invocation would drive σ to the lower bound and defeats the "smoke" purpose.
   - In **43.4b** (`test_multi_start_finds_known_optimum`, line 167) replace "expects `best_x[0]` within 1.0 of σ=3.0" with "expects a finite feasible result, bound-respecting, and no worse than the best random restart's starting objective." If a specific-σ convergence test is still desired, specify the objective explicitly as a stability-margin field (e.g. `layer3.max_stab_eig` or a weighted composite) and cite the sweep-known optimum for *that* field, not the generic σ=3.0.
   - In **43.5c** (lines 189–191): `test_shgo_finds_tension_optimum` and `test_de_finds_tension_optimum` similarly drop the "within 5% / 10% of σ=3.0" acceptance — either pin an explicit objective whose minimum is σ=3.0, or assert only "finds a finite feasible global minimum, bound-respecting."
@@ -173,7 +176,7 @@ cd scripts/stencil_gen && uv run pytest tests/test_phs.py -x -q -k "TestRegressi
   - Test: `cd scripts/stencil_gen && uv run pytest tests/test_optimizer.py -x -q -k "TestMultiStart"`
 
 - [ ] **43.4b** Tests `TestMultiStart`:
-  - `test_multi_start_finds_known_optimum` — tension E4 with `n_restarts=5`, expects `best_x[0]` within 1.0 of σ=3.0.
+  - `test_multi_start_finds_feasible_optimum` — tension E4 with `n_restarts=5` against an objective available at `max_layer=3` (e.g. `layer3.max_stab_eig`). Assert the returned result is finite, bound-respecting, and no worse than the best random-restart starting objective. (The earlier specific-σ acceptance was dropped — see 43.3b.) If a specific-σ convergence test is still wanted, pin the objective explicitly to a stability-margin field (e.g. `layer3.max_stab_eig` or a weighted composite) and cite the sweep-known optimum for that field.
   - `test_multi_start_deterministic` — same seed produces same result across two calls.
   - `test_multi_start_handles_fully_infeasible` — set bounds entirely in known-unstable region, verify `converged=False` returned gracefully.
   - File: `scripts/stencil_gen/tests/test_optimizer.py`
@@ -195,8 +198,8 @@ cd scripts/stencil_gen && uv run pytest tests/test_phs.py -x -q -k "TestRegressi
   - Test: `cd scripts/stencil_gen && uv run pytest tests/test_optimizer.py -x -q -k "TestDE"`
 
 - [ ] **43.5c** Integration tests `TestGlobalOptimizers`:
-  - `test_shgo_finds_tension_optimum` — 1D tension E4, bounds [0.5, 20], SHGO converges within 5% of σ=3.0 and reports `n_local_minima >= 1`.
-  - `test_de_finds_tension_optimum` — same, DE with popsize=10, maxiter=20 (kept small for test speed); within 10%.
+  - `test_shgo_finds_tension_optimum` — 1D tension E4 against an explicit stability-margin objective (e.g. `layer3.max_stab_eig`), bounds [0.5, 20]. Assert SHGO returns a finite feasible global minimum, bound-respecting, and reports `n_local_minima >= 1`. (The earlier specific-σ acceptance was dropped — see 43.3b. To pin a specific σ, pick an objective whose minimum is known for *that* field and cite the corresponding sweep value.)
+  - `test_de_finds_tension_optimum` — same objective, DE with popsize=10, maxiter=20 (kept small for test speed). Same acceptance: finite feasible result, bound-respecting.
   - `test_shgo_2d_classical_alpha` — E4_1 classical-α over `[(-2, 2), (197/288, 2)]`, SHGO finds at least 1 feasible local min; compare against Brady-Livescu stored value with loose (within-basin) tolerance.
   - Mark the classical-α test `@pytest.mark.slow`.
   - File: `scripts/stencil_gen/tests/test_optimizer.py`
@@ -212,7 +215,7 @@ cd scripts/stencil_gen && uv run pytest tests/test_phs.py -x -q -k "TestRegressi
   - Test: `cd scripts/stencil_gen && uv run pytest tests/test_optimizer.py -x -q -k "TestStaged"`
 
 - [ ] **43.6b** Tests `TestStaged`:
-  - `test_staged_tension_e4_convergence` — staged run at n_restarts=3, inner_gate=3, validator=6 finds σ within 10% of 3.0.
+  - `test_staged_tension_e4_convergence` — staged run at n_restarts=3, inner_gate=3, validator=6 returns a finite feasible best whose validator-stage objective improves on or ties the inner stage's best at the same point. (The earlier specific-σ acceptance was dropped — see 43.3b.)
   - `test_staged_validator_reorders` — synthetic test: inner and validator metrics disagree; validator output differs from inner output. Use `report_field="layer6.transient_growth_bound"` which isn't available at L3; force the validator stage to re-order.
   - Mark `@pytest.mark.slow`.
   - File: `scripts/stencil_gen/tests/test_optimizer.py`
@@ -382,7 +385,7 @@ Parallelizable after 43.4 completes:
 
 - `stencil_gen/optimizer.py` exports `OptimizeResult`, `params_from_vector`, `vector_from_params`, `extract_field`, `make_objective`, `run_scipy_local`, `run_scipy_shgo`, `run_scipy_de`, `multi_start_optimize`, `run_staged_optimize`, `DEFAULT_BOUNDS`.
 - No new external dependencies — only `scipy.optimize` and `scipy.stats.qmc` (both already present).
-- `python -m sweeps optimize --scheme E4 --kernel tension --objective layer1.boundary_gv_err --bounds 0.5 20 --method Nelder-Mead --max-evals 40` runs end-to-end and prints `best_params` converging within 10% of the sweep-derived σ=3.0.
+- `python -m sweeps optimize --scheme E4 --kernel tension --objective layer3.max_stab_eig --gate-layer 3 --max-layer 3 --bounds 0.5 20 --method Nelder-Mead --max-evals 40` runs end-to-end, prints a feasible `best_params`, and respects the stated bounds. (The earlier specific-σ acceptance figure was dropped — see 43.3b.)
 - `python -m sweeps optimize --scheme E4 --kernel classical --objective layer6.transient_growth_bound --method staged --n-restarts 20 --update-known-values` runs, respects the α₁ ≥ 197/288 bound, finds at least one feasible local minimum, and persists to `known_values.json["brady2d_optima"]["E4"]["classical"]`.
 - `scripts/stencil_gen/benchmarks/alpha_basin_survey.py` with `n_seeds=20` reports at least 3 distinct basins for E4 classical-α (cross-checks Brady-Livescu's multi-modality finding of 101 E4 schemes at their full budget).
 - The survey's top basin contains a point within 0.5 L∞ of Brady-Livescu's published E4 α (stored in `alpha_extraction.py`).
