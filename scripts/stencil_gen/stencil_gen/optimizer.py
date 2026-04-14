@@ -28,10 +28,13 @@ from __future__ import annotations
 
 import operator
 import re
+import time
 from dataclasses import dataclass, field
 from typing import Callable
 
 import numpy as np
+import scipy
+from scipy.optimize import minimize
 
 from stencil_gen.brady2d_stability import brady2d_stability_score
 
@@ -312,6 +315,30 @@ def make_objective(
 
 # --- drivers -----------------------------------------------------------------
 
+def _probe_cobyqa_available() -> bool:
+    """Probe whether ``scipy.optimize.minimize(method="COBYQA")`` is usable.
+
+    COBYQA was added in scipy 1.14; older installations raise ``ValueError``
+    when the method is requested.  The probe itself is a sub-millisecond call
+    on a 1-variable identity objective.
+    """
+    try:
+        minimize(
+            lambda x: float(x[0] ** 2),
+            x0=np.array([1.0]),
+            method="COBYQA",
+            options={"maxfev": 2},
+        )
+    except Exception:
+        return False
+    return True
+
+
+_COBYQA_AVAILABLE = _probe_cobyqa_available()
+
+_LOCAL_METHODS = ("Nelder-Mead", "COBYQA")
+
+
 def run_scipy_local(
     f: Callable[[np.ndarray], float],
     x0: np.ndarray,
@@ -323,9 +350,81 @@ def run_scipy_local(
 ) -> OptimizeResult:
     """Local optimization via ``scipy.optimize.minimize``.
 
-    Implemented in 43.3a / 43.3b.
+    Wraps the user-supplied objective ``f`` in a recorder that appends
+    ``(x.copy(), fval)`` to ``history`` on every evaluation — scipy's
+    per-iteration ``callback`` only samples once per simplex step, which
+    would miss most feasibility-cliff evaluations.
+
+    ``method="Nelder-Mead"`` and ``method="COBYQA"`` are both supported.
+    COBYQA (derivative-free trust region, scipy ≥ 1.14) handles 1-6D problems
+    with feasibility cliffs better than Nelder-Mead in practice; see plan
+    43.3b.  If COBYQA is requested on a scipy build that lacks it, a clear
+    ``RuntimeError`` is raised rather than the opaque internal ``ValueError``.
     """
-    raise NotImplementedError("run_scipy_local: implemented in 43.3")
+    if method not in _LOCAL_METHODS:
+        raise ValueError(
+            f"run_scipy_local: method must be one of {_LOCAL_METHODS}, got {method!r}"
+        )
+    if method == "COBYQA" and not _COBYQA_AVAILABLE:
+        raise RuntimeError(
+            f"COBYQA requires scipy >= 1.14; got {scipy.__version__}"
+        )
+    x0 = np.asarray(x0, dtype=float).ravel()
+    if len(bounds) != x0.size:
+        raise ValueError(
+            f"run_scipy_local: bounds length {len(bounds)} does not match x0 size {x0.size}"
+        )
+
+    history: list[tuple[np.ndarray, float]] = []
+
+    def _recorder(x: np.ndarray) -> float:
+        fval = float(f(np.asarray(x, dtype=float)))
+        history.append((np.asarray(x, dtype=float).copy(), fval))
+        return fval
+
+    if method == "Nelder-Mead":
+        options = {
+            "xatol": tol,
+            "fatol": tol,
+            "maxfev": max_evals,
+            "adaptive": True,
+        }
+    else:  # COBYQA
+        options = {
+            "maxfev": max_evals,
+            "feasibility_tol": tol,
+        }
+
+    t0 = time.perf_counter()
+    result = minimize(
+        _recorder,
+        x0=x0,
+        method=method,
+        bounds=bounds,
+        options=options,
+    )
+    compute_time = time.perf_counter() - t0
+
+    best_x = np.asarray(result.x, dtype=float).ravel()
+    best_objective = float(result.fun)
+    converged = bool(result.success) and np.isfinite(best_objective)
+
+    # ``run_scipy_local`` is kernel-agnostic — it receives a black-box ``f``
+    # and cannot map ``best_x`` back to a kernel-specific params dict.
+    # Higher-level drivers (``multi_start_optimize``, ``run_staged_optimize``)
+    # own the kernel and use ``dataclasses.replace`` to fill ``best_params``.
+    return OptimizeResult(
+        best_params={},
+        best_x=best_x,
+        best_objective=best_objective,
+        best_report={},
+        method=method,
+        converged=converged,
+        n_evals=int(getattr(result, "nfev", len(history))),
+        compute_time=compute_time,
+        history=history,
+        extras={"scipy_message": str(getattr(result, "message", ""))},
+    )
 
 
 def multi_start_optimize(
