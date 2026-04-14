@@ -312,31 +312,34 @@ cd scripts/stencil_gen && uv run python -m sweeps optimize \
 
 ### 44.7 — Documentation
 
-- [ ] **44.7a** Create `scripts/stencil_gen/docs/bl42_reference.md`:
+- [x] **44.7a** Create `scripts/stencil_gen/docs/bl42_reference.md`:
   - Problem statement from Brady & Livescu §4.2 (PDE, BCs, IC, exact solution, page citation).
   - Why it's the cleanest boundary-closure stability test (`div(c) = 0`, purely imaginary continuous spectrum, energy-conserving BCs).
   - Block operator construction: `L = [[0, D/h], [D/h, 0]]` and the DOF-removal indexing.
-  - API reference: `build_bl42_operator`, `layer_bl42_reflecting_hyperbolic`, `BL42_TOL`.
+  - API reference: `build_bl42_operator`, `layer_bl42_reflecting_hyperbolic`, `BL42_TOL`, reference problem module.
   - How it fits into the cascade: runs after L3, before L4; `failed_layer = 3` on failure; `gate_layer=3` requires both L3 and L3r to pass.
   - Using it as an optimizer objective: `--objective layer_bl42.max_spectral_abscissa`.
   - Expected behavior (calibration results from 44.6b pasted as a table).
-  - File: `scripts/stencil_gen/docs/bl42_reference.md` (new)
+  - File: `scripts/stencil_gen/docs/bl42_reference.md` (new) ✓
   - Test: (no test)
 
-- [ ] **44.7b** Update `scripts/stencil_gen/docs/brady2d_stability_reference.md`:
-  - Add a "Layer 3r — BL §4.2 reflecting hyperbolic" subsection in the pipeline table; cross-link to `bl42_reference.md`.
-  - Update the cascade diagram (if any) to show L3 and L3r running in sequence.
-  - File: `scripts/stencil_gen/docs/brady2d_stability_reference.md`
+- [x] **44.7b** Update `scripts/stencil_gen/docs/brady2d_stability_reference.md`:
+  - Added L3r row in the pipeline table and failure thresholds table; cross-linked to `bl42_reference.md`.
+  - Added `layer_bl42` to `StabilityReport` field table.
+  - Updated calibration results section to reflect L3r/BL42 impact (2/9 pass vs previous 6/9).
+  - File: `scripts/stencil_gen/docs/brady2d_stability_reference.md` ✓
   - Test: (no test)
 
 - [ ] **44.7c** Update `.claude/skills/group-velocity-analysis/SKILL.md`:
   - Add one bullet under "When to Use": "Testing boundary closures against the BL §4.2 neutrally-stable hyperbolic system — the strictest `div(c) = 0` discriminator, purely imaginary continuous spectrum."
   - Add `docs/bl42_reference.md` to the "Detailed Reference" list.
+  - **Blocked:** `.claude/skills/` path is write-protected by tool permissions. Needs manual edit or permission grant.
   - File: `.claude/skills/group-velocity-analysis/SKILL.md`
   - Test: (no test)
 
 - [ ] **44.7d** Update `.claude/skills/stencil-sweeps/SKILL.md`:
   - Add a CLI example line for BL42-objective optimization.
+  - **Blocked:** `.claude/skills/` path is write-protected by tool permissions. Needs manual edit or permission grant.
   - File: `.claude/skills/stencil-sweeps/SKILL.md`
   - Test: (no test)
 

@@ -34,6 +34,7 @@ expensive layers only run for candidates that pass the cheap checks.
 | L1 | Interior + boundary group velocity error (1D) | Dispersion-quality mismatch at boundary | sub-ms |
 | L2 | Rigorous GKS Kreiss determinant test | Boundary-closure instability (necessary **and** sufficient for the 1D reduction) | ~100 ms |
 | L3 | 1D eigenvalue `max Re(lambda)` at multiple N | Semi-discrete asymptotic stability, constant coefficient | ~30 ms |
+| L3r | BL §4.2 reflecting-hyperbolic `max Re(lambda)` | Boundary-closure instability on energy-conserving system (`div(c) = 0`, purely imaginary continuous spectrum) | ~30 ms |
 | L4 | Per-point local GV error across the 2D grid | Local dispersion error from varying `(c_x, c_y)` | ~tens ms |
 | L5 | 2D anisotropy `max angle_error` over propagation angles | Grid anisotropy interacting with the radial flow | ~100 ms |
 | L6 | Non-normality on 1D operator: spectral + numerical abscissa, Henrici departure, Kreiss constant, transient-growth bound | Transient growth from non-normal 1D spatial operator | ~seconds |
@@ -47,6 +48,7 @@ expensive layers only run for candidates that pass the cheap checks.
 | L1 | `boundary_gv_err` | `L1_TOL` | 0.05 (5%) | Boundary dispersion error > 5% indicates poor closure quality |
 | L2 | `KreissResult.is_stable` | `sigma_tol` | 1e-8 | GKS determinant condition; `sigma_min(M(s)) < tol` indicates instability |
 | L3 | `max_stab_eig` | `STABILITY_TOL` | 1e-10 | 1D eigenvalue in right half-plane → unstable semi-discrete scheme |
+| L3r | `max_spectral_abscissa` | `BL42_TOL` | 1e-10 | BL §4.2 continuous spectrum is exactly imaginary; see [`bl42_reference.md`](bl42_reference.md) |
 | L4 | `max_local_gv_error` | `L4_TOL` | 0.1 (10%) | Looser than L1 because varying-coefficient scaling amplifies baseline error |
 | L5 | `max_aligned_error` | `L5_TOL` | 0.05 (5%) | Grid anisotropy projected onto the local propagation direction |
 | L6 | `spectral_abscissa` | `STABILITY_TOL` | 1e-10 | 1D operator eigenvalue check |
@@ -80,6 +82,7 @@ Dataclass returned by `brady2d_stability_score`.
 | Field | Type | Description |
 |-------|------|-------------|
 | `layer1` .. `layer7` | `dict \| None` | Per-layer metrics (populated when that layer runs) |
+| `layer_bl42` | `dict \| None` | L3r BL §4.2 reflecting-hyperbolic eigenvalue result |
 | `layer8` | `dict \| None` | L8 C++ simulation result (populated when `max_layer >= 8`) |
 | `kreiss` | `KreissResult \| None` | Alias for `layer2` (the Kreiss determinant result) |
 | `non_normality` | `NonNormalityReport \| None` | Populated by L6 (1D) or L7 (2D) |
@@ -268,13 +271,15 @@ Results stored in `sweeps/known_values.json` under the `"brady2d_calibration"` k
 Regression tests in `tests/test_phs.py::TestRegressionBrady2DCalibration` verify
 that re-running at `max_layer=3` reproduces the stored verdicts.
 
-At `max_layer=6` (2026-04-12):
-- **Pass (6/9):** E4_classical, E2_phs_k2, E4_phs_k2, E4_tension_3, E4_gaussian_09, E4_multiquadric_1
+At `max_layer=6` (2026-04-14, with L3r/BL42 enabled):
+- **Pass all layers (2/9):** E4_classical, E2_phs_k2
+- **Fail at L3r/BL42 (4/9):** E4_phs_k2, E4_tension_3, E4_gaussian_09, E4_multiquadric_1
 - **Fail at L1 (3/9):** E2_tension_6, E2_gaussian_2, E2_multiquadric_1
 
-E2 families (except PHS k=2) fail at L1 because 2nd-order boundary closures
-have inherently larger dispersion error. Only E2_phs_k2 (sigma=0, fully
-determined weights) passes.
+The L3r (BL42) layer is a strict discriminator: schemes that pass L3
+(constant-coefficient advection eigenvalue) can still fail on the
+reflecting-BC hyperbolic system. See [`bl42_reference.md`](bl42_reference.md)
+for the full calibration table and API.
 
 ## References
 
