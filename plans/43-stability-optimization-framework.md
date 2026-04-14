@@ -256,6 +256,15 @@ cd scripts/stencil_gen && uv run pytest tests/test_phs.py -x -q -k "TestRegressi
   - File: `scripts/stencil_gen/tests/test_optimizer.py`.
   - Test: `cd scripts/stencil_gen && uv run pytest tests/test_optimizer.py -x -q -k "test_staged_validator_reorders"` — synthetic test green in under 1 s.
 
+- [ ] **43.6e** Fix tautological assertion in `test_staged_validator_all_blowups` (added in 43.6c) so the test actually verifies the fallback extras-parity fix it was introduced to cover.
+  - The current assertion reads `assert r.extras["inner_best_objective"] == pytest.approx(r.extras["inner_best_objective"])` (test_optimizer.py, inside `test_staged_validator_all_blowups`). Comparing a value to itself is vacuously true and does not verify that the fallback extras mirror the inner result — exactly the property 43.6c was meant to guarantee. A regression that set `inner_best_objective = None`, to the wrong float, or to a shape-wrong array would still pass this assertion as long as `pytest.approx` of the value equals itself.
+  - Because the fallback is built via `replace(inner_result, method="staged", converged=False, ...)` without touching `best_objective` or `best_x`, the returned `r.best_objective` / `r.best_x` *are* the inner-stage values. Replace the tautology with assertions that tie the extras to those fields:
+    - `assert r.extras["inner_best_objective"] == pytest.approx(r.best_objective)` (or assert against a captured inner-stage value if the test is refactored to call `multi_start_optimize` directly).
+    - `assert np.allclose(r.extras["inner_best_x"], r.best_x)` and `assert r.extras["inner_best_x"].shape == r.best_x.shape`.
+    - Keep the existing `np.isfinite(r.extras["inner_best_objective"])` and `shape == (1,)` checks.
+  - File: `scripts/stencil_gen/tests/test_optimizer.py`.
+  - Test: `cd scripts/stencil_gen && uv run pytest tests/test_optimizer.py -x -q -k "test_staged_validator_all_blowups"` — green with the strengthened assertions.
+
 ### 43.7 — CLI: `sweeps/optimize.py`
 
 - [ ] **43.7a** Create `scripts/stencil_gen/sweeps/optimize.py::main(argv) -> int`:
@@ -398,7 +407,7 @@ cd scripts/stencil_gen && uv run pytest tests/test_phs.py -x -q -k "TestRegressi
   ↓
 43.5a → 43.5b → 43.5c                  # SHGO + DE
   ↓
-43.6a → 43.6b → 43.6c → 43.6d          # staged pipeline + fallback-extras/converged fix + deterministic re-order test
+43.6a → 43.6b → 43.6c → 43.6d → 43.6e  # staged pipeline + fallback-extras/converged fix + deterministic re-order test + tautology-assertion fix
   ↓
 43.7a → 43.7b → 43.7c                  # CLI
   ↓
