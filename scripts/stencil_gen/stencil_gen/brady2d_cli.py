@@ -9,6 +9,9 @@ Usage:
     # Run calibration across all families
     uv run python -m stencil_gen.brady2d_cli --run-calibration --max-layer 3
     uv run python -m stencil_gen.brady2d_cli --run-calibration --max-layer 6 --update-known-values
+
+    # Multi-seed E4 classical-α basin survey (plan 43.9c)
+    uv run python -m stencil_gen.brady2d_cli --alpha-basin-survey --n-seeds 20
 """
 
 from __future__ import annotations
@@ -92,6 +95,30 @@ def _run_calibration_mode(args: argparse.Namespace) -> int:
     return 1 if any_fail else 0
 
 
+def _run_alpha_basin_survey_mode(args: argparse.Namespace) -> int:
+    """Run the E4 classical-α multi-seed basin survey (plan 43.9c)."""
+    from stencil_gen.benchmarks.alpha_basin_survey import (
+        format_survey_table,
+        run_survey,
+    )
+
+    kwargs: dict = {"n_seeds": args.n_seeds, "base_seed": args.base_seed}
+    if args.n_restarts is not None:
+        kwargs["n_restarts"] = args.n_restarts
+    if args.survey_max_evals is not None:
+        kwargs["max_evals"] = args.survey_max_evals
+    survey = run_survey(**kwargs)
+
+    print(format_survey_table(survey))
+
+    if args.json_output:
+        with open(args.json_output, "w") as f:
+            json.dump(survey, f, indent=2, default=_json_serializer)
+        print(f"\nJSON output written to: {args.json_output}")
+
+    return 0 if survey["n_feasible_seeds"] > 0 else 1
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(
         prog="brady2d_cli",
@@ -157,8 +184,41 @@ def main(argv: list[str] | None = None) -> int:
         default=False,
         help="Write calibration results to known_values.json under 'brady2d_calibration' key",
     )
+    parser.add_argument(
+        "--alpha-basin-survey",
+        action="store_true",
+        default=False,
+        help="Run multi-seed E4 classical-α basin survey (plan 43.9c) instead of scoring",
+    )
+    parser.add_argument(
+        "--n-seeds",
+        type=int,
+        default=20,
+        help="Number of Sobol seeds for --alpha-basin-survey (default: 20)",
+    )
+    parser.add_argument(
+        "--base-seed",
+        type=int,
+        default=0,
+        help="Starting seed offset for --alpha-basin-survey (default: 0)",
+    )
+    parser.add_argument(
+        "--n-restarts",
+        type=int,
+        default=None,
+        help="Override inner multi-start restarts for --alpha-basin-survey",
+    )
+    parser.add_argument(
+        "--survey-max-evals",
+        type=int,
+        default=None,
+        help="Override per-restart max objective evaluations for --alpha-basin-survey",
+    )
 
     args = parser.parse_args(argv)
+
+    if args.alpha_basin_survey:
+        return _run_alpha_basin_survey_mode(args)
 
     if args.run_calibration:
         return _run_calibration_mode(args)
