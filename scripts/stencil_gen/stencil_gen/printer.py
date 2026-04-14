@@ -68,6 +68,7 @@ class StencilCodePrinter(C99CodePrinter):
 def build_symbol_map(
     param_arrays: dict[str, int],
     has_psi: bool = False,
+    scalar_params: list[str] | None = None,
 ) -> dict[Symbol, str]:
     """Build a mapping from SymPy Symbols to C++ variable strings.
 
@@ -75,6 +76,9 @@ def build_symbol_map(
         param_arrays: Maps array name to element count.
             E.g. {"alpha": 2} or {"fa": 6, "da": 3, "ia": 4}.
         has_psi: If True, include psi -> "psi" mapping.
+        scalar_params: Runtime scalar parameter names. Each name `n` maps
+            `Symbol(n) -> "n"` (no subscript), companion to `param_arrays`
+            which emits subscripted array accesses.
 
     Returns:
         Dict mapping Symbol objects to C++ strings.
@@ -83,6 +87,8 @@ def build_symbol_map(
     for name, count in param_arrays.items():
         for i in range(count):
             smap[Symbol(f"{name}_{i}")] = f"{name}[{i}]"
+    for name in scalar_params or []:
+        smap[Symbol(name)] = name
     if has_psi:
         smap[Symbol("psi")] = "psi"
     smap[Symbol("h")] = "h"

@@ -544,7 +544,11 @@ def _emit_factory(spec: StencilGenSpec) -> str:
 
 def generate_stencil_cpp(spec: StencilGenSpec) -> str:
     """Generate a complete stencil .cpp file from a StencilGenSpec."""
-    smap = build_symbol_map(spec.param_arrays, has_psi=not spec.is_uniform)
+    smap = build_symbol_map(
+        spec.param_arrays,
+        has_psi=not spec.is_uniform,
+        scalar_params=spec.scalar_params,
+    )
     printer = StencilCodePrinter(symbol_map=smap)
     return "".join(
         [

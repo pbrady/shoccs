@@ -152,11 +152,12 @@ cd scripts/stencil_gen && uv run pytest tests/test_brady2d_stability.py -x -q -k
   - Test: `cd scripts/stencil_gen && uv run pytest tests/test_codegen.py -x -q -k "TestScalarParamsEmission"` → **PASSED** (6 tests: single/multiple scalar field emission, single/multiple constructor signature, default ctor preserved, no-scalars negative check). Full `tests/test_codegen.py` still green (38 passed).
   - Note: scalar constructor emits body-assignment (`sigma = sigma_;`) rather than an init list, matching the `copy_zero_padded` body style already used for array-param constructors. Parameter is named `{name}_` to avoid shadowing the member.
 
-- [ ] **42.4c** Extend `build_symbol_map` in `scripts/stencil_gen/stencil_gen/printer.py:68` to accept `scalar_params: list[str]`:
+- [x] **42.4c** Extend `build_symbol_map` in `scripts/stencil_gen/stencil_gen/printer.py:68` to accept `scalar_params: list[str]`:
   - For each scalar param name, map `Symbol(name) → name` (no subscript).
   - Update callers in `codegen.py` to pass `spec.scalar_params` through.
   - File: `scripts/stencil_gen/stencil_gen/printer.py`, `scripts/stencil_gen/stencil_gen/codegen.py`
-  - Test: `cd scripts/stencil_gen && uv run pytest tests/test_printer.py -x -q -k "TestScalarParams"`
+  - Test: `cd scripts/stencil_gen && uv run pytest tests/test_printer.py -x -q -k "TestScalarParams"` → **PASSED** (6 tests: single/multiple scalars, alongside array, no-subscript regression, default `None`, default-omitted backward-compat). Full `test_printer.py` + `test_codegen.py` still green (54 passed).
+  - Note: `scalar_params` is keyword-only with default `None` (treated as empty) to preserve the existing two-positional-arg call site in `generate_stencil_cpp` prior to this change; callers new and old both work. `codegen.py:547` now passes `spec.scalar_params` as a keyword argument alongside `has_psi=not spec.is_uniform`.
 
 - [ ] **42.4d** Tests `TestScalarParamsCodegenEndToEnd`:
   - Build a synthetic `StencilGenSpec(name="TestStruct", scalar_params=["sigma"], interior_coeffs=[sympy.Symbol("sigma") * sympy.Symbol("h")], ...)`.

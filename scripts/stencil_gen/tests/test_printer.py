@@ -70,3 +70,45 @@ def test_symbol_unmapped():
     p = StencilCodePrinter(symbol_map={})
     t5 = Symbol("t5")
     assert p.doprint(t5) == "t5"
+
+
+class TestScalarParams:
+    """build_symbol_map scalar_params emits subscript-free names."""
+
+    def test_single_scalar(self):
+        smap = build_symbol_map({}, scalar_params=["sigma"])
+        p = StencilCodePrinter(symbol_map=smap)
+        assert p.doprint(Symbol("sigma")) == "sigma"
+
+    def test_multiple_scalars(self):
+        smap = build_symbol_map({}, scalar_params=["sigma", "epsilon"])
+        p = StencilCodePrinter(symbol_map=smap)
+        assert p.doprint(Symbol("sigma")) == "sigma"
+        assert p.doprint(Symbol("epsilon")) == "epsilon"
+
+    def test_scalar_alongside_array(self):
+        smap = build_symbol_map({"alpha": 2}, scalar_params=["sigma"])
+        p = StencilCodePrinter(symbol_map=smap)
+        assert p.doprint(Symbol("alpha_0")) == "alpha[0]"
+        assert p.doprint(Symbol("alpha_1")) == "alpha[1]"
+        assert p.doprint(Symbol("sigma")) == "sigma"
+
+    def test_scalar_not_subscripted(self):
+        """Regression: scalar name must NOT be rendered as `sigma[0]`."""
+        smap = build_symbol_map({}, scalar_params=["sigma"])
+        p = StencilCodePrinter(symbol_map=smap)
+        assert "[" not in p.doprint(Symbol("sigma"))
+
+    def test_scalar_default_none(self):
+        """scalar_params=None (default) is accepted and yields no mappings."""
+        smap = build_symbol_map({"alpha": 1})
+        assert Symbol("alpha_0") in smap
+        # A symbol whose name was not passed should not be present.
+        assert Symbol("sigma") not in smap
+
+    def test_scalar_default_no_arg(self):
+        """Omitting scalar_params entirely still works (backward compat)."""
+        smap = build_symbol_map({"alpha": 1}, has_psi=True)
+        p = StencilCodePrinter(symbol_map=smap)
+        assert p.doprint(Symbol("alpha_0")) == "alpha[0]"
+        assert p.doprint(Symbol("psi")) == "psi"
