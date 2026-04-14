@@ -276,12 +276,13 @@ cd scripts/stencil_gen && uv run pytest tests/test_phs.py -x -q -k "TestRegressi
   - File: `scripts/stencil_gen/sweeps/__main__.py`
   - Test: `cd scripts/stencil_gen && uv run python -m sweeps optimize --help` — prints the full argparse surface. End-to-end smoke: `SYMPY_CACHE_SIZE=50000 uv run python -m sweeps optimize --scheme E4 --kernel tension --objective layer3.max_stab_eig --gate-layer 3 --max-layer 3 --bounds 0.5 20 --method Nelder-Mead --max-evals 40 --n-restarts 2` → `best_objective = -1.220708e-04` at σ ≈ 1.644 in ~7 s (converged, 36 evals, 2 feasible restarts).
 
-- [ ] **43.7c** CLI smoke tests `TestOptimizeCLI`:
-  - `test_cli_tension_nelder_mead` — subprocess invocation with a tiny budget completes and prints a summary containing "best".
-  - `test_cli_rejects_bad_objective` — objective `layer99.foo` exits non-zero.
-  - `test_cli_rejects_missing_bounds_and_kernel` — dimensions mismatch returns a clear error.
-  - File: `scripts/stencil_gen/tests/test_optimizer.py`
-  - Test: `cd scripts/stencil_gen && uv run pytest tests/test_optimizer.py -x -q -k "TestOptimizeCLI"`
+- [x] **43.7c** Added `TestOptimizeCLI` — 3 tests in `scripts/stencil_gen/tests/test_optimizer.py`:
+  - `test_cli_tension_nelder_mead` (`@pytest.mark.slow`) — subprocess `python -m sweeps.optimize` with `--scheme E4 --kernel tension --objective layer3.max_stab_eig --bounds 0.5 20 --method Nelder-Mead --n-restarts 1 --max-evals 10`. Asserts `returncode == 0` and the summary contains `best_objective` / `best_params`. Marked slow because the subprocess pays the full SymPy cold-start tax (~5-7 min in a fresh env); timeout set to 900 s. Verified green via `--run-slow` on first manual invocation (393 s).
+  - `test_cli_rejects_bad_objective` — in-process `main(["--objective", "bogus.field", ...])`. The plan's original `layer99.foo` is *not* a bad-field example: `_LAYER_PREFIX_RE` matches any `layer\d+\.` so `max_layer` would infer to 99 and the CLI would run silently (verified: took 6 min wall to produce `best_objective = inf`). Switched to `bogus.field`, which has no layer prefix and no alias entry, so `make_objective` raises `ValueError` up front → `parser.error` → `SystemExit(2)`. Fast.
+  - `test_cli_rejects_kernel_bounds_dim_mismatch` — in-process `main(["--kernel", "classical", "--bounds", "0.5", "20", ...])`. Without the new `_validate_kernel_bounds_dim` guard, this would silently Sobol-sample a 1D start into a 2D kernel, every evaluation would throw-and-swallow, and the CLI would exit 0 with `best_objective = inf`. The guard now raises `ValueError("kernel='classical' expects 2 bound pair(s); got 1")` → `SystemExit`. Fast.
+  - New CLI validation: `_KERNEL_DIM` map + `_validate_kernel_bounds_dim(kernel, bounds)` called after `_resolve_bounds` in `sweeps/optimize.py::main`. Catches user error at parse time instead of hiding it behind a silent infeasible run.
+  - Files: `scripts/stencil_gen/tests/test_optimizer.py`, `scripts/stencil_gen/sweeps/optimize.py`.
+  - Test: `cd scripts/stencil_gen && SYMPY_CACHE_SIZE=50000 uv run pytest tests/test_optimizer.py -x -q -k "TestOptimizeCLI"` — 2 passed, 1 slow skipped, ~4 s. Full non-slow suite still green: 77 passed, 3 skipped, 95 s.
 
 ### 43.8 — Persistence to `known_values.json`
 

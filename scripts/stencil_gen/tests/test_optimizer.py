@@ -957,3 +957,99 @@ class TestStaged:
         ranking = r.extras["validator_ranking"]
         assert len(ranking) >= 1
         assert all(not np.isfinite(fv) for (_x, fv) in ranking)
+
+
+class TestOptimizeCLI:
+    """Smoke tests for ``sweeps.optimize`` (plan 43.7c).
+
+    One subprocess test verifies the real ``python -m sweeps.optimize`` entry
+    point end-to-end; the error-path tests call ``main`` in-process to keep
+    the suite fast (parser.error raises SystemExit, which is what "exits
+    non-zero" means in a subprocess).
+    """
+
+    @pytest.mark.slow
+    def test_cli_tension_nelder_mead(self):
+        """A tiny tension-E4 Nelder-Mead run completes and prints a summary.
+
+        Marked slow: subprocess pays the SymPy cold-start tax (~5-7 min on
+        first invocation in a fresh environment).
+        """
+        import os
+        import subprocess
+        import sys
+        from pathlib import Path
+
+        stencil_gen_dir = Path(__file__).resolve().parent.parent
+        env = os.environ.copy()
+        env["SYMPY_CACHE_SIZE"] = env.get("SYMPY_CACHE_SIZE", "50000")
+        proc = subprocess.run(
+            [
+                sys.executable,
+                "-m",
+                "sweeps.optimize",
+                "--scheme", "E4",
+                "--kernel", "tension",
+                "--objective", "layer3.max_stab_eig",
+                "--gate-layer", "3",
+                "--max-layer", "3",
+                "--bounds", "0.5", "20",
+                "--method", "Nelder-Mead",
+                "--n-restarts", "1",
+                "--max-evals", "10",
+                "--seed", "0",
+            ],
+            cwd=str(stencil_gen_dir),
+            env=env,
+            capture_output=True,
+            text=True,
+            timeout=900,
+        )
+        assert proc.returncode == 0, (
+            f"stdout:\n{proc.stdout}\n\nstderr:\n{proc.stderr}"
+        )
+        assert "best_objective" in proc.stdout
+        assert "best_params" in proc.stdout
+
+    def test_cli_rejects_bad_objective(self):
+        """Unknown objective prefix cannot infer max_layer → SystemExit.
+
+        ``bogus.field`` has neither a ``layerN.`` prefix nor an entry in
+        ``_FIELD_LAYER_ALIAS``, so ``make_objective`` raises ``ValueError`` at
+        construction (before any evaluation), which the CLI surfaces as
+        ``parser.error`` → ``SystemExit(2)``.
+        """
+        from sweeps.optimize import main
+
+        with pytest.raises(SystemExit) as exc_info:
+            main(
+                [
+                    "--scheme", "E4",
+                    "--kernel", "tension",
+                    "--objective", "bogus.field",
+                    "--bounds", "0.5", "20",
+                    "--method", "Nelder-Mead",
+                    "--n-restarts", "1",
+                    "--max-evals", "4",
+                ]
+            )
+        # argparse.error exits with code 2.
+        assert exc_info.value.code != 0
+
+    def test_cli_rejects_kernel_bounds_dim_mismatch(self):
+        """``--kernel classical --bounds 0.5 20`` (1D bounds for 2D kernel) errors."""
+        from sweeps.optimize import main
+
+        with pytest.raises(SystemExit) as exc_info:
+            main(
+                [
+                    "--scheme", "E4",
+                    "--kernel", "classical",
+                    "--objective", "layer3.max_stab_eig",
+                    "--bounds", "0.5", "20",
+                    "--method", "Nelder-Mead",
+                    "--n-restarts", "1",
+                    "--max-evals", "4",
+                ]
+            )
+        assert exc_info.value.code != 0

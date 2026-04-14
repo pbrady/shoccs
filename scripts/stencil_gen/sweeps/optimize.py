@@ -34,6 +34,7 @@ from ._common import load_known_values, save_known_values
 
 _METHOD_CHOICES = ("Nelder-Mead", "COBYQA", "SHGO", "DE", "staged")
 _KERNEL_CHOICES = ("tension", "gaussian", "multiquadric", "classical")
+_KERNEL_DIM = {"tension": 1, "gaussian": 1, "multiquadric": 1, "classical": 2}
 
 
 def _parse_bounds(raw: list[float] | None) -> list[tuple[float, float]] | None:
@@ -61,6 +62,26 @@ def _resolve_bounds(
             "pass --bounds explicitly"
         )
     return list(DEFAULT_BOUNDS[key])
+
+
+def _validate_kernel_bounds_dim(
+    kernel: str,
+    bounds: list[tuple[float, float]],
+) -> None:
+    """Reject bounds whose pair count disagrees with ``kernel``'s dimensionality.
+
+    Without this gate, a mismatch (e.g. ``--kernel classical --bounds 0.5 20``)
+    would feed a 1D Sobol start into a 2D ``params_from_vector``, the exception
+    would be swallowed by ``make_objective``'s try/except, and every evaluation
+    would silently return ``+inf`` — the CLI would exit 0 with an infeasible
+    result instead of flagging the user error.
+    """
+    expected = _KERNEL_DIM[kernel]
+    if len(bounds) != expected:
+        raise ValueError(
+            f"kernel={kernel!r} expects {expected} bound pair(s); "
+            f"got {len(bounds)}"
+        )
 
 
 def _result_to_persist_dict(
@@ -289,6 +310,7 @@ def main(argv: list[str] | None = None) -> int:
 
     try:
         bounds = _resolve_bounds(args.scheme, args.kernel, args.bounds)
+        _validate_kernel_bounds_dim(args.kernel, bounds)
     except ValueError as exc:
         parser.error(str(exc))
 
