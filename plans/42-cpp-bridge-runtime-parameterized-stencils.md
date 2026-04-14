@@ -243,13 +243,14 @@ The strategy: the constructor takes `real sigma` from Lua, builds the small (r=5
 
 Each family follows the same 4-item pattern as 42.5b–f (minus the split reference-generation step, which is combined into the first item per family). The kernel function changes; everything else mirrors `tension_E4u_1`.
 
-- [ ] **42.6a** Generate the Python reference for `gaussian_E4u_1` at `epsilon=0.9` and create `src/stencils/gaussian_E4u_1.cpp` skeleton + CMake registration:
+- [x] **42.6a** Generate the Python reference for `gaussian_E4u_1` at `epsilon=0.9` and create `src/stencils/gaussian_E4u_1.cpp` skeleton + CMake registration:
   - Generate reference: `cd scripts/stencil_gen && uv run python -c "from stencil_gen.phs import build_diff_matrix_rbf; import numpy as np; D = build_diff_matrix_rbf(n=20, p=2, q=3, epsilon=0.9, kernel='gaussian', nu=1, nextra=0); np.set_printoptions(precision=17); print(repr(D[:5, :7]))"`.
   - Add as `REFERENCE_GAUSSIAN_E4U1_EPS09_COEFFS` to `tests/fixtures/gaussian_e4u1_reference.py`.
   - Create `src/stencils/gaussian_E4u_1.cpp` as a clone of `tension_E4u_1.cpp` with `real epsilon` instead of `real sigma` and empty solver (stub).
   - Append `gaussian_E4u_1.cpp` to `src/stencils/CMakeLists.txt`.
   - File: `scripts/stencil_gen/tests/fixtures/gaussian_e4u1_reference.py` (new), `src/stencils/gaussian_E4u_1.cpp` (new), `src/stencils/CMakeLists.txt`
-  - Test: `cmake --build build --target shoccs-stencils`
+  - Test: `cmake --build build --target shoccs-stencils` → **PASSED** (clean incremental build: `Building CXX object .../gaussian_E4u_1.cpp.o` → `Linking CXX static library libshoccs-stencils.a`, no compiler warnings). Fixture regenerates exactly (max_abs_diff = 0.0) against `build_diff_matrix_rbf(kernel='gaussian', epsilon=0.9)`.
+  - Note: skeleton stub `solve_gaussian_coefficients` zero-fills rows 0..3 and hardcodes the row-4 classical E4 stencil; the real solve body comes in 42.6b. Struct is not yet dispatchable from Lua — registration is 42.6c. `<cstddef>` include was omitted from the skeleton (no `std::size_t` references yet); 42.6b adds it back when `gauss_solve<>` is introduced.
 
 - [ ] **42.6b** Implement `solve_gaussian_coefficients(real epsilon, std::array<real, 5*7>& out)` in `gaussian_E4u_1.cpp`:
   - Same 10×10 augmented system and 5×7 output layout as `solve_tension_coefficients` (see corrected dimension note above 42.5b — 6-point kernel + 4-column polynomial augmentation; rows 0..3 × cols 0..5 are solved, row 4 is the hardcoded classical E4 stencil, col 6 of rows 0..3 is zero).
