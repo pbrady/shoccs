@@ -377,7 +377,7 @@ Every strand is strictly sequential; no parallelism opportunities without riskin
 - `layer_bl42_reflecting_hyperbolic` returns `{spectral_abscissa_by_n, max_spectral_abscissa, purely_imaginary}` for the published classical-E4 closure and classifies it as `purely_imaginary=True`.
 - `brady2d_stability_score(..., max_layer=3)` populates `report.layer_bl42`; failures set `failed_layer=3` with a distinctive `failed_reason` containing "BL42".
 - `python -m sweeps optimize --objective layer_bl42.max_spectral_abscissa --kernel tension --scheme E4 --bounds 0.5 20 --method Nelder-Mead` runs end-to-end and returns a finite best_objective.
-- `known_values.json["brady2d_calibration"]` contains `layer_bl42` entries for all 9 families after 44.6b.
+- `known_values.json["brady2d_calibration"]` contains `layer_bl42` entries for the 6 families that reach L3r (3 E2 families fail at L1 and short-circuit before L3r).
 - `TestRegressionBrady2DCalibration` recomputes each family's `max_spectral_abscissa` within 1% of the stored value.
 - `cd scripts/stencil_gen && uv run pytest tests/ -x -q` still passes in under 60 seconds.
 - `docs/bl42_reference.md` exists; `brady2d_stability_reference.md` cross-links to it; both skills updated.
