@@ -327,9 +327,20 @@ cd scripts/stencil_gen && uv run pytest tests/test_phs.py -x -q -k "TestRegressi
   - Files: `scripts/stencil_gen/stencil_gen/optimizer.py`, `scripts/stencil_gen/tests/test_optimizer.py`.
   - Test: `cd scripts/stencil_gen && SYMPY_CACHE_SIZE=50000 uv run pytest tests/test_optimizer.py -x -q -k "TestClassicalAlphaBounds"` — 6 passed in 2.0 s. Full suite: 84 passed, 3 skipped, 76 s; slow `test_shgo_2d_classical_alpha` still green in 20 s.
 
+- [ ] **43.9a-r1** Plan-text cleanup missed by 43.9a: the decision to drop the 197/288 floor from `DEFAULT_BOUNDS[("E4", "classical")]` survives in several downstream task specs and the completion criteria as the old "α₁ ≥ 197/288 hard" invariant. These will silently encode the wrong bound / wrong assertion when 43.9b/c are implemented and will contradict the widened `DEFAULT_BOUNDS` that 43.9a actually shipped. Reconcile them now. No code changes.
+  - In the plan-header **scope** bullet (line 12), change "E4_1 (2D, single hard inequality `α₁ ≥ 197/288`)" to "E4_1 (2D, `α₁` lower bound is analytical-stability-driven, not the C++ cut-cell 197/288 floor — see 43.9a)".
+  - In the plan-header **parameter-spaces table** (line 37), update the Classical-α row bounds from `α₁ ∈ [197/288, 2]` to `α₁ ∈ [0.05, 2]` and change the Constraints column from "α₁ ≥ 197/288 hard" to "analytical-stability only; C++ cut-cell 197/288 floor enforced at L8 diagnosis — see 43.9a".
+  - In the **Read first** list (line 59), rephrase the `src/stencils/E4_1.cpp` bullet to note the 197/288 constraint is cut-cell-specific and is *not* enforced by the Python analytical pipeline (L1–L7) — it fires only as an L8 diagnostic.
+  - In **43.1a** (line 90) change the inline spec `E4 classical α has `[(-2.0, 2.0), (197.0/288.0, 2.0)]`` to `E4 classical α has `[(-2.0, 2.0), (0.05, 2.0)]` — see 43.9a for the analytical-vs-cut-cell bound reconciliation`. This keeps the implemented constant matching the spec that describes it.
+  - In **43.9b** (line 332) drop the bullet `Assert converged result has `best_x[1] >= 197/288 - 1e-9` (hard bound respected)` — it contradicts the widened `DEFAULT_BOUNDS` (which admits α₁ ≥ 0.05) and would fail on the Brady-Livescu feasible region (α₁ ≈ 0.16 < 197/288). Replace with: `Assert converged result is feasible (finite `best_objective`), bound-respecting (`best_x[i]` ∈ the widened `DEFAULT_BOUNDS` interval for each i), and records an L8 diagnostic flag `cpp_cutcell_violates_197_288 = best_x[1] < 197/288` in the result extras (purely informational — does not fail the test).`
+  - In **43.9c** (line 344) change the test-command invocation `bounds=[(-2,2),(197/288,2)]` to `bounds=DEFAULT_BOUNDS[("E4","classical")]` (or the literal `[(-2,2),(0.05,2)]`) so the basin survey uses the same feasible envelope the rest of the pipeline uses.
+  - In the **Completion Criteria** (line 434), change "respects the α₁ ≥ 197/288 bound" to "respects `DEFAULT_BOUNDS[("E4","classical")]` (widened in 43.9a to admit the Brady-Livescu analytical feasible region)".
+  - File: `plans/43-stability-optimization-framework.md` only (no code changes).
+  - Test: `grep -n "197/288\|197\.0/288" plans/43-stability-optimization-framework.md` — every surviving hit must be inside the 43.9a resolution narrative, the `TestClassicalAlphaBounds` description, the `Classical-α` parameter-spaces Constraints cell (which now cites 197/288 as an L8 diagnostic only), or this 43.9a-r1 item. No surviving hit may appear in an active (unchecked) task spec or in the `Completion Criteria` as a bound/assertion.
+
 - [ ] **43.9b** Single-seed optimization run on E4_1 classical-α:
   - `run_staged_optimize(scheme="E4", kernel="classical", report_field="layer6.transient_growth_bound", bounds=DEFAULT_BOUNDS[("E4", "classical")], inner_gate=3, inner_max_layer=3, validator_max_layer=6, top_k=5, method="Nelder-Mead", n_restarts=20, seed=0)`.
-  - Assert converged result has `best_x[1] >= 197/288 - 1e-9` (hard bound respected).
+  - Assert converged result is feasible (finite `best_objective`), bound-respecting (`best_x[i]` within each `DEFAULT_BOUNDS[("E4","classical")]` interval), and records an L8 diagnostic flag `cpp_cutcell_violates_197_288 = bool(best_x[1] < 197.0/288.0)` in the result extras (informational — does not fail the test; see 43.9a / 43.9a-r1 for why).
   - Record the result.
   - Mark `@pytest.mark.slow`.
   - File: `scripts/stencil_gen/tests/test_optimizer.py`
@@ -341,7 +352,7 @@ cd scripts/stencil_gen && uv run pytest tests/test_phs.py -x -q -k "TestRegressi
   - CLI entry: `python -m stencil_gen.brady2d_cli --alpha-basin-survey --n-seeds 20`. Prints a table of `(α₀, α₁, objective, n_seeds_in_basin)`.
   - Not a test, but keep it under 200 lines. Mark the test `@pytest.mark.slow`.
   - File: `scripts/stencil_gen/stencil_gen/benchmarks/alpha_basin_survey.py` (new)
-  - Test: `cd scripts/stencil_gen && uv run python -c "from stencil_gen.benchmarks.alpha_basin_survey import run_survey; r = run_survey(n_seeds=3, bounds=[(-2,2),(197/288,2)]); print(len(r['basins']))"`
+  - Test: `cd scripts/stencil_gen && uv run python -c "from stencil_gen.benchmarks.alpha_basin_survey import run_survey; r = run_survey(n_seeds=3, bounds=[(-2,2),(0.05,2)]); print(len(r['basins']))"`
 
 - [ ] **43.9d** Compare the survey's top basin against Brady-Livescu's published E4 α:
   - Read the published values from `stencil_gen/alpha_extraction.py` (they're stored there).
@@ -413,7 +424,7 @@ cd scripts/stencil_gen && uv run pytest tests/test_phs.py -x -q -k "TestRegressi
   ↓
 43.8a → 43.8b → 43.8c                  # persistence + regression + persist gate/max_layer
   ↓
-43.9a → 43.9b → 43.9c → 43.9d          # classical-α (depends on all prior)
+43.9a → 43.9a-r1 → 43.9b → 43.9c → 43.9d  # classical-α (depends on all prior)
   ↓
 43.10a → 43.10b                        # L8 validation
   ↓
