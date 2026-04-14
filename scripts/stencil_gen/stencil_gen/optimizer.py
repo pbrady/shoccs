@@ -103,20 +103,70 @@ class OptimizeResult:
 
 # --- primitives: params <-> vector -------------------------------------------
 
-def params_from_vector(kernel: str, x: np.ndarray) -> dict:  # noqa: ARG001
-    """Convert a flat vector to a kernel-specific params dict.
+_SCALAR_EPSILON_KERNELS = ("gaussian", "multiquadric")
 
-    Implemented in 43.1b.
+
+def params_from_vector(kernel: str, x: np.ndarray) -> dict:
+    """Convert a flat vector to the kernel-specific ``params`` dict that
+    :func:`brady2d_stability_score` consumes.
+
+    Kernel mapping (see plan 43, section "Parameter spaces in scope"):
+
+    - ``"tension"``                     : ``x=[σ]``            → ``{"sigma": σ}``
+    - ``"gaussian"`` / ``"multiquadric"``: ``x=[ε]``            → ``{"epsilon": ε}``
+    - ``"tension-penalty"``             : ``x=[σ, γ]``         → ``{"sigma": σ, "gamma": γ}``
+    - ``"mixed-epsilon"``               : ``x=[ε₀, ε₁, …]``    → ``{"epsilons": [ε₀, ε₁, …]}``
+    - ``"classical"``                   : ``x=[α₀, α₁]``       → ``{"alpha": [α₀, α₁]}``
     """
-    raise NotImplementedError("params_from_vector: implemented in 43.1b")
+    x = np.asarray(x, dtype=float).ravel()
+    if kernel == "tension":
+        if x.size != 1:
+            raise ValueError(f"kernel='tension' expects 1D vector, got shape {x.shape}")
+        return {"sigma": float(x[0])}
+    if kernel in _SCALAR_EPSILON_KERNELS:
+        if x.size != 1:
+            raise ValueError(f"kernel={kernel!r} expects 1D vector, got shape {x.shape}")
+        return {"epsilon": float(x[0])}
+    if kernel == "tension-penalty":
+        if x.size != 2:
+            raise ValueError(f"kernel='tension-penalty' expects 2D vector, got shape {x.shape}")
+        return {"sigma": float(x[0]), "gamma": float(x[1])}
+    if kernel == "mixed-epsilon":
+        if x.size < 1:
+            raise ValueError("kernel='mixed-epsilon' expects non-empty vector")
+        return {"epsilons": [float(v) for v in x]}
+    if kernel == "classical":
+        if x.size != 2:
+            raise ValueError(f"kernel='classical' expects 2D vector, got shape {x.shape}")
+        return {"alpha": [float(x[0]), float(x[1])]}
+    raise ValueError(f"unknown kernel: {kernel!r}")
 
 
-def vector_from_params(kernel: str, params: dict) -> np.ndarray:  # noqa: ARG001
+def vector_from_params(kernel: str, params: dict) -> np.ndarray:
     """Inverse of :func:`params_from_vector`.
 
-    Implemented in 43.1b.
+    Returns a flat ``np.ndarray`` of dtype ``float`` whose layout matches the
+    convention in :func:`params_from_vector`.
     """
-    raise NotImplementedError("vector_from_params: implemented in 43.1b")
+    if kernel == "tension":
+        return np.array([float(params["sigma"])], dtype=float)
+    if kernel in _SCALAR_EPSILON_KERNELS:
+        return np.array([float(params["epsilon"])], dtype=float)
+    if kernel == "tension-penalty":
+        return np.array([float(params["sigma"]), float(params["gamma"])], dtype=float)
+    if kernel == "mixed-epsilon":
+        eps = params["epsilons"]
+        if len(eps) < 1:
+            raise ValueError("kernel='mixed-epsilon' expects non-empty 'epsilons'")
+        return np.asarray([float(v) for v in eps], dtype=float)
+    if kernel == "classical":
+        alpha = params["alpha"]
+        if len(alpha) != 2:
+            raise ValueError(
+                f"kernel='classical' expects alpha of length 2, got {len(alpha)}"
+            )
+        return np.array([float(alpha[0]), float(alpha[1])], dtype=float)
+    raise ValueError(f"unknown kernel: {kernel!r}")
 
 
 # --- primitives: report field extraction -------------------------------------

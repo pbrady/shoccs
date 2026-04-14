@@ -88,7 +88,7 @@ cd scripts/stencil_gen && uv run pytest tests/test_phs.py -x -q -k "TestRegressi
   - File: `scripts/stencil_gen/stencil_gen/optimizer.py` (new)
   - Test: `cd scripts/stencil_gen && uv run python -c "from stencil_gen.optimizer import OptimizeResult, DEFAULT_BOUNDS; print(list(DEFAULT_BOUNDS.keys())[:3])"`
 
-- [ ] **43.1b** Implement `params_from_vector(kernel: str, x: np.ndarray) -> dict` and `vector_from_params(kernel: str, params: dict) -> np.ndarray`:
+- [x] **43.1b** Implement `params_from_vector(kernel: str, x: np.ndarray) -> dict` and `vector_from_params(kernel: str, params: dict) -> np.ndarray`:
   - `kernel="tension"` / `"gaussian"` / `"multiquadric"`: 1D, `x=[σ]` or `x=[ε]` → `{"sigma": x[0]}` or `{"epsilon": x[0]}`.
   - `kernel="tension-penalty"`: 2D `x=[σ, γ]` → `{"sigma": x[0], "gamma": x[1]}`.
   - `kernel="mixed-epsilon"`: variable-dim `x=[ε₀, ε₁, ...]` → `{"epsilons": list(x)}`.
