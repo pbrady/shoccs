@@ -17,6 +17,13 @@ from stencil_gen.benchmarks.brady_livescu_2d import (
     make_coefficient_field,
     psi,
 )
+from stencil_gen.benchmarks.brady_livescu_4_2 import (
+    L_DOMAIN as L_DOMAIN_42,
+    continuous_eigenvalues,
+    exact_solution as exact_solution_42,
+    initial_u,
+    initial_v,
+)
 from stencil_gen.benchmarks.brady2d_calibration import (
     FAMILIES,
     _E4_CLASSICAL_ALPHA,
@@ -173,3 +180,54 @@ class TestCalibrationDataclass:
             assert "layer1" in r or r["overall_verdict"] == "error", (
                 f"{label}: missing layer1 data"
             )
+
+
+class TestBradyLivescu42:
+    """Tests for the Brady & Livescu 2019 §4.2 reflecting-hyperbolic benchmark."""
+
+    def test_initial_condition_matches_paper(self):
+        """u(0) = 0, u(1) = -1.5*pi*sin(1.5*pi) ~ -1.5*pi, v(x) = 0."""
+        assert initial_u(0.0) == pytest.approx(0.0, abs=1e-15)
+        assert initial_u(1.0) == pytest.approx(
+            -1.5 * np.pi * np.sin(1.5 * np.pi), rel=1e-14
+        )
+        xs = np.linspace(0, 1, 11)
+        np.testing.assert_allclose(initial_v(xs), 0.0, atol=1e-15)
+
+    def test_exact_solution_matches_initial_at_t_zero(self):
+        """exact_solution(x, 0.0) returns (initial_u(x), initial_v(x))."""
+        rng = np.random.default_rng(42)
+        xs = rng.uniform(0.0, L_DOMAIN_42, 10)
+        u, v = exact_solution_42(xs, 0.0)
+        np.testing.assert_allclose(u, initial_u(xs), atol=1e-14)
+        np.testing.assert_allclose(v, initial_v(xs), atol=1e-14)
+
+    def test_exact_solution_satisfies_pde(self):
+        """Central-difference check: |u_t - v_x| < 1e-6 and |v_t - u_x| < 1e-6."""
+        rng = np.random.default_rng(123)
+        h = 1e-6
+        for _ in range(5):
+            x_val = rng.uniform(0.1, 0.9)
+            t_val = rng.uniform(0.1, 10.0)
+
+            u_p, v_p = exact_solution_42(x_val, t_val + h)
+            u_m, v_m = exact_solution_42(x_val, t_val - h)
+            u_t = (u_p - u_m) / (2.0 * h)
+            v_t = (v_p - v_m) / (2.0 * h)
+
+            u_xp, v_xp = exact_solution_42(x_val + h, t_val)
+            u_xm, v_xm = exact_solution_42(x_val - h, t_val)
+            v_x = (v_xp - v_xm) / (2.0 * h)
+            u_x = (u_xp - u_xm) / (2.0 * h)
+
+            assert abs(u_t - v_x) < 1e-6, f"u_t - v_x = {u_t - v_x} at (x={x_val}, t={t_val})"
+            assert abs(v_t - u_x) < 1e-6, f"v_t - u_x = {v_t - u_x} at (x={x_val}, t={t_val})"
+
+    def test_continuous_eigenvalues_purely_imaginary(self):
+        """Eigenvalues have zero real part, imag parts at +/-(2k-1)*pi/2."""
+        eigs = continuous_eigenvalues(5)
+        assert len(eigs) == 10
+        np.testing.assert_allclose(eigs.real, 0.0, atol=1e-15)
+        expected_pos = np.array([(2 * k - 1) * np.pi / 2.0 for k in range(1, 6)])
+        expected_all = np.sort(np.concatenate([expected_pos, -expected_pos]))
+        np.testing.assert_allclose(np.sort(eigs.imag), expected_all, rtol=1e-14)
