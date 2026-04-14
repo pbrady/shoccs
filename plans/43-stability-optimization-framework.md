@@ -355,6 +355,15 @@ cd scripts/stencil_gen && uv run pytest tests/test_phs.py -x -q -k "TestRegressi
   - Verified: `SYMPY_CACHE_SIZE=50000 uv run pytest tests/test_optimizer.py -x -q -k "TestStaged and not slow"` — 7 passed, 1.65 s. `SYMPY_CACHE_SIZE=50000 uv run pytest tests/test_optimizer.py -x -q -k "TestStagedClassicalAlpha" --run-slow` — 1 passed, 137 s. Full non-slow suite `SYMPY_CACHE_SIZE=50000 uv run pytest tests/test_optimizer.py -x -q` — 86 passed, 4 skipped, 76 s.
   - Files: `scripts/stencil_gen/stencil_gen/optimizer.py`, `scripts/stencil_gen/tests/test_optimizer.py`.
 
+- [ ] **43.9b-r2** Follow-up review items against 43.9b-r1. Two issues — one plan/test-name consistency, one risky omission around persistence — both small enough to close in a single pass.
+  1. **Test-name drift.** 43.9b-r1's resolution narrative (line 354) cites the new negative test as `TestStaged::test_staged_omits_cpp_cutcell_flag_for_e4_tension`, but the committed test is `TestStaged::test_staged_omits_cpp_cutcell_flag_for_other_kernels` (`tests/test_optimizer.py:1160`). Update the plan-file narrative to match the actual test name so future `-k` selector commands copy-pasted from the plan resolve.
+  2. **Flag is not persisted to JSON.** `run_staged_optimize` now records `cpp_cutcell_violates_197_288` in `result.extras`, but `sweeps/optimize.py::_result_to_persist_dict` never serialises `extras` into `known_values.json["brady2d_optima"]` (see `scripts/stencil_gen/sweeps/optimize.py:142-160`). So the 43.9b claim that "downstream plan 43.10 wiring can consume the flag" only holds for in-memory consumers inside a single CLI invocation; any 43.10 consumer that reads persisted optima sees no flag and must recompute it from `best_x[1] < 197/288`. Resolve one of the two ways:
+     - (a) **Persist the flag.** Extend `_result_to_persist_dict` to copy a short allow-list of scalar extras (start with `cpp_cutcell_violates_197_288`) into the persisted entry — e.g. as a top-level `cpp_cutcell_violates_197_288: bool` field or inside a nested `diagnostics: {...}` dict. Extend `test_cli_update_known_values_additive_and_drops_history` (or a new sibling test) to monkey-patch `_run_method` to return an E4-classical `OptimizeResult` with the flag set, and assert the persisted dict carries the flag.
+     - (b) **Document the in-memory-only scope.** Update the 43.9b-r1 resolution narrative and the 43.9b bullet text to state explicitly that the flag lives only on the in-memory `OptimizeResult` and that any 43.10 consumer reading persisted JSON must recompute it from `best_x[1] < 197/288`. Leave `_result_to_persist_dict` unchanged.
+  - Pick (a) unless you have reason to keep extras out of the JSON contract — the flag is cheap to serialise and 43.10 hasn't picked its consumption path yet.
+  - Files: `plans/43-stability-optimization-framework.md` (both options); `scripts/stencil_gen/sweeps/optimize.py`, `scripts/stencil_gen/tests/test_optimizer.py` (option a only).
+  - Test: `grep -n "test_staged_omits_cpp_cutcell_flag_for_e4_tension" plans/43-stability-optimization-framework.md` must return no hits; for option (a), `cd scripts/stencil_gen && uv run pytest tests/test_optimizer.py -x -q -k "test_cli_update_known_values"` green with the new flag assertion.
+
 - [ ] **43.9c** Multi-seed diversity study (analog of Brady-Livescu Table 4):
   - Create `scripts/stencil_gen/benchmarks/alpha_basin_survey.py` with a `run_survey(n_seeds=20, bounds=..., ...)` function.
   - For each seed, run `run_staged_optimize` and record the best `(α₀, α₁)`. Cluster results by rounding to 2 decimals; report the count of distinct basins found.
@@ -433,7 +442,7 @@ cd scripts/stencil_gen && uv run pytest tests/test_phs.py -x -q -k "TestRegressi
   ↓
 43.8a → 43.8b → 43.8c                  # persistence + regression + persist gate/max_layer
   ↓
-43.9a → 43.9a-r1 → 43.9b → 43.9c → 43.9d  # classical-α (depends on all prior)
+43.9a → 43.9a-r1 → 43.9b → 43.9b-r1 → 43.9b-r2 → 43.9c → 43.9d  # classical-α (depends on all prior)
   ↓
 43.10a → 43.10b                        # L8 validation
   ↓
