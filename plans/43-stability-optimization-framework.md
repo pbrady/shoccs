@@ -12,6 +12,7 @@
 - **Classical-α E2_1 (4D)**. The user noted second-order stability is inconsequential. Skip in favor of E4_1 (2D, single hard inequality `α₁ ≥ 197/288`).
 - **E6 / E8 classical schemes**. No Python derivation pipeline exists for them; out of scope.
 - **NLopt dependency**. `pip install nlopt` fails in this container; the container would need a spack rebuild. Skip — use `scipy.optimize.minimize(method="COBYQA")` which matches BOBYQA's derivative-free trust-region design and is built-in (scipy ≥ 1.14; this repo has 1.17).
+- **Tension-penalty and mixed-epsilon kernels through the layered cascade** (resolved at 43.1d, option b). `brady2d_stability_score` and every layer helper dispatch only `kernel ∈ {"classical", "tension", "gaussian", "multiquadric"}`; routing `"tension-penalty"`/`"mixed-epsilon"` through the 2D eigenvalue / non-normality / sparse paths would require a substantial extension to the Brady-Livescu pipeline for marginal optimizer reach — those families already have standalone exploratory sweeps (`sweeps/tension_penalty_sweep.py`, `sweeps/mixed_epsilon_sweep.py`). Defer the extension to a follow-up plan. `DEFAULT_BOUNDS` and `params_from_vector`/`vector_from_params` are pruned to the four supported kernels.
 
 **Approach — the layered pipeline as a manual cascade:**
 
@@ -33,9 +34,9 @@ candidate → L1 L2 L3 feasibility → L4 L5 L6 L7 metrics → top-k → L8 C++ 
 | Tension | E2_1, E4_1 | 1 | σ ∈ [0.5, 20] | none beyond stability |
 | Gaussian | E2_1, E4_1 | 1 | ε ∈ [0.1, 5] (log) | none beyond stability |
 | Multiquadric | E2_1, E4_1 | 1 | ε ∈ [0.1, 5] (log) | none beyond stability |
-| Tension-penalty | E4_1 | 2 | σ ∈ [0, 20], γ ∈ [0, 100] | both ≥ 0 |
-| Mixed-ε | E4_1 | 4 | each εᵢ ∈ [0.1, 10] (log) | each > 0 |
 | Classical-α | E4_1 | 2 | α₀ ∈ [-2, 2], α₁ ∈ [197/288, 2] | α₁ ≥ 197/288 hard |
+
+(Tension-penalty and mixed-ε are out of scope — see "What this plan does NOT do".)
 
 **Algorithm stack** (all in scipy; no new dependencies):
 
@@ -107,12 +108,9 @@ cd scripts/stencil_gen && uv run pytest tests/test_phs.py -x -q -k "TestRegressi
 
 ### 43.1d — Prerequisite: reconcile kernel scope with `brady2d_stability_score`
 
-- [ ] **43.1d** `params_from_vector` / `DEFAULT_BOUNDS` now expose six kernels, but the objective in 43.2a routes through `brady2d_stability_score`, which today only dispatches `kernel ∈ {"classical", "tension", "gaussian", "multiquadric"}`. `layer1_interior_boundary_gv`/`layer3_1d_eigenvalue`/etc. will pass `kernel="tension-penalty"` or `"mixed-epsilon"` straight into `boundary_group_velocity` / `build_diff_matrix_rbf` / `uniform_boundary_weights_rbf`, which do not recognise those names. Before 43.2a is implementable end-to-end for the full scope, decide one of:
-  - (a) Extend `brady2d_stability_score` (and its layer helpers) to route `"tension-penalty"` through `build_diff_matrix_rbf_penalty` and `"mixed-epsilon"` through `build_diff_matrix_mixed_epsilon`, including matching group-velocity paths, so the existing 4-kernel call sites keep working and the new 2 kernels produce valid `StabilityReport`s. Add regression tests covering `brady2d_stability_score("E4", "tension-penalty", {"sigma":…, "gamma":…}, max_layer=3)` and mixed-epsilon analogs returning finite, feasible values at known-good parameters taken from `known_values.json`.
-  - (b) Explicitly narrow the 43.2–43.10 scope (and the plan's top-of-file parameter-spaces table and completion criteria) to the four kernels currently supported, drop the `"tension-penalty"` and `"mixed-epsilon"` rows from `DEFAULT_BOUNDS`, prune the corresponding `params_from_vector` / `vector_from_params` branches and tests, and note the deferral under "What this plan does NOT do".
-  - Do not skip this decision by relying on the 43.2a `try/except Exception → +inf` shim — silently infeasible kernels masquerading as feasibility-cliff failures would make every multi-start / SHGO / DE run on those kernels return `converged=False` with no diagnostic.
-  - File(s): `scripts/stencil_gen/stencil_gen/brady2d_stability.py` (+ layer helpers) **or** `plans/43-stability-optimization-framework.md` + `scripts/stencil_gen/stencil_gen/optimizer.py` + `scripts/stencil_gen/tests/test_optimizer.py`.
-  - Test: if (a), `cd scripts/stencil_gen && uv run pytest tests/ -x -q -k "brady2d and (tension_penalty or mixed_epsilon)"`; if (b), `cd scripts/stencil_gen && uv run pytest tests/test_optimizer.py -x -q` still passes with the pruned parametrisations.
+- [x] **43.1d** Resolved as **option (b)**: narrow the 43.2–43.10 scope to the four kernels that `brady2d_stability_score` already routes (`classical`, `tension`, `gaussian`, `multiquadric`). `tension-penalty` and `mixed-epsilon` are handled by standalone sweeps that bypass the layered cascade; extending every layer helper to a fifth/sixth kernel is disproportionate to the optimizer's reach. Pruned `("E4", "tension-penalty")` and `("E4", "mixed-epsilon")` from `DEFAULT_BOUNDS`; removed the corresponding branches in `params_from_vector` / `vector_from_params`; added a `test_pruned_kernels_rejected` parametrization that confirms those names now raise `ValueError("unknown kernel")`; noted the deferral in the plan's "What this plan does NOT do" and removed the two rows from the parameter-spaces table.
+  - Files: `scripts/stencil_gen/stencil_gen/optimizer.py`, `scripts/stencil_gen/tests/test_optimizer.py`, `plans/43-stability-optimization-framework.md`.
+  - Test: `cd scripts/stencil_gen && uv run pytest tests/test_optimizer.py -x -q` — green, 32 tests.
 
 ### 43.2 — Objective factory with feasibility cliff
 

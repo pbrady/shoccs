@@ -22,8 +22,6 @@ class TestParamsVector:
             ("tension", [3.0], {"sigma": 3.0}),
             ("gaussian", [1.5], {"epsilon": 1.5}),
             ("multiquadric", [0.7], {"epsilon": 0.7}),
-            ("tension-penalty", [2.0, 10.0], {"sigma": 2.0, "gamma": 10.0}),
-            ("mixed-epsilon", [1.0, 2.0, 3.0, 4.0], {"epsilons": [1.0, 2.0, 3.0, 4.0]}),
             ("classical", [-0.5, 197.0 / 288.0], {"alpha": [-0.5, 197.0 / 288.0]}),
         ],
     )
@@ -36,8 +34,6 @@ class TestParamsVector:
             ("tension", {"sigma": 3.0}, [3.0]),
             ("gaussian", {"epsilon": 1.5}, [1.5]),
             ("multiquadric", {"epsilon": 0.7}, [0.7]),
-            ("tension-penalty", {"sigma": 2.0, "gamma": 10.0}, [2.0, 10.0]),
-            ("mixed-epsilon", {"epsilons": [1.0, 2.0, 3.0, 4.0]}, [1.0, 2.0, 3.0, 4.0]),
             ("classical", {"alpha": [-0.5, 1.0]}, [-0.5, 1.0]),
         ],
     )
@@ -52,8 +48,6 @@ class TestParamsVector:
             ("tension", {"sigma": 3.0}),
             ("gaussian", {"epsilon": 1.5}),
             ("multiquadric", {"epsilon": 0.7}),
-            ("tension-penalty", {"sigma": 2.0, "gamma": 10.0}),
-            ("mixed-epsilon", {"epsilons": [1.0, 2.0, 3.0, 4.0]}),
             ("classical", {"alpha": [-0.5, 1.0]}),
         ],
     )
@@ -67,14 +61,21 @@ class TestParamsVector:
             ("tension", [1.0, 2.0]),
             ("gaussian", [1.0, 2.0]),
             ("multiquadric", []),
-            ("tension-penalty", [1.0]),
             ("classical", [1.0]),
-            ("mixed-epsilon", []),
         ],
     )
     def test_params_from_vector_wrong_dim(self, kernel, x):
         with pytest.raises(ValueError):
             params_from_vector(kernel, np.asarray(x, dtype=float))
+
+    @pytest.mark.parametrize("kernel", ["tension-penalty", "mixed-epsilon"])
+    def test_pruned_kernels_rejected(self, kernel):
+        # Plan 43.1d (option b): these families are out of scope for the
+        # layered optimizer; brady2d_stability_score does not route them.
+        with pytest.raises(ValueError, match="unknown kernel"):
+            params_from_vector(kernel, np.array([1.0, 2.0]))
+        with pytest.raises(ValueError, match="unknown kernel"):
+            vector_from_params(kernel, {"sigma": 1.0, "gamma": 2.0})
 
     def test_params_from_vector_unknown_kernel(self):
         with pytest.raises(ValueError, match="unknown kernel"):

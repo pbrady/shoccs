@@ -40,6 +40,15 @@ import numpy as np
 # are given in log-uniform space only in the UI sense; the optimizer operates
 # on the raw ε value — log-sampling for multi-start is applied by Sobol scaling
 # inside :func:`multi_start_optimize` when bounds span more than a decade.
+#
+# Scope note (plan 43.1d, option b): ``"tension-penalty"`` and
+# ``"mixed-epsilon"`` are intentionally omitted.  ``brady2d_stability_score``
+# and its layer helpers currently dispatch only
+# ``kernel ∈ {"classical", "tension", "gaussian", "multiquadric"}``; the two
+# excluded families live in dedicated sweeps (``sweeps/tension_penalty_sweep``
+# and ``sweeps/mixed_epsilon_sweep``) that bypass the layered pipeline.
+# Extending the layered pipeline to those kernels is deferred — see the
+# "What this plan does NOT do" section of the plan file.
 DEFAULT_BOUNDS: dict[tuple[str, str], list[tuple[float, float]]] = {
     ("E2", "tension"): [(0.5, 20.0)],
     ("E4", "tension"): [(0.5, 20.0)],
@@ -47,8 +56,6 @@ DEFAULT_BOUNDS: dict[tuple[str, str], list[tuple[float, float]]] = {
     ("E4", "gaussian"): [(0.1, 5.0)],
     ("E2", "multiquadric"): [(0.1, 5.0)],
     ("E4", "multiquadric"): [(0.1, 5.0)],
-    ("E4", "tension-penalty"): [(0.0, 20.0), (0.0, 100.0)],
-    ("E4", "mixed-epsilon"): [(0.1, 10.0)] * 4,
     ("E4", "classical"): [(-2.0, 2.0), (197.0 / 288.0, 2.0)],
 }
 
@@ -115,9 +122,13 @@ def params_from_vector(kernel: str, x: np.ndarray) -> dict:
 
     - ``"tension"``                     : ``x=[σ]``            → ``{"sigma": σ}``
     - ``"gaussian"`` / ``"multiquadric"``: ``x=[ε]``            → ``{"epsilon": ε}``
-    - ``"tension-penalty"``             : ``x=[σ, γ]``         → ``{"sigma": σ, "gamma": γ}``
-    - ``"mixed-epsilon"``               : ``x=[ε₀, ε₁, …]``    → ``{"epsilons": [ε₀, ε₁, …]}``
     - ``"classical"``                   : ``x=[α₀, α₁]``       → ``{"alpha": [α₀, α₁]}``
+
+    The ``"tension-penalty"`` and ``"mixed-epsilon"`` families are out of
+    scope for this optimizer (plan 43.1d, option b) — ``brady2d_stability_score``
+    does not route those kernels.  Use the standalone
+    ``sweeps/tension_penalty_sweep`` / ``sweeps/mixed_epsilon_sweep`` entry
+    points for those parameter spaces.
     """
     x = np.asarray(x, dtype=float).ravel()
     if kernel == "tension":
@@ -128,14 +139,6 @@ def params_from_vector(kernel: str, x: np.ndarray) -> dict:
         if x.size != 1:
             raise ValueError(f"kernel={kernel!r} expects 1D vector, got shape {x.shape}")
         return {"epsilon": float(x[0])}
-    if kernel == "tension-penalty":
-        if x.size != 2:
-            raise ValueError(f"kernel='tension-penalty' expects 2D vector, got shape {x.shape}")
-        return {"sigma": float(x[0]), "gamma": float(x[1])}
-    if kernel == "mixed-epsilon":
-        if x.size < 1:
-            raise ValueError("kernel='mixed-epsilon' expects non-empty vector")
-        return {"epsilons": [float(v) for v in x]}
     if kernel == "classical":
         if x.size != 2:
             raise ValueError(f"kernel='classical' expects 2D vector, got shape {x.shape}")
@@ -153,13 +156,6 @@ def vector_from_params(kernel: str, params: dict) -> np.ndarray:
         return np.array([float(params["sigma"])], dtype=float)
     if kernel in _SCALAR_EPSILON_KERNELS:
         return np.array([float(params["epsilon"])], dtype=float)
-    if kernel == "tension-penalty":
-        return np.array([float(params["sigma"]), float(params["gamma"])], dtype=float)
-    if kernel == "mixed-epsilon":
-        eps = params["epsilons"]
-        if len(eps) < 1:
-            raise ValueError("kernel='mixed-epsilon' expects non-empty 'epsilons'")
-        return np.asarray([float(v) for v in eps], dtype=float)
     if kernel == "classical":
         alpha = params["alpha"]
         if len(alpha) != 2:
