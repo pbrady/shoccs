@@ -35,6 +35,7 @@ from typing import Callable
 import numpy as np
 import scipy
 from scipy.optimize import minimize
+from scipy.stats import qmc
 
 from stencil_gen.brady2d_stability import brady2d_stability_score
 
@@ -434,12 +435,80 @@ def multi_start_optimize(
     *,
     method: str = "Nelder-Mead",
     seed: int = 0,
+    max_evals: int = 200,
+    tol: float = 1e-6,
 ) -> OptimizeResult:
     """Sobol-seeded multi-start wrapper around :func:`run_scipy_local`.
 
-    Implemented in 43.4a.
+    Generates ``n_restarts`` starting points via
+    :class:`scipy.stats.qmc.Sobol` scaled to ``bounds`` and runs
+    :func:`run_scipy_local` from each.  Returns the :class:`OptimizeResult`
+    whose ``best_objective`` is the smallest finite value across restarts,
+    with ``history`` concatenated and ``n_evals`` summed.  ``compute_time`` is
+    the total wall-clock across restarts.
+
+    If every restart returns ``+inf`` (fully infeasible bounds), the last
+    restart's record is returned with ``converged=False`` — preserving the
+    attempted ``best_x`` and any diagnostic ``scipy_message`` from the final
+    call.
     """
-    raise NotImplementedError("multi_start_optimize: implemented in 43.4")
+    if n_restarts < 1:
+        raise ValueError(f"multi_start_optimize: n_restarts must be >= 1, got {n_restarts}")
+    if not bounds:
+        raise ValueError("multi_start_optimize: bounds must be non-empty")
+
+    sampler = qmc.Sobol(d=len(bounds), seed=seed)
+    unit_sample = sampler.random(n_restarts)
+    lo = np.array([b[0] for b in bounds], dtype=float)
+    hi = np.array([b[1] for b in bounds], dtype=float)
+    x0s = qmc.scale(unit_sample, lo, hi)
+
+    aggregated_history: list[tuple[np.ndarray, float]] = []
+    total_evals = 0
+    total_time = 0.0
+    n_feasible = 0
+    best: OptimizeResult | None = None
+    last: OptimizeResult | None = None
+
+    for i in range(n_restarts):
+        r = run_scipy_local(
+            f,
+            x0=x0s[i],
+            bounds=bounds,
+            method=method,
+            max_evals=max_evals,
+            tol=tol,
+        )
+        aggregated_history.extend(r.history)
+        total_evals += r.n_evals
+        total_time += r.compute_time
+        last = r
+        if np.isfinite(r.best_objective):
+            n_feasible += 1
+            if best is None or r.best_objective < best.best_objective:
+                best = r
+
+    chosen = best if best is not None else last
+    assert chosen is not None  # n_restarts >= 1 guarantees at least one run
+    converged = best is not None and chosen.converged
+
+    return OptimizeResult(
+        best_params={},
+        best_x=np.asarray(chosen.best_x, dtype=float).copy(),
+        best_objective=float(chosen.best_objective),
+        best_report={},
+        method="multi-start",
+        converged=converged,
+        n_evals=total_evals,
+        compute_time=total_time,
+        history=aggregated_history,
+        extras={
+            "inner_method": method,
+            "n_restarts": n_restarts,
+            "seed": seed,
+            "n_feasible_restarts": n_feasible,
+        },
+    )
 
 
 def run_scipy_shgo(

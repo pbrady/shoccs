@@ -167,20 +167,24 @@ cd scripts/stencil_gen && uv run pytest tests/test_phs.py -x -q -k "TestRegressi
 
 ### 43.4 — Multi-start wrapper
 
-- [ ] **43.4a** Implement `multi_start_optimize(f, bounds, n_restarts=10, *, method="Nelder-Mead", seed=0) -> OptimizeResult`:
-  - Generates `n_restarts` starting points via `scipy.stats.qmc.Sobol(d=len(bounds), seed=seed)` scaled to the bounds.
-  - For each starting point, runs `run_scipy_local(f, x0, bounds, method=method)`.
-  - Aggregates: returns the `OptimizeResult` with the smallest finite `best_objective` across restarts, with `history` concatenated from all runs and `n_evals` summed.
-  - If all restarts return `+inf` (fully infeasible region), returns the last result with `converged=False`.
+- [x] **43.4a** Implemented `multi_start_optimize(f, bounds, n_restarts=10, *, method="Nelder-Mead", seed=0, max_evals=200, tol=1e-6)`:
+  - Sobol-seeded starting points via `scipy.stats.qmc.Sobol(d=len(bounds), seed=seed)` scaled to bounds with `qmc.scale`.
+  - Delegates each restart to `run_scipy_local`, aggregates `history` (concatenated), `n_evals` (summed), and `compute_time` (summed).
+  - Returns the restart with the smallest finite `best_objective`; if every restart is infeasible, returns the last restart's record with `converged=False`.
+  - Added `max_evals` and `tol` passthrough (not in the original spec but needed so CLI/test callers can keep runs tight).
+  - `extras = {inner_method, n_restarts, seed, n_feasible_restarts}` for diagnostics.
+  - Added `ValueError` gates on `n_restarts < 1` and empty `bounds`.
   - File: `scripts/stencil_gen/stencil_gen/optimizer.py`
-  - Test: `cd scripts/stencil_gen && uv run pytest tests/test_optimizer.py -x -q -k "TestMultiStart"`
+  - Test: `cd scripts/stencil_gen && uv run pytest tests/test_optimizer.py -x -q -k "TestMultiStart"` — 6 tests green.
 
-- [ ] **43.4b** Tests `TestMultiStart`:
-  - `test_multi_start_finds_feasible_optimum` — tension E4 with `n_restarts=5` against an objective available at `max_layer=3` (e.g. `layer3.max_stab_eig`). Assert the returned result is finite, bound-respecting, and no worse than the best random-restart starting objective. (The earlier specific-σ acceptance was dropped — see 43.3b.) If a specific-σ convergence test is still wanted, pin the objective explicitly to a stability-margin field (e.g. `layer3.max_stab_eig` or a weighted composite) and cite the sweep-known optimum for that field.
-  - `test_multi_start_deterministic` — same seed produces same result across two calls.
-  - `test_multi_start_handles_fully_infeasible` — set bounds entirely in known-unstable region, verify `converged=False` returned gracefully.
+- [x] **43.4b** Tests `TestMultiStart`:
+  - `test_multi_start_converges_on_quadratic` — analytic quadratic `(x-3)²` on `[0, 10]`, `n_restarts=4`: converges, `n_evals` matches `len(history)`, extras populated.
+  - `test_multi_start_deterministic` — same seed produces identical `best_x`, `best_objective`, and `n_evals` across two calls.
+  - `test_multi_start_handles_fully_infeasible` — objective returns `+inf` everywhere: result has non-finite `best_objective`, `converged=False`, `n_feasible_restarts == 0`.
+  - `test_multi_start_rejects_zero_restarts` / `test_multi_start_rejects_empty_bounds` — input validation.
+  - `test_multi_start_finds_feasible_optimum` — tension-E4 against `layer3.max_stab_eig`, `bounds=[(0.5, 20)]`, `n_restarts=4`: finite, bound-respecting, no worse than the best Sobol-sampled starting objective. (No specific-σ claim — see 43.3b.)
   - File: `scripts/stencil_gen/tests/test_optimizer.py`
-  - Test: `cd scripts/stencil_gen && uv run pytest tests/test_optimizer.py -x -q -k "TestMultiStart"`
+  - Test: `cd scripts/stencil_gen && uv run pytest tests/test_optimizer.py -x -q -k "TestMultiStart"` — 6 tests green.
 
 ### 43.5 — Global optimizers: SHGO and DE
 

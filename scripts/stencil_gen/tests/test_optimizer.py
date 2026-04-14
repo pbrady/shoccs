@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import numpy as np
 import pytest
+from scipy.stats import qmc
 
 from stencil_gen.brady2d_stability import StabilityReport
 from stencil_gen.gks_kreiss import KreissResult
@@ -12,6 +13,7 @@ from stencil_gen.optimizer import (
     _COBYQA_AVAILABLE,
     extract_field,
     make_objective,
+    multi_start_optimize,
     params_from_vector,
     run_scipy_local,
     vector_from_params,
@@ -365,6 +367,117 @@ class TestRunScipyLocalCOBYQA:
         assert np.isfinite(r.best_objective)
         assert r.best_objective <= f0 + 1e-9
         assert 0.5 <= r.best_x[0] <= 20.0
+
+
+class TestMultiStart:
+    """Tests for :func:`multi_start_optimize` (plan 43.4)."""
+
+    @staticmethod
+    def _quadratic(x: np.ndarray) -> float:
+        # Minimum at [3.0] on [0, 10].
+        return float((x[0] - 3.0) ** 2)
+
+    def test_multi_start_converges_on_quadratic(self):
+        r = multi_start_optimize(
+            self._quadratic,
+            bounds=[(0.0, 10.0)],
+            n_restarts=4,
+            method="Nelder-Mead",
+            seed=0,
+            max_evals=50,
+        )
+        assert r.method == "multi-start"
+        assert r.converged
+        assert np.isfinite(r.best_objective)
+        assert r.best_x[0] == pytest.approx(3.0, abs=1e-3)
+        # n_evals sums across restarts; history concatenates.
+        assert r.n_evals > 0
+        assert len(r.history) == r.n_evals
+        assert r.extras["inner_method"] == "Nelder-Mead"
+        assert r.extras["n_restarts"] == 4
+        assert r.extras["n_feasible_restarts"] >= 1
+
+    def test_multi_start_deterministic(self):
+        r1 = multi_start_optimize(
+            self._quadratic,
+            bounds=[(0.0, 10.0)],
+            n_restarts=3,
+            method="Nelder-Mead",
+            seed=42,
+            max_evals=40,
+        )
+        r2 = multi_start_optimize(
+            self._quadratic,
+            bounds=[(0.0, 10.0)],
+            n_restarts=3,
+            method="Nelder-Mead",
+            seed=42,
+            max_evals=40,
+        )
+        np.testing.assert_array_equal(r1.best_x, r2.best_x)
+        assert r1.best_objective == r2.best_objective
+        assert r1.n_evals == r2.n_evals
+
+    def test_multi_start_handles_fully_infeasible(self):
+        r = multi_start_optimize(
+            lambda x: float("inf"),
+            bounds=[(0.0, 10.0)],
+            n_restarts=3,
+            method="Nelder-Mead",
+            seed=0,
+            max_evals=20,
+        )
+        assert not np.isfinite(r.best_objective)
+        assert not r.converged
+        assert r.extras["n_feasible_restarts"] == 0
+
+    def test_multi_start_rejects_zero_restarts(self):
+        with pytest.raises(ValueError, match="n_restarts must be >= 1"):
+            multi_start_optimize(
+                self._quadratic,
+                bounds=[(0.0, 10.0)],
+                n_restarts=0,
+            )
+
+    def test_multi_start_rejects_empty_bounds(self):
+        with pytest.raises(ValueError, match="bounds must be non-empty"):
+            multi_start_optimize(
+                self._quadratic,
+                bounds=[],
+                n_restarts=2,
+            )
+
+    def test_multi_start_finds_feasible_optimum(self):
+        # Plan 43.4b: tension E4 against layer3.max_stab_eig.  The feasibility
+        # gate carves out a non-trivial portion of [0.5, 20], so a multi-start
+        # should land on a finite, bound-respecting minimum no worse than the
+        # best random-restart starting objective.  (No specific-σ claim — see
+        # 43.3b for why the sweep-derived σ=3.0 is not this objective's
+        # minimum.)
+        f = make_objective(
+            "E4", "tension", "layer3.max_stab_eig",
+            gate_layer=3, max_layer=3,
+        )
+        bounds = [(0.5, 20.0)]
+        r = multi_start_optimize(
+            f,
+            bounds=bounds,
+            n_restarts=4,
+            method="Nelder-Mead",
+            seed=0,
+            max_evals=60,
+        )
+        assert np.isfinite(r.best_objective)
+        assert bounds[0][0] <= r.best_x[0] <= bounds[0][1]
+        # Compare against the best initial-point value across restarts.
+        sampler = qmc.Sobol(d=1, seed=0)
+        x0s = qmc.scale(
+            sampler.random(4),
+            np.array([bounds[0][0]]),
+            np.array([bounds[0][1]]),
+        )
+        best_f0 = min(float(f(x0)) for x0 in x0s)
+        assert r.best_objective <= best_f0 + 1e-9
 
 
 class TestRunScipyLocalCOBYQAUnavailable:
