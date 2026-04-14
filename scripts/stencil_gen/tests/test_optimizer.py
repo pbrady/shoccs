@@ -1977,3 +1977,39 @@ class TestOptimizeCppValidation:
         out = capsys.readouterr().out
         assert "L8 FAIL" in out
         assert "soft-failure" not in out
+
+    @pytest.mark.slow
+    def test_validate_classical_e4_published_alpha(self, capsys):
+        """Live shoccs L8 run at the Brady-Livescu published E4 classical α.
+
+        Plan 43.10b: end-to-end exercise of ``_run_cpp_validation`` with no
+        ``brady2d_stability_score`` monkeypatch — the full L8 bridge actually
+        runs the shoccs binary and reports a real ``final_linf``.  Skips when
+        the binary has not been built.  Published α is sourced from the
+        canonical ``sweeps.brady2d_sweep.CLASSICAL_E4_ALPHA`` (see 43.9d for
+        why ``stencil_gen.alpha_extraction`` is not the source — that module
+        only holds E2 production α's).
+        """
+        from stencil_gen import brady2d_stability as bs
+        from sweeps import optimize as opt_mod
+        from sweeps.brady2d_sweep import CLASSICAL_E4_ALPHA
+
+        if not opt_mod.SHOCCS_BINARY.exists():
+            pytest.skip("shoccs binary not built")
+
+        result = opt_mod._run_cpp_validation(
+            scheme="E4",
+            kernel="classical",
+            best_params={"alpha": list(CLASSICAL_E4_ALPHA)},
+            best_objective=-1.0,
+            N=21,
+            t_final=5.0,
+        )
+
+        assert result is not None
+        assert result["stable"] is True
+        assert result["final_linf"] <= bs.L8_FINAL_LINF_TOL
+        out = capsys.readouterr().out
+        assert "L8 PASS" in out
+        assert "soft-failure" not in out
+        assert "L8 FAIL" not in out
