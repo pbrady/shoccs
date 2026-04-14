@@ -179,8 +179,10 @@ The strategy: the constructor takes `real sigma` from Lua, builds the small (r=5
   - Test: `cd scripts/stencil_gen && uv run python -c "from tests.fixtures.tension_e4u1_reference import REFERENCE_TENSION_E4U1_SIGMA3_COEFFS; print(len(REFERENCE_TENSION_E4U1_SIGMA3_COEFFS))"` → **PASSED** (shape=(5,7), size=35; live build_diff_matrix_rbf regeneration matches fixture to ~7e-18 max abs error).
   - Note: row 4 of the 5×7 block is the classical E4 centered stencil `[0, 0, 1/12, -2/3, 0, 2/3, -1/12]` (row index 4 falls in the interior region of build_diff_matrix_rbf, which only decorates rows 0..3 with RBF+polynomial augmentation for `q=3`). The plan's spec of r=5 boundary rows is preserved — row 4 is cached alongside the true boundary rows and the C++ will simply copy it into the output span.
 
+> **Corrected dimension context (from 42.5a review):** The actual `build_diff_matrix_rbf(p=2, q=3, nu=1, nextra=0)` geometry is `r=4, t=6` (via `compute_dimensions`), not `r=5, t=7` as originally drafted. The solver therefore produces a 4×6 = 24-entry block (rows 0..3 × cols 0..5). The fixture (and the C++ `cached_coeffs`) pad this to 5×7 = 35 entries by appending: (a) row 4 = the classical E4 centered stencil at h=1, `[0, 0, 1/12, -2/3, 0, 2/3, -1/12]`, hardcoded; (b) col 6 = 0 for rows 0..3. Keep the `cached_coeffs` layout at 5×7 so the unit test in 42.5f can compare byte-for-byte against the fixture, but do not route row 4 or col 6 (rows 0..3) through the runtime solver. 42.6a/b/e/f inherit the same correction.
+>
 - [ ] **42.5b** Create `src/stencils/tension_E4u_1.cpp` struct skeleton (no solver body yet):
-  - Struct layout mirroring `E4u_1` but with `real sigma` field replacing `std::array<real, 2> alpha`, and a new `std::array<real, 5 * 7> cached_coeffs` member.
+  - Struct layout mirroring `E4u_1` but with `real sigma` field replacing `std::array<real, 2> alpha`, and a new `std::array<real, 5 * 7> cached_coeffs` member (5 rows × 7 cols; see the corrected-dimension note above — row 4 is the hardcoded classical E4 interior stencil, col 6 is zero for rows 0..3).
   - Constructor `tension_E4u_1(real sigma_in) : sigma(sigma_in) { /* solver call inserted in 42.5d */ }`.
   - `interior`, `query`, `query_max`, method stubs for `nbs_floating` and `nbs` matching `E4u_1`'s signatures but with empty (TODO) bodies that simply fill the output span with zeros and return it.
   - Does **not** register in `stencil.cpp` yet — that's 42.5e.
@@ -195,11 +197,14 @@ The strategy: the constructor takes `real sigma` from Lua, builds the small (r=5
   - Test: `cmake --build build --target shoccs-stencils`
 
 - [ ] **42.5d** Implement `solve_tension_coefficients(real sigma, std::array<real, 5*7>& out)` as a static/anonymous-namespace helper in `tension_E4u_1.cpp`:
-  - Builds the 7×7 tension-spline kernel matrix entries `K[i,j] = sigma*|x_i - x_j| - 1 + exp(-sigma*|x_i - x_j|)` where `x_i = i` for i in 0..6 (reference grid, h=1).
-  - Augments with the polynomial block (5 polynomial columns for q=3 → `1, x, x^2, x^3`, and 1 row/col for the order-1 derivative constraint — matches `phs._rbf_weights_numeric`'s construction).
-  - Solves via plain Gaussian elimination with partial pivoting, 7×7 fits on the stack.
-  - Fills `out[i*7 + j] = w_ij` where `w_ij` is the weight for boundary row `i` at column `j`.
-  - Wire the call into the `tension_E4u_1` constructor (replacing the 42.5b stub comment).
+  - Builds the **6×6** tension-spline kernel matrix entries `K[i,j] = sigma*|x_i - x_j| - 1 + exp(-sigma*|x_i - x_j|)` where `x_i = i` for i in 0..5 (reference grid, h=1, t=6 collocation points).
+  - Augments with the polynomial block: **4 polynomial rows and 4 polynomial columns** for q=3 (monomials `1, x, x^2, x^3`), matching `phs._rbf_weights_numeric`'s construction — augmented system is **(t + q+1) × (t + q+1) = 10 × 10**.
+  - For each boundary row `i` in 0..3 (r=4 boundary rows), build the RHS `[D^1 φ(i - x_j) for j in 0..5 ; D^1 x^k at x=i for k in 0..3]` and solve the 10×10 system via plain Gaussian elimination with partial pivoting (fits on the stack). Extract the first 6 components of the solution as the boundary-row weights `w_ij` for j in 0..5.
+  - Layout into the 5×7 `out` buffer (row-major, `out[i*7 + j]`):
+    - Rows 0..3, cols 0..5: the solved RBF+poly weights `w_ij` at h=1.
+    - Rows 0..3, col 6: `0.0` (zero-padding; fixture captures these as exact zeros because `build_diff_matrix_rbf` only writes t=6 columns per boundary row).
+    - Row 4 (interior, not from the solver): hardcoded classical E4 first-derivative stencil `{0, 0, 1.0/12.0, -2.0/3.0, 0, 2.0/3.0, -1.0/12.0}` at h=1.
+  - Wire the call into the `tension_E4u_1` constructor (replacing the 42.5b stub comment). Row 4 and col 6 of rows 0..3 can be written unconditionally before the solver runs.
   - Update `nbs_floating` to copy `cached_coeffs` into the output span, apply `1/h` scaling, then the `right` flip logic matching `E4u_1.cpp:~103`.
   - File: `src/stencils/tension_E4u_1.cpp`
   - Test: `cmake --build build --target shoccs-stencils` (still just compiles; functional test in 42.5f)
@@ -233,7 +238,8 @@ Each family follows the same 4-item pattern as 42.5b–f (minus the split refere
   - Test: `cmake --build build --target shoccs-stencils`
 
 - [ ] **42.6b** Implement `solve_gaussian_coefficients(real epsilon, std::array<real, 5*7>& out)` in `gaussian_E4u_1.cpp`:
-  - Same Gaussian elimination structure as `solve_tension_coefficients` but with kernel `gaussian_kernel(r, eps) = exp(-(eps*r)*(eps*r))`.
+  - Same 10×10 augmented system and 5×7 output layout as `solve_tension_coefficients` (see corrected dimension note above 42.5b — 6-point kernel + 4-column polynomial augmentation; rows 0..3 × cols 0..5 are solved, row 4 is the hardcoded classical E4 stencil, col 6 of rows 0..3 is zero).
+  - Kernel function: `gaussian_kernel(r, eps) = exp(-(eps*r)*(eps*r))`. RHS uses `D^1 φ(i - x_j) = -2*eps^2*(i-x_j) * exp(-(eps*(i-x_j))^2)`.
   - Wire into the constructor; populate `nbs_floating` to read from `cached_coeffs`.
   - File: `src/stencils/gaussian_E4u_1.cpp`
   - Test: `cmake --build build --target shoccs-stencils`
@@ -254,7 +260,7 @@ Each family follows the same 4-item pattern as 42.5b–f (minus the split refere
   - File: `scripts/stencil_gen/tests/fixtures/multiquadric_e4u1_reference.py` (new), `src/stencils/multiquadric_E4u_1.cpp` (new), `src/stencils/CMakeLists.txt`
   - Test: `cmake --build build --target shoccs-stencils`
 
-- [ ] **42.6f** Implement `solve_multiquadric_coefficients` with kernel `sqrt(1 + (eps*r)^2)`; wire into constructor (mirrors 42.6b):
+- [ ] **42.6f** Implement `solve_multiquadric_coefficients` with kernel `sqrt(1 + (eps*r)^2)` and RHS `D^1 φ(i - x_j) = eps^2*(i - x_j) / sqrt(1 + (eps*(i - x_j))^2)`; wire into constructor (mirrors 42.6b — same 10×10 system and 5×7 layout with row 4 hardcoded and col 6 zero for rows 0..3):
   - File: `src/stencils/multiquadric_E4u_1.cpp`
   - Test: `cmake --build build --target shoccs-stencils`
 
