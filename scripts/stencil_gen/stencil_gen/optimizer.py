@@ -27,10 +27,13 @@ The public API surface is:
 from __future__ import annotations
 
 import operator
+import re
 from dataclasses import dataclass, field
 from typing import Callable
 
 import numpy as np
+
+from stencil_gen.brady2d_stability import brady2d_stability_score
 
 
 # --- bounds ------------------------------------------------------------------
@@ -215,6 +218,30 @@ def extract_field(report, dotted_path: str) -> float:
 
 # --- objective factory -------------------------------------------------------
 
+_LAYER_PREFIX_RE = re.compile(r"^layer(\d+)\.")
+
+# Dotted-path prefixes that alias to a populating layer.  ``kreiss`` is
+# assigned in layer 2; extend this mapping if new aliased fields are added
+# to :class:`StabilityReport`.
+_FIELD_LAYER_ALIAS = {
+    "kreiss": 2,
+    "non_normality": 6,
+}
+
+
+def _infer_max_layer(report_field: str) -> int | None:
+    """Return the layer that populates ``report_field``, or ``None`` if the
+    prefix is unrecognised.  Layer-prefixed fields (``layer1.*`` …
+    ``layer8.*``) are parsed directly; aliased fields such as ``kreiss.*`` are
+    mapped via :data:`_FIELD_LAYER_ALIAS`.
+    """
+    m = _LAYER_PREFIX_RE.match(report_field)
+    if m:
+        return int(m.group(1))
+    head, _, _ = report_field.partition(".")
+    return _FIELD_LAYER_ALIAS.get(head)
+
+
 def make_objective(
     scheme: str,
     kernel: str,
@@ -225,9 +252,62 @@ def make_objective(
 ) -> Callable[[np.ndarray], float]:
     """Build a feasibility-gated objective ``f(x) -> float``.
 
-    Implemented in 43.2a.
+    The returned closure converts a flat vector ``x`` to a kernel-specific
+    ``params`` dict, runs :func:`brady2d_stability_score` in short-circuit
+    mode up to ``max_layer``, and returns:
+
+    - ``+inf`` if any layer at or before ``gate_layer`` failed (the
+      feasibility cliff).
+    - ``+inf`` if :func:`brady2d_stability_score` raised (extreme parameters
+      can produce singular/ill-conditioned RBF systems).
+    - :func:`extract_field` of ``report_field`` otherwise (which itself
+      returns ``+inf`` when the requested dotted path is absent).
+
+    Parameters
+    ----------
+    scheme, kernel, report_field
+        Forwarded to :func:`brady2d_stability_score` and
+        :func:`extract_field`.
+    gate_layer
+        Highest layer whose failure forces ``+inf`` (the feasibility gate).
+        Defaults to 3, matching the cheap-inner stage of the cascade.
+    max_layer
+        Highest layer actually executed.  Defaults to the layer implied by
+        ``report_field`` (``layer6.*`` → 6, ``kreiss.*`` → 2, …).  Raises
+        ``ValueError`` if the resolved value is less than ``gate_layer`` —
+        the optimiser cannot gate on layers it never runs.
     """
-    raise NotImplementedError("make_objective: implemented in 43.2a")
+    if max_layer is None:
+        inferred = _infer_max_layer(report_field)
+        if inferred is None:
+            raise ValueError(
+                f"cannot infer max_layer from report_field={report_field!r}; "
+                "pass max_layer explicitly"
+            )
+        max_layer = inferred
+    if max_layer < gate_layer:
+        raise ValueError(
+            f"max_layer={max_layer} is less than gate_layer={gate_layer}; "
+            "raise max_layer or lower gate_layer"
+        )
+
+    def objective(x: np.ndarray) -> float:
+        try:
+            params = params_from_vector(kernel, x)
+            report = brady2d_stability_score(
+                scheme,
+                kernel,
+                params,
+                max_layer=max_layer,
+                short_circuit=True,
+            )
+        except Exception:
+            return float("inf")
+        if report.failed_layer is not None and report.failed_layer <= gate_layer:
+            return float("inf")
+        return extract_field(report, report_field)
+
+    return objective
 
 
 # --- drivers -----------------------------------------------------------------

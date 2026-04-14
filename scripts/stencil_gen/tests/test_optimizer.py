@@ -10,6 +10,7 @@ from stencil_gen.gks_kreiss import KreissResult
 from stencil_gen.optimizer import (
     DEFAULT_BOUNDS,
     extract_field,
+    make_objective,
     params_from_vector,
     vector_from_params,
 )
@@ -160,3 +161,65 @@ class TestExtractField:
     def test_extract_missing_dataclass_attr_returns_inf(self):
         r = self._populated_report()
         assert extract_field(r, "kreiss.no_such_attr") == float("inf")
+
+
+class TestMakeObjective:
+    def test_objective_returns_finite_on_feasible(self):
+        # E4 tension σ=3.0 is the known-good sweep-derived optimum and
+        # comfortably passes L1-L3.
+        f = make_objective(
+            "E4", "tension", "layer1.boundary_gv_err",
+            gate_layer=3, max_layer=3,
+        )
+        val = f(np.array([3.0]))
+        assert np.isfinite(val)
+        assert val >= 0.0
+
+    def test_objective_returns_inf_on_gate_failure(self):
+        # A tiny gaussian ε makes the RBF matrix nearly singular: L1 or L3
+        # fails and the feasibility gate forces +inf.
+        f = make_objective(
+            "E4", "gaussian", "layer1.boundary_gv_err",
+            gate_layer=3, max_layer=3,
+        )
+        assert f(np.array([0.01])) == float("inf")
+
+    def test_objective_catches_exception(self, monkeypatch):
+        import stencil_gen.optimizer as opt
+
+        def _boom(*_args, **_kwargs):
+            raise RuntimeError("synthetic failure")
+
+        monkeypatch.setattr(opt, "brady2d_stability_score", _boom)
+        f = opt.make_objective(
+            "E4", "tension", "layer1.boundary_gv_err",
+            gate_layer=3, max_layer=3,
+        )
+        assert f(np.array([3.0])) == float("inf")
+
+    def test_objective_raises_on_bad_field(self):
+        # A nonsense dotted path at a feasible point returns +inf (extract_field
+        # treats missing segments as inf) rather than raising.
+        f = make_objective(
+            "E4", "tension", "layer99.foo",
+            gate_layer=3, max_layer=3,
+        )
+        assert f(np.array([3.0])) == float("inf")
+
+    def test_objective_infers_max_layer_from_field(self):
+        # layer6.* implies max_layer=6; gate_layer=3 (default) is < 6 so no
+        # error.
+        f = make_objective("E4", "tension", "layer6.spectral_abscissa")
+        val = f(np.array([3.0]))
+        assert np.isfinite(val)
+
+    def test_objective_rejects_max_layer_below_gate(self):
+        with pytest.raises(ValueError, match="less than gate_layer"):
+            make_objective(
+                "E4", "tension", "layer1.boundary_gv_err",
+                gate_layer=3, max_layer=1,
+            )
+
+    def test_objective_rejects_uninferable_field_without_max_layer(self):
+        with pytest.raises(ValueError, match="cannot infer max_layer"):
+            make_objective("E4", "tension", "no_prefix_here")

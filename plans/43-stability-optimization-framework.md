@@ -118,7 +118,7 @@ cd scripts/stencil_gen && uv run pytest tests/test_phs.py -x -q -k "TestRegressi
 
 ### 43.2 — Objective factory with feasibility cliff
 
-- [ ] **43.2a** Implement `make_objective(scheme, kernel, report_field, *, gate_layer=3, max_layer=None) -> Callable[[np.ndarray], float]`:
+- [x] **43.2a** Implement `make_objective(scheme, kernel, report_field, *, gate_layer=3, max_layer=None) -> Callable[[np.ndarray], float]`:
   - `max_layer` defaults to the layer implied by `report_field` (e.g., `layer6.*` → `max_layer=6`). If less than `gate_layer`, raise `ValueError`.
   - Returned function: converts `x` via `params_from_vector`, calls `brady2d_stability_score(scheme, kernel, params, max_layer=max_layer, short_circuit=True)`, checks `report.failed_layer is None or report.failed_layer > gate_layer`. If gate failed, return `+inf`. Otherwise return `extract_field(report, report_field)`.
   - Wraps `brady2d_stability_score` in `try/except Exception` returning `+inf` (ill-conditioned RBF systems at extreme parameters can raise).
@@ -126,7 +126,7 @@ cd scripts/stencil_gen && uv run pytest tests/test_phs.py -x -q -k "TestRegressi
   - File: `scripts/stencil_gen/stencil_gen/optimizer.py`
   - Test: `cd scripts/stencil_gen && uv run pytest tests/test_optimizer.py -x -q -k "TestMakeObjective"`
 
-- [ ] **43.2b** Tests for `make_objective`:
+- [x] **43.2b** Tests for `make_objective`:
   - `test_objective_returns_finite_on_feasible` — E4 tension σ=3.0 passes L1-L3, objective returns finite `layer1.boundary_gv_err`.
   - `test_objective_returns_inf_on_gate_failure` — deliberately-bad parameters (e.g., E4 Gaussian ε=0.01) fail L3, objective returns `+inf`.
   - `test_objective_catches_exception` — monkey-patch to raise, verify `+inf` returned.
