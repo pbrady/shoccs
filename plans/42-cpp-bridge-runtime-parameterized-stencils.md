@@ -305,10 +305,11 @@ Each family follows the same 4-item pattern as 42.5b–f (minus the split refere
   - Test: `cd scripts/stencil_gen && uv run pytest tests/test_brady2d_stability.py -x -q -k "TestLayer8Dispatch"` → **PASSED** (4 tests: 3 parametrized spline-kernel dispatch cases + classical regression). `_scheme_table_for` in `cpp_bridge.py` already routed `sigma`/`epsilon` through to Lua, so 42.7a is purely a dispatch-table addition. Existing `test_unsupported_kernel_raises` changed its example from `tension` to `bogus` since `tension` is now a supported dispatch key. Full `test_brady2d_stability.py` run: 79 passed, 8 skipped.
   - Note: the plan's draft dispatch table said `("E4", "classical") → "E4"`; corrected to `"E4u"` to match 42.3a's existing mapping. The `("E4", "tension") → "tension_E4u"` line is wired via the same `_scheme_table_for` shape already exercised by 42.2a's placeholder tests, so 42.7b is effectively a no-op extension (scheme_table emitter already handles sigma/epsilon).
 
-- [ ] **42.7b** Extend `make_brady2d_lua` in `cpp_bridge.py` to emit the new scheme tables:
+- [x] **42.7b** Extend `make_brady2d_lua` in `cpp_bridge.py` to emit the new scheme tables:
   - For `tension_E4u` and `gaussian_E4u`/`multiquadric_E4u`, emit `scheme = { order = 1, type = "<name>", sigma = <val> }` or `epsilon = <val>` respectively.
   - File: `scripts/stencil_gen/stencil_gen/cpp_bridge.py`
-  - Test: `cd scripts/stencil_gen && uv run pytest tests/test_cpp_bridge.py -x -q -k "TestMakeBrady2DLuaSpline"`
+  - Test: `cd scripts/stencil_gen && uv run pytest tests/test_cpp_bridge.py -x -q -k "TestMakeBrady2DLuaSpline"` → **PASSED** (8 tests: parametrized sigma/epsilon emission across all three spline families, balanced-brace sanity for each family, float-precision preservation via `repr()`). Full `test_cpp_bridge.py` run: 30 passed, 1 skipped (slow smoke).
+  - Note: as 42.7a predicted, the emitter itself (`_scheme_table_for` in `cpp_bridge.py`) already handled `sigma`/`epsilon` from 42.2a — 42.7b was purely a test addition confirming the end-to-end rendering contract. Also hardened the test that the non-selected scalar ("sigma" when passing epsilon, vice versa) is never emitted in the scheme slice, and that the order=1 declaration survives the substitution.
 
 - [ ] **42.7c** Integration test `TestLayer8EndToEndSpline`:
   - For each of (tension sigma=3.0), (gaussian eps=0.9), (multiquadric eps=1.0), call `brady2d_stability_score(..., max_layer=8)`.

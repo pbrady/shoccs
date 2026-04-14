@@ -113,6 +113,69 @@ class TestMakeBrady2DLua:
         assert re.search(r"max_time\s*=\s*10\.0", rendered)
 
 
+class TestMakeBrady2DLuaSpline:
+    """Plan 42.7b — spline-family scheme-table emission.
+
+    The three runtime-parameterized families registered in 42.5e/42.6c/42.6g
+    each take a single scalar parameter (`sigma` for tension, `epsilon` for
+    gaussian and multiquadric) and must round-trip cleanly through the Lua
+    template.
+    """
+
+    @pytest.mark.parametrize(
+        "scheme_type,params,expected_kv",
+        [
+            ("tension_E4u", {"sigma": 3.0}, ("sigma", 3.0)),
+            ("tension_E4u", {"sigma": 7.5}, ("sigma", 7.5)),
+            ("gaussian_E4u", {"epsilon": 0.9}, ("epsilon", 0.9)),
+            ("gaussian_E4u", {"epsilon": 1.25}, ("epsilon", 1.25)),
+            ("multiquadric_E4u", {"epsilon": 1.0}, ("epsilon", 1.0)),
+            ("multiquadric_E4u", {"epsilon": 0.4}, ("epsilon", 0.4)),
+        ],
+    )
+    def test_emits_spline_scheme_table(self, scheme_type, params, expected_kv):
+        rendered = make_brady2d_lua(
+            scheme_type=scheme_type, params=params, N=31, t_final=10.0
+        )
+        key, value = expected_kv
+        # type must match verbatim
+        assert re.search(rf'type\s*=\s*"{re.escape(scheme_type)}"', rendered)
+        # parameter must be present with its repr (preserves full precision)
+        assert re.search(rf"{key}\s*=\s*{re.escape(repr(float(value)))}", rendered)
+        # the other scalar is never emitted
+        other = "epsilon" if key == "sigma" else "sigma"
+        scheme_slice = rendered.split("scheme")[1].split("system")[0]
+        assert f"{other} =" not in scheme_slice
+        assert "alpha" not in scheme_slice
+        # all markers are replaced
+        for marker in ("--{{N}}--", "--{{T_FINAL}}--", "--{{SCHEME_TABLE}}--"):
+            assert marker not in rendered
+        # order = 1 is present in the scheme table
+        assert "order = 1" in scheme_slice
+
+    def test_spline_rendered_output_has_balanced_braces(self):
+        for scheme_type, params in [
+            ("tension_E4u", {"sigma": 3.0}),
+            ("gaussian_E4u", {"epsilon": 0.9}),
+            ("multiquadric_E4u", {"epsilon": 1.0}),
+        ]:
+            rendered = make_brady2d_lua(
+                scheme_type=scheme_type, params=params, N=31, t_final=10.0
+            )
+            assert rendered.count("{") == rendered.count("}"), scheme_type
+
+    def test_spline_param_precision_preserved(self):
+        """Sigma/epsilon are emitted via repr() so round-tripping is exact."""
+        sigma = 0.1 + 0.2  # classic float that shows extra digits in repr
+        rendered = make_brady2d_lua(
+            scheme_type="tension_E4u",
+            params={"sigma": sigma},
+            N=31,
+            t_final=10.0,
+        )
+        assert repr(sigma) in rendered
+
+
 def _make_fake_shoccs(
     tmp_path: Path,
     *,
