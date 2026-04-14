@@ -767,6 +767,32 @@ def _top_k_candidates(
     return ordered[:top_k]
 
 
+_E4_CLASSICAL_ALPHA1_CPP_FLOOR = 197.0 / 288.0
+
+
+def _record_cpp_cutcell_diagnostic(
+    extras: dict, scheme: str, kernel: str, best_x: np.ndarray | None
+) -> None:
+    """Populate the L8 cut-cell ``α₁ ≥ 197/288`` diagnostic flag (plan 43.9b-r1).
+
+    The C++ ``E4_1.cpp`` stencil enforces ``α₁ ≥ 197/288`` to keep the
+    cut-cell psi denominator non-zero.  The Python analytical pipeline
+    (L1–L7) does not enforce this floor (see plan 43.9a), so an analytical
+    winner with ``α₁ < 197/288`` is expected and not an error.  The flag is
+    purely informational for downstream plan-43.10 L8 wiring.
+    """
+    if scheme != "E4" or kernel != "classical":
+        return
+    if best_x is None:
+        return
+    x_arr = np.asarray(best_x, dtype=float).ravel()
+    if x_arr.size < 2 or not np.isfinite(x_arr[1]):
+        return
+    extras["cpp_cutcell_violates_197_288"] = bool(
+        x_arr[1] < _E4_CLASSICAL_ALPHA1_CPP_FLOOR
+    )
+
+
 def run_staged_optimize(
     scheme: str,
     kernel: str,
@@ -887,6 +913,24 @@ def run_staged_optimize(
     if not validator_ranking or not np.isfinite(validator_ranking[0][1]):
         # Every candidate blew up at the deeper layer.  Surface the inner
         # result verbatim so the caller still has a diagnostic anchor.
+        fallback_extras = {
+            "stage": "inner",
+            "validator_ranking": [(x, fv) for (x, fv, _r) in validator_ranking],
+            "inner_method": inner_result.extras.get("inner_method", method),
+            "inner_n_restarts": inner_result.extras.get("n_restarts", n_restarts),
+            "inner_seed": inner_result.extras.get("seed", seed),
+            "inner_n_feasible_restarts": inner_result.extras.get(
+                "n_feasible_restarts", 0
+            ),
+            "inner_field": inner_field,
+            "inner_best_objective": inner_result.best_objective,
+            "inner_best_x": np.asarray(inner_result.best_x, dtype=float).copy(),
+            "validator_max_layer": validator_max_layer,
+            "inner_max_layer": inner_max_layer,
+        }
+        _record_cpp_cutcell_diagnostic(
+            fallback_extras, scheme, kernel, inner_result.best_x
+        )
         fallback = replace(
             inner_result,
             method="staged",
@@ -899,21 +943,7 @@ def run_staged_optimize(
             best_report={},
             compute_time=compute_time,
             n_evals=inner_result.n_evals + validator_evals,
-            extras={
-                "stage": "inner",
-                "validator_ranking": [(x, fv) for (x, fv, _r) in validator_ranking],
-                "inner_method": inner_result.extras.get("inner_method", method),
-                "inner_n_restarts": inner_result.extras.get("n_restarts", n_restarts),
-                "inner_seed": inner_result.extras.get("seed", seed),
-                "inner_n_feasible_restarts": inner_result.extras.get(
-                    "n_feasible_restarts", 0
-                ),
-                "inner_field": inner_field,
-                "inner_best_objective": inner_result.best_objective,
-                "inner_best_x": np.asarray(inner_result.best_x, dtype=float).copy(),
-                "validator_max_layer": validator_max_layer,
-                "inner_max_layer": inner_max_layer,
-            },
+            extras=fallback_extras,
         )
         return fallback
 
@@ -928,6 +958,22 @@ def run_staged_optimize(
     validated_top_key = tuple(np.round(best_x, 6).tolist())
     stage = "validated" if inner_top_key != validated_top_key else "inner"
 
+    success_extras = {
+        "stage": stage,
+        "validator_ranking": [(x, fv) for (x, fv, _r) in validator_ranking],
+        "inner_method": inner_result.extras.get("inner_method", method),
+        "inner_n_restarts": inner_result.extras.get("n_restarts", n_restarts),
+        "inner_seed": inner_result.extras.get("seed", seed),
+        "inner_n_feasible_restarts": inner_result.extras.get(
+            "n_feasible_restarts", 0
+        ),
+        "inner_field": inner_field,
+        "inner_best_objective": inner_result.best_objective,
+        "inner_best_x": np.asarray(inner_result.best_x, dtype=float).copy(),
+        "validator_max_layer": validator_max_layer,
+        "inner_max_layer": inner_max_layer,
+    }
+    _record_cpp_cutcell_diagnostic(success_extras, scheme, kernel, best_x)
     return OptimizeResult(
         best_params=params_from_vector(kernel, best_x),
         best_x=np.asarray(best_x, dtype=float).copy(),
@@ -938,19 +984,5 @@ def run_staged_optimize(
         n_evals=inner_result.n_evals + validator_evals,
         compute_time=compute_time,
         history=list(inner_result.history),
-        extras={
-            "stage": stage,
-            "validator_ranking": [(x, fv) for (x, fv, _r) in validator_ranking],
-            "inner_method": inner_result.extras.get("inner_method", method),
-            "inner_n_restarts": inner_result.extras.get("n_restarts", n_restarts),
-            "inner_seed": inner_result.extras.get("seed", seed),
-            "inner_n_feasible_restarts": inner_result.extras.get(
-                "n_feasible_restarts", 0
-            ),
-            "inner_field": inner_field,
-            "inner_best_objective": inner_result.best_objective,
-            "inner_best_x": np.asarray(inner_result.best_x, dtype=float).copy(),
-            "validator_max_layer": validator_max_layer,
-            "inner_max_layer": inner_max_layer,
-        },
+        extras=success_extras,
     )
