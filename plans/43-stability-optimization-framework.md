@@ -387,12 +387,12 @@ cd scripts/stencil_gen && uv run pytest tests/test_phs.py -x -q -k "TestRegressi
   - File: `scripts/stencil_gen/tests/test_optimizer.py`.
   - Test: `cd scripts/stencil_gen && SYMPY_CACHE_SIZE=50000 uv run pytest tests/test_optimizer.py -x -q -k "TestAlphaBasinSurvey"` — 5 passed in 1.7 s. Full non-slow suite: `uv run pytest tests/test_optimizer.py -x -q` — 91 passed, 4 skipped, 74 s.
 
-- [ ] **43.9d** Compare the survey's top basin against Brady-Livescu's published E4 α:
-  - Read the published values from `stencil_gen/alpha_extraction.py` (they're stored there).
-  - Assertion test: at least one basin in the survey output has `(α₀, α₁)` within a 0.5 L∞ ball of the published value.
-  - The paper doesn't claim uniqueness, so this is a containment check, not an identity check.
+- [x] **43.9d** Added `TestAlphaSurveyVsPublished::test_top_basin_within_published_l_infinity_ball` in `scripts/stencil_gen/tests/test_optimizer.py` — a slow-marked live-pipeline regression that drives `run_survey(n_seeds=1, base_seed=0, bounds=DEFAULT_BOUNDS[("E4","classical")])` with the same staged knobs as 43.9b (`inner_gate=3`, `inner_max_layer=3`, `validator_max_layer=6`, `top_k=5`, `n_restarts=20`, `max_evals=60`) and asserts containment (not identity) against Brady-Livescu's published α.
+  - **Published-value source corrected vs plan text.** The plan said to read from `stencil_gen/alpha_extraction.py`, but no such module exists — the repo's `sweeps/alpha_extraction.py` only defines E2 production α's (`PRODUCTION_ALPHAS = {"E2": [...]}`). The canonical Brady-Livescu E4 constant lives at `sweeps.brady2d_sweep.CLASSICAL_E4_ALPHA = [-0.7733323791884821, 0.1623961700641681]` (identical copy in private `stencil_gen.benchmarks.brady2d_calibration._E4_CLASSICAL_ALPHA`). Test imports the public `sweeps.brady2d_sweep` constant and documents the divergence in the class docstring; no new published-value module was created.
+  - **Why n_seeds=1 instead of the 20-seed production default.** 43.9b proved seed=0 lands feasibly in the Brady-Livescu basin at α ≈ [-0.81, 0.09] with `best_objective ≈ 4.83` in ~138 s. A single feasible seed is sufficient to populate one basin and exercise the `run_survey` aggregation path; the containment assertion does not require multi-basin diversity. Multi-seed diversity (`n_distinct_basins ≥ 3`) is a Completion-Criteria concern for a production run, not a CI regression gate — keeping this test at n_seeds=1 holds the slow-suite cost to ~2 min per run. The synthetic `TestAlphaBasinSurvey` class already covers multi-basin clustering / propagation / rendering deterministically.
+  - Assertions: `n_feasible_seeds >= 1`, `len(basins) >= 1`, and `any(max(|basin.alpha - published|) <= 0.5 for basin in basins)`. The 0.5 L∞ tolerance matches the plan spec and the 43.5c `test_shgo_2d_classical_alpha` precedent. Observed: seed=0 basin at [-0.81, 0.09], L∞ distance 0.072 — well inside the 0.5 ball.
   - File: `scripts/stencil_gen/tests/test_optimizer.py`
-  - Test: `cd scripts/stencil_gen && uv run pytest tests/test_optimizer.py -x -q -k "TestAlphaSurveyVsPublished" -m slow`
+  - Test: `cd scripts/stencil_gen && SYMPY_CACHE_SIZE=50000 uv run pytest tests/test_optimizer.py -x -q -k "TestAlphaSurveyVsPublished" --run-slow` — 1 passed in 138 s. Non-slow suite: `uv run pytest tests/test_optimizer.py -x -q` — 91 passed, 5 skipped, 77 s.
 
 ### 43.10 — L8 validation of optimizer winners
 
@@ -457,7 +457,7 @@ cd scripts/stencil_gen && uv run pytest tests/test_phs.py -x -q -k "TestRegressi
   ↓
 43.8a → 43.8b → 43.8c                  # persistence + regression + persist gate/max_layer
   ↓
-43.9a → 43.9a-r1 → 43.9b → 43.9b-r1 → 43.9b-r2 → 43.9c → 43.9c-r1 → 43.9d  # classical-α (depends on all prior)  [43.9c-r1 done]
+43.9a → 43.9a-r1 → 43.9b → 43.9b-r1 → 43.9b-r2 → 43.9c → 43.9c-r1 → 43.9d  # classical-α (depends on all prior)  [43.9d done]
   ↓
 43.10a → 43.10b                        # L8 validation
   ↓

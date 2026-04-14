@@ -1809,3 +1809,65 @@ class TestAlphaBasinSurvey:
         assert "yes" in body
         assert "no" in body
         assert " - " in body or "| -" in body
+
+
+class TestAlphaSurveyVsPublished:
+    """Live basin-survey assertion against Brady-Livescu's published E4 α
+    (plan 43.9d).
+
+    The plan cites ``stencil_gen/alpha_extraction.py`` as the published-value
+    source, but the Brady-Livescu E4 α is stored in
+    :data:`sweeps.brady2d_sweep.CLASSICAL_E4_ALPHA` (the codebase's canonical
+    constant; ``sweeps/alpha_extraction.py`` only defines E2 production α's).
+    We import from the canonical location and cross-check that at least one
+    basin from the live survey sits within a 0.5 L∞ ball of it.  The paper
+    does not claim uniqueness of this α (it reports 101 distinct E4 schemes
+    at the full budget); this is a containment check, not identity.
+    """
+
+    @pytest.mark.slow
+    def test_top_basin_within_published_l_infinity_ball(self):
+        from stencil_gen.benchmarks import alpha_basin_survey as survey_mod
+        from sweeps.brady2d_sweep import CLASSICAL_E4_ALPHA
+
+        bounds = DEFAULT_BOUNDS[("E4", "classical")]
+        # Single seed matches ``TestStagedClassicalAlpha`` — seed=0 is
+        # empirically known to land in the Brady-Livescu basin at this
+        # budget (~2 min wall; 43.9b observed α ≈ [-0.81, 0.09]).  One
+        # feasible seed suffices to populate the basin list; a wider
+        # multi-seed diversity study is a production-run concern and out
+        # of scope for the regression gate here.
+        survey = survey_mod.run_survey(
+            n_seeds=1,
+            bounds=bounds,
+            scheme="E4",
+            kernel="classical",
+            report_field="layer6.transient_growth_bound",
+            inner_gate=3,
+            inner_max_layer=3,
+            validator_max_layer=6,
+            top_k=5,
+            method="Nelder-Mead",
+            n_restarts=20,
+            base_seed=0,
+            max_evals=60,
+            cluster_decimals=2,
+        )
+
+        assert survey["n_feasible_seeds"] >= 1, (
+            "expected at least one feasible seed; "
+            f"got seed_results={survey['seed_results']}"
+        )
+        assert survey["basins"], "survey returned zero basins"
+
+        published = np.asarray(CLASSICAL_E4_ALPHA, dtype=float)
+        tol = 0.5
+        distances = [
+            float(np.max(np.abs(np.asarray(b["alpha"], dtype=float) - published)))
+            for b in survey["basins"]
+        ]
+        assert any(d <= tol for d in distances), (
+            f"no basin within L∞ distance {tol} of Brady-Livescu α "
+            f"{published.tolist()}; basin distances={distances}, "
+            f"basins={survey['basins']}"
+        )
