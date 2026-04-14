@@ -66,8 +66,10 @@ def brady2d_stability_score(
     kernel: str,           # "classical" | "tension" | "gaussian" | "multiquadric"
     params: dict,          # {"alpha": [...]}, {"sigma": float}, or {"epsilon": float}
     *,
-    max_layer: int = 7,    # highest layer to run (1-7)
+    max_layer: int = 7,    # highest layer to run (1-8; L8 invokes the C++ bridge)
     short_circuit: bool = True,  # stop at first failure
+    layer8_N: int = 31,          # grid resolution forwarded to L8
+    layer8_t_final: float = 10.0,  # physical end time forwarded to L8
 ) -> StabilityReport
 ```
 
@@ -78,6 +80,7 @@ Dataclass returned by `brady2d_stability_score`.
 | Field | Type | Description |
 |-------|------|-------------|
 | `layer1` .. `layer7` | `dict \| None` | Per-layer metrics (populated when that layer runs) |
+| `layer8` | `dict \| None` | L8 C++ simulation result (populated when `max_layer >= 8`) |
 | `kreiss` | `KreissResult \| None` | Alias for `layer2` (the Kreiss determinant result) |
 | `non_normality` | `NonNormalityReport \| None` | Populated by L6 (1D) or L7 (2D) |
 | `overall_verdict` | `"pass" \| "fail" \| "unknown"` | Final verdict |
@@ -131,6 +134,88 @@ def compute_non_normality(
 `transient_growth_bound` (`= e * kreiss_constant`), `n`, `compute_time`,
 `notes`.
 
+## Layer 8 — C++ simulation
+
+L8 closes the loop between the analytical stack (L1&ndash;L7) and the
+compiled C++ solver. It is the only layer that runs an actual
+time-stepping simulation, so it is gated behind `max_layer >= 8` and
+typically only invoked for candidates that have already passed the cheap
+analytical layers.
+
+### Architecture
+
+Python builds a Lua config string from the `lua-configs/brady_livescu_4_3.lua`
+template, writes it to a per-call `tempfile.TemporaryDirectory`, and invokes
+`build/src/app/shoccs` as a subprocess. The simulation writes
+`logs/system.csv` under the tempdir (so concurrent invocations do not race),
+Python parses the final `Linf` column, and a `BridgeResult` is returned.
+The mechanics are described in detail in
+`docs/brady2d_cpp_bridge_reference.md`.
+
+### Dispatch
+
+`layer8_cpp_simulation(scheme, kernel, params, *, N, t_final)` maps
+`(scheme, kernel)` to the Lua `scheme.type` string expected by `stencil::from_lua`:
+
+| `(scheme, kernel)` | Lua `scheme.type` | Passed param |
+|--------------------|-------------------|--------------|
+| `("E4", "classical")` | `"E4u"` | `alpha = {...}` (2-vector) |
+| `("E4", "tension")` | `"tension_E4u"` | `sigma` |
+| `("E4", "gaussian")` | `"gaussian_E4u"` | `epsilon` |
+| `("E4", "multiquadric")` | `"multiquadric_E4u"` | `epsilon` |
+
+E2 spline variants and cut-cell (`E4_1`, not `E4u_1`) variants are
+deferred &mdash; see `plans/42-cpp-bridge-runtime-parameterized-stencils.md`
+items 42.10a / 42.10b.
+
+### Failure thresholds
+
+| Metric | Threshold constant | Value | Rationale |
+|--------|--------------------|-------|-----------|
+| `stable` | `BridgeResult.stable` | `final_linf < 10.0` and finite | Simulation did not blow up or timeout |
+| `final_linf` | `L8_FINAL_LINF_TOL` | 1.0 | Schemes that survive L1&ndash;L7 but diverge under the full 2D varying-coefficient flow still trip this at `t_final = 10` |
+
+A layer-8 failure sets `failed_layer = 8` and `failed_reason` to one of
+`"stable=False"` or `"final_linf=<v> > L8_FINAL_LINF_TOL=1.0"`.
+
+### `BridgeResult`
+
+Returned inside `report.layer8["bridge_result"]`:
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `final_linf` | `float` | L&infin; at `t_final`; `nan` on failure |
+| `linf_trace` | `np.ndarray` | Per-step L&infin; history |
+| `t_trace` | `np.ndarray` | Per-step physical time |
+| `stable` | `bool` | `isfinite(final_linf) and final_linf < 10.0` |
+| `wall_time_s` | `float` | Subprocess wall time |
+| `exit_code` | `int` | `shoccs` exit status |
+| `stderr` | `str` | Captured stderr (diagnostic on failure) |
+
+### Cost and runtime knobs
+
+Default `N = 31, t_final = 10.0` runs in ~1&nbsp;second per call at E4.
+For fast integration testing, pass `layer8_N=21, layer8_t_final=1.0`
+&mdash; the full L1&ndash;L8 pipeline then completes in ~20&nbsp;seconds
+(most of it L7's 2D Arnoldi, not the C++ run itself).
+
+### Sweep integration
+
+`sweeps/brady2d_sweep.py` (subcommand `brady2d`) sweeps a parameter range
+at `max_layer <= 7`, ranks survivors, and then re-runs the top-3 at
+`max_layer = 8` when invoked with `--validate-with-cpp`:
+
+```bash
+cd scripts/stencil_gen
+uv run python -m sweeps brady2d --scheme E4 --kernel tension \
+    --param-range 2 6 20 --max-layer 6 --validate-with-cpp
+```
+
+Ranking uses `layer6.transient_growth_bound` ascending when L6 is
+present, falling back to `layer3.max_stab_eig` otherwise. The C++ build
+is compiled once up front; Lua configs are the only thing that changes
+per sweep point.
+
 ## CLI usage
 
 ```bash
@@ -144,6 +229,11 @@ uv run python -m stencil_gen.brady2d --run-calibration --max-layer 6
 # Run calibration and persist to known_values.json
 uv run python -m stencil_gen.brady2d --run-calibration --max-layer 7 --update-known-values
 ```
+
+L8 has no dedicated CLI entry point. Drive it via the Python API
+(`brady2d_stability_score(..., max_layer=8, layer8_N=..., layer8_t_final=...)`)
+or through the sweep subcommand (`python -m sweeps brady2d
+--validate-with-cpp`).
 
 ## Calibration results
 

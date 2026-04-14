@@ -374,9 +374,10 @@ Each family follows the same 4-item pattern as 42.5b–f (minus the split refere
   - Test: (no test) → **DONE** (reference created at `docs/brady2d_cpp_bridge_reference.md`, ~150 lines). Covers architecture diagram, key files table, the three spline families with Lua type strings + parameter defaults, construction-time solve + 5×7 cache layout, scalar-params codegen pattern (`StencilGenSpec.scalar_params` + `build_symbol_map` no-subscript mapping), cut-cell deferral rationale, programmatic + sweep usage, and L8 failure thresholds.
   - Note: placed under top-level `docs/` (alongside `stencils.md`, `discrete_operators.md`, etc.) rather than `scripts/stencil_gen/docs/` so the C++-side bridge reference is discoverable from the repo root; 42.9c updates the Python-side L8 section of `scripts/stencil_gen/docs/brady2d_stability_reference.md` separately.
 
-- [ ] **42.9c** Update `scripts/stencil_gen/docs/brady2d_stability_reference.md` (from plan 41) with a new "Layer 8 — C++ simulation" section.
+- [x] **42.9c** Update `scripts/stencil_gen/docs/brady2d_stability_reference.md` (from plan 41) with a new "Layer 8 — C++ simulation" section.
   - File: `scripts/stencil_gen/docs/brady2d_stability_reference.md`
-  - Test: (no test)
+  - Test: (no test) → **DONE** (added ~85-line "Layer 8 — C++ simulation" section between the non-normality section and "CLI usage", covering architecture, `(scheme, kernel) → Lua type` dispatch table, failure thresholds, `BridgeResult` fields, cost knobs at `layer8_N=21, layer8_t_final=1.0`, and the `sweeps brady2d --validate-with-cpp` integration). Also updated the `brady2d_stability_score` signature snippet to advertise `max_layer=8` (with the new `layer8_N`/`layer8_t_final` kwargs from 42.3b) and added a `layer8` row to the `StabilityReport` fields table. Noted at the bottom of CLI usage that L8 is not exposed via `stencil_gen.brady2d_cli` and must be driven through the Python API or the sweep subcommand.
+  - Note: deliberately kept the L8 section pointing at `docs/brady2d_cpp_bridge_reference.md` (42.9b's output) for the lower-level bridge mechanics rather than duplicating them — the stability-reference doc now focuses on where L8 sits in the layered pipeline and how to invoke it, while the bridge-reference doc owns the Lua template / CSV parsing / subprocess details.
 
 - [ ] **42.9d** Update `.claude/skills/stencil-sweeps/SKILL.md`:
   - Add `brady2d` to the CLI quick reference.
