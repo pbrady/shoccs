@@ -168,7 +168,7 @@ cd scripts/stencil_gen && uv run python -m sweeps optimize \
 
 ### 44.4-followup — Review fix: harden conditional test assertion
 
-- [ ] **44.4f** Fix `test_short_circuit_after_l3r_skips_l4` in `TestBrady2DScoreL3rCascade`:
+- [x] **44.4f** Fix `test_short_circuit_after_l3r_skips_l4` in `TestBrady2DScoreL3rCascade`:
   - The current test guards its assertion with `if report.layer_bl42 is not None and ...` — if the precondition isn't met, the test passes vacuously without testing short-circuit behavior.
   - Replace the `if` with explicit `assert` statements so the test fails loudly if preconditions aren't met:
     ```python
@@ -177,7 +177,7 @@ cd scripts/stencil_gen && uv run python -m sweeps optimize \
     assert report.layer4 is None, "short-circuit should skip L4 after L3r failure"
     ```
   - File: `scripts/stencil_gen/tests/test_brady2d_stability.py`
-  - Test: `cd scripts/stencil_gen && uv run pytest tests/test_brady2d_stability.py -x -q -k "test_short_circuit_after_l3r_skips_l4"`
+  - Test: `cd scripts/stencil_gen && uv run pytest tests/test_brady2d_stability.py -x -q -k "test_short_circuit_after_l3r_skips_l4"` ✓
 
 ### 44.5 — Optimizer integration
 

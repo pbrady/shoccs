@@ -1012,8 +1012,9 @@ class TestBrady2DScoreL3rCascade:
             "E4", "tension", {"sigma": 3.0}, max_layer=4,
             short_circuit=True,
         )
-        if report.layer_bl42 is not None and report.layer_bl42["max_spectral_abscissa"] > BL42_TOL:
-            assert report.layer4 is None
+        assert report.layer_bl42 is not None, "L3r should have run"
+        assert report.layer_bl42["max_spectral_abscissa"] > BL42_TOL, "tension E4 σ=3.0 should fail BL42"
+        assert report.layer4 is None, "short-circuit should skip L4 after L3r failure"
 
 
 class TestBrady2DScoreIntegration:
