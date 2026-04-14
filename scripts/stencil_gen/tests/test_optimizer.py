@@ -620,6 +620,19 @@ class TestDE:
         with pytest.raises(ValueError, match="maxiter must be >= 1"):
             run_scipy_de(self._quadratic, bounds=[(0.0, 1.0)], maxiter=0)
 
+    def test_de_handles_fully_infeasible(self):
+        r = run_scipy_de(
+            lambda x: float("inf"),
+            bounds=[(0.0, 1.0)],
+            popsize=4,
+            maxiter=3,
+            seed=0,
+        )
+        assert not np.isfinite(r.best_objective)
+        assert r.converged is False
+        assert r.best_x.shape == (1,)
+        assert len(r.history) > 0
+
 
 class TestRunScipyLocalCOBYQAUnavailable:
     def test_cobyqa_unavailable_raises_runtime_error(self, monkeypatch):

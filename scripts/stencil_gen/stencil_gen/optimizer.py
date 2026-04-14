@@ -618,7 +618,9 @@ def run_scipy_de(
     """Global optimization via ``scipy.optimize.differential_evolution``.
 
     Population-based global search with Sobol initialization and a final
-    Nelder-Mead polish (``polish=True``).  Suited to 4-6D landscapes where
+    L-BFGS-B polish (``polish=True``; scipy's documented default for a bounded,
+    unconstrained problem — it falls back to ``trust-constr`` when constraints
+    are supplied, which we do not do today).  Suited to 4-6D landscapes where
     SHGO's simplicial decomposition becomes expensive.
 
     The objective is wrapped in a recorder so every evaluation — including
