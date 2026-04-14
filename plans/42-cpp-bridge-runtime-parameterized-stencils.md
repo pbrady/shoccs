@@ -336,12 +336,23 @@ Each family follows the same 4-item pattern as 42.5b–f (minus the split refere
   - Test: `cd scripts/stencil_gen && uv run python -m sweeps.brady2d_sweep --scheme E4 --kernel tension --param-range 2 4 3 --max-layer 3` → **PASSED** (3 sigma values swept in ~8s, markdown table shows all three passing L1+L3, exit 0; classical single-point path also validated: `--kernel classical` emits one `pass` row with L1=2.1e-2, L3=-1.8e-4). The `-m sweeps brady2d` subcommand form (no `.brady2d_sweep` module suffix) is wired by 42.8b.
   - Note: `--param-range` is `nargs=3` rather than three separate flags (`--sigma-range` / `--epsilon-range`) so one arg serves all three spline kernels — 42.8b exposes it verbatim under the same name. For the `--validate-with-cpp` path to do anything useful, `--max-layer` must be ≥3 (otherwise the ranking has no signal). `TOP_K_FOR_L8 = 3` is a module constant matching the plan text.
 
+- [ ] **42.8a-fu1** Follow-up from 42.8a review: add unit tests for `sweeps/brady2d_sweep.py` in `tests/test_sweep_gv_objectives.py` (matching the precedent set by `test_tension_sweep_main_merges_known_values` etc.). The only coverage today is a manual CLI smoke recorded in 42.8a's Test line; no automated test exercises argument parsing, the classical single-point branch, the spline-kernel path, the ranking helper, or the known-values write path. Each new sweep script in this repo has a corresponding `main()` test with monkeypatched `sweeps_common.KNOWN_VALUES_PATH`, and the same pattern should apply here.
+  - Required test cases (fast — must not invoke the C++ binary, so avoid `--validate-with-cpp` and either stub `brady2d_stability_score` via `monkeypatch.setattr(brady2d_sweep, "brady2d_stability_score", ...)` or restrict to `--max-layer 1` so only L1 runs):
+    1. `test_brady2d_sweep_main_classical_single_point`: `--kernel classical` with no `--param-range` succeeds (exit 0), produces one table row, and does not raise the spline-kernel `ValueError`. Verifies `CLASSICAL_E4_ALPHA` is what ends up in `params_dict`.
+    2. `test_brady2d_sweep_main_spline_requires_param_range`: `--kernel tension` without `--param-range` exits 2 with the expected message on stderr.
+    3. `test_brady2d_sweep_main_param_range_parsing`: `--param-range 2 4 3` yields exactly 3 sweep points at `{2.0, 3.0, 4.0}` (post-`np.linspace`) for `tension`/`gaussian`/`multiquadric` and that the correct scalar name (`sigma` vs `epsilon`) appears in each `params_dict`.
+    4. `test_brady2d_sweep_main_update_known_values`: with `monkeypatch.setattr(sweeps_common, "KNOWN_VALUES_PATH", tmp_path / "known_values.json")`, `--update-known-values` writes under `brady2d_sweep.<scheme>.<kernel>` without clobbering unrelated top-level keys (mirror the merge check from `test_tension_sweep_main_merges_known_values`).
+    5. `test_rank_for_l8_prefers_layer6_then_layer3`: unit test on `rank_for_l8` directly — construct two dummy `SweepPoint`s with hand-built `StabilityReport`s, verify ordering uses `layer6.transient_growth_bound` ascending when available and falls back to `layer3.max_stab_eig` otherwise; passing points with mixed `layer6 is None` force the L3 branch; empty-passing returns `[]`.
+  - Run under the default (non-slow) suite — total wall under ~5 s.
+  - File: `scripts/stencil_gen/tests/test_sweep_gv_objectives.py`
+  - Test: `cd scripts/stencil_gen && uv run pytest tests/test_sweep_gv_objectives.py -x -q -k "brady2d or rank_for_l8"`
+
 - [ ] **42.8b** Register `brady2d` subcommand in `sweeps/__main__.py`:
-  - `sub_brady2d = subparsers.add_parser("brady2d", ...)` with all the args from 42.8a.
+  - `sub_brady2d = subparsers.add_parser("brady2d", ...)` with all the args from 42.8a: `--scheme`, `--kernel`, `--param-range` (nargs=3, metavar=("LO","HI","N"); **use the same name `--param-range` as 42.8a — do NOT rename to `--sigma-range`/`--epsilon-range`**), `--max-layer`, `--validate-with-cpp`, `--layer8-N`, `--layer8-t-final`, `--update-known-values`.
   - Add dispatch block `if args.command == "brady2d": from .brady2d_sweep import main as brady2d_main; return brady2d_main(...)`.
-  - Add to `_run_all`'s `sweeps` list in quick mode (`--sigma-range 2 4 3 --max-layer 3`).
+  - Add to `_run_all`'s `sweeps` list in quick mode (`--param-range 2 4 3 --max-layer 3`).
   - File: `scripts/stencil_gen/sweeps/__main__.py`
-  - Test: `cd scripts/stencil_gen && uv run python -m sweeps brady2d --scheme E4 --kernel tension --sigma-range 2 4 3 --max-layer 3`
+  - Test: `cd scripts/stencil_gen && uv run python -m sweeps brady2d --scheme E4 --kernel tension --param-range 2 4 3 --max-layer 3`
 
 ### 42.9 — Regression tests and documentation
 
@@ -406,7 +417,7 @@ Each family follows the same 4-item pattern as 42.5b–f (minus the split refere
   ↓
 42.7a → 42.7b → 42.7c              # Bridge dispatch for spline families
   ↓
-42.8a → 42.8b                      # New sweep subcommand
+42.8a → 42.8a-fu1 → 42.8b          # New sweep subcommand (42.8a-fu1 = review follow-up: unit tests)
   ↓
 42.9a → 42.9b → 42.9c → 42.9d → 42.9e    # Regression + docs
   ↓
@@ -426,9 +437,9 @@ Parallelizable after 42.4:
 - Three new C++ stencil families exist: `tension_E4u_1`, `gaussian_E4u_1`, `multiquadric_E4u_1` — each compiled as a separate `.cpp` file in `src/stencils/`, each registered in `stencil::from_lua`, each with a passing Catch2 unit test (`t-{family}_E4u_1`) that verifies coefficients match the Python reference within `1e-12`.
 - `StencilGenSpec` supports scalar runtime parameters via `scalar_params` field, with `generate_stencil_cpp` emitting clean `real name;` fields and `name`-subscripted expressions (not `name[0]`).
 - `brady2d_stability_score(scheme="E4", kernel="tension", params={"sigma": 3.0}, max_layer=8)` runs end-to-end: L1–L7 analytical layers pass, L8 invokes the C++ simulation with `type="tension_E4u"` and `sigma=3.0` in the Lua config, and reports `overall_verdict="pass"` when the calibration (plan 41) predicts it should pass.
-- `sweeps/brady2d_sweep.py` exists and `python -m sweeps brady2d --scheme E4 --kernel tension --sigma-range 2 4 3 --max-layer 3` runs a 3-point sweep and prints a per-layer results table.
+- `sweeps/brady2d_sweep.py` exists and `python -m sweeps brady2d --scheme E4 --kernel tension --param-range 2 4 3 --max-layer 3` runs a 3-point sweep and prints a per-layer results table.
 - `TestRegressionBrady2DSweep` passes; `TestLayer8EndToEndSpline` confirms consistency between L1–L7 analytical verdicts and L8 empirical verdicts for all three spline families.
 - `ctest --test-dir build` passes; full build succeeds with zero warnings from the new stencil files.
-- **No rebuild required per sweep point.** Verified by running `python -m sweeps brady2d --sigma-range 2 6 20 --validate-with-cpp` and confirming the C++ build is compiled exactly once at the start and Lua configs are the only thing changing per sweep point.
+- **No rebuild required per sweep point.** Verified by running `python -m sweeps brady2d --scheme E4 --kernel tension --param-range 2 6 20 --validate-with-cpp` and confirming the C++ build is compiled exactly once at the start and Lua configs are the only thing changing per sweep point.
 - Documentation: `docs/brady2d_cpp_bridge_reference.md` exists; `docs/brady2d_stability_reference.md` updated with L8 section; both skill files updated.
 - Plan 41's completion criterion that "Plan 42 can now start" is no longer relevant — plan 42 is complete.
