@@ -66,6 +66,9 @@ L4_TOL = 0.1
 # Layer-5 threshold: 5% anisotropy error projected onto local propagation direction.
 L5_TOL = 0.05
 
+# BL §4.2 tolerance: continuous spectrum is exactly imaginary; tight tolerance.
+BL42_TOL = 1e-10
+
 # Fraction of the resolved band over which to measure max |gv_error|.
 # Using 10% of the cutoff restricts evaluation to very well-resolved
 # wavenumbers where even boundary stencils (especially the outermost
@@ -555,6 +558,62 @@ def build_bl42_operator(D: np.ndarray) -> "scipy.sparse.csr_matrix":
     keep = np.concatenate([np.arange(1, N), np.arange(N, 2 * N - 1)])
     L_red = L_full[np.ix_(keep, keep)]
     return L_red.tocsr()
+
+
+def layer_bl42_reflecting_hyperbolic(
+    scheme: str,
+    kernel: str,
+    params: dict,
+    n_values: tuple[int, ...] = (21, 41, 81),
+) -> dict:
+    """L3r: BL §4.2 reflecting-hyperbolic eigenvalue stability check.
+
+    For each grid size N, builds the 2×2 block operator for the coupled
+    hyperbolic system u_t = v_x, v_t = u_x with reflecting BCs, and
+    computes the spectral abscissa.  The continuous spectrum is purely
+    imaginary; any positive real part indicates boundary-closure instability.
+
+    Parameters
+    ----------
+    scheme : str
+        Scheme name ("E2" or "E4").
+    kernel : str
+        Kernel type ("classical", "tension", "gaussian", "multiquadric").
+    params : dict
+        Kernel-specific parameters.
+    n_values : tuple[int, ...]
+        Grid sizes at which to evaluate stability.
+
+    Returns
+    -------
+    dict with keys:
+        spectral_abscissa_by_n : dict[int, float]
+            {N: max Re(lambda)} for each grid size.
+        max_spectral_abscissa : float
+            Maximum over all grid sizes.
+        purely_imaginary : bool
+            True iff max_spectral_abscissa < BL42_TOL.
+    """
+    sp = _SCHEME_PARAMS[scheme]
+    p, q, nextra, nu = sp["p"], sp["q"], sp["nextra"], sp["nu"]
+
+    spectral_abscissa_by_n = {}
+    for N in n_values:
+        if kernel == "classical":
+            D = _build_classical_diff_matrix(N, p, nu, params["alpha"])
+        else:
+            epsilon = params.get("sigma", params.get("epsilon", 0.0))
+            D = build_diff_matrix_rbf(N, p, q, epsilon, kernel, nu, nextra)
+        L_red = build_bl42_operator(D)
+        max_re, _ = spectral_abscissa_sparse(L_red, k=10)
+        spectral_abscissa_by_n[N] = max_re
+
+    max_sa = max(spectral_abscissa_by_n.values())
+    return {
+        "spectral_abscissa_by_n": spectral_abscissa_by_n,
+        "max_spectral_abscissa": max_sa,
+        "purely_imaginary": max_sa < BL42_TOL,
+    }
 
 
 def layer4_local_gv_2d(

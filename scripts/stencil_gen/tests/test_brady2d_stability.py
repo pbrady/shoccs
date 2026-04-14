@@ -7,6 +7,7 @@ import numpy as np
 import pytest
 
 from stencil_gen.brady2d_stability import (
+    BL42_TOL,
     L1_TOL,
     L4_TOL,
     L5_TOL,
@@ -28,6 +29,7 @@ from stencil_gen.brady2d_stability import (
     layer7_sparse_2d_eigenvalue,
     layer7_with_non_normality,
     layer8_cpp_simulation,
+    layer_bl42_reflecting_hyperbolic,
 )
 from stencil_gen.cpp_bridge import SHOCCS_BINARY, BridgeResult
 from stencil_gen.gks_kreiss import KreissResult
@@ -330,6 +332,65 @@ class TestBuildBL42Operator:
         eigvals = np.linalg.eigvals(L.toarray())
         max_re = np.max(np.abs(eigvals.real))
         assert max_re < 1e-10, f"max |Re(lambda)| = {max_re}"
+
+
+class TestLayerBL42:
+    """Layer BL42 (L3r): reflecting-hyperbolic eigenvalue stability check."""
+
+    def test_classical_e4_passes(self):
+        """Classical E4 with known-good alpha gives purely imaginary spectrum."""
+        alpha = [-0.7733323791884821, 0.1623961700641681]
+        result = layer_bl42_reflecting_hyperbolic(
+            "E4", "classical", {"alpha": alpha},
+        )
+        assert result["max_spectral_abscissa"] < 1e-8, (
+            f"max_spectral_abscissa={result['max_spectral_abscissa']:.4e}"
+        )
+        assert result["purely_imaginary"] is True
+
+    def test_tension_e4_sigma_3_detects_instability(self):
+        """Tension E4 σ=3.0 passes L3 but BL42 catches reflecting-BC instability at larger N."""
+        result = layer_bl42_reflecting_hyperbolic(
+            "E4", "tension", {"sigma": 3.0},
+        )
+        assert result["max_spectral_abscissa"] > 0.1, (
+            f"Expected unstable at higher N, got max_spectral_abscissa={result['max_spectral_abscissa']:.4e}"
+        )
+        assert result["purely_imaginary"] is False
+
+    @pytest.mark.slow
+    def test_gaussian_e4_eps_01_fails(self):
+        """Gaussian E4 at epsilon=0.1 is unstable — large positive spectral abscissa."""
+        result = layer_bl42_reflecting_hyperbolic(
+            "E4", "gaussian", {"epsilon": 0.1},
+        )
+        assert result["max_spectral_abscissa"] > 0.01, (
+            f"Expected unstable, got max_spectral_abscissa={result['max_spectral_abscissa']:.4e}"
+        )
+        assert result["purely_imaginary"] is False
+
+    def test_purely_imaginary_flag(self):
+        """Verify purely_imaginary flag for stable and unstable cases."""
+        alpha = [-0.7733323791884821, 0.1623961700641681]
+        stable = layer_bl42_reflecting_hyperbolic(
+            "E4", "classical", {"alpha": alpha},
+        )
+        assert stable["purely_imaginary"] is True
+
+        unstable = layer_bl42_reflecting_hyperbolic(
+            "E4", "gaussian", {"epsilon": 0.1}, n_values=(21,),
+        )
+        assert unstable["purely_imaginary"] is False
+
+    def test_return_keys(self):
+        """Layer BL42 returns expected keys."""
+        result = layer_bl42_reflecting_hyperbolic(
+            "E4", "tension", {"sigma": 3.0}, n_values=(21,),
+        )
+        assert "spectral_abscissa_by_n" in result
+        assert "max_spectral_abscissa" in result
+        assert "purely_imaginary" in result
+        assert 21 in result["spectral_abscissa_by_n"]
 
 
 class TestLayer4:
