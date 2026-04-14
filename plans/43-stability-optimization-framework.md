@@ -259,24 +259,15 @@ cd scripts/stencil_gen && uv run pytest tests/test_phs.py -x -q -k "TestRegressi
 
 ### 43.7 — CLI: `sweeps/optimize.py`
 
-- [ ] **43.7a** Create `scripts/stencil_gen/sweeps/optimize.py::main(argv) -> int`:
-  - Args:
-    - `--scheme {E2,E4}` (required)
-    - `--kernel {tension,gaussian,multiquadric,classical}` (required)
-    - `--objective FIELD` (required; dotted path like `layer6.spectral_abscissa`)
-    - `--gate-layer INT` (default 3)
-    - `--max-layer INT` (default: layer implied by objective)
-    - `--bounds LO1 HI1 [LO2 HI2 ...]` (if absent, falls back to `DEFAULT_BOUNDS`)
-    - `--method {Nelder-Mead,COBYQA,SHGO,DE,staged}` (default `staged`)
-    - `--n-restarts INT` (default 10; used by Nelder-Mead, COBYQA, staged)
-    - `--max-evals INT` (default 200; used by local methods)
-    - `--seed INT` (default 0)
-    - `--validate-with-cpp` (runs L8 on final winner)
-    - `--update-known-values`
-    - `--json-output PATH`
-  - Dispatches to the right `run_*` function, prints a summary, optionally writes to `known_values.json`.
+- [x] **43.7a** Created `scripts/stencil_gen/sweeps/optimize.py::main(argv) -> int`:
+  - Argparse surface covers `--scheme {E2,E4}`, `--kernel {tension,gaussian,multiquadric,classical}`, `--objective FIELD`, `--gate-layer`, `--max-layer`, `--bounds` (flat list parsed into pairs, with an odd-length guard), `--method {Nelder-Mead,COBYQA,SHGO,DE,staged}`, `--n-restarts`, `--max-evals`, `--seed`, `--validate-with-cpp` (stubbed, full wiring in 43.10a), `--update-known-values`, and `--json-output`.
+  - Method-specific extras added beyond the original spec so SHGO/DE/staged can be exercised from the CLI without editing the module: `--validator-max-layer`, `--top-k`, `--inner-method` (staged); `--shgo-n`, `--shgo-iters` (SHGO); `--de-popsize`, `--de-maxiter` (DE).
+  - Dispatch: Nelder-Mead / COBYQA via `multi_start_optimize`; SHGO via `run_scipy_shgo`; DE via `run_scipy_de`; `staged` via `run_staged_optimize`. For kernel-agnostic drivers (multi-start / SHGO / DE), `best_params` is backfilled via `params_from_vector` on a successful (finite) run so the persisted JSON carries the kernel-native dict.
+  - Bounds fall back to `DEFAULT_BOUNDS[(scheme, kernel)]` when `--bounds` is absent; unknown combinations error out with a clear argparse message.
+  - `_print_summary` renders scheme / kernel / method / objective / bounds and the result fields (`best_x`, `best_params`, `best_objective`, `converged`, `n_evals`, `compute_time`) plus each extras entry (length-summarised for `validator_ranking` / `local_minima`).
+  - Persistence (under `--update-known-values`) writes to `kv["brady2d_optima"][scheme][kernel][objective]` with the 43.8a schema (best_x, best_params, best_objective, method, bounds, n_evals, compute_time, converged, best_report) and omits `history`. `--json-output PATH` mirrors the same dict to disk.
   - File: `scripts/stencil_gen/sweeps/optimize.py` (new)
-  - Test: `cd scripts/stencil_gen && uv run python -m sweeps optimize --scheme E4 --kernel tension --objective layer1.boundary_gv_err --bounds 0.5 20 --method Nelder-Mead --max-evals 40`
+  - Test: run directly via `cd scripts/stencil_gen && SYMPY_CACHE_SIZE=50000 uv run python -m sweeps.optimize --scheme E4 --kernel tension --objective layer3.max_stab_eig --gate-layer 3 --max-layer 3 --bounds 0.5 20 --method Nelder-Mead --max-evals 40 --n-restarts 3` — succeeds, prints `best_objective = -1.220708e-04` at σ ≈ 1.644 in ~6 s. Top-level `python -m sweeps optimize ...` dispatch is wired in 43.7b.
 
 - [ ] **43.7b** Register `optimize` subcommand in `scripts/stencil_gen/sweeps/__main__.py`:
   - Add `sub_opt = subparsers.add_parser("optimize", help="Optimize boundary-closure parameters against a stability objective")` with all args.
