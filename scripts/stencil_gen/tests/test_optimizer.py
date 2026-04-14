@@ -1567,3 +1567,245 @@ class TestOptimizeCLI:
         assert "cpp_cutcell_violates_197_288" not in opt
         assert "cpp_cutcell_violates_197_288" not in second_opt
         assert "cpp_cutcell_violates_197_288" not in staged_opt
+
+
+class TestAlphaBasinSurvey:
+    """Synthetic coverage for ``run_survey`` / ``format_survey_table``
+    (plan 43.9c-r1).
+
+    The live pipeline is exercised by the slow ``43.9d`` test.  Here we
+    monkey-patch :func:`run_staged_optimize` so each branch — basin
+    clustering, winner-replaces-basin, fallback-infeasible, flag propagation,
+    input validation, and markdown rendering — is deterministic and fast.
+    """
+
+    @staticmethod
+    def _canned(
+        *,
+        best_x,
+        best_objective,
+        cpp_flag=None,
+        stage="validated",
+    ):
+        x = np.asarray(best_x, dtype=float)
+        extras = {"stage": stage, "inner_method": "Nelder-Mead"}
+        if cpp_flag is not None:
+            extras["cpp_cutcell_violates_197_288"] = cpp_flag
+        return OptimizeResult(
+            best_params={"alpha": x.tolist()} if x.shape[0] == 2 else {"sigma": float(x[0])},
+            best_x=x,
+            best_objective=float(best_objective),
+            best_report={"layer6": {"transient_growth_bound": float(best_objective)}},
+            method="staged",
+            converged=np.isfinite(best_objective),
+            n_evals=7,
+            compute_time=0.01,
+            history=[(x.copy(), float(best_objective))],
+            extras=extras,
+        )
+
+    def test_run_survey_clusters_multiple_basins(self, monkeypatch):
+        from stencil_gen.benchmarks import alpha_basin_survey as survey_mod
+
+        # 4 seeds: seeds 0 and 2 cluster near [-0.80, 0.10] (two-decimal key),
+        # seed 1 is a separate basin at [-0.30, 0.90], seed 3 infeasible.
+        # Seed 2 has the *lower* objective, so the shared basin should
+        # retain seed-2's alpha/objective (winner-replaces-basin branch).
+        seed_to_result = {
+            0: self._canned(best_x=[-0.803, 0.102], best_objective=5.0, cpp_flag=True),
+            1: self._canned(best_x=[-0.300, 0.900], best_objective=2.0, cpp_flag=False),
+            2: self._canned(best_x=[-0.797, 0.099], best_objective=1.0, cpp_flag=True),
+            3: self._canned(
+                best_x=[0.0, 0.0], best_objective=float("inf"), stage="inner"
+            ),
+        }
+
+        def fake_staged(**kwargs):
+            return seed_to_result[kwargs["seed"]]
+
+        monkeypatch.setattr(survey_mod, "run_staged_optimize", fake_staged)
+
+        r = survey_mod.run_survey(
+            n_seeds=4,
+            bounds=[(-2.0, 2.0), (0.05, 2.0)],
+            cluster_decimals=2,
+            base_seed=0,
+        )
+
+        assert r["n_feasible_seeds"] == 3
+        assert r["n_distinct_basins"] == 2
+        basins = r["basins"]
+        # Sorted ascending by best_objective → seed-2 basin first (obj=1.0),
+        # then seed-1 basin (obj=2.0).
+        assert basins[0]["best_objective"] == pytest.approx(1.0)
+        assert basins[1]["best_objective"] == pytest.approx(2.0)
+
+        # First basin holds seeds {0, 2} with seed 2's alpha (the winner).
+        assert basins[0]["n_seeds_in_basin"] == 2
+        assert sorted(basins[0]["seeds"]) == [0, 2]
+        np.testing.assert_allclose(basins[0]["alpha"], [-0.797, 0.099])
+
+        # Second basin holds only seed 1.
+        assert basins[1]["n_seeds_in_basin"] == 1
+        assert basins[1]["seeds"] == [1]
+        np.testing.assert_allclose(basins[1]["alpha"], [-0.300, 0.900])
+
+        # Config round-trips all keys (including cluster_decimals).
+        cfg = r["config"]
+        for key in (
+            "scheme",
+            "kernel",
+            "report_field",
+            "bounds",
+            "n_seeds",
+            "base_seed",
+            "cluster_decimals",
+            "inner_gate",
+            "inner_max_layer",
+            "validator_max_layer",
+            "top_k",
+            "method",
+            "n_restarts",
+            "max_evals",
+        ):
+            assert key in cfg, f"config missing {key!r}"
+        assert cfg["cluster_decimals"] == 2
+        assert cfg["n_seeds"] == 4
+
+        assert len(r["seed_results"]) == 4
+        assert r["compute_time"] >= 0.0
+
+    def test_run_survey_propagates_cpp_cutcell_flag(self, monkeypatch):
+        from stencil_gen.benchmarks import alpha_basin_survey as survey_mod
+
+        # Three distinct feasible basins with flag values {True, False, None}.
+        seed_to_result = {
+            0: self._canned(best_x=[-0.80, 0.10], best_objective=3.0, cpp_flag=True),
+            1: self._canned(best_x=[-0.30, 0.90], best_objective=2.0, cpp_flag=False),
+            2: self._canned(best_x=[0.50, 0.50], best_objective=1.0, cpp_flag=None),
+        }
+
+        def fake_staged(**kwargs):
+            return seed_to_result[kwargs["seed"]]
+
+        monkeypatch.setattr(survey_mod, "run_staged_optimize", fake_staged)
+
+        r = survey_mod.run_survey(
+            n_seeds=3,
+            bounds=[(-2.0, 2.0), (0.05, 2.0)],
+            cluster_decimals=2,
+        )
+
+        # Per-seed entries carry the flag untouched.
+        seed_map = {e["seed"]: e for e in r["seed_results"]}
+        assert seed_map[0]["cpp_cutcell_violates_197_288"] is True
+        assert seed_map[1]["cpp_cutcell_violates_197_288"] is False
+        assert seed_map[2]["cpp_cutcell_violates_197_288"] is None
+
+        # Per-basin summaries carry the flag too (each basin is a single
+        # seed here so the propagation is unambiguous).
+        basin_by_alpha = {tuple(round(a, 2) for a in b["alpha"]): b for b in r["basins"]}
+        assert basin_by_alpha[(-0.80, 0.10)]["cpp_cutcell_violates_197_288"] is True
+        assert basin_by_alpha[(-0.30, 0.90)]["cpp_cutcell_violates_197_288"] is False
+        assert basin_by_alpha[(0.50, 0.50)]["cpp_cutcell_violates_197_288"] is None
+
+    def test_run_survey_all_infeasible_returns_empty_basins(self, monkeypatch):
+        from stencil_gen.benchmarks import alpha_basin_survey as survey_mod
+
+        def fake_staged(**kwargs):
+            return self._canned(
+                best_x=[0.0, 0.0], best_objective=float("inf"), stage="inner"
+            )
+
+        monkeypatch.setattr(survey_mod, "run_staged_optimize", fake_staged)
+
+        r = survey_mod.run_survey(
+            n_seeds=3,
+            bounds=[(-2.0, 2.0), (0.05, 2.0)],
+            cluster_decimals=2,
+        )
+
+        assert r["basins"] == []
+        assert r["n_distinct_basins"] == 0
+        assert r["n_feasible_seeds"] == 0
+        assert len(r["seed_results"]) == 3
+        assert all(not e["feasible"] for e in r["seed_results"])
+
+        # format_survey_table must still render without raising; it should
+        # include the header lines and an empty table body.
+        table = survey_mod.format_survey_table(r)
+        assert "distinct basins=0" in table
+        assert "| α₀ | α₁" in table
+
+    def test_run_survey_rejects_bad_inputs(self):
+        from stencil_gen.benchmarks import alpha_basin_survey as survey_mod
+
+        with pytest.raises(ValueError, match="n_seeds"):
+            survey_mod.run_survey(n_seeds=0, bounds=[(-2.0, 2.0), (0.05, 2.0)])
+        with pytest.raises(ValueError, match="cluster_decimals"):
+            survey_mod.run_survey(
+                n_seeds=1,
+                bounds=[(-2.0, 2.0), (0.05, 2.0)],
+                cluster_decimals=-1,
+            )
+
+    def test_format_survey_table_renders_header_and_rows(self):
+        from stencil_gen.benchmarks import alpha_basin_survey as survey_mod
+
+        fake = {
+            "basins": [
+                {
+                    "alpha": [-0.7733, 0.1624],
+                    "best_objective": 4.83,
+                    "n_seeds_in_basin": 3,
+                    "seeds": [0, 2, 5],
+                    "cpp_cutcell_violates_197_288": True,
+                },
+                {
+                    "alpha": [0.5, 0.9],
+                    "best_objective": 7.21,
+                    "n_seeds_in_basin": 2,
+                    "seeds": [1, 3],
+                    "cpp_cutcell_violates_197_288": False,
+                },
+                {
+                    "alpha": [1.0, 0.2],
+                    "best_objective": 12.0,
+                    "n_seeds_in_basin": 1,
+                    "seeds": [4],
+                    "cpp_cutcell_violates_197_288": None,
+                },
+            ],
+            "n_distinct_basins": 3,
+            "n_feasible_seeds": 6,
+            "compute_time": 12.3,
+            "config": {
+                "scheme": "E4",
+                "kernel": "classical",
+                "report_field": "layer6.transient_growth_bound",
+                "n_seeds": 10,
+            },
+        }
+
+        table = survey_mod.format_survey_table(fake)
+        lines = table.splitlines()
+
+        # Header: scheme, kernel, report_field, and the summary stats line
+        # must all appear.
+        header = lines[0]
+        assert "E4" in header and "classical" in header
+        assert "layer6.transient_growth_bound" in header
+        stats = lines[1]
+        assert "n_seeds=10" in stats
+        assert "feasible=6" in stats
+        assert "distinct basins=3" in stats
+        assert "wall=12.3s" in stats
+
+        # The 5-column schema.
+        assert "| α₀ | α₁ | best_objective | n_seeds | 197/288 viol |" in lines[2]
+
+        # viol cell renders yes / no / - for True / False / None.
+        body = "\n".join(lines[4:])
+        assert "yes" in body
+        assert "no" in body
+        assert " - " in body or "| -" in body
