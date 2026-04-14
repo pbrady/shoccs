@@ -365,13 +365,14 @@ Each family follows the same 4-item pattern as 42.5b–f (minus the split refere
   - Test: `cd scripts/stencil_gen && uv run pytest tests/test_phs.py -x -q -k "TestRegressionBrady2DSweep"` → **PASSED** (skips cleanly when `brady2d_sweep` key absent from `known_values.json`, as it currently is; 1 skipped in 0.84 s). Positive-path verified out-of-band by injecting a synthetic `brady2d_sweep.E4.classical` entry with `{"alpha": [-0.7733..., 0.1624...]}` and stored `overall_verdict="pass"` — test recomputes at `max_layer=3` and asserts match (1 passed in 1.49 s, `known_values.json` restored from backup afterward). Full `TestRegression*` suite still green: 16 passed, 7 skipped.
   - Note: mirrors the structure of `TestRegressionBrady2DCalibration` just above — autouse skip fixture + single iteration test. Iterates `brady2d_sweep → scheme → kernel → points`, reads `params_dict` and stored `report.overall_verdict`/`failed_layer` from each point. Uses the same "if stored failure is reachable at layer ≤ 3 then expect fail, else expect pass" logic as the calibration test, since sweeps often record results at `max_layer > 3` where later layers might fail. `checked == 0` after iteration triggers a `pytest.skip` so an empty sweep bucket doesn't silently no-op.
 
-- [ ] **42.9b** Create `docs/brady2d_cpp_bridge_reference.md`:
+- [x] **42.9b** Create `docs/brady2d_cpp_bridge_reference.md`:
   - Describes the bridge architecture (Python writes Lua, calls shoccs, parses CSV).
   - Lists the three new C++ stencil families with their Lua type strings and parameters.
   - Documents the runtime-parameterized pattern (scalar_params in codegen).
   - Explains why cut-cell variants are deferred.
   - File: `docs/brady2d_cpp_bridge_reference.md` (new)
-  - Test: (no test)
+  - Test: (no test) → **DONE** (reference created at `docs/brady2d_cpp_bridge_reference.md`, ~150 lines). Covers architecture diagram, key files table, the three spline families with Lua type strings + parameter defaults, construction-time solve + 5×7 cache layout, scalar-params codegen pattern (`StencilGenSpec.scalar_params` + `build_symbol_map` no-subscript mapping), cut-cell deferral rationale, programmatic + sweep usage, and L8 failure thresholds.
+  - Note: placed under top-level `docs/` (alongside `stencils.md`, `discrete_operators.md`, etc.) rather than `scripts/stencil_gen/docs/` so the C++-side bridge reference is discoverable from the repo root; 42.9c updates the Python-side L8 section of `scripts/stencil_gen/docs/brady2d_stability_reference.md` separately.
 
 - [ ] **42.9c** Update `scripts/stencil_gen/docs/brady2d_stability_reference.md` (from plan 41) with a new "Layer 8 — C++ simulation" section.
   - File: `scripts/stencil_gen/docs/brady2d_stability_reference.md`
