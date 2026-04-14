@@ -422,12 +422,17 @@ cd scripts/stencil_gen && uv run pytest tests/test_phs.py -x -q -k "TestRegressi
 
 ### 43.11 — Documentation and skill updates
 
-- [ ] **43.11a** Create `scripts/stencil_gen/docs/optimization_reference.md`:
-  - Architecture diagram (cheap inner → top-k → expensive validator → L8).
-  - API reference for `make_objective`, `params_from_vector`, `extract_field`, `run_staged_optimize`, `multi_start_optimize`, `run_scipy_local`, `run_scipy_shgo`, `run_scipy_de`.
-  - Recipe: "How to optimize a new family" — bounds declaration + kernel routing.
-  - Recipe: "How to add a new objective field" — just pick a dotted path; no code changes needed.
-  - Known limitations (multi-objective, multi-fidelity BO, Brady-Livescu 1D Euler reproduction — all deferred).
+- [x] **43.11a** Created `scripts/stencil_gen/docs/optimization_reference.md` (~330 lines). Sections:
+  - Architecture diagram — the same cheap-inner → top-k → expensive-validator → L8 cascade shown in the plan header, phrased for a reader who has not read the plan.
+  - Parameter spaces in scope — `DEFAULT_BOUNDS` table plus a cross-reference to plan 43's "What this plan does NOT do" so out-of-scope kernels (tension-penalty, mixed-ε) are explicit at the top.
+  - API reference for every exported symbol: `OptimizeResult`, `DEFAULT_BOUNDS`, primitives (`params_from_vector`, `vector_from_params`, `extract_field`), `make_objective`, and drivers `run_scipy_local`, `multi_start_optimize`, `run_scipy_shgo`, `run_scipy_de`, `run_staged_optimize`. Each driver block names the extras keys it populates so callers can write against a documented contract (e.g. `stage`, `validator_ranking`, `cpp_cutcell_violates_197_288`, `local_minima`, `n_local_minima`).
+  - CLI section with two working examples — tension-E4 Nelder-Mead local refine, and classical-α E4 staged with `--validate-with-cpp --update-known-values`.
+  - Persistence schema table matching the 43.8a + 43.8c + 43.9b-r2 + 43.10a fields (including `cpp_cutcell_violates_197_288`, `cpp_validation`, `validator_max_layer`, and the note that `history` is never persisted).
+  - Alpha basin survey section (43.9c / 43.9c-r1) pointing at the `--alpha-basin-survey` CLI flag.
+  - Recipes: "How to optimize a new family" (bounds declaration + kernel routing + `_KERNEL_DIM` CLI guard) and "How to add a new objective field" (dotted path via `_LAYER_PREFIX_RE`, plus `_FIELD_LAYER_ALIAS` as the non-layer-prefixed escape hatch).
+  - Known limitations — mirrors the plan header's "What this plan does NOT do" so the doc does not silently drift if someone updates the plan and forgets the doc.
+  - References — cross-links to plans 41, 42, 43 and Brady & Livescu 2019.
+  - Verified every identifier cited in the doc exists in the codebase (`_KERNEL_DIM` in `sweeps/optimize.py:43`, `_FIELD_LAYER_ALIAS` and `_LAYER_PREFIX_RE` in `stencil_gen/optimizer.py:240/245`, `_CPP_SUPPORTED_SCHEMES`/`_CPP_SUPPORTED_KERNELS` implied only by the `cpp_validation` schema which is documented via the CLI flag, not the private constants).
   - File: `scripts/stencil_gen/docs/optimization_reference.md` (new)
   - Test: (no test)
 
