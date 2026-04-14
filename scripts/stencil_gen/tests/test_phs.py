@@ -1983,3 +1983,61 @@ if _KNOWN is not None:
                         checked += 1
             if checked == 0:
                 pytest.skip("brady2d_sweep had no stored points")
+
+    class TestRegressionBrady2DOptima:
+        """Regression tests for Brady-Livescu 2D optimizer results.
+
+        Loads ``brady2d_optima`` from ``known_values.json`` (written by
+        ``python -m sweeps optimize --update-known-values``), iterates each
+        stored ``[scheme][kernel][objective]`` entry, rebuilds the objective
+        via :func:`stencil_gen.optimizer.make_objective`, evaluates it at
+        the stored ``best_x``, and asserts the result matches the stored
+        ``best_objective`` within 1% relative tolerance.  Also verifies
+        ``converged is True`` at the stored result.  Graceful skip when the
+        key is absent (first run before any optimizer persistence).
+        """
+
+        _OPTIMA = _KNOWN.get("brady2d_optima")
+
+        @pytest.fixture(autouse=True)
+        def _skip_if_absent(self):
+            if self._OPTIMA is None:
+                pytest.skip("brady2d_optima key absent from known_values.json")
+
+        def test_all_optima_objective_matches(self):
+            """Each stored optimum reproduces its recorded best_objective."""
+            import numpy as np
+
+            from stencil_gen.optimizer import make_objective
+
+            checked = 0
+            for scheme, kernels in self._OPTIMA.items():
+                for kernel, objectives in kernels.items():
+                    for objective, entry in objectives.items():
+                        assert entry.get("converged") is True, (
+                            f"{scheme}/{kernel}/{objective}: stored "
+                            f"converged={entry.get('converged')!r}, expected True"
+                        )
+                        best_x = np.asarray(entry["best_x"], dtype=float)
+                        stored_obj = float(entry["best_objective"])
+                        f = make_objective(
+                            scheme=scheme,
+                            kernel=kernel,
+                            report_field=objective,
+                        )
+                        recomputed = f(best_x)
+                        assert np.isfinite(recomputed), (
+                            f"{scheme}/{kernel}/{objective}: recomputed "
+                            f"objective is non-finite ({recomputed}) at "
+                            f"best_x={best_x}"
+                        )
+                        denom = max(abs(stored_obj), 1e-12)
+                        rel = abs(recomputed - stored_obj) / denom
+                        assert rel < 1e-2, (
+                            f"{scheme}/{kernel}/{objective}: recomputed "
+                            f"{recomputed:.6e} differs from stored "
+                            f"{stored_obj:.6e} by {rel:.2%} (>1%)"
+                        )
+                        checked += 1
+            if checked == 0:
+                pytest.skip("brady2d_optima had no stored entries")

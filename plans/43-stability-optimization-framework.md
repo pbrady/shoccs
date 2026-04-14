@@ -293,12 +293,13 @@ cd scripts/stencil_gen && uv run pytest tests/test_phs.py -x -q -k "TestRegressi
   - File: `scripts/stencil_gen/tests/test_optimizer.py` (test), `scripts/stencil_gen/sweeps/optimize.py` (unchanged — contract already met).
   - Test: `cd scripts/stencil_gen && uv run pytest tests/test_optimizer.py -x -q -k "test_cli_update_known_values"` — 1 green, 2 s. Full `TestOptimizeCLI`: 3 passed, 1 skipped (slow subprocess), 1.5 s. Full `test_optimizer.py` suite: 78 passed, 3 skipped, 77 s.
 
-- [ ] **43.8b** Add `TestRegressionBrady2DOptima` in `test_phs.py`:
-  - Loads `brady2d_optima` from `known_values.json`. Graceful skip if absent.
-  - For each stored entry, rebuilds `f = make_objective(...)`, evaluates at `best_x`, asserts the result matches the stored `best_objective` within 1% relative tolerance.
-  - Also verifies `converged is True` at the stored result.
+- [x] **43.8b** Added `TestRegressionBrady2DOptima` in `scripts/stencil_gen/tests/test_phs.py`, alongside the existing `TestRegressionBrady2D{Calibration,Sweep}` classes:
+  - Loads `brady2d_optima` from `known_values.json`; uses the same `_KNOWN` helper and `_skip_if_absent` fixture pattern as the sibling regression classes — graceful skip when the key is absent (the current state; first optimizer persistence hasn't landed yet).
+  - For each stored `[scheme][kernel][objective]` entry: asserts `converged is True`, rebuilds `f = make_objective(scheme=..., kernel=..., report_field=objective)` (uses default `gate_layer=3` and infers `max_layer` from the dotted path — matches how the CLI built the objective when it persisted), evaluates at `np.asarray(entry["best_x"])`, asserts the recomputed value is finite and within 1% relative tolerance of the stored `best_objective` (denominator floored at 1e-12 to handle near-zero optima like `layer3.max_stab_eig = -1.22e-4`).
+  - A secondary `pytest.skip` fires if the `brady2d_optima` subtree is present but empty, mirroring the `checked == 0` guard in `TestRegressionBrady2DSweep`.
+  - Sanity-check: confirmed `make_objective` is bit-exact deterministic for tension-E4 `layer3.max_stab_eig` at σ=1.644 (two calls → 0.00e+00 relative difference), so the 1% tolerance has generous headroom against any sympy/numerics drift.
   - File: `scripts/stencil_gen/tests/test_phs.py`
-  - Test: `cd scripts/stencil_gen && uv run pytest tests/test_phs.py -x -q -k "TestRegressionBrady2DOptima"`
+  - Test: `cd scripts/stencil_gen && uv run pytest tests/test_phs.py -x -q -k "TestRegressionBrady2DOptima"` — 1 skipped (expected; no stored optima yet). Full suite `uv run pytest tests/test_phs.py tests/test_optimizer.py` — 158 passed, 14 skipped in 78 s.
 
 ### 43.9 — Classical-α E4_1 2D optimization
 
