@@ -112,13 +112,13 @@ cd scripts/stencil_gen && uv run pytest tests/test_brady2d_stability.py -x -q -k
 
 ### 42.3 — L8 integration: C++ simulation as the final validation layer
 
-- [ ] **42.3a** Add `layer8_cpp_simulation(scheme: str, kernel: str, params: dict, *, N: int = 31, t_final: float = 10.0) -> dict` to `brady2d_stability.py`:
+- [x] **42.3a** Add `layer8_cpp_simulation(scheme: str, kernel: str, params: dict, *, N: int = 31, t_final: float = 10.0) -> dict` to `brady2d_stability.py`:
   - Maps `(scheme, kernel)` → Lua `scheme.type` string. For plan 42 first cut, only `("E4", "classical")` → `"E4u"` is supported (uniform variant — see 42.2a's note for the constraint); other kernels raise `NotImplementedError` (filled in by 42.5+).
   - Calls `run_cpp_brady2d` with the appropriate params.
-  - Returns `{final_linf, stable, wall_time_s}`.
-  - Layer-8 failure: `not stable` OR `final_linf > 1.0` at `t_final=10.0`.
+  - Returns `{final_linf, stable, wall_time_s, bridge_result}` — includes the full `BridgeResult` so callers can inspect `exit_code`/`stderr`/traces on failure without a second call.
+  - Layer-8 failure: `not stable` OR `final_linf > 1.0` at `t_final=10.0`. Threshold exposed as `L8_FINAL_LINF_TOL = 1.0` module constant (consumed by 42.3b).
   - File: `scripts/stencil_gen/stencil_gen/brady2d_stability.py`
-  - Test: `cd scripts/stencil_gen && uv run pytest tests/test_brady2d_stability.py -x -q -k "TestLayer8 and classical"`
+  - Test: `cd scripts/stencil_gen && uv run pytest tests/test_brady2d_stability.py -x -q -k "TestLayer8 and classical"` → **PASSED** (1 fast dispatch test + 1 slow end-to-end smoke skipped without `--run-slow`). Full `TestLayer8` class with `--run-slow`: 7 passed (dispatch, unstable propagation, unsupported-kernel/scheme NotImplementedError, threshold constant check, defaults, real shoccs E4u short run with `final_linf<1.0`).
 
 - [ ] **42.3b** Extend `brady2d_stability_score` to accept `max_layer=8` and the `StabilityReport` dataclass to carry a `layer8: dict | None` field:
   - When `max_layer >= 8` and earlier layers pass, call `layer8_cpp_simulation`.

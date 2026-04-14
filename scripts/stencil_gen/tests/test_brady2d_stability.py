@@ -13,6 +13,7 @@ from stencil_gen.brady2d_stability import (
     L6_TRANSIENT_GROWTH_TOL,
     L7_TOL,
     L7_TRANSIENT_GROWTH_TOL,
+    L8_FINAL_LINF_TOL,
     STABILITY_TOL,
     StabilityReport,
     brady2d_stability_score,
@@ -25,7 +26,9 @@ from stencil_gen.brady2d_stability import (
     layer6_non_normality,
     layer7_sparse_2d_eigenvalue,
     layer7_with_non_normality,
+    layer8_cpp_simulation,
 )
+from stencil_gen.cpp_bridge import SHOCCS_BINARY, BridgeResult
 from stencil_gen.gks_kreiss import KreissResult
 from stencil_gen.non_normality import NonNormalityReport
 from stencil_gen.group_velocity import local_group_velocity_2d_varying
@@ -918,3 +921,110 @@ class TestBrady2DScoreIntegration:
         assert report.layer6 is not None
         assert report.layer7 is not None
         assert report.non_normality is not None
+
+
+class TestLayer8:
+    """Layer 8: end-to-end C++ simulation via the shoccs bridge (plan 42.3a).
+
+    Most tests monkey-patch run_cpp_brady2d so they run hermetically without
+    the compiled binary. One @pytest.mark.slow smoke test invokes the real
+    binary when --run-slow is passed and the build exists.
+    """
+
+    CLASSICAL_ALPHA = [-0.7733323791884821, 0.1623961700641681]
+
+    def _patch_bridge(self, monkeypatch, result: BridgeResult) -> list[dict]:
+        """Replace run_cpp_brady2d with a stub returning ``result``.
+
+        Returns the list of call kwargs so a test can assert on them.
+        """
+        calls: list[dict] = []
+
+        def fake(scheme_type, params, **kwargs):
+            calls.append({"scheme_type": scheme_type, "params": params, **kwargs})
+            return result
+
+        monkeypatch.setattr(
+            "stencil_gen.brady2d_stability.run_cpp_brady2d", fake,
+        )
+        return calls
+
+    def test_classical_dispatch_maps_to_E4u_lua_type(self, monkeypatch):
+        stub = BridgeResult(
+            final_linf=1.75e-3, stable=True, wall_time_s=0.42, exit_code=0,
+        )
+        calls = self._patch_bridge(monkeypatch, stub)
+
+        out = layer8_cpp_simulation(
+            "E4", "classical", {"alpha": self.CLASSICAL_ALPHA},
+            N=31, t_final=10.0,
+        )
+
+        assert len(calls) == 1
+        call = calls[0]
+        assert call["scheme_type"] == "E4u", (
+            "classical E4 must dispatch to Lua type 'E4u' (uniform variant)"
+        )
+        assert call["params"] == {"alpha": self.CLASSICAL_ALPHA}
+        assert call["N"] == 31
+        assert call["t_final"] == 10.0
+
+        assert out["final_linf"] == pytest.approx(1.75e-3)
+        assert out["stable"] is True
+        assert out["wall_time_s"] == pytest.approx(0.42)
+        assert out["bridge_result"] is stub
+
+    def test_unstable_result_propagates(self, monkeypatch):
+        stub = BridgeResult(
+            final_linf=42.0, stable=False, wall_time_s=1.1, exit_code=0,
+        )
+        self._patch_bridge(monkeypatch, stub)
+
+        out = layer8_cpp_simulation(
+            "E4", "classical", {"alpha": self.CLASSICAL_ALPHA},
+        )
+        assert out["stable"] is False
+        assert out["final_linf"] == pytest.approx(42.0)
+
+    def test_unsupported_kernel_raises(self):
+        with pytest.raises(NotImplementedError, match="tension"):
+            layer8_cpp_simulation(
+                "E4", "tension", {"sigma": 3.0},
+            )
+
+    def test_unsupported_scheme_raises(self):
+        with pytest.raises(NotImplementedError, match="E2"):
+            layer8_cpp_simulation(
+                "E2", "classical", {"alpha": [0.0, 0.0]},
+            )
+
+    def test_l8_threshold_matches_plan(self):
+        """Plan 42.3a specifies the L8 pass threshold as final_linf <= 1.0."""
+        assert L8_FINAL_LINF_TOL == 1.0
+
+    def test_default_n_and_t_final(self, monkeypatch):
+        stub = BridgeResult(final_linf=1e-3, stable=True)
+        calls = self._patch_bridge(monkeypatch, stub)
+
+        layer8_cpp_simulation("E4", "classical", {"alpha": self.CLASSICAL_ALPHA})
+
+        call = calls[0]
+        assert call["N"] == 31
+        assert call["t_final"] == 10.0
+
+    @pytest.mark.slow
+    def test_classical_e4_end_to_end(self):
+        """Drive the real shoccs binary on a tiny Brady-Livescu run."""
+        if not SHOCCS_BINARY.exists():
+            pytest.skip("shoccs binary not built")
+        out = layer8_cpp_simulation(
+            "E4", "classical", {"alpha": self.CLASSICAL_ALPHA},
+            N=21, t_final=1.0,
+        )
+        assert out["stable"] is True, (
+            f"classical E4u short run unexpectedly unstable: {out}"
+        )
+        assert 0.0 < out["final_linf"] < L8_FINAL_LINF_TOL
+        br = out["bridge_result"]
+        assert br.exit_code == 0
+        assert br.linf_trace.size > 0

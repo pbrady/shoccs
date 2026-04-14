@@ -43,6 +43,7 @@ from stencil_gen.phs import (
     stability_eigenvalue,
     stability_eigenvalue_from_matrix,
 )
+from stencil_gen.cpp_bridge import BridgeResult, run_cpp_brady2d
 
 logger = logging.getLogger("stencil_gen.brady2d_stability")
 
@@ -907,6 +908,99 @@ def layer7_with_non_normality(
         report.compute_time,
     )
     return report
+
+
+# Layer-8 threshold: final L∞ error at t=10 must be bounded. Classical E4u on
+# the uniform Brady-Livescu domain produces L∞ ~ 2e-3 at N=31, t=10; so 1.0 is
+# a loose ceiling that only catches blow-up, not high-order accuracy loss.
+L8_FINAL_LINF_TOL = 1.0
+
+
+# Dispatch table: (scheme, kernel) → Lua scheme.type string understood by
+# stencil::from_lua. For plan 42 first cut only the classical uniform branch
+# is wired; spline families are filled in by 42.7a.
+_L8_SCHEME_TYPE = {
+    ("E4", "classical"): "E4u",
+}
+
+
+def layer8_cpp_simulation(
+    scheme: str,
+    kernel: str,
+    params: dict,
+    *,
+    N: int = 31,
+    t_final: float = 10.0,
+) -> dict:
+    """L8: end-to-end C++ simulation via the shoccs Brady-Livescu 2D harness.
+
+    Renders a Lua config from the plan-42 template with the supplied scheme
+    parameters, invokes the compiled shoccs binary, and reports the final
+    L∞ error. A layer-8 pass means the analytical predictions of L1–L7 survive
+    contact with the real solver; a failure flags an inconsistency to chase.
+
+    Parameters
+    ----------
+    scheme : str
+        Scheme name ("E2" or "E4"). Plan 42 first cut supports "E4" only.
+    kernel : str
+        Kernel type ("classical", "tension", "gaussian", "multiquadric").
+        Plan 42 first cut supports "classical" only; spline families are
+        added by 42.7a once the matching C++ structs exist.
+    params : dict
+        Scheme-specific parameters; passed through verbatim to
+        :func:`run_cpp_brady2d`. Classical uses ``{"alpha": [...]}``.
+    N : int
+        Grid resolution (points per side). Default 31 matches the
+        Brady-Livescu §4.3 coarsest grid.
+    t_final : float
+        Physical end time. Default 10.0 — short enough to run in a
+        few seconds, long enough to catch an exponential blow-up.
+
+    Returns
+    -------
+    dict with keys:
+        final_linf : float
+            Final L∞ error at t_final (nan on simulation failure).
+        stable : bool
+            True iff the simulation ran to completion with a finite L∞
+            below the hard blow-up ceiling used by
+            :func:`run_cpp_brady2d`.
+        wall_time_s : float
+            Wall-clock seconds for the C++ invocation.
+        bridge_result : BridgeResult
+            Full bridge result for debugging (exit_code, stderr, traces).
+
+    Raises
+    ------
+    NotImplementedError
+        When ``(scheme, kernel)`` has no registered Lua scheme type. Items
+        42.7a onward extend the dispatch table.
+    """
+    key = (scheme, kernel)
+    if key not in _L8_SCHEME_TYPE:
+        raise NotImplementedError(
+            f"layer8_cpp_simulation has no dispatch for (scheme={scheme!r}, "
+            f"kernel={kernel!r}); only {sorted(_L8_SCHEME_TYPE)} supported so far",
+        )
+    scheme_type = _L8_SCHEME_TYPE[key]
+
+    result: BridgeResult = run_cpp_brady2d(
+        scheme_type, params, N=N, t_final=t_final,
+    )
+
+    logger.debug(
+        "L8 %s/%s N=%d t_final=%g: final_linf=%.4e stable=%s wall=%.1fs",
+        scheme, kernel, N, t_final, result.final_linf, result.stable,
+        result.wall_time_s,
+    )
+
+    return {
+        "final_linf": result.final_linf,
+        "stable": result.stable,
+        "wall_time_s": result.wall_time_s,
+        "bridge_result": result,
+    }
 
 
 def brady2d_stability_score(
