@@ -56,6 +56,21 @@ from stencil_gen.brady2d_stability import brady2d_stability_score
 # and ``sweeps/mixed_epsilon_sweep``) that bypass the layered pipeline.
 # Extending the layered pipeline to those kernels is deferred — see the
 # "What this plan does NOT do" section of the plan file.
+#
+# Classical-α note (plan 43.9a): the C++ ``E4_1`` stencil in
+# ``src/stencils/E4_1.cpp`` imposes ``alpha[1] >= 197/288 ≈ 0.684`` to avoid
+# an interior singularity in the cut-cell psi denominator for ``psi ∈ (0, 1)``.
+# That constraint is cut-cell-specific.  The analytical layers L1–L7 (and the
+# Python ``_build_classical_diff_matrix``) operate on uniform grids with no
+# psi involvement, and the Brady-Livescu published feasible point
+# ``α ≈ [-0.7733, 0.1624]`` lives *below* 197/288 — a grid-probe of
+# ``alpha[1] ∈ [0.0, 2.0]`` at ``alpha[0] = -0.77`` finds L3-feasibility only
+# in ``alpha[1] ∈ [~0.08, ~0.17]`` and total infeasibility once
+# ``alpha[1] ≥ 0.2``.  The analytical and cut-cell feasible regions therefore
+# do not overlap for E4 classical-α, so the optimizer uses the *analytical*
+# feasible envelope.  L8 C++ validation (plan 43.10) will reject any winner
+# that violates ``alpha[1] ≥ 197/288``; that rejection is the diagnostic
+# signal, not an optimizer bound.
 DEFAULT_BOUNDS: dict[tuple[str, str], list[tuple[float, float]]] = {
     ("E2", "tension"): [(0.5, 20.0)],
     ("E4", "tension"): [(0.5, 20.0)],
@@ -63,7 +78,7 @@ DEFAULT_BOUNDS: dict[tuple[str, str], list[tuple[float, float]]] = {
     ("E4", "gaussian"): [(0.1, 5.0)],
     ("E2", "multiquadric"): [(0.1, 5.0)],
     ("E4", "multiquadric"): [(0.1, 5.0)],
-    ("E4", "classical"): [(-2.0, 2.0), (197.0 / 288.0, 2.0)],
+    ("E4", "classical"): [(-2.0, 2.0), (0.05, 2.0)],
 }
 
 

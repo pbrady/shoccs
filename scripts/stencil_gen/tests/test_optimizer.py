@@ -111,6 +111,96 @@ class TestParamsVector:
             np.testing.assert_array_equal(v, mid)
 
 
+class TestClassicalAlphaBounds:
+    """Sanity tests for the E4 classical-α bound decision in plan 43.9a.
+
+    The C++ ``E4_1`` stencil requires ``alpha[1] >= 197/288 ≈ 0.684`` to
+    avoid a cut-cell psi-denominator singularity.  The Python
+    ``_build_classical_diff_matrix`` (used by L1–L7) operates on a uniform
+    grid and has no such constraint; its analytical feasible region sits
+    entirely *below* 197/288 around ``alpha[1] ≈ 0.16``.  ``DEFAULT_BOUNDS``
+    reflects the analytical envelope, not the cut-cell envelope — L8
+    validation is where the 197/288 check fires.
+    """
+
+    _BRADY_LIVESCU_E4 = (-0.7733323791884821, 0.1623961700641681)
+
+    def test_default_bounds_admit_brady_livescu_point(self):
+        bounds = DEFAULT_BOUNDS[("E4", "classical")]
+        a0, a1 = self._BRADY_LIVESCU_E4
+        (lo0, hi0), (lo1, hi1) = bounds
+        assert lo0 <= a0 <= hi0, (
+            f"Brady-Livescu alpha[0]={a0} outside bound [{lo0}, {hi0}]"
+        )
+        assert lo1 <= a1 <= hi1, (
+            f"Brady-Livescu alpha[1]={a1} outside bound [{lo1}, {hi1}]"
+        )
+
+    def test_default_bounds_drop_cpp_cutcell_floor(self):
+        # The 197/288 floor is a cut-cell C++ constraint; L1-L7 use
+        # uniform grids with no psi denominator.  The analytical-only
+        # optimizer bound must therefore admit α₁ below 197/288.
+        (_, (lo1, _)) = DEFAULT_BOUNDS[("E4", "classical")]
+        assert lo1 < 197.0 / 288.0, (
+            f"DEFAULT_BOUNDS alpha[1] lower bound {lo1} >= 197/288; the "
+            "analytical pipeline can't reach the Brady-Livescu feasible "
+            "region with a C++-cut-cell floor"
+        )
+
+    def test_params_roundtrip_at_brady_livescu(self):
+        # Round-trip the published point to ensure params_from_vector /
+        # vector_from_params handle it cleanly.
+        x = np.array(self._BRADY_LIVESCU_E4, dtype=float)
+        params = params_from_vector("classical", x)
+        assert params == {"alpha": [float(x[0]), float(x[1])]}
+        np.testing.assert_array_equal(vector_from_params("classical", params), x)
+
+    def test_python_accepts_alpha_below_cpp_floor(self):
+        # Belt-and-braces: ``_build_classical_diff_matrix`` must not raise
+        # for the published α (where α₁ < 197/288); the analytical pipeline
+        # relies on this.
+        from stencil_gen.brady2d_stability import _build_classical_diff_matrix
+
+        D = _build_classical_diff_matrix(
+            n=20, p=2, nu=1, alpha_list=list(self._BRADY_LIVESCU_E4),
+        )
+        assert D.shape == (20, 20)
+        assert np.all(np.isfinite(D))
+
+    def test_objective_feasible_at_brady_livescu_within_default_bounds(self):
+        # The published point lies in the feasible L3 envelope.  Confirms
+        # the optimizer's feasibility cliff has a non-empty interior inside
+        # DEFAULT_BOUNDS, so multi-start / SHGO / DE have something to
+        # descend on.
+        f = make_objective(
+            "E4", "classical", "layer3.max_stab_eig",
+            gate_layer=3, max_layer=3,
+        )
+        x = np.array(self._BRADY_LIVESCU_E4, dtype=float)
+        val = f(x)
+        assert np.isfinite(val), (
+            "Brady-Livescu E4 alpha should be L3-feasible under the "
+            "widened DEFAULT_BOUNDS"
+        )
+        assert val < 0.0, (
+            f"layer3.max_stab_eig at Brady-Livescu α is {val}; expected "
+            "negative (stable)"
+        )
+
+    def test_objective_infeasible_above_cpp_floor(self):
+        # Picks a point inside DEFAULT_BOUNDS that lies *above* 197/288 —
+        # where the C++ cut-cell code is happy but the Python analytical
+        # pipeline is unstable.  The objective must return +inf gracefully
+        # rather than raising.
+        f = make_objective(
+            "E4", "classical", "layer3.max_stab_eig",
+            gate_layer=3, max_layer=3,
+        )
+        # alpha[1] well above 197/288 is in the infeasible analytical zone.
+        val = f(np.array([-0.77, 1.0]))
+        assert not np.isfinite(val)
+
+
 class TestExtractField:
     @staticmethod
     def _populated_report() -> StabilityReport:
@@ -687,15 +777,14 @@ class TestGlobalOptimizers:
 
     @pytest.mark.slow
     def test_shgo_2d_classical_alpha(self):
-        # 2D E4 classical-α.  NB: the plan's ``DEFAULT_BOUNDS[("E4",
-        # "classical")] = [(-2, 2), (197/288, 2)]`` encodes the C++ hard
-        # constraint α₁ ≥ 197/288 but the Brady-Livescu published feasible
-        # point (α ≈ [-0.77, 0.16]) sits *below* that lower α₁ bound, and the
-        # intersection of DEFAULT_BOUNDS with the L3-feasible region appears
-        # empty in the Python pipeline (probed on an 11×8 grid).  We therefore
-        # use relaxed bounds that admit the known feasible region so the
-        # "SHGO finds at least one feasible local min" invariant holds.
-        # Resolving the DEFAULT_BOUNDS mismatch itself is deferred to 43.9a.
+        # 2D E4 classical-α.  Plan 43.9a widened ``DEFAULT_BOUNDS[("E4",
+        # "classical")]`` to ``[(-2, 2), (0.05, 2)]`` — dropping the C++
+        # cut-cell 197/288 floor since L1–L7 run on uniform grids where that
+        # constraint doesn't apply.  This test still uses the narrower
+        # relaxed bounds ``[(-1.2, -0.3), (0.05, 0.4)]`` to keep SHGO's
+        # simplicial budget (n=6, iters=1) within the ~30 s time budget
+        # while landing in the Brady-Livescu basin; a test on full
+        # DEFAULT_BOUNDS lives in :class:`TestClassicalAlphaBounds`.
         f = make_objective(
             "E4", "classical", "layer3.max_stab_eig",
             gate_layer=3, max_layer=3,

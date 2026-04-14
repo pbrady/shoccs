@@ -311,13 +311,21 @@ cd scripts/stencil_gen && uv run pytest tests/test_phs.py -x -q -k "TestRegressi
 
 ### 43.9 — Classical-α E4_1 2D optimization
 
-- [ ] **43.9a** Extend `params_from_vector`/`vector_from_params` for `kernel="classical"` and reconcile the 197/288 constraint with the Brady-Livescu published α:
-  - **43.5c finding (must resolve here)**: the Brady-Livescu stored feasible point α ≈ `[-0.7733, 0.1624]` has `α₁ ≈ 0.162`, i.e. *below* 197/288. An 11×8 grid-probe of `DEFAULT_BOUNDS[("E4", "classical")] = [(-2, 2), (197/288, 2)]` finds zero L3-feasible points. So either the Python `_build_classical_diff_matrix` does not match the C++ 197/288 constraint, or the C++ constraint is misstated. Decide and document.
-  - Confirm the Python `_build_classical_diff_matrix` accepts `alpha` and does NOT impose the 197/288 bound (the C++ imposes it at construction; the Python path should either mirror it or rely on the optimizer to respect bounds).
-  - If the Python path accepts `alpha[1] < 197/288` without error but produces a singular D, the objective returns `+inf` via the `try/except` — acceptable.
-  - `DEFAULT_BOUNDS[("E4", "classical")]` currently has `α₁ ≥ 197/288`; based on the reconciliation above, either (a) keep the bound and document a Python-vs-C++ divergence, or (b) widen the bound to include the published feasible region (e.g. `α₁ ≥ 0.05`) and explain why the C++ 197/288 constraint doesn't apply here. Add a test covering whichever decision is made.
-  - File: `scripts/stencil_gen/stencil_gen/optimizer.py`
-  - Test: `cd scripts/stencil_gen && uv run pytest tests/test_optimizer.py -x -q -k "TestClassicalAlphaBounds"`
+- [x] **43.9a** Resolved the C++ 197/288 vs Brady-Livescu α-feasibility mismatch flagged by 43.5c. The C++ `E4_1` constraint `alpha[1] >= 197/288 ≈ 0.684` is *cut-cell-specific* — it exists to keep the psi denominator non-zero for `psi ∈ (0, 1)`. The analytical layers L1–L7 (and the Python `_build_classical_diff_matrix`) operate on uniform grids with no psi involvement, so that constraint does not apply to the optimizer's feasibility cliff. Verified empirically:
+  - `_build_classical_diff_matrix(..., alpha_list=[-0.7733, 0.1624])` returns finite D without raising; published α is L3-feasible with `max_stab_eig ≈ -1.8e-4` (stable).
+  - Grid-probe at `α₀=-0.77` across `α₁ ∈ [0.0, 0.5]`: L3-feasibility lives in `α₁ ∈ [~0.08, ~0.17]`; every point with `α₁ ≥ 0.2` fails L3 (unstable). The analytical and cut-cell feasible regions therefore do *not* overlap — choosing option (b) is the only way to give the optimizer a non-empty feasible interior.
+  - Decision (option b): widened `DEFAULT_BOUNDS[("E4", "classical")]` from `[(-2, 2), (197/288, 2)]` to `[(-2.0, 2.0), (0.05, 2.0)]`. Added a docstring block above `DEFAULT_BOUNDS` explaining the Python-vs-C++ divergence and that L8 validation (plan 43.10) is where a 197/288 violation fires as a diagnostic.
+  - `params_from_vector`/`vector_from_params` were already correctly implemented for `kernel="classical"` in 43.1b (verified via new round-trip test at the published point); no changes needed.
+  - Updated the comment in `test_shgo_2d_classical_alpha` to drop the "deferred to 43.9a" note and explain that the narrower bounds there are a runtime-budget choice, not a feasibility workaround.
+  - Added `TestClassicalAlphaBounds` (6 tests) in `scripts/stencil_gen/tests/test_optimizer.py` pinning:
+    1. DEFAULT_BOUNDS admits the Brady-Livescu published α,
+    2. DEFAULT_BOUNDS alpha[1] lower < 197/288 (confirms the bound shift vs prior spec),
+    3. Round-trip `params_from_vector`/`vector_from_params` at the published α,
+    4. Python `_build_classical_diff_matrix` accepts α below the C++ floor without raising,
+    5. `make_objective` at the Brady-Livescu α returns a finite *negative* (stable) `layer3.max_stab_eig`,
+    6. `make_objective` at `[α₀=-0.77, α₁=1.0]` (inside DEFAULT_BOUNDS but above the analytical feasible envelope) returns `+inf` — feasibility cliff handled gracefully.
+  - Files: `scripts/stencil_gen/stencil_gen/optimizer.py`, `scripts/stencil_gen/tests/test_optimizer.py`.
+  - Test: `cd scripts/stencil_gen && SYMPY_CACHE_SIZE=50000 uv run pytest tests/test_optimizer.py -x -q -k "TestClassicalAlphaBounds"` — 6 passed in 2.0 s. Full suite: 84 passed, 3 skipped, 76 s; slow `test_shgo_2d_classical_alpha` still green in 20 s.
 
 - [ ] **43.9b** Single-seed optimization run on E4_1 classical-α:
   - `run_staged_optimize(scheme="E4", kernel="classical", report_field="layer6.transient_growth_bound", bounds=DEFAULT_BOUNDS[("E4", "classical")], inner_gate=3, inner_max_layer=3, validator_max_layer=6, top_k=5, method="Nelder-Mead", n_restarts=20, seed=0)`.
