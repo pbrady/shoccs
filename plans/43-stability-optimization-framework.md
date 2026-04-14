@@ -394,10 +394,9 @@ cd scripts/stencil_gen && uv run pytest tests/test_phs.py -x -q -k "TestRegressi
   - File: `scripts/stencil_gen/tests/test_optimizer.py`
   - Test: `cd scripts/stencil_gen && SYMPY_CACHE_SIZE=50000 uv run pytest tests/test_optimizer.py -x -q -k "TestAlphaSurveyVsPublished" --run-slow` — 1 passed in 138 s. Non-slow suite: `uv run pytest tests/test_optimizer.py -x -q` — 91 passed, 5 skipped, 77 s.
 
-- [ ] **43.9d-r1** Reconcile the Completion Criteria with the published-value source correction made in 43.9d.
-  - The Completion Criteria bullet below still says Brady-Livescu's published E4 α is "stored in `alpha_extraction.py`", but 43.9d established that no such file holds the E4 value — the canonical constant lives at `sweeps.brady2d_sweep.CLASSICAL_E4_ALPHA` (see 43.9d's commit message and class docstring). Update the Completion Criteria line to name the correct module so the plan is internally consistent with the landed test.
+- [x] **43.9d-r1** Reconciled the Completion Criteria with the published-value source correction made in 43.9d. Updated the bullet to name `sweeps/brady2d_sweep.py::CLASSICAL_E4_ALPHA` as the canonical source and cross-references 43.9d's rationale that `alpha_extraction.py` only holds E2 production α's. Plan-text-only change; no code edits.
   - File: `plans/43-stability-optimization-framework.md` (Completion Criteria section only — no code change).
-  - Test: (no test; plan-text fix)
+  - Test: `grep -n "alpha_extraction" plans/43-stability-optimization-framework.md` — surviving hits sit in 43.9d's narrative and this 43.9d-r1 item, not in an active Completion Criteria assertion.
 
 ### 43.10 — L8 validation of optimizer winners
 
@@ -482,7 +481,7 @@ Parallelizable after 43.4 completes:
 - `python -m sweeps optimize --scheme E4 --kernel tension --objective layer3.max_stab_eig --gate-layer 3 --max-layer 3 --bounds 0.5 20 --method Nelder-Mead --max-evals 40` runs end-to-end, prints a feasible `best_params`, and respects the stated bounds. (The earlier specific-σ acceptance figure was dropped — see 43.3b.)
 - `python -m sweeps optimize --scheme E4 --kernel classical --objective layer6.transient_growth_bound --method staged --n-restarts 20 --update-known-values` runs, respects `DEFAULT_BOUNDS[("E4","classical")]` (widened in 43.9a to admit the Brady-Livescu analytical feasible region), finds at least one feasible local minimum, and persists to `known_values.json["brady2d_optima"]["E4"]["classical"]`.
 - `scripts/stencil_gen/benchmarks/alpha_basin_survey.py` with `n_seeds=20` reports at least 3 distinct basins for E4 classical-α (cross-checks Brady-Livescu's multi-modality finding of 101 E4 schemes at their full budget).
-- The survey's top basin contains a point within 0.5 L∞ of Brady-Livescu's published E4 α (stored in `alpha_extraction.py`).
+- The survey's top basin contains a point within 0.5 L∞ of Brady-Livescu's published E4 α (stored in `sweeps/brady2d_sweep.py` as `CLASSICAL_E4_ALPHA`; see 43.9d for why this is not `alpha_extraction.py`, which only holds E2 production α's).
 - `TestRegressionBrady2DOptima` passes: re-runs stored optima and verifies each matches within 1% of the recorded objective.
 - `cd scripts/stencil_gen && uv run pytest tests/ -x -q` continues to pass in under 60 seconds (new slow tests marked).
 - Plan 44 (multi-objective Pareto via pymoo) can now start cleanly — the `make_objective` factory extends to weighted scalarization without refactoring, and a future NSGA-II caller can reuse `params_from_vector` unchanged.
