@@ -295,6 +295,58 @@ def test_nbs_floating_coeff_count():
     assert body.count("c[") == 15
 
 
+# ── TestStencilGenSpec: dataclass shape checks (42.4a) ───────────────────
+
+
+class TestStencilGenSpec:
+    """Basic dataclass-level invariants for StencilGenSpec."""
+
+    def test_scalar_params_default_empty(self):
+        spec = StencilGenSpec(
+            name="Foo",
+            P=2,
+            R=3,
+            T=5,
+            X=0,
+            derivative_order=1,
+            is_uniform=True,
+            param_arrays={},
+            interior_coeffs=[],
+            floating_coeffs=[],
+            dirichlet_coeffs=[],
+        )
+        assert spec.scalar_params == []
+
+    def test_scalar_params_accepts_list(self):
+        spec = StencilGenSpec(
+            name="Foo",
+            P=2,
+            R=3,
+            T=5,
+            X=0,
+            derivative_order=1,
+            is_uniform=True,
+            param_arrays={},
+            interior_coeffs=[],
+            floating_coeffs=[],
+            dirichlet_coeffs=[],
+            scalar_params=["sigma"],
+        )
+        assert spec.scalar_params == ["sigma"]
+
+    def test_scalar_params_independent_between_instances(self):
+        a = StencilGenSpec(
+            name="A", P=2, R=3, T=5, X=0, derivative_order=1, is_uniform=True,
+            param_arrays={}, interior_coeffs=[], floating_coeffs=[], dirichlet_coeffs=[],
+        )
+        b = StencilGenSpec(
+            name="B", P=2, R=3, T=5, X=0, derivative_order=1, is_uniform=True,
+            param_arrays={}, interior_coeffs=[], floating_coeffs=[], dirichlet_coeffs=[],
+        )
+        a.scalar_params.append("sigma")
+        assert b.scalar_params == []
+
+
 # ── StencilGenSpec fixtures for 20.4e ────────────────────────────────────
 
 e4u_spec = StencilGenSpec(

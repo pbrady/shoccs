@@ -5,7 +5,7 @@ Generates .cpp and .t.cpp files matching the patterns in src/stencils/.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 from sympy import Expr, Rational, Symbol, cse, numbered_symbols
 
@@ -232,7 +232,18 @@ def generate_nbs_method(
 
 @dataclass
 class StencilGenSpec:
-    """Specification for generating a complete stencil .cpp file."""
+    """Specification for generating a complete stencil .cpp file.
+
+    Runtime parameters come in two shapes:
+
+    - ``param_arrays`` maps an array parameter name to its length (e.g.
+      ``{"alpha": 2}`` emits ``std::array<real, 2> alpha;`` and references to
+      ``alpha[0]``/``alpha[1]`` in expression bodies).
+    - ``scalar_params`` lists plain scalar parameter names (e.g. ``["sigma"]``
+      emits ``real sigma;`` and references to ``sigma`` — no subscript — in
+      expression bodies). Used by spline families whose boundary closure takes
+      a single tension/shape parameter from Lua.
+    """
 
     name: str
     P: int
@@ -248,6 +259,7 @@ class StencilGenSpec:
     has_interp: bool = False
     interp_P: int = 0
     interp_T: int = 0
+    scalar_params: list[str] = field(default_factory=list)
 
 
 def _emit_header(spec: StencilGenSpec) -> str:
