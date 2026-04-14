@@ -48,7 +48,7 @@ cd scripts/stencil_gen && uv run pytest tests/test_cpp_bridge.py -x -q
 cd scripts/stencil_gen && uv run pytest tests/test_brady2d_stability.py -x -q -k "TestLayer8 and not test_full_simulation"
 
 # Brady-Livescu Lua smoke
-./build/shoccs lua-configs/brady_livescu_4_3.lua  # produces logs/system.csv
+./build/src/app/shoccs lua-configs/brady_livescu_4_3.lua  # produces logs/system.csv
 ```
 
 ---
@@ -76,7 +76,7 @@ cd scripts/stencil_gen && uv run pytest tests/test_brady2d_stability.py -x -q -k
   - `lua-configs/brady_livescu_4_3_long.lua` (N=31, `max_time = 100.0` for stability check)
   - Both reuse the same pattern; keep them as thin variants.
   - File: `lua-configs/brady_livescu_4_3_n61.lua`, `lua-configs/brady_livescu_4_3_long.lua` (new)
-  - Test: `./build/shoccs lua-configs/brady_livescu_4_3_n61.lua` runs without error
+  - Test: `./build/src/app/shoccs lua-configs/brady_livescu_4_3_n61.lua` runs without error
 
 ### 42.2 — Python → C++ bridge (first cut: classical-alpha stencils only)
 
@@ -84,7 +84,7 @@ cd scripts/stencil_gen && uv run pytest tests/test_brady2d_stability.py -x -q -k
   - `REPO_ROOT: Path` computed via `Path(__file__).parents[3]`.
   - `LUA_TEMPLATE_DIR = REPO_ROOT / "lua-configs"`.
   - `BRADY_LIVESCU_TEMPLATE = LUA_TEMPLATE_DIR / "brady_livescu_4_3.lua"`.
-  - `SHOCCS_BINARY = REPO_ROOT / "build" / "shoccs"`.
+  - `SHOCCS_BINARY = REPO_ROOT / "build" / "src" / "app" / "shoccs"` (verified from 42.1a — the binary lives under `build/src/app/`, not `build/`).
   - `@dataclass class BridgeResult: final_linf: float, linf_trace: np.ndarray, t_trace: np.ndarray, stable: bool, wall_time_s: float, exit_code: int, stderr: str`.
   - `make_brady2d_lua(scheme_type: str, params: dict, *, N: int, t_final: float, template: Path = BRADY_LIVESCU_TEMPLATE) -> str` — **strategy: explicit placeholder token substitution.** Add to 42.1a's template file the exact markers `--{{N}}--`, `--{{T_FINAL}}--`, `--{{SCHEME_TABLE}}--`; `make_brady2d_lua` does `template.read_text().replace(...)` on these three markers with the appropriate values. Returns the Lua source as a string. No regex, no Lua AST parsing.
   - File: `scripts/stencil_gen/stencil_gen/cpp_bridge.py` (new)
@@ -379,7 +379,7 @@ Parallelizable after 42.4:
 
 ## Completion Criteria
 
-- `lua-configs/brady_livescu_4_3.lua` exists and `./build/shoccs lua-configs/brady_livescu_4_3.lua` runs without error and produces `logs/system.csv` with a finite L∞ column.
+- `lua-configs/brady_livescu_4_3.lua` exists and `./build/src/app/shoccs lua-configs/brady_livescu_4_3.lua` runs without error and produces `logs/system.csv` with a finite L∞ column.
 - `scripts/stencil_gen/stencil_gen/cpp_bridge.py` provides `run_cpp_brady2d` that successfully runs the classical E4 closure end-to-end (L8 integration test passes).
 - Three new C++ stencil families exist: `tension_E4u_1`, `gaussian_E4u_1`, `multiquadric_E4u_1` — each compiled as a separate `.cpp` file in `src/stencils/`, each registered in `stencil::from_lua`, each with a passing Catch2 unit test (`t-{family}_E4u_1`) that verifies coefficients match the Python reference within `1e-12`.
 - `StencilGenSpec` supports scalar runtime parameters via `scalar_params` field, with `generate_stencil_cpp` emitting clean `real name;` fields and `name`-subscripted expressions (not `name[0]`).
