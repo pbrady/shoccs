@@ -286,13 +286,12 @@ cd scripts/stencil_gen && uv run pytest tests/test_phs.py -x -q -k "TestRegressi
 
 ### 43.8 — Persistence to `known_values.json`
 
-- [ ] **43.8a** In `sweeps/optimize.py`, when `--update-known-values` is set:
-  - Load with `load_known_values()`.
-  - Deep-set `kv["brady2d_optima"][scheme][kernel][objective_field]` = serialized `OptimizeResult` dict (best_x, best_params, best_objective, method, bounds, n_evals, compute_time, converged). Omit `history` from the persisted form to keep JSON small.
-  - Save with `save_known_values(kv)`.
-  - Additive: verify existing keys (including `brady2d_calibration`, `brady2d_sweep`, per-scheme entries) are not modified.
-  - File: `scripts/stencil_gen/sweeps/optimize.py`
-  - Test: `cd scripts/stencil_gen && uv run python -m sweeps optimize --scheme E4 --kernel tension --objective layer1.boundary_gv_err --bounds 0.5 20 --method Nelder-Mead --max-evals 40 --update-known-values && uv run python -c "import json; d=json.load(open('sweeps/known_values.json')); assert 'brady2d_optima' in d; print(d['brady2d_optima'])"`
+- [x] **43.8a** Persistence path already landed with 43.7a (`sweeps/optimize.py::_result_to_persist_dict` + the `--update-known-values` block in `main`). This item closes out the contract test: a `TestOptimizeCLI::test_cli_update_known_values_additive_and_drops_history` case in `scripts/stencil_gen/tests/test_optimizer.py` monkey-patches `load_known_values`/`save_known_values` and `_run_method` (so the test never enters the real SymPy pipeline) and pins three invariants:
+  1. The result is deep-set under `kv["brady2d_optima"][scheme][kernel][objective]` with the serialised `OptimizeResult` fields (`best_x`, `best_params`, `best_objective`, `method`, `bounds`, `n_evals`, `compute_time`, `converged`, `best_report`).
+  2. `history` is **never** persisted (asserted via `"history" not in opt`).
+  3. Existing top-level keys (`brady2d_calibration`, `brady2d_sweep`) are untouched after the write, and a second call with a *different* objective coexists with the first under the same `[scheme][kernel]` bucket (additive within `brady2d_optima`, not clobbering).
+  - File: `scripts/stencil_gen/tests/test_optimizer.py` (test), `scripts/stencil_gen/sweeps/optimize.py` (unchanged — contract already met).
+  - Test: `cd scripts/stencil_gen && uv run pytest tests/test_optimizer.py -x -q -k "test_cli_update_known_values"` — 1 green, 2 s. Full `TestOptimizeCLI`: 3 passed, 1 skipped (slow subprocess), 1.5 s. Full `test_optimizer.py` suite: 78 passed, 3 skipped, 77 s.
 
 - [ ] **43.8b** Add `TestRegressionBrady2DOptima` in `test_phs.py`:
   - Loads `brady2d_optima` from `known_values.json`. Graceful skip if absent.

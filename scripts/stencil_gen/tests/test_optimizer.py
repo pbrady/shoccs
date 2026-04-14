@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from dataclasses import replace
+
 import numpy as np
 import pytest
 from scipy.stats import qmc
@@ -1053,3 +1055,114 @@ class TestOptimizeCLI:
                 ]
             )
         assert exc_info.value.code != 0
+
+    def test_cli_update_known_values_additive_and_drops_history(
+        self, monkeypatch
+    ):
+        """``--update-known-values`` writes under ``brady2d_optima`` without
+        touching unrelated keys, and omits ``history`` from the persisted form.
+
+        Uses a monkey-patched ``_run_method`` so the test never enters the real
+        SymPy pipeline — the goal is to pin the persistence contract in
+        ``sweeps/optimize.py`` (plan item 43.8a), not to re-exercise the
+        optimizers.
+        """
+        from sweeps import optimize as optimize_mod
+
+        store: dict = {
+            "brady2d_calibration": {"E4": {"tension": [1.0, 2.0]}},
+            "brady2d_sweep": {"E4": {"tension": {"sigma": 3.0}}},
+        }
+
+        def fake_load() -> dict:
+            # Shallow copy so the CLI's setdefault mutations go through
+            # ``fake_save`` rather than silently aliasing ``store``.
+            import copy
+            return copy.deepcopy(store)
+
+        def fake_save(data: dict) -> None:
+            store.clear()
+            store.update(data)
+
+        monkeypatch.setattr(optimize_mod, "load_known_values", fake_load)
+        monkeypatch.setattr(optimize_mod, "save_known_values", fake_save)
+
+        canned = OptimizeResult(
+            best_params={"sigma": 3.1},
+            best_x=np.array([3.1]),
+            best_objective=-1.5,
+            best_report={"layer3": {"max_stab_eig": -1.5}},
+            method="Nelder-Mead",
+            converged=True,
+            n_evals=17,
+            compute_time=0.1,
+            history=[
+                (np.array([3.0]), -1.4),
+                (np.array([3.1]), -1.5),
+            ],
+            extras={"n_restarts": 1},
+        )
+        monkeypatch.setattr(
+            optimize_mod, "_run_method", lambda args, bounds: canned
+        )
+
+        rc = optimize_mod.main(
+            [
+                "--scheme", "E4",
+                "--kernel", "tension",
+                "--objective", "layer3.max_stab_eig",
+                "--bounds", "0.5", "20",
+                "--method", "Nelder-Mead",
+                "--n-restarts", "1",
+                "--max-evals", "4",
+                "--update-known-values",
+            ]
+        )
+        assert rc == 0
+
+        # Persisted under brady2d_optima[scheme][kernel][objective].
+        opt = store["brady2d_optima"]["E4"]["tension"]["layer3.max_stab_eig"]
+        assert opt["best_objective"] == pytest.approx(-1.5)
+        assert opt["best_params"] == {"sigma": 3.1}
+        assert opt["converged"] is True
+        assert opt["n_evals"] == 17
+        assert opt["method"] == "Nelder-Mead"
+        assert opt["bounds"] == [[0.5, 20.0]]
+        assert opt["best_x"] == [pytest.approx(3.1)]
+        # history is intentionally omitted from the persisted form.
+        assert "history" not in opt
+        # Existing top-level keys are untouched.
+        assert store["brady2d_calibration"] == {"E4": {"tension": [1.0, 2.0]}}
+        assert store["brady2d_sweep"] == {"E4": {"tension": {"sigma": 3.0}}}
+
+        # A second CLI call at a different objective must coexist with the
+        # first under the same scheme/kernel bucket (additive behaviour).
+        second = replace(canned, best_objective=-0.75, best_x=np.array([4.0]),
+                         best_params={"sigma": 4.0})
+        monkeypatch.setattr(
+            optimize_mod, "_run_method", lambda args, bounds: second
+        )
+        rc2 = optimize_mod.main(
+            [
+                "--scheme", "E4",
+                "--kernel", "tension",
+                "--objective", "layer6.transient_growth_bound",
+                "--max-layer", "6",
+                "--bounds", "0.5", "20",
+                "--method", "Nelder-Mead",
+                "--n-restarts", "1",
+                "--max-evals", "4",
+                "--update-known-values",
+            ]
+        )
+        assert rc2 == 0
+        kernel_bucket = store["brady2d_optima"]["E4"]["tension"]
+        assert set(kernel_bucket.keys()) == {
+            "layer3.max_stab_eig",
+            "layer6.transient_growth_bound",
+        }
+        assert kernel_bucket["layer3.max_stab_eig"]["best_objective"] == \
+            pytest.approx(-1.5)
+        assert kernel_bucket["layer6.transient_growth_bound"][
+            "best_objective"
+        ] == pytest.approx(-0.75)
