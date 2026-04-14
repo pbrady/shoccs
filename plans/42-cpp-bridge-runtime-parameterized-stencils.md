@@ -323,16 +323,18 @@ Each family follows the same 4-item pattern as 42.5b–f (minus the split refere
 
 ### 42.8 — New sweep subcommand `brady2d`
 
-- [ ] **42.8a** Create `scripts/stencil_gen/sweeps/brady2d_sweep.py` with `main(argv) -> int`:
-  - Args: `--scheme {E2,E4}`, `--kernel {classical,tension,gaussian,multiquadric}`, `--param-range lo hi n` (e.g. `--sigma-range 1.0 10.0 10`), `--max-layer int`, `--validate-with-cpp` (sets `max_layer=8` for winners), `--update-known-values`.
+- [x] **42.8a** Create `scripts/stencil_gen/sweeps/brady2d_sweep.py` with `main(argv) -> int`:
+  - Args: `--scheme {E2,E4}`, `--kernel {classical,tension,gaussian,multiquadric}`, `--param-range lo hi n` (three values: low, high, point count), `--max-layer int` (1-8, default 3), `--validate-with-cpp` (re-runs top-3 survivors at `max_layer=8`), `--update-known-values`, plus `--layer8-N` / `--layer8-t-final` passthroughs for L8 cost control.
   - For each parameter value in the range:
     1. Run `brady2d_stability_score(scheme, kernel, params, max_layer=max_layer)`.
-    2. Collect per-layer scalars into a results table.
-  - Print a markdown table sorted by param.
-  - If `--validate-with-cpp`, re-run at `max_layer=8` for the top 3 survivors (by lowest L6 transient_growth_bound or similar ranking metric).
-  - Persist results to `known_values.json["brady2d_sweep"][scheme][kernel]` when `--update-known-values` set.
+    2. Collect per-layer scalars into a `SweepPoint` dataclass.
+  - Print a markdown-pipe table sorted by param; columns adapt to `max_layer` (L1/L3/L6/L7/L8 shown only when their layer ran).
+  - If `--validate-with-cpp`, re-run the top 3 passing points at `max_layer=8` (ranked by `layer6.transient_growth_bound` ascending when L6 is present, else `layer3.max_stab_eig` ascending).
+  - Persist results to `known_values.json["brady2d_sweep"][scheme][kernel]` when `--update-known-values` set — full per-point `StabilityReport` serialised via `_report_to_dict` (keeps only JSON-safe scalar fields).
+  - Classical kernel degenerates to a single point using the hard-coded `CLASSICAL_E4_ALPHA = [-0.7733323791884821, 0.1623961700641681]` (matching `test_cpp_bridge.py` and `E4u_1.t.cpp`); `--param-range` is ignored there. Spline kernels require `--param-range`, else `ValueError`/exit 2.
   - File: `scripts/stencil_gen/sweeps/brady2d_sweep.py` (new)
-  - Test: `cd scripts/stencil_gen && uv run python -m sweeps brady2d --scheme E4 --kernel tension --sigma-range 2 4 3 --max-layer 3`
+  - Test: `cd scripts/stencil_gen && uv run python -m sweeps.brady2d_sweep --scheme E4 --kernel tension --param-range 2 4 3 --max-layer 3` → **PASSED** (3 sigma values swept in ~8s, markdown table shows all three passing L1+L3, exit 0; classical single-point path also validated: `--kernel classical` emits one `pass` row with L1=2.1e-2, L3=-1.8e-4). The `-m sweeps brady2d` subcommand form (no `.brady2d_sweep` module suffix) is wired by 42.8b.
+  - Note: `--param-range` is `nargs=3` rather than three separate flags (`--sigma-range` / `--epsilon-range`) so one arg serves all three spline kernels — 42.8b exposes it verbatim under the same name. For the `--validate-with-cpp` path to do anything useful, `--max-layer` must be ≥3 (otherwise the ranking has no signal). `TOP_K_FOR_L8 = 3` is a module constant matching the plan text.
 
 - [ ] **42.8b** Register `brady2d` subcommand in `sweeps/__main__.py`:
   - `sub_brady2d = subparsers.add_parser("brady2d", ...)` with all the args from 42.8a.
