@@ -71,12 +71,12 @@ cd scripts/stencil_gen && uv run pytest tests/test_brady2d_stability.py -x -q -k
   - Test: `./build/src/app/shoccs lua-configs/brady_livescu_4_3.lua && python3 -c "import csv; rows=[r for r in csv.reader(open('logs/system.csv')) if r and r[0] and r[0][0].isdigit()]; assert rows, 'no data rows'; linf=float(rows[-1][3]); assert 0 < linf < 10, f'linf out of range: {linf}'; print(f'ok linf={linf}')"` → **PASSED** (`linf=0.00175` at t=10.0, N=31)
   - Note: shoccs binary lives at `build/src/app/shoccs`, not `build/shoccs`. Follow-up 42.2a/42.2b must use the correct path in `SHOCCS_BINARY`.
 
-- [ ] **42.1b** Create companion configs:
+- [x] **42.1b** Create companion configs:
   - `lua-configs/brady_livescu_4_3_n61.lua` (N=61, same everything else)
   - `lua-configs/brady_livescu_4_3_long.lua` (N=31, `max_time = 100.0` for stability check)
   - Both reuse the same pattern; keep them as thin variants.
   - File: `lua-configs/brady_livescu_4_3_n61.lua`, `lua-configs/brady_livescu_4_3_long.lua` (new)
-  - Test: `./build/src/app/shoccs lua-configs/brady_livescu_4_3_n61.lua` runs without error
+  - Test: `./build/src/app/shoccs lua-configs/brady_livescu_4_3_n61.lua` → **PASSED** (ran cleanly to t=10, wall=0.296s, 531 steps). Long variant also verified: runs to t=100 cleanly (wall=1.2s, 2652 steps at N=31).
 
 ### 42.2 — Python → C++ bridge (first cut: classical-alpha stencils only)
 
