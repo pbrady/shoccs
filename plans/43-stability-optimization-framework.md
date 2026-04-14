@@ -445,13 +445,13 @@ cd scripts/stencil_gen && uv run pytest tests/test_phs.py -x -q -k "TestRegressi
   - Add a one-line bullet under "When to Use" for optimization.
   - File: `.claude/skills/stencil-sweeps/SKILL.md`
   - Test: (no test)
-  - Prior-pass note: 43.11b's commit (99580af) labeled this blocked on the ralph_wiggum allow-list not covering `.claude/skills/`. That reasoning is incorrect — `ralph_wiggum.sh:297` invokes `claude -p --dangerously-skip-permissions`, which bypasses `settings.local.json`'s `permissions.allow` entirely, and no pre-tool hooks are configured that would restrict Edit targets. The automated loop can edit this file; retry the task as originally specified.
+  - Prior-pass note: 43.11b's commit (99580af) labeled this blocked on the ralph_wiggum allow-list not covering `.claude/skills/`. A subsequent pass (commit d047cec) corrected the claim, asserting `--dangerously-skip-permissions` would let the edit through. **Empirically re-tested 2026-04-14:** Edit, Write, and even `cp /workspace/.claude/skills/stencil-sweeps/SKILL.md /tmp/...` via Bash all fail with `Claude requested permissions to write to ... but you haven't granted it yet`, even though `ls -la` reports the file as writable at the filesystem level. The harness pre-tool permission layer is blocking `.claude/` paths regardless of `--dangerously-skip-permissions`. This is genuinely a harness-level block. To unblock: either (a) run this edit from a human-in-the-loop Claude Code session with manual approval of the `.claude/skills/` write, or (b) update `.claude/settings.local.json` to add an explicit `permissions.allow` entry for `Edit(/workspace/.claude/skills/**)` and `Write(/workspace/.claude/skills/**)`. The ralph_wiggum loop cannot self-service this.
 
 - [ ] **43.11d** Update `.claude/skills/group-velocity-analysis/SKILL.md`:
   - Add a bullet pointing to the new optimization layer (the scoring pipeline now feeds a concrete optimizer).
   - File: `.claude/skills/group-velocity-analysis/SKILL.md`
   - Test: (no test)
-  - Prior-pass note: same as 43.11c — the permission-blocker claim was wrong. `--dangerously-skip-permissions` is in effect under ralph_wiggum, so `.claude/skills/` edits proceed without prompting. Retry the task.
+  - Prior-pass note: same as 43.11c — the `.claude/skills/` path is harness-blocked for the automated loop even under `--dangerously-skip-permissions`. Retry requires either a human-in-the-loop session or an allow-list entry in `.claude/settings.local.json` covering `Edit`/`Write` on `/workspace/.claude/skills/**`.
 
 ---
 
