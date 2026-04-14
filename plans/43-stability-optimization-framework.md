@@ -9,7 +9,7 @@
 - **Multi-objective Pareto optimization** (pymoo NSGA-II). Single-objective plus feasibility cliff covers the working-out-which-parameter-is-best question cleanly; multi-objective is a separate infrastructure and output schema. Defer to a follow-up plan (44). The architecture here supports weighted scalarization as a bridge path.
 - **Multi-fidelity Bayesian optimization** (BoTorch / Emukit). We use the built-in layered short-circuit as a manual cascade (staged cheap inner → expensive validator). Defer BO to a follow-up plan (45).
 - **Brady-Livescu 1D Euler reproduction**. Their 2019 paper's objective requires a full nonlinear 1D Euler RK4 solver in Python (not present in this repo) and returns a two-phase blow-up-or-monotonicity score. Reproducing exactly is explicitly *not a target* — the paper notes their published α's are "simply the first entries in the databases" and the procedure is known to be multi-modal (Table 4 reports 101 found E4 schemes from random restarts). Defer to plan 46.
-- **Classical-α E2_1 (4D)**. The user noted second-order stability is inconsequential. Skip in favor of E4_1 (2D, single hard inequality `α₁ ≥ 197/288`).
+- **Classical-α E2_1 (4D)**. The user noted second-order stability is inconsequential. Skip in favor of E4_1 (2D, `α₁` lower bound is analytical-stability-driven, not the C++ cut-cell 197/288 floor — see 43.9a).
 - **E6 / E8 classical schemes**. No Python derivation pipeline exists for them; out of scope.
 - **NLopt dependency**. `pip install nlopt` fails in this container; the container would need a spack rebuild. Skip — use `scipy.optimize.minimize(method="COBYQA")` which matches BOBYQA's derivative-free trust-region design and is built-in (scipy ≥ 1.14; this repo has 1.17).
 - **Tension-penalty and mixed-epsilon kernels through the layered cascade** (resolved at 43.1d, option b). `brady2d_stability_score` and every layer helper dispatch only `kernel ∈ {"classical", "tension", "gaussian", "multiquadric"}`; routing `"tension-penalty"`/`"mixed-epsilon"` through the 2D eigenvalue / non-normality / sparse paths would require a substantial extension to the Brady-Livescu pipeline for marginal optimizer reach — those families already have standalone exploratory sweeps (`sweeps/tension_penalty_sweep.py`, `sweeps/mixed_epsilon_sweep.py`). Defer the extension to a follow-up plan. `DEFAULT_BOUNDS` and `params_from_vector`/`vector_from_params` are pruned to the four supported kernels.
@@ -34,7 +34,7 @@ candidate → L1 L2 L3 feasibility → L4 L5 L6 L7 metrics → top-k → L8 C++ 
 | Tension | E2_1, E4_1 | 1 | σ ∈ [0.5, 20] | none beyond stability |
 | Gaussian | E2_1, E4_1 | 1 | ε ∈ [0.1, 5] (log) | none beyond stability |
 | Multiquadric | E2_1, E4_1 | 1 | ε ∈ [0.1, 5] (log) | none beyond stability |
-| Classical-α | E4_1 | 2 | α₀ ∈ [-2, 2], α₁ ∈ [197/288, 2] | α₁ ≥ 197/288 hard |
+| Classical-α | E4_1 | 2 | α₀ ∈ [-2, 2], α₁ ∈ [0.05, 2] | analytical-stability only; C++ cut-cell 197/288 floor enforced at L8 diagnosis — see 43.9a |
 
 (Tension-penalty and mixed-ε are out of scope — see "What this plan does NOT do".)
 
@@ -56,7 +56,7 @@ candidate → L1 L2 L3 feasibility → L4 L5 L6 L7 metrics → top-k → L8 C++ 
 - `scripts/stencil_gen/sweeps/brady2d_sweep.py` (`_params_for`, `_report_to_dict`, `rank_for_l8` — all candidates for reuse)
 - `scripts/stencil_gen/sweeps/__main__.py` (CLI dispatch pattern)
 - `scripts/stencil_gen/sweeps/_common.py` (`load_known_values`, `save_known_values`)
-- `src/stencils/E4_1.cpp` lines 35–41 (the α₁ ≥ 197/288 hard constraint — confirm this is in the Python `_build_classical_diff_matrix` too, or is enforced externally by the optimizer)
+- `src/stencils/E4_1.cpp` lines 35–41 (the α₁ ≥ 197/288 constraint is cut-cell-specific — it exists to keep the psi denominator non-zero — and is **not** enforced by the Python analytical pipeline L1–L7; it fires only as an L8 diagnostic. See 43.9a.)
 
 **Test commands:**
 
@@ -87,7 +87,7 @@ cd scripts/stencil_gen && uv run pytest tests/test_phs.py -x -q -k "TestRegressi
 - [x] **43.1a** Create `scripts/stencil_gen/stencil_gen/optimizer.py` with:
   - Module docstring citing the layered cascade approach and linking to plan 43.
   - `@dataclass(frozen=True) class OptimizeResult` with fields: `best_params: dict`, `best_x: np.ndarray`, `best_objective: float`, `best_report: dict` (serialized `StabilityReport`), `method: str`, `converged: bool`, `n_evals: int`, `compute_time: float`, `history: list[tuple[np.ndarray, float]]`.
-  - Constants: `DEFAULT_BOUNDS` dict mapping `(scheme, kernel) -> list[tuple[float, float]]` with the bounds table above. E4 classical α has `[(-2.0, 2.0), (197.0/288.0, 2.0)]`.
+  - Constants: `DEFAULT_BOUNDS` dict mapping `(scheme, kernel) -> list[tuple[float, float]]` with the bounds table above. E4 classical α has `[(-2.0, 2.0), (0.05, 2.0)]` — see 43.9a for the analytical-vs-cut-cell bound reconciliation.
   - All function stubs raise `NotImplementedError`.
   - File: `scripts/stencil_gen/stencil_gen/optimizer.py` (new)
   - Test: `cd scripts/stencil_gen && uv run python -c "from stencil_gen.optimizer import OptimizeResult, DEFAULT_BOUNDS; print(list(DEFAULT_BOUNDS.keys())[:3])"`
@@ -327,7 +327,7 @@ cd scripts/stencil_gen && uv run pytest tests/test_phs.py -x -q -k "TestRegressi
   - Files: `scripts/stencil_gen/stencil_gen/optimizer.py`, `scripts/stencil_gen/tests/test_optimizer.py`.
   - Test: `cd scripts/stencil_gen && SYMPY_CACHE_SIZE=50000 uv run pytest tests/test_optimizer.py -x -q -k "TestClassicalAlphaBounds"` — 6 passed in 2.0 s. Full suite: 84 passed, 3 skipped, 76 s; slow `test_shgo_2d_classical_alpha` still green in 20 s.
 
-- [ ] **43.9a-r1** Plan-text cleanup missed by 43.9a: the decision to drop the 197/288 floor from `DEFAULT_BOUNDS[("E4", "classical")]` survives in several downstream task specs and the completion criteria as the old "α₁ ≥ 197/288 hard" invariant. These will silently encode the wrong bound / wrong assertion when 43.9b/c are implemented and will contradict the widened `DEFAULT_BOUNDS` that 43.9a actually shipped. Reconcile them now. No code changes.
+- [x] **43.9a-r1** Plan-text cleanup missed by 43.9a: the decision to drop the 197/288 floor from `DEFAULT_BOUNDS[("E4", "classical")]` survives in several downstream task specs and the completion criteria as the old "α₁ ≥ 197/288 hard" invariant. These will silently encode the wrong bound / wrong assertion when 43.9b/c are implemented and will contradict the widened `DEFAULT_BOUNDS` that 43.9a actually shipped. Reconcile them now. No code changes. Resolution: updated the scope bullet (line 12), parameter-spaces table row (line 37), Read first bullet for `E4_1.cpp` (line 59), 43.1a inline spec (line 90), and the Completion Criteria line that previously said "respects the α₁ ≥ 197/288 bound". 43.9b's active bullet and 43.9c's test-command invocation were already in sync with the widened bounds (no edit needed). Verified via `grep -n "197/288\|197\.0/288" plans/43-stability-optimization-framework.md`: all surviving hits sit inside the 43.9a resolution narrative, the `TestClassicalAlphaBounds` bullet (archival), 43.9b's L8 diagnostic flag (which cites 197/288 as diagnostic-only), or this 43.9a-r1 item.
   - In the plan-header **scope** bullet (line 12), change "E4_1 (2D, single hard inequality `α₁ ≥ 197/288`)" to "E4_1 (2D, `α₁` lower bound is analytical-stability-driven, not the C++ cut-cell 197/288 floor — see 43.9a)".
   - In the plan-header **parameter-spaces table** (line 37), update the Classical-α row bounds from `α₁ ∈ [197/288, 2]` to `α₁ ∈ [0.05, 2]` and change the Constraints column from "α₁ ≥ 197/288 hard" to "analytical-stability only; C++ cut-cell 197/288 floor enforced at L8 diagnosis — see 43.9a".
   - In the **Read first** list (line 59), rephrase the `src/stencils/E4_1.cpp` bullet to note the 197/288 constraint is cut-cell-specific and is *not* enforced by the Python analytical pipeline (L1–L7) — it fires only as an L8 diagnostic.
@@ -442,7 +442,7 @@ Parallelizable after 43.4 completes:
 - `stencil_gen/optimizer.py` exports `OptimizeResult`, `params_from_vector`, `vector_from_params`, `extract_field`, `make_objective`, `run_scipy_local`, `run_scipy_shgo`, `run_scipy_de`, `multi_start_optimize`, `run_staged_optimize`, `DEFAULT_BOUNDS`.
 - No new external dependencies — only `scipy.optimize` and `scipy.stats.qmc` (both already present).
 - `python -m sweeps optimize --scheme E4 --kernel tension --objective layer3.max_stab_eig --gate-layer 3 --max-layer 3 --bounds 0.5 20 --method Nelder-Mead --max-evals 40` runs end-to-end, prints a feasible `best_params`, and respects the stated bounds. (The earlier specific-σ acceptance figure was dropped — see 43.3b.)
-- `python -m sweeps optimize --scheme E4 --kernel classical --objective layer6.transient_growth_bound --method staged --n-restarts 20 --update-known-values` runs, respects the α₁ ≥ 197/288 bound, finds at least one feasible local minimum, and persists to `known_values.json["brady2d_optima"]["E4"]["classical"]`.
+- `python -m sweeps optimize --scheme E4 --kernel classical --objective layer6.transient_growth_bound --method staged --n-restarts 20 --update-known-values` runs, respects `DEFAULT_BOUNDS[("E4","classical")]` (widened in 43.9a to admit the Brady-Livescu analytical feasible region), finds at least one feasible local minimum, and persists to `known_values.json["brady2d_optima"]["E4"]["classical"]`.
 - `scripts/stencil_gen/benchmarks/alpha_basin_survey.py` with `n_seeds=20` reports at least 3 distinct basins for E4 classical-α (cross-checks Brady-Livescu's multi-modality finding of 101 E4 schemes at their full budget).
 - The survey's top basin contains a point within 0.5 L∞ of Brady-Livescu's published E4 α (stored in `alpha_extraction.py`).
 - `TestRegressionBrady2DOptima` passes: re-runs stored optima and verifies each matches within 1% of the recorded objective.
