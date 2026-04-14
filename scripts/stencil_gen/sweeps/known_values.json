@@ -114,7 +114,7 @@
       "overall_verdict": "pass",
       "failed_layer": null,
       "failed_reason": "",
-      "compute_time": 1.1718094169918913,
+      "compute_time": 1.0639665839844383,
       "layer1": {
         "interior_gv_err_x": 0.00013016508525931503,
         "interior_gv_err_y": 0.00013016508525931503,
@@ -127,22 +127,16 @@
       "layer3": {
         "max_stab_eig": -0.0001808367140203875
       },
-      "layer4": {
-        "max_local_gv_error": 0.00017360868541544126
-      },
-      "layer5": {
-        "max_aligned_error": 0.0026147663048305177
-      },
-      "layer6": {
-        "spectral_abscissa": -0.0001808367140203875,
-        "transient_growth_bound": 8.527076798420156
+      "layer_bl42": {
+        "max_spectral_abscissa": 6.002468414324108e-14,
+        "purely_imaginary": true
       }
     },
     "E2_phs_k2": {
       "overall_verdict": "pass",
       "failed_layer": null,
       "failed_reason": "",
-      "compute_time": 0.45361716600018553,
+      "compute_time": 0.4907669590320438,
       "layer1": {
         "interior_gv_err_x": 0.011473792229796054,
         "interior_gv_err_y": 0.011473792229796054,
@@ -155,22 +149,16 @@
       "layer3": {
         "max_stab_eig": -0.00011226540786009979
       },
-      "layer4": {
-        "max_local_gv_error": 0.01237493230014061
-      },
-      "layer5": {
-        "max_aligned_error": 0.04811311242252088
-      },
-      "layer6": {
-        "spectral_abscissa": -0.00011226540786009979,
-        "transient_growth_bound": 3.346610142188868
+      "layer_bl42": {
+        "max_spectral_abscissa": 4.890563694017857e-15,
+        "purely_imaginary": true
       }
     },
     "E4_phs_k2": {
       "overall_verdict": "fail",
       "failed_layer": 3,
       "failed_reason": "BL42 max_spectral_abscissa=6.2970e-01 > BL42_TOL=1e-10",
-      "compute_time": 0.7013166249962524,
+      "compute_time": 0.5219547920278274,
       "layer1": {
         "interior_gv_err_x": 0.00013016508525931503,
         "interior_gv_err_y": 0.00013016508525931503,
@@ -182,13 +170,17 @@
       },
       "layer3": {
         "max_stab_eig": -0.0005885839609341391
+      },
+      "layer_bl42": {
+        "max_spectral_abscissa": 0.6297033039721802,
+        "purely_imaginary": false
       }
     },
     "E2_tension_6": {
       "overall_verdict": "fail",
       "failed_layer": 1,
       "failed_reason": "boundary_gv_err=9.7527e-02 > L1_TOL=0.05",
-      "compute_time": 0.0008650000090710819,
+      "compute_time": 0.0006565000512637198,
       "layer1": {
         "interior_gv_err_x": 0.011473792229796054,
         "interior_gv_err_y": 0.011473792229796054,
@@ -200,7 +192,7 @@
       "overall_verdict": "fail",
       "failed_layer": 3,
       "failed_reason": "BL42 max_spectral_abscissa=9.5397e-01 > BL42_TOL=1e-10",
-      "compute_time": 0.6543935840018094,
+      "compute_time": 0.42013362603029236,
       "layer1": {
         "interior_gv_err_x": 0.00013016508525931503,
         "interior_gv_err_y": 0.00013016508525931503,
@@ -212,13 +204,17 @@
       },
       "layer3": {
         "max_stab_eig": -7.802238653237703e-06
+      },
+      "layer_bl42": {
+        "max_spectral_abscissa": 0.9539737194887553,
+        "purely_imaginary": false
       }
     },
     "E2_gaussian_2": {
       "overall_verdict": "fail",
       "failed_layer": 1,
       "failed_reason": "boundary_gv_err=2.6981e-01 > L1_TOL=0.05",
-      "compute_time": 0.0006991659756749868,
+      "compute_time": 0.0007342079770751297,
       "layer1": {
         "interior_gv_err_x": 0.011473792229796054,
         "interior_gv_err_y": 0.011473792229796054,
@@ -230,7 +226,7 @@
       "overall_verdict": "fail",
       "failed_layer": 3,
       "failed_reason": "BL42 max_spectral_abscissa=7.0022e-01 > BL42_TOL=1e-10",
-      "compute_time": 0.6590312079933938,
+      "compute_time": 0.4703446250059642,
       "layer1": {
         "interior_gv_err_x": 0.00013016508525931503,
         "interior_gv_err_y": 0.00013016508525931503,
@@ -242,13 +238,17 @@
       },
       "layer3": {
         "max_stab_eig": -2.948974986938358e-05
+      },
+      "layer_bl42": {
+        "max_spectral_abscissa": 0.7002219115791712,
+        "purely_imaginary": false
       }
     },
     "E2_multiquadric_1": {
       "overall_verdict": "fail",
       "failed_layer": 1,
       "failed_reason": "boundary_gv_err=5.9976e-02 > L1_TOL=0.05",
-      "compute_time": 0.0007015000155661255,
+      "compute_time": 0.0005868340376764536,
       "layer1": {
         "interior_gv_err_x": 0.011473792229796054,
         "interior_gv_err_y": 0.011473792229796054,
@@ -260,7 +260,7 @@
       "overall_verdict": "fail",
       "failed_layer": 3,
       "failed_reason": "BL42 max_spectral_abscissa=6.4762e-01 > BL42_TOL=1e-10",
-      "compute_time": 0.6141156250087079,
+      "compute_time": 0.4011417080182582,
       "layer1": {
         "interior_gv_err_x": 0.00013016508525931503,
         "interior_gv_err_y": 0.00013016508525931503,
@@ -272,6 +272,10 @@
       },
       "layer3": {
         "max_stab_eig": -9.34107837092079e-05
+      },
+      "layer_bl42": {
+        "max_spectral_abscissa": 0.6476246914364765,
+        "purely_imaginary": false
       }
     }
   }

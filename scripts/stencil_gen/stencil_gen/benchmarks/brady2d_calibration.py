@@ -109,6 +109,12 @@ def _report_to_dict(report) -> dict[str, Any]:
             "max_spectral_abscissa": report.layer7.get("max_spectral_abscissa"),
         }
 
+    if report.layer_bl42 is not None:
+        d["layer_bl42"] = {
+            "max_spectral_abscissa": report.layer_bl42.get("max_spectral_abscissa"),
+            "purely_imaginary": report.layer_bl42.get("purely_imaginary"),
+        }
+
     return d
 
 

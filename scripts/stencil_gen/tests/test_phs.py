@@ -1927,6 +1927,39 @@ if _KNOWN is not None:
                         f"reason={report.failed_reason})"
                     )
 
+        def test_bl42_spectral_abscissa_matches(self):
+            """layer_bl42.max_spectral_abscissa reproduces within 1%."""
+            from stencil_gen.benchmarks.brady2d_calibration import FAMILIES
+            from stencil_gen.brady2d_stability import brady2d_stability_score
+
+            for scheme, kernel, params, label in FAMILIES:
+                if label not in self._CAL:
+                    continue
+                stored = self._CAL[label]
+                stored_bl42 = stored.get("layer_bl42")
+                if stored_bl42 is None:
+                    continue
+                report = brady2d_stability_score(
+                    scheme, kernel, params,
+                    max_layer=3, short_circuit=True,
+                )
+                assert report.layer_bl42 is not None, (
+                    f"{label}: expected layer_bl42 populated"
+                )
+                got = report.layer_bl42["max_spectral_abscissa"]
+                expected = stored_bl42["max_spectral_abscissa"]
+                if expected < 1e-12:
+                    assert got < 1e-10, (
+                        f"{label}: expected near-zero spectral abscissa, "
+                        f"got {got:.4e}"
+                    )
+                else:
+                    rel_err = abs(got - expected) / abs(expected)
+                    assert rel_err < 0.01, (
+                        f"{label}: BL42 max_spectral_abscissa {got:.6e} "
+                        f"vs stored {expected:.6e} (rel_err={rel_err:.4e})"
+                    )
+
     class TestRegressionBrady2DSweep:
         """Regression tests for Brady-Livescu 2D sweep results.
 

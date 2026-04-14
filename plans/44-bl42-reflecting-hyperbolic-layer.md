@@ -280,24 +280,24 @@ cd scripts/stencil_gen && uv run python -m sweeps optimize \
 
 ### 44.6 — Calibration and persistence
 
-- [ ] **44.6a** Extend `stencil_gen/benchmarks/brady2d_calibration.py::FAMILIES` and `run_calibration`:
+- [x] **44.6a** Extend `stencil_gen/benchmarks/brady2d_calibration.py::_report_to_dict` to serialize `layer_bl42`:
   - No change to FAMILIES itself (same family list).
-  - Calibration at `max_layer >= 3` now automatically runs L3r and records `layer_bl42` in each family's output dict.
-  - Verify no extra code change needed — the orchestrator in 44.4d already populates the field.
-  - File: (no file modification; this item is a verification step)
-  - Test: `cd scripts/stencil_gen && uv run python -m stencil_gen.brady2d_cli --run-calibration --max-layer 3 | head -60 ; uv run python -c "import json; d=json.load(open('sweeps/known_values.json')); [print(k, v.get('layer_bl42')) for k,v in d.get('brady2d_calibration', {}).items()]"`
+  - **Correction:** Plan claimed no code change needed, but `_report_to_dict()` did not extract `layer_bl42`. Added `layer_bl42` block (max_spectral_abscissa, purely_imaginary) after the existing `layer7` block.
+  - Verified: `run_calibration(max_layer=3)` now populates `layer_bl42` for 6 of 9 families (the 3 E2 families fail at L1 before reaching L3r). ✓
+  - File: `scripts/stencil_gen/stencil_gen/benchmarks/brady2d_calibration.py`
+  - Test: `cd scripts/stencil_gen && uv run python -c "from stencil_gen.benchmarks.brady2d_calibration import run_calibration; r = run_calibration(max_layer=3); print(sum(1 for v in r.values() if 'layer_bl42' in v), 'families with BL42 data')"` ✓
 
-- [ ] **44.6b** Run `max_layer=3` calibration with `--update-known-values` to persist L3r scores for all 9 families:
+- [x] **44.6b** Run `max_layer=3` calibration with `--update-known-values` to persist L3r scores:
   - `cd scripts/stencil_gen && uv run python -m stencil_gen.brady2d_cli --run-calibration --max-layer 3 --update-known-values`
-  - Expected runtime: under 2 minutes for all 9 families at `max_layer=3` (L3r is ~cheap eigenvalue on ≤160 dim).
+  - 6 families have BL42 data (E4_classical, E2_phs_k2, E4_phs_k2, E4_tension_3, E4_gaussian_09, E4_multiquadric_1). The 3 E2 families (E2_tension_6, E2_gaussian_2, E2_multiquadric_1) fail at L1 and short-circuit.
   - File: `scripts/stencil_gen/sweeps/known_values.json`
-  - Test: `cd scripts/stencil_gen && uv run python -c "import json; d=json.load(open('sweeps/known_values.json'))['brady2d_calibration']; keys_with_bl42 = [k for k,v in d.items() if 'layer_bl42' in v]; print(len(keys_with_bl42), 'families with BL42 data')"`
+  - Test: verified 6 families with BL42 data in known_values.json ✓
 
-- [ ] **44.6c** Extend `TestRegressionBrady2DCalibration` to assert `layer_bl42.max_spectral_abscissa` matches within 1% when present:
-  - Load stored calibration; for each family with a `layer_bl42` field, re-run `brady2d_stability_score(..., max_layer=3)`, compare `max_spectral_abscissa` to the stored value.
-  - Graceful skip if `layer_bl42` absent.
+- [x] **44.6c** Extend `TestRegressionBrady2DCalibration` to assert `layer_bl42.max_spectral_abscissa` matches within 1% when present:
+  - Added `test_bl42_spectral_abscissa_matches` method. For near-zero values (< 1e-12), checks absolute bound (< 1e-10). For non-zero values, checks relative error < 1%.
+  - Graceful skip if `layer_bl42` absent in stored data.
   - File: `scripts/stencil_gen/tests/test_phs.py`
-  - Test: `cd scripts/stencil_gen && uv run pytest tests/test_phs.py -x -q -k "TestRegressionBrady2DCalibration"`
+  - Test: `cd scripts/stencil_gen && uv run pytest tests/test_phs.py -x -q -k "TestRegressionBrady2DCalibration"` — 2 passed ✓
 
 ### 44.7 — Documentation
 
