@@ -833,3 +833,61 @@ class TestStaged:
         # ``best_report`` carries the L6 payload since the validator ran
         # at max_layer=6.
         assert "layer6" in r.best_report
+
+    def test_staged_validator_all_blowups(self, monkeypatch):
+        # Every validator re-run raises: the staged pipeline must return the
+        # inner-stage result wrapped with ``method="staged"``,
+        # ``stage="inner"``, ``converged=False`` (the validator did not
+        # confirm), and the fallback ``extras`` must carry the
+        # ``inner_best_objective`` / ``inner_best_x`` keys that the
+        # success-path extras populates — otherwise downstream callers and
+        # tests that read those keys ``KeyError`` on the fallback branch.
+        import stencil_gen.optimizer as opt_mod
+
+        def fake_score(scheme, kernel, params, *, max_layer, short_circuit=True):
+            if max_layer <= 3:
+                # Inner stage: feasible, L3 max_stab_eig varies with sigma so
+                # multi_start_optimize has a real objective to descend on.
+                sigma = float(params["sigma"])
+                return StabilityReport(
+                    layer1={"boundary_gv_err": 1e-4},
+                    layer3={"max_stab_eig": -0.1 + 1e-3 * (sigma - 3.0) ** 2},
+                    failed_layer=None,
+                    overall_verdict="pass",
+                )
+            # Validator stage (max_layer=6): blow up every time.
+            raise RuntimeError("validator blew up")
+
+        monkeypatch.setattr(opt_mod, "brady2d_stability_score", fake_score)
+
+        r = run_staged_optimize(
+            scheme="E4",
+            kernel="tension",
+            report_field="layer6.transient_growth_bound",
+            bounds=[(0.5, 20.0)],
+            inner_gate=3,
+            inner_max_layer=3,
+            validator_max_layer=6,
+            top_k=3,
+            method="Nelder-Mead",
+            n_restarts=2,
+            seed=0,
+            max_evals=20,
+        )
+
+        assert r.method == "staged"
+        assert r.extras["stage"] == "inner"
+        assert r.converged is False
+        # Fallback extras parity with the success path: both keys must be
+        # present and mirror the inner result.
+        assert "inner_best_objective" in r.extras
+        assert "inner_best_x" in r.extras
+        assert r.extras["inner_best_objective"] == pytest.approx(
+            r.extras["inner_best_objective"]
+        )
+        assert np.isfinite(r.extras["inner_best_objective"])
+        assert r.extras["inner_best_x"].shape == (1,)
+        # Validator ranking entries are all infeasible.
+        ranking = r.extras["validator_ranking"]
+        assert len(ranking) >= 1
+        assert all(not np.isfinite(fv) for (_x, fv) in ranking)

@@ -875,6 +875,7 @@ def run_staged_optimize(
         fallback = replace(
             inner_result,
             method="staged",
+            converged=False,
             best_params=(
                 params_from_vector(kernel, inner_result.best_x)
                 if np.isfinite(inner_result.best_objective)
@@ -893,6 +894,8 @@ def run_staged_optimize(
                     "n_feasible_restarts", 0
                 ),
                 "inner_field": inner_field,
+                "inner_best_objective": inner_result.best_objective,
+                "inner_best_x": np.asarray(inner_result.best_x, dtype=float).copy(),
                 "validator_max_layer": validator_max_layer,
                 "inner_max_layer": inner_max_layer,
             },
