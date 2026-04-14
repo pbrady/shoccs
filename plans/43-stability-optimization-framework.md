@@ -112,6 +112,12 @@ cd scripts/stencil_gen && uv run pytest tests/test_phs.py -x -q -k "TestRegressi
   - Files: `scripts/stencil_gen/stencil_gen/optimizer.py`, `scripts/stencil_gen/tests/test_optimizer.py`, `plans/43-stability-optimization-framework.md`.
   - Test: `cd scripts/stencil_gen && uv run pytest tests/test_optimizer.py -x -q` — green, 32 tests.
 
+- [ ] **43.1e** Follow-up cleanup missed by 43.1d: two downstream task specs still reference the pruned `tension-penalty` / `mixed-epsilon` kernels and must be reconciled with option (b) before the next work pass proceeds.
+  - In **43.1b** (lines 93–96) delete the two bullets for `kernel="tension-penalty"` and `kernel="mixed-epsilon"`; the spec should match the actual implementation in `optimizer.py` (tension / gaussian / multiquadric / classical only). Leave the round-trip test bullet intact.
+  - In **43.7a** (the `--kernel` argparse choices bullet) change `{tension,gaussian,multiquadric,tension-penalty,mixed-epsilon,classical}` to `{tension,gaussian,multiquadric,classical}` so a literal reading of the CLI spec cannot reintroduce the pruned kernels when 43.7a is implemented.
+  - File: `plans/43-stability-optimization-framework.md` only (no code changes).
+  - Test: `grep -n "tension-penalty\|mixed-epsilon" plans/43-stability-optimization-framework.md` should return only the two expected locations — the "What this plan does NOT do" bullet and the 43.1d resolution bullet.
+
 ### 43.2 — Objective factory with feasibility cliff
 
 - [ ] **43.2a** Implement `make_objective(scheme, kernel, report_field, *, gate_layer=3, max_layer=None) -> Callable[[np.ndarray], float]`:
@@ -335,7 +341,7 @@ cd scripts/stencil_gen && uv run pytest tests/test_phs.py -x -q -k "TestRegressi
 ## Ordering
 
 ```
-43.1a → 43.1b → 43.1c → 43.1d         # skeleton + primitives + scope reconcile
+43.1a → 43.1b → 43.1c → 43.1d → 43.1e  # skeleton + primitives + scope reconcile + plan cleanup
   ↓
 43.2a → 43.2b                          # objective factory
   ↓
