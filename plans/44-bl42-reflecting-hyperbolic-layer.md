@@ -272,11 +272,11 @@ cd scripts/stencil_gen && uv run python -m sweeps optimize \
 
 ### 44.5-followup — Fix vacuous CLI test for BL42 optimizer
 
-- [ ] **44.5d** Fix `test_cli_optimize_bl42_tension` in `TestOptimizerBL42` (`test_optimizer.py`):
+- [x] **44.5d** Fix `test_cli_optimize_bl42_tension` in `TestOptimizerBL42` (`test_optimizer.py`):
   - **Bug:** Uses tension E4 with `--objective layer_bl42.max_spectral_abscissa` but no `--gate-layer` flag, so the CLI default `gate_layer=3` applies. Tension fails L3r (BL42) at gate_layer=3, so all evaluations return `+inf`. The test passes vacuously — `"best_objective" in proc.stdout` is true even when best_objective is infinity. Same class of bug as 44.4o-p.
-  - Fix: add `--gate-layer 2` to the CLI invocation (tension passes L1-L2; L3r failure is not gated, so the optimizer gets actual finite BL42 spectral abscissa values to minimize). Add `assert "inf" not in proc.stdout` guard per the 44.4p pattern.
+  - Fix: added `--gate-layer 2` to the CLI invocation (tension passes L1-L2; L3r failure is not gated, so the optimizer gets actual finite BL42 spectral abscissa values to minimize). Added `assert "inf" not in proc.stdout` guard per the 44.4p pattern.
   - File: `scripts/stencil_gen/tests/test_optimizer.py`
-  - Test: `cd scripts/stencil_gen && SYMPY_CACHE_SIZE=50000 uv run pytest tests/test_optimizer.py -x -q -k "test_cli_optimize_bl42_tension" --run-slow`
+  - Test: `cd scripts/stencil_gen && uv run pytest tests/test_optimizer.py -x -q -k "not slow"` — 101 passed ✓
 
 ### 44.6 — Calibration and persistence
 

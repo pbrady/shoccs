@@ -2107,6 +2107,7 @@ class TestOptimizerBL42:
                 "--scheme", "E4",
                 "--kernel", "tension",
                 "--objective", "layer_bl42.max_spectral_abscissa",
+                "--gate-layer", "2",
                 "--bounds", "0.5", "20",
                 "--method", "Nelder-Mead",
                 "--n-restarts", "4",
@@ -2123,3 +2124,4 @@ class TestOptimizerBL42:
             f"stdout:\n{proc.stdout}\n\nstderr:\n{proc.stderr}"
         )
         assert "best_objective" in proc.stdout
+        assert "inf" not in proc.stdout, "all evaluations returned +inf (vacuous run)"
