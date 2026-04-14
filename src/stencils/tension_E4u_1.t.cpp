@@ -126,3 +126,46 @@ TEST_CASE("tension_E4u_1 nbs_floating fills output span")
     REQUIRE(c[4 * 7 + 2] == Catch::Approx(1.0 / (12.0 * h)).margin(1.0e-12));
     REQUIRE(c[4 * 7 + 3] == Catch::Approx(-2.0 / (3.0 * h)).margin(1.0e-12));
 }
+
+TEST_CASE("tension_E4u_1 Dirichlet query and nbs at sigma=3")
+{
+    auto st_opt = make_tension_stencil(3.0);
+    REQUIRE(!!st_opt);
+    const auto& st = *st_opt;
+
+    auto [p, r, t, x] = st.query(bcs::Dirichlet);
+    REQUIRE(p == 2);
+    REQUIRE(r == 4);
+    REQUIRE(t == 7);
+    REQUIRE(x == 0);
+
+    // Dirichlet drops the first wall row — expected = REFERENCE_SIGMA3_COEFFS[7..35].
+    std::vector<real> c(4 * 7);
+    std::vector<real> ex{};
+    auto out = st.nbs(1.0, bcs::Dirichlet, 1.0, false, c, ex);
+
+    REQUIRE(out.size() == 4u * 7u);
+    const std::vector<real> expected{REFERENCE_SIGMA3_COEFFS.begin() + 7,
+                                     REFERENCE_SIGMA3_COEFFS.end()};
+    REQUIRE_THAT(c, Approx(expected).margin(1.0e-12));
+}
+
+TEST_CASE("tension_E4u_1 right=true flips Floating block")
+{
+    auto st_opt = make_tension_stencil(3.0);
+    REQUIRE(!!st_opt);
+    const auto& st = *st_opt;
+
+    // right=true negates every entry and reverses the block end-to-end:
+    // c[i] == -REFERENCE_SIGMA3_COEFFS[34 - i].
+    std::vector<real> c(5 * 7);
+    std::vector<real> ex{};
+    auto out = st.nbs(1.0, bcs::Floating, 1.0, true, c, ex);
+
+    REQUIRE(out.size() == 5u * 7u);
+    std::vector<real> expected(REFERENCE_SIGMA3_COEFFS.size());
+    for (std::size_t i = 0; i < expected.size(); ++i) {
+        expected[i] = -REFERENCE_SIGMA3_COEFFS[expected.size() - 1 - i];
+    }
+    REQUIRE_THAT(c, Approx(expected).margin(1.0e-12));
+}

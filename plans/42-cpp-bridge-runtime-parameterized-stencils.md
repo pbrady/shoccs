@@ -229,7 +229,7 @@ The strategy: the constructor takes `real sigma` from Lua, builds the small (r=5
   - Test: `cmake --build build --target t-tension_E4u_1 && ctest --test-dir build -R t-tension_E4u_1` → **PASSED** (3 Catch2 cases; test executable reports `All tests passed (assertions in 3 test cases)` and ctest reports `100% tests passed, 0 tests failed out of 1` in 0.01 s).
   - Note: the test drives the stencil through `from_lua` (mirroring `E4u_1.t.cpp`'s pattern) rather than instantiating the `tension_E4u_1` struct directly, because the struct lives in the .cpp's anonymous-namespace scope and is not exposed in the header. With `h=1.0` and `right=false`, `nbs_floating` copies `cached_coeffs` verbatim into the output span, so the reference-match test at `h=1.0` equivalently asserts `cached_coeffs == REFERENCE_SIGMA3_COEFFS` within `1e-12`. The third test additionally spot-checks the `1/h` scaling at `h=0.1` on the classical-interior row (row 4) so regressions in the `nbs_floating` transform get caught without rederiving the whole block at a second h.
 
-- [ ] **42.5g** Extend `t-tension_E4u_1` to cover the `Dirichlet` and `right=true` paths:
+- [x] **42.5g** Extend `t-tension_E4u_1` to cover the `Dirichlet` and `right=true` paths:
   - Brady-Livescu §4.3 uses `xmin/ymin = "dirichlet"` (and mirrored max faces), so `nbs_dirichlet` and the `right=true` negate+reverse branch in `nbs_floating`/`nbs_dirichlet` (`tension_E4u_1.cpp:251-253, 266-268`) are on this phase's hot path but currently untested. 42.6d/42.6h clone these tests, so closing the gap here prevents it from propagating to gaussian/multiquadric.
   - Add `TEST_CASE("tension_E4u_1 Dirichlet query and nbs at sigma=3")`:
     - Assert `query(bcs::Dirichlet)` returns `(p=2, r=4, t=7, x=0)`.
@@ -237,7 +237,7 @@ The strategy: the constructor takes `real sigma` from Lua, builds the small (r=5
   - Add `TEST_CASE("tension_E4u_1 right=true flips Floating block")`:
     - Call `nbs(h=1.0, bcs::Floating, psi=1.0, right=true, c, ex)` with a 35-entry buffer; assert the output equals `-REFERENCE_SIGMA3_COEFFS` reversed end-to-end within `1e-12` (i.e. `c[i] == -REFERENCE_SIGMA3_COEFFS[34 - i]`).
   - File: `src/stencils/tension_E4u_1.t.cpp`
-  - Test: `cmake --build build --target t-tension_E4u_1 && ctest --test-dir build -R t-tension_E4u_1`
+  - Test: `cmake --build build --target t-tension_E4u_1 && ctest --test-dir build -R t-tension_E4u_1` → **PASSED** (5 Catch2 cases; ctest reports `100% tests passed, 0 tests failed out of 1` in 0.01 s). Dirichlet case asserts `query` returns `(2, 4, 7, 0)` and the 28-entry `nbs` output matches `REFERENCE_SIGMA3_COEFFS[7..35]`; `right=true` case builds the negated-reversed expected block via an explicit loop and asserts elementwise within `1e-12`.
 
 ### 42.6 — Second and third spline families: `gaussian_E4u_1`, `multiquadric_E4u_1`
 
