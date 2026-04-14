@@ -172,11 +172,12 @@ The strategy: the constructor takes `real sigma` from Lua, builds the small (r=5
 
 **Note:** The Python-emits-C++ codegen path (originally scoped as 42.5a / 42.5e) is explicitly deferred to a follow-up plan. Plan 42 ships with a hand-written `tension_E4u_1.cpp`. Rationale: emitting a correct Gaussian elimination as C++ text from Python adds significant scope and the hand-written version is a one-time effort per kernel.
 
-- [ ] **42.5a** Generate the Python reference coefficient array for `tension_E4u_1` at `sigma=3.0`:
+- [x] **42.5a** Generate the Python reference coefficient array for `tension_E4u_1` at `sigma=3.0`:
   - Run `cd scripts/stencil_gen && uv run python -c "from stencil_gen.phs import build_diff_matrix_rbf; import numpy as np; D = build_diff_matrix_rbf(n=20, p=2, q=3, epsilon=3.0, kernel='tension', nu=1, nextra=0); np.set_printoptions(precision=17, suppress=False); print(repr(D[:5, :7]))"` to obtain the 5×7 boundary coefficient block at h=1/(n-1). Capture the exact numeric output.
   - Add the captured array as a constant `REFERENCE_TENSION_E4U1_SIGMA3_COEFFS` in a new test helper file (e.g. `scripts/stencil_gen/tests/fixtures/tension_e4u1_reference.py`) for later reuse. Also hand-paste it as a `std::array<real, 35>` into the Catch2 test file in 42.5f.
   - File: `scripts/stencil_gen/tests/fixtures/__init__.py` (new), `scripts/stencil_gen/tests/fixtures/tension_e4u1_reference.py` (new)
-  - Test: `cd scripts/stencil_gen && uv run python -c "from tests.fixtures.tension_e4u1_reference import REFERENCE_TENSION_E4U1_SIGMA3_COEFFS; print(len(REFERENCE_TENSION_E4U1_SIGMA3_COEFFS))"`
+  - Test: `cd scripts/stencil_gen && uv run python -c "from tests.fixtures.tension_e4u1_reference import REFERENCE_TENSION_E4U1_SIGMA3_COEFFS; print(len(REFERENCE_TENSION_E4U1_SIGMA3_COEFFS))"` → **PASSED** (shape=(5,7), size=35; live build_diff_matrix_rbf regeneration matches fixture to ~7e-18 max abs error).
+  - Note: row 4 of the 5×7 block is the classical E4 centered stencil `[0, 0, 1/12, -2/3, 0, 2/3, -1/12]` (row index 4 falls in the interior region of build_diff_matrix_rbf, which only decorates rows 0..3 with RBF+polynomial augmentation for `q=3`). The plan's spec of r=5 boundary rows is preserved — row 4 is cached alongside the true boundary rows and the C++ will simply copy it into the output span.
 
 - [ ] **42.5b** Create `src/stencils/tension_E4u_1.cpp` struct skeleton (no solver body yet):
   - Struct layout mirroring `E4u_1` but with `real sigma` field replacing `std::array<real, 2> alpha`, and a new `std::array<real, 5 * 7> cached_coeffs` member.
