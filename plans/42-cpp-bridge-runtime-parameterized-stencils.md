@@ -103,12 +103,12 @@ cd scripts/stencil_gen && uv run pytest tests/test_brady2d_stability.py -x -q -k
   - File: `scripts/stencil_gen/stencil_gen/cpp_bridge.py`
   - Test: `cd scripts/stencil_gen && uv run pytest tests/test_cpp_bridge.py -x -q -k "TestRunCppBrady2D"` → **PASSED** (7 tests: success, nonzero exit, unstable Linf, missing CSV, empty CSV, timeout, tempdir isolation). Full `test_cpp_bridge.py` run: 22 passed.
 
-- [ ] **42.2c** Smoke test `TestCppBridgeSmoke`:
+- [x] **42.2c** Smoke test `TestCppBridgeSmoke`:
   - Skip if `SHOCCS_BINARY` does not exist (`pytest.skip("shoccs binary not built")`).
   - `test_classical_e4u_short_run` — `run_cpp_brady2d(scheme_type="E4u", params={"alpha": [-0.7733323791884821, 0.1623961700641681]}, N=21, t_final=1.0)` returns `stable=True` and `final_linf < 1.0`. **Correction (from 42.2a's note):** use `scheme_type="E4u"` (uniform variant), NOT `"E4"` — the classical alpha values in `known_values.json` have `alpha[1] ≈ 0.162` which violates `E4_1`'s interior denominator constraint (`alpha[1] >= 197/288 ≈ 0.684`) and would abort the simulation. Brady-Livescu §4.3 is uniform-domain.
   - Mark `@pytest.mark.slow`.
   - File: `scripts/stencil_gen/tests/test_cpp_bridge.py` (new)
-  - Test: `cd scripts/stencil_gen && uv run pytest tests/test_cpp_bridge.py -x -q -k "TestCppBridgeSmoke"`
+  - Test: `cd scripts/stencil_gen && uv run pytest tests/test_cpp_bridge.py -x -q -k "TestCppBridgeSmoke" --run-slow` → **PASSED** (1 test; real shoccs run at N=21, t_final=1.0 completes in ~0.15 s per invocation). Full `test_cpp_bridge.py` with `--run-slow`: 23 passed.
 
 ### 42.3 — L8 integration: C++ simulation as the final validation layer
 

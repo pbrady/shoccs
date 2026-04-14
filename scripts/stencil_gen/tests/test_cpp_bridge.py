@@ -263,6 +263,32 @@ class TestRunCppBrady2D:
         assert before == after, "run_cpp_brady2d must not touch REPO_ROOT/logs/"
 
 
+class TestCppBridgeSmoke:
+    """End-to-end smoke test against the real shoccs binary.
+
+    Marked @pytest.mark.slow — deselected unless --run-slow is passed.
+    Skipped entirely if the binary hasn't been built.
+    """
+
+    @pytest.mark.slow
+    def test_classical_e4u_short_run(self):
+        if not SHOCCS_BINARY.exists():
+            pytest.skip("shoccs binary not built")
+        result = run_cpp_brady2d(
+            scheme_type="E4u",
+            params={"alpha": [-0.7733323791884821, 0.1623961700641681]},
+            N=21,
+            t_final=1.0,
+        )
+        assert result.exit_code == 0, f"shoccs failed: {result.stderr}"
+        assert result.stable is True
+        assert 0.0 < result.final_linf < 1.0, (
+            f"final_linf out of expected band: {result.final_linf}"
+        )
+        assert result.linf_trace.size > 0
+        assert result.t_trace.size == result.linf_trace.size
+
+
 class TestBridgeResultDefaults:
     def test_default_construction(self):
         r = BridgeResult(final_linf=0.0)
