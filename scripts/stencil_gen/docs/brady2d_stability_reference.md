@@ -216,6 +216,33 @@ present, falling back to `layer3.max_stab_eig` otherwise. The C++ build
 is compiled once up front; Lua configs are the only thing that changes
 per sweep point.
 
+## Optimization
+
+The layered pipeline also backs a scipy-based optimizer that turns the
+brute-force sweep into actual optimization (single-objective +
+feasibility cliff, random-restart multi-start, SHGO and DE for global
+coverage, and a staged cheap-inner + expensive-validator cascade). See
+[`optimization_reference.md`](optimization_reference.md) for the full
+API and CLI surface.
+
+Entry points:
+
+- `stencil_gen/optimizer.py` — `make_objective`, `run_scipy_local`,
+  `multi_start_optimize`, `run_scipy_shgo`, `run_scipy_de`,
+  `run_staged_optimize`, `OptimizeResult`, `DEFAULT_BOUNDS`.
+- `python -m sweeps optimize ...` — CLI driver that persists winners
+  under `known_values.json["brady2d_optima"]` and can round-trip an L8
+  verdict when invoked with `--validate-with-cpp`.
+- `stencil_gen/benchmarks/alpha_basin_survey.py` — multi-seed diversity
+  study for the 2D classical-alpha landscape (Brady-Livescu Table 4
+  analog).
+
+The optimizer reuses the `StabilityReport` schema documented above:
+objectives are dotted paths into the report
+(`layer1.boundary_gv_err`, `layer3.max_stab_eig`,
+`layer6.transient_growth_bound`, ...), and the feasibility cliff fires
+when `failed_layer <= gate_layer`.
+
 ## CLI usage
 
 ```bash

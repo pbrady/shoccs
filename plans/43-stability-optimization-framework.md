@@ -436,7 +436,7 @@ cd scripts/stencil_gen && uv run pytest tests/test_phs.py -x -q -k "TestRegressi
   - File: `scripts/stencil_gen/docs/optimization_reference.md` (new)
   - Test: (no test)
 
-- [ ] **43.11b** Update `scripts/stencil_gen/docs/brady2d_stability_reference.md` with a new "Optimization" section cross-linking to the new doc.
+- [x] **43.11b** Added an "Optimization" section to `scripts/stencil_gen/docs/brady2d_stability_reference.md` between "Layer 8 — C++ simulation" and "CLI usage". Cross-links to `optimization_reference.md`; lists the three entry points (`stencil_gen/optimizer.py` symbols, `python -m sweeps optimize`, `stencil_gen/benchmarks/alpha_basin_survey.py`); reminds readers that objectives are dotted paths into `StabilityReport` and the feasibility cliff fires at `failed_layer <= gate_layer`. No code change.
   - File: `scripts/stencil_gen/docs/brady2d_stability_reference.md`
   - Test: (no test)
 
@@ -445,11 +445,13 @@ cd scripts/stencil_gen && uv run pytest tests/test_phs.py -x -q -k "TestRegressi
   - Add a one-line bullet under "When to Use" for optimization.
   - File: `.claude/skills/stencil-sweeps/SKILL.md`
   - Test: (no test)
+  - Blocker: edits under `.claude/skills/` require interactive permission approval; the ralph_wiggum allow-list in `settings.local.json` does not cover this path, so the automated loop cannot make the change. Requires human-driven edit pass (or a permission-rule update).
 
 - [ ] **43.11d** Update `.claude/skills/group-velocity-analysis/SKILL.md`:
   - Add a bullet pointing to the new optimization layer (the scoring pipeline now feeds a concrete optimizer).
   - File: `.claude/skills/group-velocity-analysis/SKILL.md`
   - Test: (no test)
+  - Blocker: same as 43.11c — requires human-driven edit or a permission-rule update for `.claude/skills/`.
 
 ---
 
