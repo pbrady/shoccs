@@ -126,6 +126,7 @@ class TestStabilityReport:
         assert report.layer5 is None
         assert report.layer6 is None
         assert report.layer7 is None
+        assert report.layer8 is None
         assert report.non_normality is None
         assert report.kreiss is None
         assert report.failed_layer is None
@@ -1028,3 +1029,182 @@ class TestLayer8:
         br = out["bridge_result"]
         assert br.exit_code == 0
         assert br.linf_trace.size > 0
+
+
+class TestStabilityScoreL8:
+    """brady2d_stability_score with max_layer=8 (plan 42.3b)."""
+
+    CLASSICAL_ALPHA = [-0.7733323791884821, 0.1623961700641681]
+
+    def _patch_l8(self, monkeypatch, result_dict: dict) -> list[dict]:
+        """Replace layer8_cpp_simulation with a stub. Returns call records."""
+        calls: list[dict] = []
+
+        def fake(scheme, kernel, params, **kwargs):
+            calls.append(
+                {"scheme": scheme, "kernel": kernel, "params": params, **kwargs},
+            )
+            return result_dict
+
+        monkeypatch.setattr(
+            "stencil_gen.brady2d_stability.layer8_cpp_simulation", fake,
+        )
+        return calls
+
+    def test_max_layer_8_runs_layer8_on_pass(self, monkeypatch):
+        """When L1–L7 pass, max_layer=8 invokes layer8_cpp_simulation."""
+        stub = {
+            "final_linf": 1.75e-3,
+            "stable": True,
+            "wall_time_s": 0.42,
+            "bridge_result": BridgeResult(
+                final_linf=1.75e-3, stable=True, wall_time_s=0.42, exit_code=0,
+            ),
+        }
+        calls = self._patch_l8(monkeypatch, stub)
+
+        report = brady2d_stability_score(
+            "E4", "classical", {"alpha": self.CLASSICAL_ALPHA},
+            max_layer=8,
+        )
+        assert report.overall_verdict == "pass"
+        assert report.failed_layer is None
+        assert report.layer8 is stub
+        assert len(calls) == 1
+        assert calls[0]["scheme"] == "E4"
+        assert calls[0]["kernel"] == "classical"
+        assert calls[0]["N"] == 31
+        assert calls[0]["t_final"] == 10.0
+
+    def test_max_layer_8_forwards_N_and_t_final(self, monkeypatch):
+        stub = {
+            "final_linf": 1e-3, "stable": True, "wall_time_s": 0.1,
+            "bridge_result": BridgeResult(final_linf=1e-3, stable=True),
+        }
+        calls = self._patch_l8(monkeypatch, stub)
+        brady2d_stability_score(
+            "E4", "classical", {"alpha": self.CLASSICAL_ALPHA},
+            max_layer=8, layer8_N=21, layer8_t_final=1.0,
+        )
+        assert calls[0]["N"] == 21
+        assert calls[0]["t_final"] == 1.0
+
+    def test_max_layer_8_records_failure_on_unstable(self, monkeypatch):
+        """A failing L8 sets failed_layer=8 and verdict=fail."""
+        stub = {
+            "final_linf": float("nan"),
+            "stable": False,
+            "wall_time_s": 0.1,
+            "bridge_result": BridgeResult(
+                final_linf=float("nan"), stable=False,
+                exit_code=1, stderr="boom",
+            ),
+        }
+        self._patch_l8(monkeypatch, stub)
+
+        report = brady2d_stability_score(
+            "E4", "classical", {"alpha": self.CLASSICAL_ALPHA},
+            max_layer=8,
+        )
+        assert report.overall_verdict == "fail"
+        assert report.failed_layer == 8
+        assert "unstable" in report.failed_reason.lower()
+        assert report.layer8 is stub
+
+    def test_max_layer_8_records_failure_on_linf_over_tol(self, monkeypatch):
+        """A stable run with final_linf > L8_FINAL_LINF_TOL still fails L8."""
+        stub = {
+            "final_linf": 5.0,
+            "stable": True,
+            "wall_time_s": 0.3,
+            "bridge_result": BridgeResult(
+                final_linf=5.0, stable=True, exit_code=0,
+            ),
+        }
+        self._patch_l8(monkeypatch, stub)
+
+        report = brady2d_stability_score(
+            "E4", "classical", {"alpha": self.CLASSICAL_ALPHA},
+            max_layer=8,
+        )
+        assert report.overall_verdict == "fail"
+        assert report.failed_layer == 8
+        assert "L8_FINAL_LINF_TOL" in report.failed_reason
+
+    def test_max_layer_8_skips_l8_when_earlier_layer_fails(self, monkeypatch):
+        """When an earlier layer fails and short_circuit=True, L8 is not run."""
+        kv = _load_known_values()
+        unstable = kv["E4_1"]["known_unstable"][0]
+        assert unstable["kernel"] == "gaussian"
+        eps = unstable["epsilon"]
+
+        calls = self._patch_l8(monkeypatch, {
+            "final_linf": 0.0, "stable": True, "wall_time_s": 0.0,
+            "bridge_result": BridgeResult(),
+        })
+
+        report = brady2d_stability_score(
+            "E4", "gaussian", {"epsilon": eps}, max_layer=8,
+        )
+        assert report.overall_verdict == "fail"
+        assert report.failed_layer == 3  # original failure layer
+        assert report.layer8 is None
+        assert len(calls) == 0  # L8 never invoked
+
+    def test_max_layer_7_does_not_run_layer8(self, monkeypatch):
+        """At max_layer=7, layer8 field stays None and the stub is untouched."""
+        calls = self._patch_l8(monkeypatch, {
+            "final_linf": 0.0, "stable": True, "wall_time_s": 0.0,
+            "bridge_result": BridgeResult(),
+        })
+        report = brady2d_stability_score(
+            "E4", "tension", {"sigma": 3.0}, max_layer=7,
+        )
+        assert report.layer8 is None
+        assert len(calls) == 0
+
+    def test_str_with_layer8_populated_pass(self):
+        """The __str__ output contains an L8 line when layer8 is populated."""
+        report = StabilityReport(
+            layer8={"final_linf": 1.75e-3, "stable": True, "wall_time_s": 0.42},
+            overall_verdict="pass",
+        )
+        s = str(report)
+        assert "L8" in s
+        assert "C++ simulation" in s
+        assert "PASS" in s
+
+    def test_str_with_layer8_populated_fail(self):
+        """The __str__ output shows FAIL when the layer8 block failed."""
+        report = StabilityReport(
+            layer8={"final_linf": 42.0, "stable": False, "wall_time_s": 1.0},
+            overall_verdict="fail",
+            failed_layer=8,
+            failed_reason="C++ simulation unstable",
+        )
+        s = str(report)
+        assert "L8" in s
+        assert "FAIL" in s
+
+
+class TestBrady2DL8ClassicalE4:
+    """End-to-end orchestrator test including L8 (plan 42.3c)."""
+
+    CLASSICAL_ALPHA = [-0.7733323791884821, 0.1623961700641681]
+
+    @pytest.mark.slow
+    def test_classical_e4_passes_all_layers(self):
+        if not SHOCCS_BINARY.exists():
+            pytest.skip("shoccs binary not built")
+        report = brady2d_stability_score(
+            "E4", "classical", {"alpha": self.CLASSICAL_ALPHA},
+            max_layer=8, layer8_N=21, layer8_t_final=1.0,
+        )
+        assert report.overall_verdict == "pass", (
+            f"expected pass for classical E4 end-to-end; failed at layer "
+            f"{report.failed_layer}: {report.failed_reason}"
+        )
+        assert report.failed_layer is None
+        assert report.layer8 is not None
+        assert report.layer8["stable"] is True
+        assert 0.0 < report.layer8["final_linf"] < L8_FINAL_LINF_TOL

@@ -90,6 +90,7 @@ class StabilityReport:
     layer5: dict | None = None
     layer6: dict | None = None  # reserved for standalone non-normality
     layer7: dict | None = None
+    layer8: dict | None = None
     non_normality: NonNormalityReport | None = None
     kreiss: KreissResult | None = None
     overall_verdict: Literal["pass", "fail", "unknown"] = "unknown"
@@ -189,6 +190,18 @@ class StabilityReport:
                 f"kreiss_K={nn.kreiss_constant:.2f}  "
                 f"tgb={nn.transient_growth_bound:.2f}  "
                 f"henrici={nn.henrici_departure:.4e}"
+            )
+
+        # Layer 8
+        if self.layer8 is not None:
+            d = self.layer8
+            stable = bool(d.get("stable", False))
+            linf = float(d.get("final_linf", float("nan")))
+            status = "PASS" if (stable and linf <= L8_FINAL_LINF_TOL) else "FAIL"
+            lines.append(
+                f"L8  C++ simulation  : {status:4s}  "
+                f"final_linf={linf:.4e}  "
+                f"wall={float(d.get('wall_time_s', 0.0)):.2f}s"
             )
 
         lines.append("-" * 60)
@@ -1010,6 +1023,8 @@ def brady2d_stability_score(
     *,
     max_layer: int = 7,
     short_circuit: bool = True,
+    layer8_N: int = 31,
+    layer8_t_final: float = 10.0,
 ) -> StabilityReport:
     """Run the layered stability analysis pipeline.
 
@@ -1027,9 +1042,17 @@ def brady2d_stability_score(
     params : dict
         Kernel-specific parameters.
     max_layer : int
-        Highest layer to run (1–7).
+        Highest layer to run (1–8). Layer 8 invokes the compiled shoccs
+        binary via :func:`layer8_cpp_simulation` and is gated behind
+        earlier layers passing when ``short_circuit`` is True.
     short_circuit : bool
         If True, stop at the first failing layer.
+    layer8_N : int
+        Grid resolution forwarded to :func:`layer8_cpp_simulation` when
+        ``max_layer >= 8``.
+    layer8_t_final : float
+        Physical end time forwarded to :func:`layer8_cpp_simulation`
+        when ``max_layer >= 8``.
 
     Returns
     -------
@@ -1149,6 +1172,30 @@ def brady2d_stability_score(
                 f"transient_growth_bound="
                 f"{report.non_normality.transient_growth_bound:.2f} "
                 f"> L7_TRANSIENT_GROWTH_TOL={L7_TRANSIENT_GROWTH_TOL}",
+            )
+        if _should_stop():
+            report.overall_verdict = "fail"
+            report.compute_time = time.perf_counter() - t0
+            return report
+
+    # --- Layer 8: end-to-end C++ simulation ---
+    if max_layer >= 8:
+        report.layer8 = layer8_cpp_simulation(
+            scheme, kernel, params,
+            N=layer8_N, t_final=layer8_t_final,
+        )
+        stable = bool(report.layer8["stable"])
+        linf = float(report.layer8["final_linf"])
+        if not stable:
+            _record_failure(
+                8,
+                f"C++ simulation unstable: final_linf={linf:.4e} "
+                f"(exit_code={report.layer8['bridge_result'].exit_code})",
+            )
+        elif linf > L8_FINAL_LINF_TOL:
+            _record_failure(
+                8,
+                f"final_linf={linf:.4e} > L8_FINAL_LINF_TOL={L8_FINAL_LINF_TOL}",
             )
 
     # Final verdict

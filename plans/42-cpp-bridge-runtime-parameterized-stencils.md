@@ -120,18 +120,20 @@ cd scripts/stencil_gen && uv run pytest tests/test_brady2d_stability.py -x -q -k
   - File: `scripts/stencil_gen/stencil_gen/brady2d_stability.py`
   - Test: `cd scripts/stencil_gen && uv run pytest tests/test_brady2d_stability.py -x -q -k "TestLayer8 and classical"` → **PASSED** (1 fast dispatch test + 1 slow end-to-end smoke skipped without `--run-slow`). Full `TestLayer8` class with `--run-slow`: 7 passed (dispatch, unstable propagation, unsupported-kernel/scheme NotImplementedError, threshold constant check, defaults, real shoccs E4u short run with `final_linf<1.0`).
 
-- [ ] **42.3b** Extend `brady2d_stability_score` to accept `max_layer=8` and the `StabilityReport` dataclass to carry a `layer8: dict | None` field:
+- [x] **42.3b** Extend `brady2d_stability_score` to accept `max_layer=8` and the `StabilityReport` dataclass to carry a `layer8: dict | None` field:
   - When `max_layer >= 8` and earlier layers pass, call `layer8_cpp_simulation`.
   - Layer-8 failure sets `failed_layer=8`, `failed_reason=...`.
   - File: `scripts/stencil_gen/stencil_gen/brady2d_stability.py`
-  - Test: `cd scripts/stencil_gen && uv run pytest tests/test_brady2d_stability.py -x -q -k "TestStabilityScoreL8"`
+  - Test: `cd scripts/stencil_gen && uv run pytest tests/test_brady2d_stability.py -x -q -k "TestStabilityScoreL8"` → **PASSED** (8 tests: dispatch to L8 on pass, forwarding of `layer8_N`/`layer8_t_final`, `failed_layer=8` on `stable=False`, `failed_layer=8` on `final_linf > L8_FINAL_LINF_TOL`, L8 skipped under short-circuit when earlier layer fails, L8 not run at `max_layer=7`, `__str__` L8 pass/fail lines). `TestStabilityReport` default-values test updated to assert `layer8 is None`; `TestStabilityScoreOrchestrator` still passes.
+  - Note: added `layer8_N: int = 31` and `layer8_t_final: float = 10.0` kwargs to `brady2d_stability_score` so callers can configure the C++ run without a separate wrapper (used by 42.3c's integration test at N=21, t_final=1.0).
 
-- [ ] **42.3c** Integration test `TestBrady2DL8ClassicalE4`:
+- [x] **42.3c** Integration test `TestBrady2DL8ClassicalE4`:
   - Runs `brady2d_stability_score(scheme="E4", kernel="classical", params={"alpha": [...]}, max_layer=8)` end-to-end.
   - Asserts `overall_verdict == "pass"`, `failed_layer is None`, `layer8.stable is True`.
   - Mark `@pytest.mark.slow` (runs a ~30 s C++ simulation at N=21, t_final=5).
   - File: `scripts/stencil_gen/tests/test_brady2d_stability.py`
-  - Test: `cd scripts/stencil_gen && uv run pytest tests/test_brady2d_stability.py -x -q -k "TestBrady2DL8ClassicalE4"`
+  - Test: `cd scripts/stencil_gen && uv run pytest tests/test_brady2d_stability.py -x -q -k "TestBrady2DL8ClassicalE4" --run-slow` → **PASSED** (1 slow test; real shoccs run at N=21, t_final=1.0 completes in ~20 s including layer 1–7 analytic work. Classical E4u short run lands `final_linf < L8_FINAL_LINF_TOL` cleanly).
+  - Note: used `layer8_N=21, layer8_t_final=1.0` (not the plan's draft t_final=5) to keep the slow test under 30 s; the orchestrator keywords added in 42.3b make this ergonomic.
 
 ### 42.4 — Codegen: add scalar runtime parameter support to `StencilGenSpec`
 
