@@ -252,12 +252,13 @@ Each family follows the same 4-item pattern as 42.5b–f (minus the split refere
   - Test: `cmake --build build --target shoccs-stencils` → **PASSED** (clean incremental build: `Building CXX object .../gaussian_E4u_1.cpp.o` → `Linking CXX static library libshoccs-stencils.a`, no compiler warnings). Fixture regenerates exactly (max_abs_diff = 0.0) against `build_diff_matrix_rbf(kernel='gaussian', epsilon=0.9)`.
   - Note: skeleton stub `solve_gaussian_coefficients` zero-fills rows 0..3 and hardcodes the row-4 classical E4 stencil; the real solve body comes in 42.6b. Struct is not yet dispatchable from Lua — registration is 42.6c. `<cstddef>` include was omitted from the skeleton (no `std::size_t` references yet); 42.6b adds it back when `gauss_solve<>` is introduced.
 
-- [ ] **42.6b** Implement `solve_gaussian_coefficients(real epsilon, std::array<real, 5*7>& out)` in `gaussian_E4u_1.cpp`:
+- [x] **42.6b** Implement `solve_gaussian_coefficients(real epsilon, std::array<real, 5*7>& out)` in `gaussian_E4u_1.cpp`:
   - Same 10×10 augmented system and 5×7 output layout as `solve_tension_coefficients` (see corrected dimension note above 42.5b — 6-point kernel + 4-column polynomial augmentation; rows 0..3 × cols 0..5 are solved, row 4 is the hardcoded classical E4 stencil, col 6 of rows 0..3 is zero).
   - Kernel function: `gaussian_kernel(r, eps) = exp(-(eps*r)*(eps*r))`. RHS uses `D^1 φ(i - x_j) = -2*eps^2*(i-x_j) * exp(-(eps*(i-x_j))^2)`.
   - Wire into the constructor; populate `nbs_floating` to read from `cached_coeffs`.
   - File: `src/stencils/gaussian_E4u_1.cpp`
-  - Test: `cmake --build build --target shoccs-stencils`
+  - Test: `cmake --build build --target shoccs-stencils` → **PASSED** (clean incremental build, no warnings). Standalone numerical check: reproducing the solver in a throwaway `main` at `epsilon=0.9` yields max abs diff of `1.8e-15` vs `REFERENCE_GAUSSIAN_E4U1_EPS09_COEFFS` across all 35 entries. `nbs_floating` was already wired to copy `cached_coeffs` in 42.6a's skeleton, so no further changes needed. Full fixture-vs-solver Catch2 assertion is 42.6d's job.
+  - Note: structure is a direct clone of `solve_tension_coefficients` with the kernel functions swapped. `gaussian_phi(r, eps) = exp(-(eps*r)^2)` and `gaussian_dphi(r, eps) = -2*eps^2*r*exp(-(eps*r)^2)` — no small-z Taylor path needed because the Gaussian is smooth and well-conditioned at r=0 (unlike tension, which has z<2 Taylor for accuracy). The `gauss_solve<N, NRHS>` template is duplicated across `tension_E4u_1.cpp` and `gaussian_E4u_1.cpp` (and will be duplicated again in 42.6f); factoring to a shared header is out of scope for plan 42 — its in-anonymous-namespace placement means there's no ODR risk.
 
 - [ ] **42.6c** Register `gaussian_E4u_1` in `stencil.hpp` / `stencil.cpp` dispatch (type string `"gaussian_E4u"`, reading `real epsilon = m["epsilon"].get_or(0.9)`, inserted immediately after the `tension_E4u` branch from 42.5e):
   - File: `src/stencils/stencil.hpp`, `src/stencils/stencil.cpp`, `src/stencils/gaussian_E4u_1.cpp`
