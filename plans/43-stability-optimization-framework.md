@@ -416,12 +416,15 @@ cd scripts/stencil_gen && uv run pytest tests/test_phs.py -x -q -k "TestRegressi
   - Files: `scripts/stencil_gen/sweeps/optimize.py`, `scripts/stencil_gen/tests/test_optimizer.py`.
   - Test: `cd scripts/stencil_gen && SYMPY_CACHE_SIZE=50000 uv run pytest tests/test_optimizer.py -x -q -k "TestOptimizeCppValidation"` — 3 passed, 1.6 s. Full non-slow suite: `uv run pytest tests/test_optimizer.py -x -q` — 94 passed, 5 skipped, 74 s.
 
-- [ ] **43.10b** Test `TestOptimizeCppValidation`:
-  - Mock or skip if `build/shoccs` not present.
-  - `test_validate_classical_e4_published_alpha` — optimizer winner passes L8 (final_linf < 1.0 at t=5, N=21).
-  - Mark `@pytest.mark.slow`.
+- [ ] **43.10b** Extend the existing `TestOptimizeCppValidation` class (added in 43.10a-r1, currently covers PASS / soft-failure / hard-FAIL via monkeypatched `brady2d_stability_score`) with a single live-pipeline regression that actually drives the shoccs binary through `_run_cpp_validation`:
+  - Add `test_validate_classical_e4_published_alpha` to the existing class — do **not** create a new class, and do not re-add the fast monkeypatched tests (those already landed in 43.10a-r1).
+  - The test must **not** monkeypatch `sweeps.optimize.brady2d_stability_score`; it must call `_run_cpp_validation` (or `main()` with `--validate-with-cpp`) so L8 runs the real shoccs bridge end-to-end.
+  - Skip with `pytest.skip("shoccs binary not built")` when `sweeps.optimize.SHOCCS_BINARY` does not exist (do not use the fake-binary helper from the fast tests).
+  - Inputs: `scheme="E4"`, `kernel="classical"`, `best_params` set to Brady-Livescu published α (`sweeps.brady2d_sweep.CLASSICAL_E4_ALPHA`, same source 43.9d uses — NOT the non-existent `stencil_gen.alpha_extraction` referenced in earlier plan text), `best_objective=-1.0` (arbitrary finite feasible placeholder), `N=21`, `t_final=5.0`.
+  - Assertions: returned dict is not `None`; `stable is True`; `final_linf <= L8_FINAL_LINF_TOL` (i.e. the PASS branch — import `L8_FINAL_LINF_TOL` from `stencil_gen.brady2d_stability`, do not hard-code `1.0`); captured stdout contains `"L8 PASS"` and does **not** contain `"soft-failure"` or `"L8 FAIL"`.
+  - Mark `@pytest.mark.slow` and put the class/file under the existing slow-suite gating so the non-slow default run still completes in under ~80 s.
   - File: `scripts/stencil_gen/tests/test_optimizer.py`
-  - Test: `cd scripts/stencil_gen && uv run pytest tests/test_optimizer.py -x -q -k "TestOptimizeCppValidation"`
+  - Test: `cd scripts/stencil_gen && SYMPY_CACHE_SIZE=50000 uv run pytest tests/test_optimizer.py -x -q -k "TestOptimizeCppValidation" --run-slow`
 
 ### 43.11 — Documentation and skill updates
 
