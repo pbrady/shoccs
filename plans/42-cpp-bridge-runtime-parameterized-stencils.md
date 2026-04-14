@@ -47,8 +47,9 @@ cd scripts/stencil_gen && uv run pytest tests/test_cpp_bridge.py -x -q
 # End-to-end closed-loop test (slow; runs one short simulation)
 cd scripts/stencil_gen && uv run pytest tests/test_brady2d_stability.py -x -q -k "TestLayer8 and not test_full_simulation"
 
-# Brady-Livescu Lua smoke
-./build/src/app/shoccs lua-configs/brady_livescu_4_3.lua  # produces logs/system.csv
+# Brady-Livescu Lua smoke (standalone variants — NOT the template, which is not directly runnable)
+./build/src/app/shoccs lua-configs/brady_livescu_4_3_n61.lua   # produces logs/system.csv
+./build/src/app/shoccs lua-configs/brady_livescu_4_3_long.lua  # N=31, t=100 for long-time stability
 ```
 
 ---
@@ -94,16 +95,17 @@ cd scripts/stencil_gen && uv run pytest tests/test_brady2d_stability.py -x -q -k
 
 - [ ] **42.2b** Implement `run_cpp_brady2d(scheme_type: str, params: dict, *, N: int = 31, t_final: float = 10.0, timeout: float = 300.0) -> BridgeResult`:
   - Writes the Lua config to a `tempfile.NamedTemporaryFile` with suffix `.lua`, invokes `subprocess.run([str(SHOCCS_BINARY), lua_path], cwd=REPO_ROOT, capture_output=True, text=True, timeout=timeout)`.
-  - On nonzero exit, populates `BridgeResult(stable=False, exit_code=..., stderr=...)` and returns.
+  - On nonzero exit, populates `BridgeResult(final_linf=float("nan"), stable=False, exit_code=..., stderr=...)` and returns. **Note (from 42.2a follow-up):** `BridgeResult.final_linf` currently has no default in `cpp_bridge.py` (line 26). Either add `= float("nan")` as a default to the dataclass field (preferred — simplifies the error path) or pass `float("nan")` explicitly on every error-path construction. Apply the same treatment to `run_cpp_brady2d` logic for timeouts and CSV-parse failures so the caller always gets a well-formed `BridgeResult`.
   - On success, parses `REPO_ROOT / "logs" / "system.csv"` — expects header row and then time/Linf columns per `scalar_wave.cpp:67`. **Correction (verified from 42.1a's output):** actual columns 0-indexed are `Timestamp=0, Time=1, Step=2, Linf=3, Min=4, ...`. Use `Time = row[1]`, `Linf = row[3]`.
   - `stable = (final_linf < 10.0 and not np.isnan(final_linf) and np.isfinite(final_linf))`.
   - `wall_time_s` from `time.perf_counter` around the subprocess call.
+  - **Concurrency note:** `logs/system.csv` is written under `REPO_ROOT/logs/` by the shoccs binary, so concurrent invocations of `run_cpp_brady2d` race on the same file. For plan 42's sweep use case, serialize or run per-subprocess `cwd` in a tempdir; document the chosen approach in the docstring.
   - File: `scripts/stencil_gen/stencil_gen/cpp_bridge.py`
   - Test: `cd scripts/stencil_gen && uv run pytest tests/test_cpp_bridge.py -x -q -k "TestRunCppBrady2D"`
 
 - [ ] **42.2c** Smoke test `TestCppBridgeSmoke`:
   - Skip if `SHOCCS_BINARY` does not exist (`pytest.skip("shoccs binary not built")`).
-  - `test_classical_e4_short_run` — `run_cpp_brady2d(scheme_type="E4", params={"alpha": [...]}, N=21, t_final=1.0)` returns `stable=True` and `final_linf < 1.0`.
+  - `test_classical_e4u_short_run` — `run_cpp_brady2d(scheme_type="E4u", params={"alpha": [-0.7733323791884821, 0.1623961700641681]}, N=21, t_final=1.0)` returns `stable=True` and `final_linf < 1.0`. **Correction (from 42.2a's note):** use `scheme_type="E4u"` (uniform variant), NOT `"E4"` — the classical alpha values in `known_values.json` have `alpha[1] ≈ 0.162` which violates `E4_1`'s interior denominator constraint (`alpha[1] >= 197/288 ≈ 0.684`) and would abort the simulation. Brady-Livescu §4.3 is uniform-domain.
   - Mark `@pytest.mark.slow`.
   - File: `scripts/stencil_gen/tests/test_cpp_bridge.py` (new)
   - Test: `cd scripts/stencil_gen && uv run pytest tests/test_cpp_bridge.py -x -q -k "TestCppBridgeSmoke"`
@@ -111,7 +113,7 @@ cd scripts/stencil_gen && uv run pytest tests/test_brady2d_stability.py -x -q -k
 ### 42.3 — L8 integration: C++ simulation as the final validation layer
 
 - [ ] **42.3a** Add `layer8_cpp_simulation(scheme: str, kernel: str, params: dict, *, N: int = 31, t_final: float = 10.0) -> dict` to `brady2d_stability.py`:
-  - Maps `(scheme, kernel)` → Lua `scheme.type` string. For plan 42 first cut, only `("E4", "classical")` → `"E4"` is supported; other kernels raise `NotImplementedError` (filled in by 42.5+).
+  - Maps `(scheme, kernel)` → Lua `scheme.type` string. For plan 42 first cut, only `("E4", "classical")` → `"E4u"` is supported (uniform variant — see 42.2a's note for the constraint); other kernels raise `NotImplementedError` (filled in by 42.5+).
   - Calls `run_cpp_brady2d` with the appropriate params.
   - Returns `{final_linf, stable, wall_time_s}`.
   - Layer-8 failure: `not stable` OR `final_linf > 1.0` at `t_final=10.0`.
@@ -381,7 +383,7 @@ Parallelizable after 42.4:
 
 ## Completion Criteria
 
-- `lua-configs/brady_livescu_4_3.lua` exists and `./build/src/app/shoccs lua-configs/brady_livescu_4_3.lua` runs without error and produces `logs/system.csv` with a finite L∞ column.
+- `lua-configs/brady_livescu_4_3.lua` exists as a template with `--{{N}}--`, `--{{T_FINAL}}--`, `--{{SCHEME_TABLE}}--` markers (the double-dash-dash-braces syntax means the raw file is a Lua comment soup and is NOT standalone-runnable — converted to a template by 42.2a). The thin variants `lua-configs/brady_livescu_4_3_n61.lua` and `lua-configs/brady_livescu_4_3_long.lua` remain standalone-runnable. Running `make_brady2d_lua(...)` and piping the result into shoccs (as `run_cpp_brady2d` does in 42.2b) produces `logs/system.csv` with a finite L∞ column.
 - `scripts/stencil_gen/stencil_gen/cpp_bridge.py` provides `run_cpp_brady2d` that successfully runs the classical E4 closure end-to-end (L8 integration test passes).
 - Three new C++ stencil families exist: `tension_E4u_1`, `gaussian_E4u_1`, `multiquadric_E4u_1` — each compiled as a separate `.cpp` file in `src/stencils/`, each registered in `stencil::from_lua`, each with a passing Catch2 unit test (`t-{family}_E4u_1`) that verifies coefficients match the Python reference within `1e-12`.
 - `StencilGenSpec` supports scalar runtime parameters via `scalar_params` field, with `generate_stencil_cpp` emitting clean `real name;` fields and `name`-subscripted expressions (not `name[0]`).
