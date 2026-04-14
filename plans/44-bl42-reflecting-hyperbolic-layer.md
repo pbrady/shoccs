@@ -299,6 +299,17 @@ cd scripts/stencil_gen && uv run python -m sweeps optimize \
   - File: `scripts/stencil_gen/tests/test_phs.py`
   - Test: `cd scripts/stencil_gen && uv run pytest tests/test_phs.py -x -q -k "TestRegressionBrady2DCalibration"` — 2 passed ✓
 
+### 44.6-followup — Restore layer4-6 calibration data lost by max_layer=3 re-run
+
+- [ ] **44.6d** Re-run calibration at `max_layer=6` with `--update-known-values` to restore layer4-6 data for E4_classical and E2_phs_k2:
+  - **Bug:** 44.6b ran `--run-calibration --max-layer 3 --update-known-values`, which overwrote the entire `brady2d_calibration` section of `known_values.json`. The two families that pass L3r (E4_classical, E2_phs_k2) previously had stored layer4, layer5, and layer6 data (from the original max_layer=6 calibration on 2026-04-12). That data was deleted because max_layer=3 doesn't run layers 4-6.
+  - Lost values for E4_classical: layer4 (max_local_gv_error=1.74e-4), layer5 (max_aligned_error=2.61e-3), layer6 (spectral_abscissa=-1.81e-4, transient_growth_bound=8.53).
+  - Lost values for E2_phs_k2: layer4 (max_local_gv_error=1.24e-2), layer5 (max_aligned_error=4.81e-2), layer6 (spectral_abscissa=-1.12e-4, transient_growth_bound=3.35).
+  - Fix: `cd scripts/stencil_gen && uv run python -m stencil_gen.brady2d_cli --run-calibration --max-layer 6 --update-known-values`
+  - Verify E4_classical and E2_phs_k2 have layer4, layer5, layer6 AND layer_bl42 data.
+  - File: `scripts/stencil_gen/sweeps/known_values.json`
+  - Test: `cd scripts/stencil_gen && uv run python -c "import json; d=json.load(open('sweeps/known_values.json'))['brady2d_calibration']; [print(k, sorted([k2 for k2 in v if k2.startswith('layer')])) for k,v in d.items() if v.get('overall_verdict')=='pass']"`
+
 ### 44.7 — Documentation
 
 - [ ] **44.7a** Create `scripts/stencil_gen/docs/bl42_reference.md`:
