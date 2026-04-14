@@ -16,6 +16,7 @@ from stencil_gen.optimizer import (
     multi_start_optimize,
     params_from_vector,
     run_scipy_local,
+    run_scipy_shgo,
     vector_from_params,
 )
 
@@ -478,6 +479,75 @@ class TestMultiStart:
         )
         best_f0 = min(float(f(x0)) for x0 in x0s)
         assert r.best_objective <= best_f0 + 1e-9
+
+
+class TestSHGO:
+    """Tests for :func:`run_scipy_shgo` (plan 43.5a)."""
+
+    @staticmethod
+    def _quadratic(x: np.ndarray) -> float:
+        # Single global minimum at [3.0] on [0, 10].
+        return float((x[0] - 3.0) ** 2)
+
+    @staticmethod
+    def _two_basin(x: np.ndarray) -> float:
+        # Two distinct local minima: one at x=2 (shallow) and one at x=7
+        # (deep global).  Constructed so SHGO will find both basins.
+        return float(
+            0.3 * (x[0] - 2.0) ** 2 * (x[0] < 4.5)
+            + ((x[0] - 7.0) ** 2 + 0.1) * (x[0] >= 4.5)
+        )
+
+    def test_shgo_converges_on_quadratic(self):
+        r = run_scipy_shgo(
+            self._quadratic,
+            bounds=[(0.0, 10.0)],
+            n=20,
+            iters=2,
+        )
+        assert r.method == "SHGO"
+        assert r.converged
+        assert np.isfinite(r.best_objective)
+        assert r.best_x[0] == pytest.approx(3.0, abs=1e-3)
+        assert r.best_objective == pytest.approx(0.0, abs=1e-6)
+        assert r.n_evals > 0
+        assert r.compute_time >= 0.0
+        # Extras carry the local-minima table.
+        assert "n_local_minima" in r.extras
+        assert r.extras["n_local_minima"] >= 1
+        assert len(r.extras["local_minima"]) == r.extras["n_local_minima"]
+
+    def test_shgo_records_local_minima(self):
+        # Multi-basin landscape — SHGO should discover at least one minimum,
+        # and the extras["local_minima"] table should be parseable.
+        r = run_scipy_shgo(
+            self._two_basin,
+            bounds=[(0.0, 10.0)],
+            n=30,
+            iters=2,
+        )
+        assert r.extras["n_local_minima"] >= 1
+        for x, fv in r.extras["local_minima"]:
+            assert isinstance(x, np.ndarray)
+            assert isinstance(fv, float)
+            assert 0.0 <= x[0] <= 10.0
+
+    def test_shgo_rejects_empty_bounds(self):
+        with pytest.raises(ValueError, match="bounds must be non-empty"):
+            run_scipy_shgo(self._quadratic, bounds=[])
+
+    def test_shgo_handles_fully_infeasible(self):
+        r = run_scipy_shgo(
+            lambda x: float("inf"),
+            bounds=[(0.0, 10.0)],
+            n=10,
+            iters=1,
+        )
+        assert not np.isfinite(r.best_objective)
+        assert not r.converged
+        assert r.method == "SHGO"
+        # Fallback best_x is the bound midpoint — a sensible placeholder.
+        assert r.best_x.shape == (1,)
 
 
 class TestRunScipyLocalCOBYQAUnavailable:

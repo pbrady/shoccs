@@ -34,7 +34,7 @@ from typing import Callable
 
 import numpy as np
 import scipy
-from scipy.optimize import minimize
+from scipy.optimize import minimize, shgo
 from scipy.stats import qmc
 
 from stencil_gen.brady2d_stability import brady2d_stability_score
@@ -520,9 +520,90 @@ def run_scipy_shgo(
 ) -> OptimizeResult:
     """Global optimization via ``scipy.optimize.shgo``.
 
-    Implemented in 43.5a.
+    Simplicial homology global optimization is a deterministic global
+    optimizer that constructs a simplicial complex over ``bounds`` and
+    polishes each local basin with a scipy local minimizer (Nelder-Mead here,
+    to match the rest of plan 43's derivative-free stack).
+
+    The returned :class:`OptimizeResult` carries the count of distinct local
+    minima SHGO discovered in ``extras["n_local_minima"]`` and the local
+    minima table (``[(x, f)]``) in ``extras["local_minima"]``.  If the whole
+    domain is infeasible (``+inf`` everywhere) scipy returns ``x=None``; in
+    that case we return a non-finite, non-converged record so callers can
+    detect the failure without special-casing an ``AttributeError``.
     """
-    raise NotImplementedError("run_scipy_shgo: implemented in 43.5")
+    if not bounds:
+        raise ValueError("run_scipy_shgo: bounds must be non-empty")
+
+    history: list[tuple[np.ndarray, float]] = []
+
+    def _recorder(x: np.ndarray) -> float:
+        fval = float(f(np.asarray(x, dtype=float)))
+        history.append((np.asarray(x, dtype=float).copy(), fval))
+        return fval
+
+    t0 = time.perf_counter()
+    result = shgo(
+        _recorder,
+        bounds=bounds,
+        n=n,
+        iters=iters,
+        minimizer_kwargs={"method": "Nelder-Mead"},
+    )
+    compute_time = time.perf_counter() - t0
+
+    xl = getattr(result, "xl", None)
+    funl = getattr(result, "funl", None)
+    if xl is None or len(xl) == 0:
+        local_minima: list[tuple[np.ndarray, float]] = []
+    else:
+        local_minima = [
+            (np.asarray(x, dtype=float).copy(), float(fv))
+            for x, fv in zip(xl, funl)
+        ]
+    n_local_minima = len(local_minima)
+
+    if result.x is None or not np.isfinite(float(result.fun) if result.fun is not None else float("inf")):
+        # Fully infeasible domain: preserve the attempted bound midpoint as
+        # best_x so callers see something sensible, but mark non-converged.
+        fallback_x = np.array([0.5 * (lo + hi) for (lo, hi) in bounds], dtype=float)
+        return OptimizeResult(
+            best_params={},
+            best_x=fallback_x,
+            best_objective=float("inf"),
+            best_report={},
+            method="SHGO",
+            converged=False,
+            n_evals=int(getattr(result, "nfev", len(history))),
+            compute_time=compute_time,
+            history=history,
+            extras={
+                "n_local_minima": n_local_minima,
+                "local_minima": local_minima,
+                "scipy_message": str(getattr(result, "message", "")),
+            },
+        )
+
+    best_x = np.asarray(result.x, dtype=float).ravel()
+    best_objective = float(result.fun)
+    converged = bool(result.success) and np.isfinite(best_objective)
+
+    return OptimizeResult(
+        best_params={},
+        best_x=best_x,
+        best_objective=best_objective,
+        best_report={},
+        method="SHGO",
+        converged=converged,
+        n_evals=int(getattr(result, "nfev", len(history))),
+        compute_time=compute_time,
+        history=history,
+        extras={
+            "n_local_minima": n_local_minima,
+            "local_minima": local_minima,
+            "scipy_message": str(getattr(result, "message", "")),
+        },
+    )
 
 
 def run_scipy_de(

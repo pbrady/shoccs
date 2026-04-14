@@ -188,12 +188,13 @@ cd scripts/stencil_gen && uv run pytest tests/test_phs.py -x -q -k "TestRegressi
 
 ### 43.5 — Global optimizers: SHGO and DE
 
-- [ ] **43.5a** Implement `run_scipy_shgo(f, bounds, *, n=100, iters=3) -> OptimizeResult`:
+- [x] **43.5a** Implemented `run_scipy_shgo(f, bounds, *, n=100, iters=3) -> OptimizeResult`:
   - Wraps `scipy.optimize.shgo(f, bounds, n=n, iters=iters, minimizer_kwargs={"method": "Nelder-Mead"})`.
-  - Post-processes `result.xl`/`result.funl` (all local minima found) — picks the global minimum plus records the count of distinct local minima.
-  - Adds to `OptimizeResult`: extra field `n_local_minima` (via `history` aux or a new field in an `extras: dict` field).
+  - Wraps the objective in a history recorder (same pattern as `run_scipy_local`) so every feasibility-cliff evaluation shows up in `history`, not just iteration endpoints.
+  - Post-processes `result.xl`/`result.funl` into `extras["local_minima"] = [(x, f)]` and `extras["n_local_minima"]`; scipy's simplicial-homology pass already yields one entry per distinct basin.
+  - Fully-infeasible domain handling: scipy returns `result.x=None` / `result.fun=None` in that case and the `xl`/`funl` attributes may be missing. We detect the condition, return `best_objective=+inf`, `converged=False`, and fall back to the bound midpoint for `best_x` so callers don't have to special-case `AttributeError`.
   - File: `scripts/stencil_gen/stencil_gen/optimizer.py`
-  - Test: `cd scripts/stencil_gen && uv run pytest tests/test_optimizer.py -x -q -k "TestSHGO"`
+  - Test: `cd scripts/stencil_gen && uv run pytest tests/test_optimizer.py -x -q -k "TestSHGO"` — 4 tests green.
 
 - [ ] **43.5b** Implement `run_scipy_de(f, bounds, *, popsize=15, maxiter=100, seed=0, strategy="best1bin") -> OptimizeResult`:
   - Wraps `scipy.optimize.differential_evolution(f, bounds, popsize=popsize, maxiter=maxiter, seed=seed, strategy=strategy, tol=1e-7, init="sobol", polish=True)`.
