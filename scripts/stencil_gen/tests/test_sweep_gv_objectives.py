@@ -17,6 +17,7 @@ from stencil_gen.phs import build_diff_matrix_rbf
 
 from sweeps import _common as sweeps_common
 from sweeps import (
+    brady2d_sweep,
     epsilon_sweep,
     footprint_sweep,
     tension_penalty_sweep,
@@ -660,3 +661,211 @@ def test_check_gks_advisory_helper_clean_matrix(capsys):
     assert "GKS advisory (smoke)" in captured.out
     assert "no outgoing boundary modes detected" in captured.out
     assert "WARNING:" not in captured.out
+
+
+# ---------------------------------------------------------------------------
+# 42.8a-fu1: unit tests for sweeps/brady2d_sweep.py
+# ---------------------------------------------------------------------------
+
+
+def _make_stub_report(
+    *,
+    verdict: str = "pass",
+    failed_layer: int | None = None,
+    l1_err: float = 1e-3,
+    l3_eig: float = -1e-4,
+    l6_tgb: float | None = None,
+) -> "brady2d_sweep.StabilityReport":
+    """Build a minimal StabilityReport for stubbing brady2d_stability_score."""
+    from stencil_gen.brady2d_stability import StabilityReport
+
+    report = StabilityReport.empty()
+    report.layer1 = {"boundary_gv_err": float(l1_err)}
+    report.layer3 = {"max_stab_eig": float(l3_eig)}
+    if l6_tgb is not None:
+        report.layer6 = {
+            "spectral_abscissa": -1e-4,
+            "transient_growth_bound": float(l6_tgb),
+            "non_normality_report": None,
+        }
+    report.overall_verdict = verdict
+    report.failed_layer = failed_layer
+    return report
+
+
+def _install_stub_score(monkeypatch, recorder: list[dict]):
+    """Replace brady2d_stability_score with a recorder that returns pass reports."""
+
+    def _stub(scheme, kernel, params, *, max_layer, **kwargs):
+        recorder.append({
+            "scheme": scheme,
+            "kernel": kernel,
+            "params": dict(params),
+            "max_layer": max_layer,
+            "kwargs": dict(kwargs),
+        })
+        return _make_stub_report(verdict="pass")
+
+    monkeypatch.setattr(brady2d_sweep, "brady2d_stability_score", _stub)
+
+
+def test_brady2d_sweep_main_classical_single_point(monkeypatch, capsys):
+    """42.8a-fu1 (1): --kernel classical runs once with CLASSICAL_E4_ALPHA and no --param-range."""
+    calls: list[dict] = []
+    _install_stub_score(monkeypatch, calls)
+
+    rc = brady2d_sweep.main([
+        "--scheme", "E4",
+        "--kernel", "classical",
+        "--max-layer", "1",
+    ])
+    assert rc == 0
+    assert len(calls) == 1, f"expected one sweep point for classical, got {len(calls)}"
+    call = calls[0]
+    assert call["kernel"] == "classical"
+    assert call["scheme"] == "E4"
+    assert call["params"] == {"alpha": list(brady2d_sweep.CLASSICAL_E4_ALPHA)}
+    assert call["max_layer"] == 1
+
+    out = capsys.readouterr().out
+    assert "brady2d sweep" in out
+    assert "pass" in out
+
+
+def test_brady2d_sweep_main_spline_requires_param_range(monkeypatch, capsys):
+    """42.8a-fu1 (2): spline kernels without --param-range exit 2 with a diagnostic."""
+    # Even though the stub would accept any call, _build_param_values should
+    # raise before brady2d_stability_score is ever invoked.
+    calls: list[dict] = []
+    _install_stub_score(monkeypatch, calls)
+
+    rc = brady2d_sweep.main([
+        "--scheme", "E4",
+        "--kernel", "tension",
+        "--max-layer", "1",
+    ])
+    assert rc == 2
+    assert calls == [], "spline kernel must not invoke the stability score without --param-range"
+
+    captured = capsys.readouterr()
+    assert "--param-range" in captured.err
+    assert "tension" in captured.err
+
+
+@pytest.mark.parametrize(
+    "kernel,expected_key",
+    [
+        ("tension", "sigma"),
+        ("gaussian", "epsilon"),
+        ("multiquadric", "epsilon"),
+    ],
+)
+def test_brady2d_sweep_main_param_range_parsing(
+    monkeypatch, capsys, kernel, expected_key,
+):
+    """42.8a-fu1 (3): --param-range 2 4 3 produces 3 points at {2.0, 3.0, 4.0} with the right key."""
+    calls: list[dict] = []
+    _install_stub_score(monkeypatch, calls)
+
+    rc = brady2d_sweep.main([
+        "--scheme", "E4",
+        "--kernel", kernel,
+        "--param-range", "2", "4", "3",
+        "--max-layer", "1",
+    ])
+    assert rc == 0
+    assert len(calls) == 3, f"expected 3 sweep points from --param-range 2 4 3, got {len(calls)}"
+
+    observed_values = [c["params"][expected_key] for c in calls]
+    np.testing.assert_allclose(observed_values, [2.0, 3.0, 4.0], rtol=0, atol=0)
+
+    # And the other scalar name must NOT appear in params.
+    off_key = "epsilon" if expected_key == "sigma" else "sigma"
+    for c in calls:
+        assert off_key not in c["params"]
+        assert c["kernel"] == kernel
+
+    capsys.readouterr()  # consume
+
+
+def test_brady2d_sweep_main_update_known_values(tmp_path, monkeypatch, capsys):
+    """42.8a-fu1 (4): --update-known-values writes brady2d_sweep.<scheme>.<kernel> and preserves siblings."""
+    kv_path = tmp_path / "known_values.json"
+    # Seed an unrelated top-level key that must not be clobbered.
+    kv_path.write_text(json.dumps({
+        "E4_1": {"tension": {"sigma": 3.0, "preexisting_extra_key": "survive"}},
+        "footprint": {"preexisting": "survive"},
+    }))
+    monkeypatch.setattr(sweeps_common, "KNOWN_VALUES_PATH", kv_path)
+
+    calls: list[dict] = []
+    _install_stub_score(monkeypatch, calls)
+
+    rc = brady2d_sweep.main([
+        "--scheme", "E4",
+        "--kernel", "tension",
+        "--param-range", "2", "4", "3",
+        "--max-layer", "1",
+        "--update-known-values",
+    ])
+    assert rc == 0
+    capsys.readouterr()
+
+    with open(kv_path) as f:
+        after = json.load(f)
+
+    # Unrelated siblings preserved.
+    assert after["E4_1"]["tension"]["preexisting_extra_key"] == "survive"
+    assert after["footprint"] == {"preexisting": "survive"}
+
+    # brady2d_sweep entry present under the right scheme/kernel.
+    assert "brady2d_sweep" in after
+    bucket = after["brady2d_sweep"]["E4"]["tension"]
+    assert bucket["scheme"] == "E4"
+    assert bucket["kernel"] == "tension"
+    assert bucket["param_name"] == "sigma"
+    assert bucket["max_layer"] == 1
+    assert len(bucket["points"]) == 3
+    params_values = [pt["params_dict"]["sigma"] for pt in bucket["points"]]
+    np.testing.assert_allclose(sorted(params_values), [2.0, 3.0, 4.0], rtol=0, atol=0)
+    # Each point's report dict carries the pass verdict from the stub.
+    for pt in bucket["points"]:
+        assert pt["report"]["overall_verdict"] == "pass"
+
+
+def test_rank_for_l8_prefers_layer6_then_layer3():
+    """42.8a-fu1 (5): rank_for_l8 ranks by L6 tgb ascending when L6 is present, else L3 max_stab_eig."""
+    # Helper: build a SweepPoint from a stub report.
+    def _pt(param: float, *, verdict: str, l3_eig: float, l6_tgb: float | None):
+        report = _make_stub_report(verdict=verdict, l3_eig=l3_eig, l6_tgb=l6_tgb)
+        return brady2d_sweep.SweepPoint(
+            param=param,
+            params_dict={"sigma": param},
+            report=report,
+        )
+
+    # Case A: both points have L6 → ranked by L6 tgb ascending.
+    a = _pt(2.0, verdict="pass", l3_eig=-1e-3, l6_tgb=50.0)
+    b = _pt(3.0, verdict="pass", l3_eig=-5e-4, l6_tgb=10.0)
+    c = _pt(4.0, verdict="fail", l3_eig=+1.0, l6_tgb=2.0)  # failing — excluded
+    ranked = brady2d_sweep.rank_for_l8([a, b, c], max_layer=6)
+    assert [p.param for p in ranked] == [3.0, 2.0]  # tgb=10 first, then tgb=50
+    assert all(p.verdict() == "pass" for p in ranked)
+
+    # Case B: L6 missing on some passing points → fall back to L3 max_stab_eig ascending.
+    d = _pt(5.0, verdict="pass", l3_eig=-1e-3, l6_tgb=None)
+    e = _pt(6.0, verdict="pass", l3_eig=-5e-3, l6_tgb=None)
+    ranked2 = brady2d_sweep.rank_for_l8([d, e], max_layer=3)
+    assert [p.param for p in ranked2] == [6.0, 5.0]  # -5e-3 (more negative) first
+
+    # Case C: no passing points → empty list.
+    ranked3 = brady2d_sweep.rank_for_l8([c], max_layer=6)
+    assert ranked3 == []
+
+    # Case D: caps at TOP_K_FOR_L8.
+    many = [
+        _pt(float(i), verdict="pass", l3_eig=-float(i), l6_tgb=float(i))
+        for i in range(1, 8)
+    ]
+    ranked4 = brady2d_sweep.rank_for_l8(many, max_layer=6)
+    assert len(ranked4) == brady2d_sweep.TOP_K_FOR_L8
