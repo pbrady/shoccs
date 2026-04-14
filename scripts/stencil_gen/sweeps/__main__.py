@@ -81,6 +81,48 @@ def main() -> int:
     sub_pareto.add_argument("--n", type=int, default=40, help="Grid size for the stability eigenvalue")
     sub_pareto.add_argument("--param-max", type=float, default=20.0, help="Upper end of the parameter grid")
 
+    sub_brady2d = subparsers.add_parser(
+        "brady2d",
+        help="Brady-Livescu 2D layered stability sweep",
+    )
+    sub_brady2d.add_argument("--scheme", choices=["E2", "E4"], required=True)
+    sub_brady2d.add_argument(
+        "--kernel",
+        choices=["classical", "tension", "gaussian", "multiquadric"],
+        required=True,
+    )
+    sub_brady2d.add_argument(
+        "--param-range",
+        nargs=3,
+        metavar=("LO", "HI", "N"),
+        default=None,
+        help=(
+            "Three values: low, high, and number of sweep points. "
+            "Sweeps sigma for tension, epsilon for gaussian/multiquadric. "
+            "Ignored when --kernel=classical."
+        ),
+    )
+    sub_brady2d.add_argument(
+        "--max-layer", type=int, default=3, choices=list(range(1, 9)),
+        help="Highest stability layer to run (1-8). Default: 3.",
+    )
+    sub_brady2d.add_argument(
+        "--validate-with-cpp", action="store_true",
+        help="Re-run top-3 passing points at max_layer=8 via the C++ bridge.",
+    )
+    sub_brady2d.add_argument(
+        "--layer8-N", type=int, default=21,
+        help="Grid resolution forwarded to layer 8 (default: 21).",
+    )
+    sub_brady2d.add_argument(
+        "--layer8-t-final", type=float, default=1.0,
+        help="Simulation end time forwarded to layer 8 (default: 1.0).",
+    )
+    sub_brady2d.add_argument(
+        "--update-known-values", action="store_true",
+        help='Persist results to known_values.json["brady2d_sweep"][scheme][kernel].',
+    )
+
     sub_all = subparsers.add_parser("all", help="Run all sweeps")
     sub_all.add_argument("--quick", action="store_true", help="Reduced resolution for quick verification")
 
@@ -175,6 +217,24 @@ def main() -> int:
             "--param-max", str(args.param_max),
         ])
 
+    if args.command == "brady2d":
+        from .brady2d_sweep import main as brady2d_main
+
+        forwarded: list[str] = [
+            "--scheme", args.scheme,
+            "--kernel", args.kernel,
+            "--max-layer", str(args.max_layer),
+            "--layer8-N", str(args.layer8_N),
+            "--layer8-t-final", str(args.layer8_t_final),
+        ]
+        if args.param_range is not None:
+            forwarded.extend(["--param-range", *[str(v) for v in args.param_range]])
+        if args.validate_with_cpp:
+            forwarded.append("--validate-with-cpp")
+        if args.update_known_values:
+            forwarded.append("--update-known-values")
+        return brady2d_main(forwarded)
+
     if args.command == "all":
         return _run_all(quick=args.quick)
 
@@ -185,6 +245,7 @@ def main() -> int:
 def _run_all(*, quick: bool) -> int:
     """Run all sweeps sequentially. --quick reduces resolution for fast verification."""
     from .alpha_extraction import main as alpha_main
+    from .brady2d_sweep import main as brady2d_main
     from .comparison import main as comp_main
     from .epsilon_sweep import main as eps_main
     from .footprint_sweep import main as fp_main
@@ -231,6 +292,8 @@ def _run_all(*, quick: bool) -> int:
         ("GV-stability Pareto E2 (tension)", pareto_main,
          ["--scheme", "E2", "--param", "tension", "--n-points", quick_pareto_n_points]),
         ("Alpha extraction E2", alpha_main, ["--scheme", "E2"]),
+        ("Brady-Livescu 2D sweep E4 (tension)", brady2d_main,
+         ["--scheme", "E4", "--kernel", "tension", "--param-range", "2", "4", "3", "--max-layer", "3"]),
     ]
 
     failures: list[str] = []
