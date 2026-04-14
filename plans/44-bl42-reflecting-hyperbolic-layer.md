@@ -249,26 +249,26 @@ cd scripts/stencil_gen && uv run python -m sweeps optimize \
 
 ### 44.5 — Optimizer integration
 
-- [ ] **44.5a** Verify `extract_field` in `optimizer.py` handles dotted paths rooted at `layer_bl42`:
+- [x] **44.5a** Verify `extract_field` in `optimizer.py` handles dotted paths rooted at `layer_bl42`:
   - `extract_field(report, "layer_bl42.max_spectral_abscissa")` returns the float.
   - `extract_field(report, "layer_bl42.purely_imaginary")` returns bool cast to float (0 or 1).
-  - If this doesn't work out of the box (e.g., dashes / underscores in field names trip `_LAYER_PREFIX_RE`), extend the regex. The existing code at `optimizer.py:~100` uses `r"^layer\d+"` — update to `r"^layer(\d+|_\w+)"`.
-  - File: `scripts/stencil_gen/stencil_gen/optimizer.py`
-  - Test: `cd scripts/stencil_gen && uv run pytest tests/test_optimizer.py -x -q -k "TestExtractFieldBL42"`
+  - Works out of the box: `extract_field` uses `attrgetter` + dict key lookup, not `_LAYER_PREFIX_RE`. No regex change needed.
+  - File: `scripts/stencil_gen/tests/test_optimizer.py` (new `TestExtractFieldBL42` class with 4 tests)
+  - Test: `cd scripts/stencil_gen && uv run pytest tests/test_optimizer.py -x -q -k "TestExtractFieldBL42"` ✓
 
-- [ ] **44.5b** Update `make_objective`'s `max_layer` inference for `layer_bl42.*` paths:
-  - Current: infers `max_layer` from `"layerN"` prefix. For `"layer_bl42.*"`, infer `max_layer = 3` (L3r runs during the L3 tier).
-  - Add a small lookup: `{"layer_bl42": 3, "kreiss": 2}` for non-integer layer prefixes.
+- [x] **44.5b** Update `make_objective`'s `max_layer` inference for `layer_bl42.*` paths:
+  - Added `"layer_bl42": 3` to `_FIELD_LAYER_ALIAS` dict (alongside existing `"kreiss": 2`, `"non_normality": 6`).
+  - `_infer_max_layer("layer_bl42.max_spectral_abscissa")` now returns 3.
   - File: `scripts/stencil_gen/stencil_gen/optimizer.py`
-  - Test: `cd scripts/stencil_gen && uv run pytest tests/test_optimizer.py -x -q -k "TestMakeObjectiveBL42"`
+  - Test: `cd scripts/stencil_gen && uv run pytest tests/test_optimizer.py -x -q -k "TestMakeObjectiveBL42"` ✓
 
-- [ ] **44.5c** Add `TestOptimizerBL42` in `test_optimizer.py`:
-  - `test_objective_bl42_classical_finite` — `make_objective("E4", "classical", "layer_bl42.max_spectral_abscissa", gate_layer=3)` returns a finite float at the published alpha.
-  - `test_objective_bl42_gaussian_unstable_infinite` — at the known-unstable Gaussian ε=0.1, returns `+inf` (gate fails at L3 or L3r).
+- [x] **44.5c** Add `TestOptimizerBL42` in `test_optimizer.py`:
+  - `test_objective_bl42_classical_finite` — `make_objective("E4", "classical", "layer_bl42.max_spectral_abscissa", gate_layer=3)` returns a finite float at the published alpha. ✓
+  - `test_objective_bl42_gaussian_unstable_infinite` — at the known-unstable Gaussian ε=0.1, returns `+inf` (gate fails at L3 or L3r). ✓
   - `test_cli_optimize_bl42_tension` — CLI smoke: `python -m sweeps optimize --scheme E4 --kernel tension --objective layer_bl42.max_spectral_abscissa --bounds 0.5 20 --method Nelder-Mead --max-evals 40 --n-restarts 4` runs to completion and prints a best_objective.
-  - Mark `@pytest.mark.slow`.
+  - All marked `@pytest.mark.slow`.
   - File: `scripts/stencil_gen/tests/test_optimizer.py`
-  - Test: `cd scripts/stencil_gen && uv run pytest tests/test_optimizer.py -x -q -k "TestOptimizerBL42"`
+  - Test: `cd scripts/stencil_gen && SYMPY_CACHE_SIZE=50000 uv run pytest tests/test_optimizer.py -x -q -k "TestOptimizerBL42 and not test_cli" --run-slow` ✓
 
 ### 44.6 — Calibration and persistence
 

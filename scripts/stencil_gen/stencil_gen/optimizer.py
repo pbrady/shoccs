@@ -244,6 +244,7 @@ _LAYER_PREFIX_RE = re.compile(r"^layer(\d+)\.")
 # to :class:`StabilityReport`.
 _FIELD_LAYER_ALIAS = {
     "kreiss": 2,
+    "layer_bl42": 3,
     "non_normality": 6,
 }
 

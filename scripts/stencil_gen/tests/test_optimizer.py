@@ -263,6 +263,47 @@ class TestExtractField:
         assert extract_field(r, "kreiss.no_such_attr") == float("inf")
 
 
+class TestExtractFieldBL42:
+    def test_extract_max_spectral_abscissa(self):
+        r = StabilityReport(
+            layer_bl42={
+                "spectral_abscissa_by_n": {21: 1e-12, 41: 2e-12},
+                "max_spectral_abscissa": 2e-12,
+                "purely_imaginary": True,
+            },
+            overall_verdict="pass",
+        )
+        assert extract_field(r, "layer_bl42.max_spectral_abscissa") == pytest.approx(
+            2e-12
+        )
+
+    def test_extract_purely_imaginary(self):
+        r = StabilityReport(
+            layer_bl42={
+                "spectral_abscissa_by_n": {21: 1e-12},
+                "max_spectral_abscissa": 1e-12,
+                "purely_imaginary": True,
+            },
+            overall_verdict="pass",
+        )
+        assert extract_field(r, "layer_bl42.purely_imaginary") == 1.0
+
+    def test_extract_purely_imaginary_false(self):
+        r = StabilityReport(
+            layer_bl42={
+                "spectral_abscissa_by_n": {21: 0.5},
+                "max_spectral_abscissa": 0.5,
+                "purely_imaginary": False,
+            },
+            overall_verdict="fail",
+        )
+        assert extract_field(r, "layer_bl42.purely_imaginary") == 0.0
+
+    def test_extract_layer_bl42_not_populated_returns_inf(self):
+        r = StabilityReport.empty()
+        assert extract_field(r, "layer_bl42.max_spectral_abscissa") == float("inf")
+
+
 class TestMakeObjective:
     def test_objective_returns_finite_on_feasible(self):
         # E4 tension σ=3.0 passes L1-L2 (GKS-stable); gate at L2 to avoid
@@ -325,6 +366,29 @@ class TestMakeObjective:
     def test_objective_rejects_uninferable_field_without_max_layer(self):
         with pytest.raises(ValueError, match="cannot infer max_layer"):
             make_objective("E4", "tension", "no_prefix_here")
+
+
+class TestMakeObjectiveBL42:
+    def test_infer_max_layer_from_layer_bl42(self):
+        from stencil_gen.optimizer import _infer_max_layer
+
+        assert _infer_max_layer("layer_bl42.max_spectral_abscissa") == 3
+        assert _infer_max_layer("layer_bl42.purely_imaginary") == 3
+
+    def test_objective_bl42_classical_finite(self):
+        f = make_objective(
+            "E4", "classical", "layer_bl42.max_spectral_abscissa",
+            gate_layer=3,
+        )
+        val = f(np.array([-0.7733323791884821, 0.1623961700641681]))
+        assert np.isfinite(val)
+
+    def test_objective_bl42_infers_max_layer_3(self):
+        f = make_objective(
+            "E4", "classical", "layer_bl42.max_spectral_abscissa",
+        )
+        val = f(np.array([-0.7733323791884821, 0.1623961700641681]))
+        assert np.isfinite(val)
 
 
 class TestRunScipyLocal:
@@ -2004,3 +2068,58 @@ class TestOptimizeCppValidation:
         assert "L8 PASS" in out
         assert "soft-failure" not in out
         assert "L8 FAIL" not in out
+
+
+class TestOptimizerBL42:
+    @pytest.mark.slow
+    def test_objective_bl42_classical_finite(self):
+        f = make_objective(
+            "E4", "classical", "layer_bl42.max_spectral_abscissa",
+            gate_layer=3,
+        )
+        val = f(np.array([-0.7733323791884821, 0.1623961700641681]))
+        assert np.isfinite(val)
+        assert val >= 0.0
+
+    @pytest.mark.slow
+    def test_objective_bl42_gaussian_unstable_infinite(self):
+        f = make_objective(
+            "E4", "gaussian", "layer_bl42.max_spectral_abscissa",
+            gate_layer=3, max_layer=3,
+        )
+        assert f(np.array([0.1])) == float("inf")
+
+    @pytest.mark.slow
+    def test_cli_optimize_bl42_tension(self):
+        import os
+        import subprocess
+        import sys
+        from pathlib import Path
+
+        stencil_gen_dir = Path(__file__).resolve().parent.parent
+        env = os.environ.copy()
+        env["SYMPY_CACHE_SIZE"] = env.get("SYMPY_CACHE_SIZE", "50000")
+        proc = subprocess.run(
+            [
+                sys.executable,
+                "-m",
+                "sweeps.optimize",
+                "--scheme", "E4",
+                "--kernel", "tension",
+                "--objective", "layer_bl42.max_spectral_abscissa",
+                "--bounds", "0.5", "20",
+                "--method", "Nelder-Mead",
+                "--n-restarts", "4",
+                "--max-evals", "40",
+                "--seed", "0",
+            ],
+            cwd=str(stencil_gen_dir),
+            env=env,
+            capture_output=True,
+            text=True,
+            timeout=900,
+        )
+        assert proc.returncode == 0, (
+            f"stdout:\n{proc.stdout}\n\nstderr:\n{proc.stderr}"
+        )
+        assert "best_objective" in proc.stdout
