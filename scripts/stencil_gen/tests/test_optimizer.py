@@ -300,11 +300,13 @@ class TestMakeObjective:
     def test_objective_raises_on_bad_field(self):
         # A nonsense dotted path at a feasible point returns +inf (extract_field
         # treats missing segments as inf) rather than raising.
+        # Use classical E4 with known-good alpha that passes all layers
+        # including L3r, so the gate passes and extract_field is exercised.
         f = make_objective(
-            "E4", "tension", "layer99.foo",
+            "E4", "classical", "layer99.foo",
             gate_layer=3, max_layer=3,
         )
-        assert f(np.array([3.0])) == float("inf")
+        assert f(np.array([-0.7733323791884821, 0.1623961700641681])) == float("inf")
 
     def test_objective_infers_max_layer_from_field(self):
         # layer6.* implies max_layer=6; use classical E4 with known-good alpha
