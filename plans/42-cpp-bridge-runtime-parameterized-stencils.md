@@ -197,7 +197,7 @@ The strategy: the constructor takes `real sigma` from Lua, builds the small (r=5
   - File: `src/stencils/CMakeLists.txt`
   - Test: `cmake --build build --target shoccs-stencils` → **PASSED** (single-file incremental build: `Building CXX object .../tension_E4u_1.cpp.o` → `Linking CXX static library libshoccs-stencils.a`, no warnings from the new file).
 
-- [ ] **42.5d** Implement `solve_tension_coefficients(real sigma, std::array<real, 5*7>& out)` as a static/anonymous-namespace helper in `tension_E4u_1.cpp`:
+- [x] **42.5d** Implement `solve_tension_coefficients(real sigma, std::array<real, 5*7>& out)` as a static/anonymous-namespace helper in `tension_E4u_1.cpp`:
   - Builds the **6×6** tension-spline kernel matrix entries `K[i,j] = sigma*|x_i - x_j| - 1 + exp(-sigma*|x_i - x_j|)` where `x_i = i` for i in 0..5 (reference grid, h=1, t=6 collocation points).
   - Augments with the polynomial block: **4 polynomial rows and 4 polynomial columns** for q=3 (monomials `1, x, x^2, x^3`), matching `phs._rbf_weights_numeric`'s construction — augmented system is **(t + q+1) × (t + q+1) = 10 × 10**.
   - For each boundary row `i` in 0..3 (r=4 boundary rows), build the RHS `[D^1 φ(i - x_j) for j in 0..5 ; D^1 x^k at x=i for k in 0..3]` and solve the 10×10 system via plain Gaussian elimination with partial pivoting (fits on the stack). Extract the first 6 components of the solution as the boundary-row weights `w_ij` for j in 0..5.
@@ -208,7 +208,8 @@ The strategy: the constructor takes `real sigma` from Lua, builds the small (r=5
   - Wire the call into the `tension_E4u_1` constructor (replacing the 42.5b stub comment). Row 4 and col 6 of rows 0..3 can be written unconditionally before the solver runs.
   - Update `nbs_floating` to copy `cached_coeffs` into the output span, apply `1/h` scaling, then the `right` flip logic matching `E4u_1.cpp:~103`.
   - File: `src/stencils/tension_E4u_1.cpp`
-  - Test: `cmake --build build --target shoccs-stencils` (still just compiles; functional test in 42.5f)
+  - Test: `cmake --build build --target shoccs-stencils` → **PASSED** (clean incremental build, no warnings). Standalone numerical check: reproducing the solver in a throwaway `main` at sigma=3.0 produces the 5×7 block matching `REFERENCE_TENSION_E4U1_SIGMA3_COEFFS` to ≥14 significant digits row-for-row (byte-for-byte equality on rows 2..4). Full fixture-vs-solver assertion is the job of 42.5f's Catch2 test.
+  - Note: `nbs_floating` copies the cached 35-entry block, divides by h, then applies the `right` flip (negate + reverse) matching `E4u_1.cpp:97`. `nbs_dirichlet` drops the first row (cols 0..6) of the cached block and applies the same h scaling + right flip, giving the 4×7=28-entry Dirichlet closure consistent with `E4u_1.cpp:105`'s "drop first row" pattern. Shared Taylor-vs-direct kernel evaluation mirrors `phs._tension_kernel_eval`/`_deriv` (z<2 threshold) so the C++ matches Python across the full sigma range the bridge will use.
 
 - [ ] **42.5e** Register `tension_E4u_1` in `stencil.hpp` and `stencil.cpp`:
   - Add `stencil make_tension_E4u_1(real sigma)` factory declaration in `stencil.hpp`.
