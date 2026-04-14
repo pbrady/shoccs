@@ -224,6 +224,14 @@ cd scripts/stencil_gen && uv run python -m sweeps optimize \
   - File: `scripts/stencil_gen/sweeps/known_values.json`
   - Test: `cd scripts/stencil_gen && uv run pytest tests/test_phs.py -x -q -k "test_all_families_verdict_matches"` ✓
 
+### 44.4-followup4 — Fix vacuous bad-field-path test in optimizer
+
+- [ ] **44.4n** Fix `test_objective_raises_on_bad_field` in `test_optimizer.py` (line ~300):
+  - **Bug:** Uses tension E4 σ=3.0 with `gate_layer=3`. Since tension now fails L3r (`failed_layer=3 <= gate_layer=3`), the objective returns `+inf` from the gate check before `extract_field` is called. The test passes vacuously — it no longer tests the "bad dotted path returns inf" behavior it claims to.
+  - Switch to classical E4 with known-good alpha (passes all layers including L3r) so the gate passes and `extract_field("layer99.foo")` is actually exercised.
+  - File: `scripts/stencil_gen/tests/test_optimizer.py`
+  - Test: `cd scripts/stencil_gen && uv run pytest tests/test_optimizer.py -x -q -k "test_objective_raises_on_bad_field"`
+
 ### 44.5 — Optimizer integration
 
 - [ ] **44.5a** Verify `extract_field` in `optimizer.py` handles dotted paths rooted at `layer_bl42`:
