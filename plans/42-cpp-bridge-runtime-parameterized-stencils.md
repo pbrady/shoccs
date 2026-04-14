@@ -219,14 +219,15 @@ The strategy: the constructor takes `real sigma` from Lua, builds the small (r=5
   - Test: `cmake --build build --target shoccs` → **PASSED** (full chain compiles and links; `libshoccs-stencils.a` rebuilds and `src/app/shoccs` relinks with no warnings). End-to-end smoke: a minimal 2D scalar-wave Lua with `scheme = { order=1, type="tension_E4u", sigma=3.0 }` runs to `t=1.0` at N=21, producing log line `builder: tension_E4u first scheme chosen (sigma = 3)` and completing cleanly (wall=0.79s).
   - Note: branch order in `stencil.cpp:57-64` — appended to the `order == 1` `else if` chain after `E8u` so the new type is only matched when `order == 1` (matching plan 42's uniform-1st-derivative scope). Factory at `tension_E4u_1.cpp:278` is a one-liner mirroring `make_E4u_1`.
 
-- [ ] **42.5f** Add unit test `t-tension_E4u_1`:
+- [x] **42.5f** Add unit test `t-tension_E4u_1`:
   - Add `add_unit_test(tension_E4u_1 "stencils" shoccs-stencils)` to `src/stencils/CMakeLists.txt`.
   - Create `src/stencils/tension_E4u_1.t.cpp` with three Catch2 tests:
     - `TEST_CASE("tension_E4u_1 construction at sigma=3")` — instantiate at `sigma=3.0`, verify no exception.
     - `TEST_CASE("tension_E4u_1 coefficients match Python reference")` — hard-code the 35-entry reference array from 42.5a's fixture as a `std::array<real, 35>`, assert each cached_coeffs entry matches within `1e-12`.
     - `TEST_CASE("tension_E4u_1 nbs_floating fills output span")` — call `nbs_floating(h=0.1, psi=1.0, c, right=false)` with a 35-element output buffer, verify the returned span has size 35 and all entries are finite.
   - File: `src/stencils/CMakeLists.txt`, `src/stencils/tension_E4u_1.t.cpp` (new)
-  - Test: `cmake --build build --target t-tension_E4u_1 && ctest --test-dir build -R t-tension_E4u_1`
+  - Test: `cmake --build build --target t-tension_E4u_1 && ctest --test-dir build -R t-tension_E4u_1` → **PASSED** (3 Catch2 cases; test executable reports `All tests passed (assertions in 3 test cases)` and ctest reports `100% tests passed, 0 tests failed out of 1` in 0.01 s).
+  - Note: the test drives the stencil through `from_lua` (mirroring `E4u_1.t.cpp`'s pattern) rather than instantiating the `tension_E4u_1` struct directly, because the struct lives in the .cpp's anonymous-namespace scope and is not exposed in the header. With `h=1.0` and `right=false`, `nbs_floating` copies `cached_coeffs` verbatim into the output span, so the reference-match test at `h=1.0` equivalently asserts `cached_coeffs == REFERENCE_SIGMA3_COEFFS` within `1e-12`. The third test additionally spot-checks the `1/h` scaling at `h=0.1` on the classical-interior row (row 4) so regressions in the `nbs_floating` transform get caught without rederiving the whole block at a second h.
 
 ### 42.6 — Second and third spline families: `gaussian_E4u_1`, `multiquadric_E4u_1`
 
