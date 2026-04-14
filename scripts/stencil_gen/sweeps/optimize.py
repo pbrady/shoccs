@@ -19,6 +19,8 @@ from typing import Any
 
 import numpy as np
 
+from stencil_gen.brady2d_stability import brady2d_stability_score
+from stencil_gen.cpp_bridge import SHOCCS_BINARY
 from stencil_gen.optimizer import (
     DEFAULT_BOUNDS,
     OptimizeResult,
@@ -36,6 +38,10 @@ from ._common import load_known_values, save_known_values
 _METHOD_CHOICES = ("Nelder-Mead", "COBYQA", "SHGO", "DE", "staged")
 _KERNEL_CHOICES = ("tension", "gaussian", "multiquadric", "classical")
 _KERNEL_DIM = {"tension": 1, "gaussian": 1, "multiquadric": 1, "classical": 2}
+_CPP_SUPPORTED_KERNELS = ("classical", "tension", "gaussian", "multiquadric")
+_CPP_SUPPORTED_SCHEMES = ("E4",)
+_CPP_VALIDATION_N_DEFAULT = 31
+_CPP_VALIDATION_T_FINAL_DEFAULT = 5.0
 
 
 def _parse_bounds(raw: list[float] | None) -> list[tuple[float, float]] | None:
@@ -119,6 +125,98 @@ def _resolve_persisted_layers(
     return int(args.gate_layer), max_layer, None
 
 
+def _run_cpp_validation(
+    scheme: str,
+    kernel: str,
+    best_params: dict,
+    best_objective: float,
+    *,
+    N: int = _CPP_VALIDATION_N_DEFAULT,
+    t_final: float = _CPP_VALIDATION_T_FINAL_DEFAULT,
+) -> dict[str, Any] | None:
+    """Re-run the optimizer winner at ``max_layer=8`` via the shoccs bridge.
+
+    Returns a JSON-friendly ``{stable, final_linf, wall_time_s}`` dict, or
+    ``None`` when the L8 run is skipped (unsupported scheme/kernel, no
+    feasible winner, missing shoccs binary).  Plan 43.10a: a failing L8
+    prints a warning and still returns the dict, but the caller does **not**
+    alter ``best_objective`` — the analytical verdict stands; L8 disagreement
+    is purely diagnostic.
+    """
+    if not best_params:
+        print(
+            "\n[optimize] --validate-with-cpp: skipping — optimizer did not "
+            "find a feasible winner (best_params is empty)."
+        )
+        return None
+    if not np.isfinite(best_objective):
+        print(
+            "\n[optimize] --validate-with-cpp: skipping — best_objective is "
+            "non-finite; the analytical stack did not produce a feasible winner."
+        )
+        return None
+    if scheme not in _CPP_SUPPORTED_SCHEMES or kernel not in _CPP_SUPPORTED_KERNELS:
+        print(
+            f"\n[optimize] --validate-with-cpp: skipping — (scheme={scheme}, "
+            f"kernel={kernel}) is not wired through the L8 bridge."
+        )
+        return None
+    if not SHOCCS_BINARY.exists():
+        print(
+            f"\n[optimize] --validate-with-cpp: skipping — shoccs binary not "
+            f"found at {SHOCCS_BINARY}. Build it with `cmake --build build`."
+        )
+        return None
+
+    print(
+        f"\n[optimize] --validate-with-cpp: running L8 ({scheme}/{kernel}) "
+        f"at N={N}, t_final={t_final}..."
+    )
+    try:
+        report = brady2d_stability_score(
+            scheme,
+            kernel,
+            best_params,
+            max_layer=8,
+            short_circuit=False,
+            layer8_N=N,
+            layer8_t_final=t_final,
+        )
+    except Exception as exc:
+        print(
+            f"[optimize] L8 raised ({type(exc).__name__}): {exc}; "
+            "treating as failure."
+        )
+        return {"stable": False, "final_linf": float("nan"), "wall_time_s": 0.0}
+
+    if report.layer8 is None:
+        print(
+            "[optimize] L8 did not populate a report (unexpected with "
+            "short_circuit=False); skipping."
+        )
+        return None
+
+    l8 = report.layer8
+    cpp_validation = {
+        "stable": bool(l8["stable"]),
+        "final_linf": float(l8["final_linf"]),
+        "wall_time_s": float(l8["wall_time_s"]),
+    }
+    if cpp_validation["stable"]:
+        print(
+            f"[optimize] L8 PASS: final_linf={cpp_validation['final_linf']:.4e} "
+            f"(wall={cpp_validation['wall_time_s']:.1f}s)"
+        )
+    else:
+        print(
+            f"[optimize] WARNING: L8 FAIL "
+            f"(stable=False, final_linf={cpp_validation['final_linf']:.4e}, "
+            f"wall={cpp_validation['wall_time_s']:.1f}s). "
+            "Analytical best_objective unchanged — L8 disagreement is diagnostic."
+        )
+    return cpp_validation
+
+
 def _result_to_persist_dict(
     result: OptimizeResult,
     *,
@@ -129,6 +227,7 @@ def _result_to_persist_dict(
     gate_layer: int,
     max_layer: int,
     validator_max_layer: int | None = None,
+    cpp_validation: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Serialise ``result`` to a JSON-friendly dict, dropping ``history``.
 
@@ -168,6 +267,12 @@ def _result_to_persist_dict(
         d["cpp_cutcell_violates_197_288"] = bool(
             extras["cpp_cutcell_violates_197_288"]
         )
+    if cpp_validation is not None:
+        d["cpp_validation"] = {
+            "stable": bool(cpp_validation["stable"]),
+            "final_linf": float(cpp_validation["final_linf"]),
+            "wall_time_s": float(cpp_validation["wall_time_s"]),
+        }
     return d
 
 
@@ -394,6 +499,15 @@ def main(argv: list[str] | None = None) -> int:
     except ValueError as exc:
         parser.error(str(exc))
 
+    cpp_validation: dict[str, Any] | None = None
+    if args.validate_with_cpp:
+        cpp_validation = _run_cpp_validation(
+            args.scheme,
+            args.kernel,
+            result.best_params,
+            result.best_objective,
+        )
+
     persisted = _result_to_persist_dict(
         result,
         scheme=args.scheme,
@@ -403,11 +517,8 @@ def main(argv: list[str] | None = None) -> int:
         gate_layer=gate_layer,
         max_layer=max_layer,
         validator_max_layer=validator_max_layer,
+        cpp_validation=cpp_validation,
     )
-
-    if args.validate_with_cpp:
-        # Stubbed: full implementation lands in 43.10a.
-        print("\n[optimize] --validate-with-cpp is wired in plan item 43.10a; skipping.")
 
     if args.update_known_values:
         kv = load_known_values()

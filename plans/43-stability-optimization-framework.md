@@ -400,12 +400,16 @@ cd scripts/stencil_gen && uv run pytest tests/test_phs.py -x -q -k "TestRegressi
 
 ### 43.10 — L8 validation of optimizer winners
 
-- [ ] **43.10a** Wire `--validate-with-cpp` in `sweeps/optimize.py`:
-  - After the main optimization completes, if `--validate-with-cpp` set and kernel is one of the C++-supported families (`classical`, `tension`, `gaussian`, `multiquadric`), call `brady2d_stability_score(..., max_layer=8, layer8_N=31, layer8_t_final=5.0)` at `best_params`.
-  - Append the L8 report to the persisted result under `cpp_validation: {stable, final_linf, wall_time_s}`.
-  - If L8 fails (simulation blows up), log a warning but do not alter `best_objective` — the analytical verdict stands for now; L8 disagreement is diagnostic.
+- [x] **43.10a** Wired `--validate-with-cpp` in `scripts/stencil_gen/sweeps/optimize.py`:
+  - Added module-level helper `_run_cpp_validation(scheme, kernel, best_params, best_objective, *, N=31, t_final=5.0)` that re-runs the analytical winner at `max_layer=8` via `brady2d_stability_score(..., short_circuit=False)`. Using `short_circuit=False` guarantees L8 executes regardless of intermediate-layer diagnostics at the winner (the analytical cascade already produced a feasible verdict; L8 is an independent sanity check, not a gate).
+  - Skip paths (return `None`, print a one-line reason, never mutate the result): empty `best_params`, non-finite `best_objective`, unsupported scheme/kernel pair (`_CPP_SUPPORTED_SCHEMES = ("E4",)`, `_CPP_SUPPORTED_KERNELS = ("classical", "tension", "gaussian", "multiquadric")`, matching the L8 dispatch table in `brady2d_stability._L8_SCHEME_TYPE`), or missing `SHOCCS_BINARY`. Each skip emits a user-visible reason so the CLI never silently swallows the `--validate-with-cpp` flag.
+  - Failure path (L8 runs but `stable=False` or an exception is raised): logs a `WARNING:` line, returns the `{stable, final_linf, wall_time_s}` dict (with NaN on exception), and the caller's `best_objective` is **not** altered — per plan directive, the analytical verdict stands and L8 disagreement is diagnostic only.
+  - Extended `_result_to_persist_dict` with an optional `cpp_validation: dict | None = None` parameter; when non-`None`, the persisted entry grows a top-level `cpp_validation: {stable, final_linf, wall_time_s}` sub-dict (the `BridgeResult` from `report.layer8` is intentionally dropped — it contains numpy arrays and subprocess metadata not worth round-tripping through JSON).
+  - Updated `main()` to call `_run_cpp_validation` just before `_result_to_persist_dict`, threading the result through so it lands in both the `--update-known-values` and `--json-output` payloads.
+  - Live smoke: `SYMPY_CACHE_SIZE=50000 uv run python -m sweeps optimize --scheme E4 --kernel tension --objective layer3.max_stab_eig --gate-layer 3 --max-layer 3 --bounds 0.5 20 --method Nelder-Mead --max-evals 40 --n-restarts 2 --validate-with-cpp --json-output /tmp/opt_cpp.json` → optimizer converges at σ≈1.6445 (best_objective=-1.22e-4), then L8 PASS with final_linf=6.99e-03 at N=31 t_final=5.0 (wall=0.12s); persisted JSON carries `cpp_validation: {stable: true, final_linf: 6.99e-3, wall_time_s: 0.12}`.
+  - Skip-path smoke: empty `best_params`, non-finite `best_objective`, E2/tension, and a hypothetical `tension-penalty` kernel each print their skip reason and return `None` without touching the persisted dict.
+  - Full optimizer suite `SYMPY_CACHE_SIZE=50000 uv run pytest tests/test_optimizer.py -x -q` — 91 passed, 5 skipped in 76 s. Test class for this path (`TestOptimizeCppValidation`) lands in 43.10b.
   - File: `scripts/stencil_gen/sweeps/optimize.py`
-  - Test: `cd scripts/stencil_gen && uv run python -m sweeps optimize --scheme E4 --kernel tension --objective layer1.boundary_gv_err --bounds 0.5 20 --method Nelder-Mead --max-evals 40 --validate-with-cpp`
 
 - [ ] **43.10b** Test `TestOptimizeCppValidation`:
   - Mock or skip if `build/shoccs` not present.
