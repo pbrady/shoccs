@@ -11,6 +11,7 @@ from stencil_gen.gks_kreiss import KreissResult
 from stencil_gen.optimizer import (
     DEFAULT_BOUNDS,
     _COBYQA_AVAILABLE,
+    OptimizeResult,
     extract_field,
     make_objective,
     multi_start_optimize,
@@ -792,46 +793,108 @@ class TestStaged:
         # Serialized report has at least the gate layers.
         assert "layer3" in r.best_report
 
-    @pytest.mark.slow
-    def test_staged_validator_reorders(self):
-        # ``layer6.transient_growth_bound`` is only populated at
-        # ``max_layer >= 6``; the inner stage (at L3) falls back to
-        # ``layer3.max_stab_eig`` internally, so the inner and validator
-        # rank by different criteria.  For a parameter space where the two
-        # rankings disagree (tension-E4 across σ ∈ [0.5, 20] qualifies —
-        # max_stab_eig and transient_growth_bound have different interior
-        # minima), the validator must either re-order (stage="validated")
-        # or at a minimum emit a finite winner measured against the
-        # deeper-layer field.
-        bounds = [(0.5, 20.0)]
+    def test_staged_validator_reorders(self, monkeypatch):
+        # Deterministic synthetic re-order test (plan 43.6d): stub both
+        # ``multi_start_optimize`` (to return a canned inner history) and
+        # ``brady2d_stability_score`` (to give validator-depth rankings that
+        # disagree with the inner ranking).  This replaces the previous
+        # tension-E4 L6 integration test whose outcome was data-dependent and
+        # whose assertion only checked that ``stage`` was populated with one
+        # of two possible values — a regression that silently made the
+        # validator mirror the inner winner would have passed.
+        #
+        # Design:
+        #   - inner ranks A=2.0 best on ``layer3.max_stab_eig`` (lowest value),
+        #     then B=8.0, then C=5.0.
+        #   - validator ranks B=8.0 best on ``layer6.transient_growth_bound``
+        #     (quadratic well centered at 8.0).
+        #   - With ``top_k=3`` the validator sees all three; its winner is B,
+        #     distinct from the inner's winner A, so ``stage`` must be
+        #     ``"validated"`` and ``best_x`` must be B.
+        import stencil_gen.optimizer as opt_mod
+
+        A = np.array([2.0])
+        B = np.array([8.0])
+        C = np.array([5.0])
+
+        canned_history = [
+            (A.copy(), -0.5),
+            (B.copy(), -0.3),
+            (C.copy(), -0.1),
+            (np.array([9.0]), 0.2),
+        ]
+        canned_inner = OptimizeResult(
+            best_params={"sigma": 2.0},
+            best_x=A.copy(),
+            best_objective=-0.5,
+            best_report={},
+            method="Nelder-Mead",
+            converged=True,
+            n_evals=4,
+            compute_time=0.0,
+            history=canned_history,
+            extras={
+                "inner_method": "Nelder-Mead",
+                "n_restarts": 4,
+                "seed": 0,
+                "n_feasible_restarts": 4,
+            },
+        )
+
+        def fake_multi_start(f, bounds, **kwargs):
+            return canned_inner
+
+        def fake_score(scheme, kernel, params, *, max_layer, short_circuit=True):
+            # Inner is bypassed via fake_multi_start; the validator stage is
+            # the only caller that reaches here in this test.
+            sigma = float(params["sigma"])
+            tgb = (sigma - 8.0) ** 2
+            return StabilityReport(
+                layer1={"boundary_gv_err": 1e-4},
+                layer3={"max_stab_eig": -0.3},
+                layer6={
+                    "transient_growth_bound": tgb,
+                    "spectral_abscissa": -0.1,
+                    "kreiss_constant": 1.0,
+                },
+                failed_layer=None,
+                overall_verdict="pass",
+            )
+
+        monkeypatch.setattr(opt_mod, "multi_start_optimize", fake_multi_start)
+        monkeypatch.setattr(opt_mod, "brady2d_stability_score", fake_score)
+
         r = run_staged_optimize(
             scheme="E4",
             kernel="tension",
             report_field="layer6.transient_growth_bound",
-            bounds=bounds,
+            bounds=[(0.5, 20.0)],
             inner_gate=3,
             inner_max_layer=3,
             validator_max_layer=6,
             top_k=3,
-            method="Nelder-Mead",
-            n_restarts=3,
-            seed=0,
-            max_evals=40,
         )
+
         assert r.method == "staged"
-        assert np.isfinite(r.best_objective)
-        assert bounds[0][0] <= r.best_x[0] <= bounds[0][1]
-        # The validator is ranking by a L6 field that the inner couldn't
-        # see; the pipeline therefore carries the inner fallback field
-        # (``layer3.max_stab_eig``) as a diagnostic.
+        # Validator reordered: winner is B, not the inner's A.
+        assert r.extras["stage"] == "validated"
+        np.testing.assert_allclose(r.best_x, B)
+        assert not np.allclose(r.best_x, canned_inner.best_x)
+        # Validator's transient_growth_bound at σ=8 is exactly 0.
+        assert r.best_objective == pytest.approx(0.0)
+        # Inner fallback field was used (report_field is L6-only).
         assert r.extras["inner_field"] == "layer3.max_stab_eig"
         assert r.extras["validator_max_layer"] == 6
-        # ``stage`` is either "validated" or "inner" depending on whether
-        # the two rankings agree at the 6-decimal dedup granularity;
-        # either way the key is populated.
-        assert r.extras["stage"] in ("validated", "inner")
-        # ``best_report`` carries the L6 payload since the validator ran
-        # at max_layer=6.
+        # Inner diagnostics preserved in extras.
+        np.testing.assert_allclose(r.extras["inner_best_x"], A)
+        assert r.extras["inner_best_objective"] == pytest.approx(-0.5)
+        # Validator ranking sorted ascending; B is first, C second, A last.
+        ranking = r.extras["validator_ranking"]
+        assert len(ranking) == 3
+        ranking_f = [fv for (_x, fv) in ranking]
+        assert ranking_f == sorted(ranking_f)
+        np.testing.assert_allclose(ranking[0][0], B)
+        # best_report carries the L6 payload from the validator run.
         assert "layer6" in r.best_report
 
     def test_staged_validator_all_blowups(self, monkeypatch):
