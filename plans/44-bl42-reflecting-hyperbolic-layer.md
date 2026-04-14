@@ -166,6 +166,19 @@ cd scripts/stencil_gen && uv run python -m sweeps optimize \
   - File: `scripts/stencil_gen/tests/test_brady2d_stability.py`
   - Test: `cd scripts/stencil_gen && uv run pytest tests/test_brady2d_stability.py -x -q -k "TestBrady2DScoreL3rCascade"` ✓
 
+### 44.4-followup — Review fix: harden conditional test assertion
+
+- [ ] **44.4f** Fix `test_short_circuit_after_l3r_skips_l4` in `TestBrady2DScoreL3rCascade`:
+  - The current test guards its assertion with `if report.layer_bl42 is not None and ...` — if the precondition isn't met, the test passes vacuously without testing short-circuit behavior.
+  - Replace the `if` with explicit `assert` statements so the test fails loudly if preconditions aren't met:
+    ```python
+    assert report.layer_bl42 is not None, "L3r should have run"
+    assert report.layer_bl42["max_spectral_abscissa"] > BL42_TOL, "tension E4 σ=3.0 should fail BL42"
+    assert report.layer4 is None, "short-circuit should skip L4 after L3r failure"
+    ```
+  - File: `scripts/stencil_gen/tests/test_brady2d_stability.py`
+  - Test: `cd scripts/stencil_gen && uv run pytest tests/test_brady2d_stability.py -x -q -k "test_short_circuit_after_l3r_skips_l4"`
+
 ### 44.5 — Optimizer integration
 
 - [ ] **44.5a** Verify `extract_field` in `optimizer.py` handles dotted paths rooted at `layer_bl42`:
@@ -252,6 +265,8 @@ cd scripts/stencil_gen && uv run python -m sweeps optimize \
 44.3a → 44.3b                          # layer function
   ↓
 44.4a → 44.4b → 44.4c → 44.4d → 44.4e  # StabilityReport + cascade wiring
+  ↓
+44.4f                                    # review fix: harden conditional test
   ↓
 44.5a → 44.5b → 44.5c                  # optimizer integration
   ↓
