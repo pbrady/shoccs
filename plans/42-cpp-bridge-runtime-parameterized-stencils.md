@@ -181,20 +181,21 @@ The strategy: the constructor takes `real sigma` from Lua, builds the small (r=5
 
 > **Corrected dimension context (from 42.5a review):** The actual `build_diff_matrix_rbf(p=2, q=3, nu=1, nextra=0)` geometry is `r=4, t=6` (via `compute_dimensions`), not `r=5, t=7` as originally drafted. The solver therefore produces a 4×6 = 24-entry block (rows 0..3 × cols 0..5). The fixture (and the C++ `cached_coeffs`) pad this to 5×7 = 35 entries by appending: (a) row 4 = the classical E4 centered stencil at h=1, `[0, 0, 1/12, -2/3, 0, 2/3, -1/12]`, hardcoded; (b) col 6 = 0 for rows 0..3. Keep the `cached_coeffs` layout at 5×7 so the unit test in 42.5f can compare byte-for-byte against the fixture, but do not route row 4 or col 6 (rows 0..3) through the runtime solver. 42.6a/b/e/f inherit the same correction.
 >
-- [ ] **42.5b** Create `src/stencils/tension_E4u_1.cpp` struct skeleton (no solver body yet):
+- [x] **42.5b** Create `src/stencils/tension_E4u_1.cpp` struct skeleton (no solver body yet):
   - Struct layout mirroring `E4u_1` but with `real sigma` field replacing `std::array<real, 2> alpha`, and a new `std::array<real, 5 * 7> cached_coeffs` member (5 rows × 7 cols; see the corrected-dimension note above — row 4 is the hardcoded classical E4 interior stencil, col 6 is zero for rows 0..3).
   - Constructor `tension_E4u_1(real sigma_in) : sigma(sigma_in) { /* solver call inserted in 42.5d */ }`.
   - `interior`, `query`, `query_max`, method stubs for `nbs_floating` and `nbs` matching `E4u_1`'s signatures but with empty (TODO) bodies that simply fill the output span with zeros and return it.
   - Does **not** register in `stencil.cpp` yet — that's 42.5e.
   - **Must compile** once added to CMakeLists in 42.5c.
   - File: `src/stencils/tension_E4u_1.cpp` (new)
-  - Test: `cmake --build build --target shoccs-stencils` (just needs to compile; no functional test yet)
+  - Test: `cmake --build build --target shoccs-stencils` → **PASSED** (compiles cleanly as part of `libshoccs-stencils.a`).
+  - Note: used `P=2, R=5, T=7, X=0` (matching E4_1's boundary region sizing) so `nbs_floating` writes 35 = R*T entries, which matches the `cached_coeffs` layout specified in 42.5a/42.5d. `interior()` is hardcoded to the classical E4 stencil (same coefficients as `E4u_1::interior`), since the boundary closure is the only RBF-specific piece. Skeleton methods zero-fill the output span; solver body comes in 42.5d. Struct is not yet a `stencil`-concept satisfying type that `from_lua` can dispatch to — that wiring is 42.5e.
 
-- [ ] **42.5c** Add `tension_E4u_1.cpp` to `src/stencils/CMakeLists.txt` build list:
+- [x] **42.5c** Add `tension_E4u_1.cpp` to `src/stencils/CMakeLists.txt` build list:
   - Append `tension_E4u_1.cpp` to the `add_library(shoccs-stencils ...)` source list. No test target yet.
   - Do not yet register in `stencil::from_lua` (42.5e).
   - File: `src/stencils/CMakeLists.txt`
-  - Test: `cmake --build build --target shoccs-stencils`
+  - Test: `cmake --build build --target shoccs-stencils` → **PASSED** (single-file incremental build: `Building CXX object .../tension_E4u_1.cpp.o` → `Linking CXX static library libshoccs-stencils.a`, no warnings from the new file).
 
 - [ ] **42.5d** Implement `solve_tension_coefficients(real sigma, std::array<real, 5*7>& out)` as a static/anonymous-namespace helper in `tension_E4u_1.cpp`:
   - Builds the **6×6** tension-spline kernel matrix entries `K[i,j] = sigma*|x_i - x_j| - 1 + exp(-sigma*|x_i - x_j|)` where `x_i = i` for i in 0..5 (reference grid, h=1, t=6 collocation points).
