@@ -394,6 +394,11 @@ cd scripts/stencil_gen && uv run pytest tests/test_phs.py -x -q -k "TestRegressi
   - File: `scripts/stencil_gen/tests/test_optimizer.py`
   - Test: `cd scripts/stencil_gen && SYMPY_CACHE_SIZE=50000 uv run pytest tests/test_optimizer.py -x -q -k "TestAlphaSurveyVsPublished" --run-slow` — 1 passed in 138 s. Non-slow suite: `uv run pytest tests/test_optimizer.py -x -q` — 91 passed, 5 skipped, 77 s.
 
+- [ ] **43.9d-r1** Reconcile the Completion Criteria with the published-value source correction made in 43.9d.
+  - The Completion Criteria bullet below still says Brady-Livescu's published E4 α is "stored in `alpha_extraction.py`", but 43.9d established that no such file holds the E4 value — the canonical constant lives at `sweeps.brady2d_sweep.CLASSICAL_E4_ALPHA` (see 43.9d's commit message and class docstring). Update the Completion Criteria line to name the correct module so the plan is internally consistent with the landed test.
+  - File: `plans/43-stability-optimization-framework.md` (Completion Criteria section only — no code change).
+  - Test: (no test; plan-text fix)
+
 ### 43.10 — L8 validation of optimizer winners
 
 - [ ] **43.10a** Wire `--validate-with-cpp` in `sweeps/optimize.py`:
@@ -457,7 +462,7 @@ cd scripts/stencil_gen && uv run pytest tests/test_phs.py -x -q -k "TestRegressi
   ↓
 43.8a → 43.8b → 43.8c                  # persistence + regression + persist gate/max_layer
   ↓
-43.9a → 43.9a-r1 → 43.9b → 43.9b-r1 → 43.9b-r2 → 43.9c → 43.9c-r1 → 43.9d  # classical-α (depends on all prior)  [43.9d done]
+43.9a → 43.9a-r1 → 43.9b → 43.9b-r1 → 43.9b-r2 → 43.9c → 43.9c-r1 → 43.9d → 43.9d-r1  # classical-α (depends on all prior)  [43.9d done; 43.9d-r1 plan-text reconcile]
   ↓
 43.10a → 43.10b                        # L8 validation
   ↓
