@@ -213,13 +213,13 @@ cd scripts/stencil_gen && uv run pytest tests/test_phs.py -x -q -k "TestRegressi
   - File: `scripts/stencil_gen/tests/test_optimizer.py`.
   - Test: `cd scripts/stencil_gen && uv run pytest tests/test_optimizer.py -x -q -k "TestDE"` — 7 green.
 
-- [ ] **43.5c** Integration tests `TestGlobalOptimizers`:
-  - `test_shgo_finds_tension_optimum` — 1D tension E4 against an explicit stability-margin objective (e.g. `layer3.max_stab_eig`), bounds [0.5, 20]. Assert SHGO returns a finite feasible global minimum, bound-respecting, and reports `n_local_minima >= 1`. (The earlier specific-σ acceptance was dropped — see 43.3b. To pin a specific σ, pick an objective whose minimum is known for *that* field and cite the corresponding sweep value.)
-  - `test_de_finds_tension_optimum` — same objective, DE with popsize=10, maxiter=20 (kept small for test speed). Same acceptance: finite feasible result, bound-respecting.
-  - `test_shgo_2d_classical_alpha` — E4_1 classical-α over `[(-2, 2), (197/288, 2)]`, SHGO finds at least 1 feasible local min; compare against Brady-Livescu stored value with loose (within-basin) tolerance.
-  - Mark the classical-α test `@pytest.mark.slow`.
-  - File: `scripts/stencil_gen/tests/test_optimizer.py`
-  - Test: `cd scripts/stencil_gen && uv run pytest tests/test_optimizer.py -x -q -k "TestGlobalOptimizers and not slow"`
+- [x] **43.5c** Integration tests `TestGlobalOptimizers` landed — three tests added in `scripts/stencil_gen/tests/test_optimizer.py`:
+  - `test_shgo_finds_tension_optimum` — 1D tension E4 against `layer3.max_stab_eig`, bounds `[(0.5, 20)]`, SHGO with `n=8, iters=1`. Asserts finite feasible result, bound-respecting, `n_local_minima >= 1`. ~27 s.
+  - `test_de_finds_tension_optimum` — same objective, DE with `popsize=6, maxiter=8` (tighter than the 10/20 proposed to keep runtime < 30 s; DE already lands on a finite feasible minimum at this budget). ~22 s.
+  - `test_shgo_2d_classical_alpha` (`@pytest.mark.slow`) — E4 classical-α, SHGO with `n=6, iters=1`. Asserts finite feasible, bound-respecting, at least one local minimum, and best_x within 0.5 L∞ of the Brady-Livescu stored α ≈ `[-0.7733, 0.1624]`. ~19 s.
+  - **Important finding — plan text updated**: the plan's `DEFAULT_BOUNDS[("E4", "classical")] = [(-2, 2), (197/288, 2)]` encodes the C++ hard constraint `α₁ ≥ 197/288`, but the Brady-Livescu published feasible point sits at `α₁ ≈ 0.162` — **below** that lower bound. Probing DEFAULT_BOUNDS on an 11×8 grid returned zero L3-feasible points, so the 2D SHGO test uses relaxed bounds `[(-1.2, -0.3), (0.05, 0.4)]` that admit the published region. Resolving the DEFAULT_BOUNDS/Brady-Livescu mismatch — either widening the bounds or documenting a Python-vs-C++ divergence — is deferred to 43.9a (where the 197/288 constraint is explicitly re-examined).
+  - Files: `scripts/stencil_gen/tests/test_optimizer.py`.
+  - Test: `cd scripts/stencil_gen && uv run pytest tests/test_optimizer.py -x -q -k "TestGlobalOptimizers and not slow"` — 2 green; `--run-slow -k test_shgo_2d_classical_alpha` — 1 green.
 
 ### 43.6 — Staged optimization: cheap inner + expensive validator
 
@@ -291,10 +291,11 @@ cd scripts/stencil_gen && uv run pytest tests/test_phs.py -x -q -k "TestRegressi
 
 ### 43.9 — Classical-α E4_1 2D optimization
 
-- [ ] **43.9a** Extend `params_from_vector`/`vector_from_params` for `kernel="classical"` and add the 197/288 constraint:
+- [ ] **43.9a** Extend `params_from_vector`/`vector_from_params` for `kernel="classical"` and reconcile the 197/288 constraint with the Brady-Livescu published α:
+  - **43.5c finding (must resolve here)**: the Brady-Livescu stored feasible point α ≈ `[-0.7733, 0.1624]` has `α₁ ≈ 0.162`, i.e. *below* 197/288. An 11×8 grid-probe of `DEFAULT_BOUNDS[("E4", "classical")] = [(-2, 2), (197/288, 2)]` finds zero L3-feasible points. So either the Python `_build_classical_diff_matrix` does not match the C++ 197/288 constraint, or the C++ constraint is misstated. Decide and document.
   - Confirm the Python `_build_classical_diff_matrix` accepts `alpha` and does NOT impose the 197/288 bound (the C++ imposes it at construction; the Python path should either mirror it or rely on the optimizer to respect bounds).
   - If the Python path accepts `alpha[1] < 197/288` without error but produces a singular D, the objective returns `+inf` via the `try/except` — acceptable.
-  - `DEFAULT_BOUNDS[("E4", "classical")]` already has `α₁ ≥ 197/288`; confirm and add a test that setting `α₁ < 197/288` raises in optimizer setup (bound violation).
+  - `DEFAULT_BOUNDS[("E4", "classical")]` currently has `α₁ ≥ 197/288`; based on the reconciliation above, either (a) keep the bound and document a Python-vs-C++ divergence, or (b) widen the bound to include the published feasible region (e.g. `α₁ ≥ 0.05`) and explain why the C++ 197/288 constraint doesn't apply here. Add a test covering whichever decision is made.
   - File: `scripts/stencil_gen/stencil_gen/optimizer.py`
   - Test: `cd scripts/stencil_gen && uv run pytest tests/test_optimizer.py -x -q -k "TestClassicalAlphaBounds"`
 

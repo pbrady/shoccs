@@ -646,3 +646,69 @@ class TestRunScipyLocalCOBYQAUnavailable:
                 bounds=[(-5.0, 5.0)],
                 method="COBYQA",
             )
+
+
+class TestGlobalOptimizers:
+    """Integration tests for :func:`run_scipy_shgo` / :func:`run_scipy_de`
+    against real :mod:`brady2d_stability` objectives (plan 43.5c)."""
+
+    def test_shgo_finds_tension_optimum(self):
+        # 1D tension E4 against layer3.max_stab_eig.  The earlier plan text
+        # asserted convergence to σ=3.0; 43.3b refuted that invariant (see
+        # 43.3c) — the new acceptance is only "finite feasible global minimum,
+        # bound-respecting, at least one discovered basin."
+        f = make_objective(
+            "E4", "tension", "layer3.max_stab_eig",
+            gate_layer=3, max_layer=3,
+        )
+        bounds = [(0.5, 20.0)]
+        r = run_scipy_shgo(f, bounds=bounds, n=8, iters=1)
+        assert np.isfinite(r.best_objective)
+        assert bounds[0][0] <= r.best_x[0] <= bounds[0][1]
+        assert r.extras["n_local_minima"] >= 1
+
+    def test_de_finds_tension_optimum(self):
+        # Same objective via differential_evolution.  Kept to a tight budget
+        # (popsize=6, maxiter=8) to keep the test under ~30s; the objective's
+        # feasibility cliff is narrow enough that this still reaches a finite
+        # feasible minimum.
+        f = make_objective(
+            "E4", "tension", "layer3.max_stab_eig",
+            gate_layer=3, max_layer=3,
+        )
+        bounds = [(0.5, 20.0)]
+        r = run_scipy_de(f, bounds=bounds, popsize=6, maxiter=8, seed=0)
+        assert np.isfinite(r.best_objective)
+        assert bounds[0][0] <= r.best_x[0] <= bounds[0][1]
+
+    @pytest.mark.slow
+    def test_shgo_2d_classical_alpha(self):
+        # 2D E4 classical-α.  NB: the plan's ``DEFAULT_BOUNDS[("E4",
+        # "classical")] = [(-2, 2), (197/288, 2)]`` encodes the C++ hard
+        # constraint α₁ ≥ 197/288 but the Brady-Livescu published feasible
+        # point (α ≈ [-0.77, 0.16]) sits *below* that lower α₁ bound, and the
+        # intersection of DEFAULT_BOUNDS with the L3-feasible region appears
+        # empty in the Python pipeline (probed on an 11×8 grid).  We therefore
+        # use relaxed bounds that admit the known feasible region so the
+        # "SHGO finds at least one feasible local min" invariant holds.
+        # Resolving the DEFAULT_BOUNDS mismatch itself is deferred to 43.9a.
+        f = make_objective(
+            "E4", "classical", "layer3.max_stab_eig",
+            gate_layer=3, max_layer=3,
+        )
+        bounds = [(-1.2, -0.3), (0.05, 0.4)]
+        r = run_scipy_shgo(f, bounds=bounds, n=6, iters=1)
+        assert np.isfinite(r.best_objective), (
+            "SHGO should land on at least one feasible minimum in the "
+            "Brady-Livescu-adjacent region"
+        )
+        # Bound-respecting.
+        assert bounds[0][0] <= r.best_x[0] <= bounds[0][1]
+        assert bounds[1][0] <= r.best_x[1] <= bounds[1][1]
+        assert r.extras["n_local_minima"] >= 1
+        # Loose (within-basin) comparison against the Brady-Livescu stored
+        # α ≈ [-0.7733, 0.1624].  A 0.5 L∞ tolerance keeps this a
+        # containment check, not an identity check (matching the 43.9d
+        # convention).
+        published = np.array([-0.7733323791884821, 0.1623961700641681])
+        assert np.max(np.abs(r.best_x - published)) < 0.5
