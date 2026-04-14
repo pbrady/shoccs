@@ -24,5 +24,6 @@ add_unit_test(E6u_1 "stencils" shoccs-stencils)
 add_unit_test(E8u_1 "stencils" shoccs-stencils)
 add_unit_test(tension_E4u_1 "stencils" shoccs-stencils)
 add_unit_test(gaussian_E4u_1 "stencils" shoccs-stencils)
+add_unit_test(multiquadric_E4u_1 "stencils" shoccs-stencils)
 
 add_unit_test(polyE2_1 "stencils" shoccs-stencils)

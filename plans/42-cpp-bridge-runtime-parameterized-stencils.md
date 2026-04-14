@@ -288,9 +288,9 @@ Each family follows the same 4-item pattern as 42.5b–f (minus the split refere
   - Test: `cmake --build build --target shoccs` → **PASSED** (full chain compiles and links; `libshoccs-stencils.a` rebuilds and `src/app/shoccs` relinks with no warnings). End-to-end smoke: a minimal 2D scalar-wave Lua with `scheme = { order=1, type="multiquadric_E4u", epsilon=1.0 }` runs to `t=1.0` at N=21, emitting `builder: multiquadric_E4u first scheme chosen (epsilon = 1)` and completing cleanly.
   - Note: dispatch branch inserted in `stencil.cpp` immediately after `gaussian_E4u`; factory `make_multiquadric_E4u_1` declared in `stencil.hpp` (after `make_gaussian_E4u_1`) and defined at the end of `multiquadric_E4u_1.cpp` before the closing `} // namespace ccs::stencils`, mirroring the gaussian pattern. Unit tests covering this dispatch (via `from_lua`) are 42.6h's job.
 
-- [ ] **42.6h** Add `t-multiquadric_E4u_1` unit test (mirrors 42.6d — five Catch2 tests including the Dirichlet + `right=true` cases from 42.5g):
+- [x] **42.6h** Add `t-multiquadric_E4u_1` unit test (mirrors 42.6d — five Catch2 tests including the Dirichlet + `right=true` cases from 42.5g):
   - File: `src/stencils/CMakeLists.txt`, `src/stencils/multiquadric_E4u_1.t.cpp` (new)
-  - Test: `cmake --build build --target t-multiquadric_E4u_1 && ctest --test-dir build -R t-multiquadric_E4u_1`
+  - Test: `cmake --build build --target t-multiquadric_E4u_1 && ctest --test-dir build -R t-multiquadric_E4u_1` → **PASSED** (5 Catch2 cases; ctest reports `100% tests passed, 0 tests failed out of 1` in 0.01 s). Clone of `gaussian_E4u_1.t.cpp` with `epsilon=1.0` fixture substituted and Lua script using `type="multiquadric_E4u"`.
 
 ### 42.7 — Closed-loop bridge for spline families
 
