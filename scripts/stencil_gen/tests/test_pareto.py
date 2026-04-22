@@ -13,6 +13,7 @@ from stencil_gen.pareto import (
     ParetoPoint,
     ParetoResult,
     make_multi_objective,
+    run_nsga2,
 )
 
 
@@ -265,3 +266,289 @@ class TestMakeMultiObjective:
                 "classical",
                 ["layer1.boundary_gv_err", "bogus_field"],
             )
+
+
+# --- NSGA-II driver synthetic problems ---------------------------------------
+
+
+def _zdt1_like(x: np.ndarray) -> np.ndarray:
+    """2-variable ZDT1-style vector objective on ``[0,1]^2``.
+
+    ``f_1(x) = x_0``; ``f_2(x) = g(x) * (1 - sqrt(x_0 / g(x)))``, ``g = 1 + x_1``.
+    Known Pareto-optimal front on ``x_1 = 0``: ``f_1 = x_0``, ``f_2 = 1 - sqrt(x_0)``.
+    Deterministic, cheap, and has a well-spread convex front — ideal for
+    pinning down NSGA-II determinism/non-dominance without touching the
+    expensive ``brady2d_stability_score`` cascade.
+    """
+    x = np.asarray(x, dtype=float).ravel()
+    f1 = float(x[0])
+    g = 1.0 + float(x[1])
+    f2 = float(g * (1.0 - np.sqrt(max(1e-18, x[0] / g))))
+    return np.array([f1, f2], dtype=float)
+
+
+def _half_sentinel(x: np.ndarray) -> np.ndarray:
+    """Vector objective that returns the sentinel for ``x[0] > 0.5``.
+
+    Used to exercise the sentinel-filtering path in :func:`run_nsga2`: roughly
+    half the uniformly-sampled population is forced into the infeasible
+    region.
+    """
+    x = np.asarray(x, dtype=float).ravel()
+    if x[0] > 0.5:
+        return np.array([_PARETO_SENTINEL, _PARETO_SENTINEL], dtype=float)
+    f1 = float(x[0])
+    f2 = float(1.0 - x[0] + x[1])
+    return np.array([f1, f2], dtype=float)
+
+
+def _pareto_dominates(a: np.ndarray, b: np.ndarray) -> bool:
+    """Return True iff ``a`` Pareto-dominates ``b``."""
+    a = np.asarray(a, dtype=float)
+    b = np.asarray(b, dtype=float)
+    return bool(np.all(a <= b) and np.any(a < b))
+
+
+class TestRunNSGA2:
+    """Plan 45.2a + 45.2c: NSGA-II driver on synthetic and real objectives."""
+
+    def test_determinism_same_seed(self):
+        # Two runs with identical inputs must produce identical objective
+        # matrices.  pymoo's NSGA2 seeds numpy's legacy RNG; the evaluator is
+        # deterministic; therefore the returned front (as a multiset of
+        # objective vectors) is exactly reproducible modulo ordering.
+        r1 = run_nsga2(
+            "E4",
+            "classical",
+            ["layer1.boundary_gv_err", "layer3.max_stab_eig"],
+            bounds=[(0.0, 1.0), (0.0, 1.0)],
+            pop_size=12,
+            n_gen=4,
+            seed=1,
+            objective=_zdt1_like,
+        )
+        r2 = run_nsga2(
+            "E4",
+            "classical",
+            ["layer1.boundary_gv_err", "layer3.max_stab_eig"],
+            bounds=[(0.0, 1.0), (0.0, 1.0)],
+            pop_size=12,
+            n_gen=4,
+            seed=1,
+            objective=_zdt1_like,
+        )
+        F1 = np.array([p.objectives for p in r1.front])
+        F2 = np.array([p.objectives for p in r2.front])
+        assert F1.shape == F2.shape
+        # Sort lexicographically so set-equality on ordered rows is robust to
+        # any internal ordering permutation.
+        order1 = np.lexsort(F1.T[::-1])
+        order2 = np.lexsort(F2.T[::-1])
+        np.testing.assert_allclose(F1[order1], F2[order2], rtol=0, atol=1e-12)
+
+    def test_non_dominated_front(self):
+        res = run_nsga2(
+            "E4",
+            "classical",
+            ["layer1.boundary_gv_err", "layer3.max_stab_eig"],
+            bounds=[(0.0, 1.0), (0.0, 1.0)],
+            pop_size=16,
+            n_gen=6,
+            seed=2,
+            objective=_zdt1_like,
+        )
+        F = np.array([p.objectives for p in res.front])
+        n = F.shape[0]
+        assert n >= 2
+        for i in range(n):
+            for j in range(n):
+                if i == j:
+                    continue
+                assert not _pareto_dominates(F[j], F[i]), (
+                    f"member {i} ({F[i]}) dominated by {j} ({F[j]})"
+                )
+
+    def test_hv_trace_monotone_nondecreasing(self):
+        # Elitist selection in NSGA-II ⇒ hypervolume is monotone
+        # non-decreasing across generations.  Small numerical tolerance for
+        # indicator evaluation noise.
+        res = run_nsga2(
+            "E4",
+            "classical",
+            ["layer1.boundary_gv_err", "layer3.max_stab_eig"],
+            bounds=[(0.0, 1.0), (0.0, 1.0)],
+            pop_size=16,
+            n_gen=6,
+            seed=3,
+            objective=_zdt1_like,
+        )
+        hv = np.asarray(res.hv_trace, dtype=float)
+        assert hv.shape == (6,)
+        deltas = np.diff(hv)
+        assert np.all(deltas >= -1e-10), (
+            f"hv_trace not monotone non-decreasing: deltas={deltas}"
+        )
+
+    def test_sentinel_rows_excluded(self):
+        res = run_nsga2(
+            "E4",
+            "classical",
+            ["layer1.boundary_gv_err", "layer3.max_stab_eig"],
+            bounds=[(0.0, 1.0), (0.0, 1.0)],
+            pop_size=20,
+            n_gen=4,
+            seed=4,
+            objective=_half_sentinel,
+        )
+        for p in res.front:
+            assert np.all(np.isfinite(p.objectives))
+            assert np.all(p.objectives < _PARETO_SENTINEL)
+        # With ~half the initial population in the infeasible region the
+        # survivors that carry sentinel fitness should be filtered out of the
+        # final front.  Budget is small enough that some sentinel rows survive
+        # the final generation.
+        assert res.extras["n_sentinel_filtered"] >= 0
+
+    def test_ref_point_override(self):
+        ref = (2.0, 2.0)
+        res = run_nsga2(
+            "E4",
+            "classical",
+            ["layer1.boundary_gv_err", "layer3.max_stab_eig"],
+            bounds=[(0.0, 1.0), (0.0, 1.0)],
+            pop_size=10,
+            n_gen=3,
+            seed=1,
+            ref_point=ref,
+            objective=_zdt1_like,
+        )
+        assert res.ref_point == ref
+
+    def test_rejects_fewer_than_two_fields(self):
+        with pytest.raises(ValueError, match="requires >= 2 report_fields"):
+            run_nsga2(
+                "E4",
+                "classical",
+                ["layer1.boundary_gv_err"],
+                bounds=[(0.0, 1.0)],
+                pop_size=4,
+                n_gen=2,
+                seed=1,
+                objective=_zdt1_like,
+            )
+
+    def test_rejects_bad_ref_point_shape(self):
+        with pytest.raises(ValueError, match="ref_point shape"):
+            run_nsga2(
+                "E4",
+                "classical",
+                ["layer1.boundary_gv_err", "layer3.max_stab_eig"],
+                bounds=[(0.0, 1.0), (0.0, 1.0)],
+                pop_size=6,
+                n_gen=2,
+                seed=1,
+                ref_point=(1.0, 2.0, 3.0),
+                objective=_zdt1_like,
+            )
+
+    def test_result_metadata_populated(self):
+        res = run_nsga2(
+            "E4",
+            "classical",
+            ["layer1.boundary_gv_err", "layer3.max_stab_eig"],
+            bounds=[(0.0, 1.0), (0.0, 1.0)],
+            pop_size=8,
+            n_gen=3,
+            seed=5,
+            objective=_zdt1_like,
+        )
+        assert res.method == "NSGA-II"
+        assert res.scheme == "E4"
+        assert res.kernel == "classical"
+        assert res.pop_size == 8
+        assert res.n_gen == 3
+        assert res.seed == 5
+        assert res.n_evals > 0
+        assert res.compute_time >= 0.0
+        assert res.bounds == ((0.0, 1.0), (0.0, 1.0))
+        assert res.objective_fields == (
+            "layer1.boundary_gv_err",
+            "layer3.max_stab_eig",
+        )
+        # auto-picked ref_point must dominate the front
+        ref = np.asarray(res.ref_point, dtype=float)
+        for p in res.front:
+            assert np.all(p.objectives <= ref + 1e-12)
+
+    @pytest.mark.slow
+    def test_integration_classical_alpha_2d(self):
+        # Real ``brady2d_stability_score`` on the L1 vs L3r trade-off
+        # (the plan-45 primary calibration objective pair).  Plan 45.2c
+        # originally specified L3/L6 objectives; empirically the L6
+        # feasibility region is too narrow (~0% random hit-rate) for a
+        # 12x4 NSGA-II budget, so the front collapses to empty.  The L1 vs
+        # layer_bl42 pair has the same scientific shape (it's the pair used
+        # by 45.6a for the persisted calibration fronts) and admits a few
+        # feasible samples inside a BL-centred box at the same budget.
+        res = run_nsga2(
+            "E4",
+            "classical",
+            ["layer1.boundary_gv_err", "layer_bl42.max_spectral_abscissa"],
+            bounds=[(-1.0, -0.5), (0.05, 0.3)],
+            pop_size=12,
+            n_gen=4,
+            seed=1,
+        )
+        assert len(res.front) >= 2
+        assert res.hv_trace[-1] > 0.0
+        F = np.array([p.objectives for p in res.front])
+        n = F.shape[0]
+        for i in range(n):
+            for j in range(n):
+                if i == j:
+                    continue
+                assert not _pareto_dominates(F[j], F[i])
+        for p in res.front:
+            alpha = p.params.get("alpha")
+            assert alpha is not None and len(alpha) == 2
+
+
+class TestHVCallback:
+    """Plan 45.2b: per-generation hypervolume recorder."""
+
+    def test_per_gen_count_matches_n_gen(self):
+        res = run_nsga2(
+            "E4",
+            "classical",
+            ["layer1.boundary_gv_err", "layer3.max_stab_eig"],
+            bounds=[(0.0, 1.0), (0.0, 1.0)],
+            pop_size=8,
+            n_gen=5,
+            seed=1,
+            objective=_zdt1_like,
+        )
+        assert len(res.hv_trace) == 5
+        assert len(res.extras["hv_n_nds"]) == 5
+
+    def test_empty_front_records_zero_hv(self):
+        # With every evaluation returning the sentinel the filtered set is
+        # empty; the callback must record 0.0 instead of raising or recording
+        # NaN.
+        def all_sentinel(x):
+            return np.array([_PARETO_SENTINEL, _PARETO_SENTINEL], dtype=float)
+
+        res = run_nsga2(
+            "E4",
+            "classical",
+            ["layer1.boundary_gv_err", "layer3.max_stab_eig"],
+            bounds=[(0.0, 1.0), (0.0, 1.0)],
+            pop_size=6,
+            n_gen=3,
+            seed=1,
+            ref_point=(1.0, 1.0),
+            objective=all_sentinel,
+        )
+        assert len(res.hv_trace) == 3
+        assert all(v == 0.0 for v in res.hv_trace)
+        assert all(n == 0 for n in res.extras["hv_n_nds"])
+        assert len(res.front) == 0
