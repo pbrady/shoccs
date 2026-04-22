@@ -130,7 +130,7 @@ cd scripts/stencil_gen && SYMPY_CACHE_SIZE=50000 uv run python -m sweeps pareto 
 
 ### 45.1 — `pareto` module: `ParetoResult`, `ParetoPoint`, `make_multi_objective`
 
-- [ ] **45.1a** Create `scripts/stencil_gen/stencil_gen/pareto.py` with two frozen dataclasses:
+- [x] **45.1a** Create `scripts/stencil_gen/stencil_gen/pareto.py` with two frozen dataclasses:
   ```python
   @dataclass(frozen=True)
   class ParetoPoint:
