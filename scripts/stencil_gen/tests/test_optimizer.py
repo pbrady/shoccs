@@ -482,6 +482,74 @@ class TestGateLayerInfer:
         with pytest.raises(ValueError, match="cannot infer max_layer"):
             make_objective("E4", "classical", "bogus_field")
 
+    def test_bl42_l3r_failure_returns_finite(self, monkeypatch):
+        # Plan 45.0e: the self-gate +inf trap.
+        # layer_bl42 is layer 3.  Under the OLD hard-coded gate_layer=3,
+        # an L3r failure (failed_layer=3) would satisfy
+        # ``failed_layer <= gate_layer`` and gate to +inf, even though the
+        # payload the user is optimising is *exactly* the one populated by
+        # that "failing" layer.  Under the NEW auto-infer gate_layer=2,
+        # an L3 failure does NOT gate and ``extract_field`` returns the
+        # stored value.  This is the exact scenario 45.0b unblocks
+        # (the 2634-eval +inf DE run documented in
+        # ``docs/handoff/next_steps.md``).
+        import stencil_gen.optimizer as opt
+
+        def fake_score(scheme, kernel, params, *, max_layer, short_circuit):
+            r = StabilityReport.empty()
+            r.failed_layer = 3
+            r.failed_reason = "synthetic L3r failure"
+            r.layer_bl42 = {"max_spectral_abscissa": 5.0}
+            return r
+
+        monkeypatch.setattr(opt, "brady2d_stability_score", fake_score)
+        f = make_objective(
+            "E4", "classical", "layer_bl42.max_spectral_abscissa",
+        )
+        val = f(np.array([-0.77, 0.16]))
+        assert val == 5.0
+
+    def test_layer6_lower_failure_with_populated_payload(self, monkeypatch):
+        # Plan 45.0e: distinguish below-gate vs above-gate failures when the
+        # user passes ``--max-layer`` deeper than the objective's native
+        # layer.  With explicit max_layer=7 and a layer6.* objective,
+        # auto-infer gives gate_layer=6: every failure strictly before the
+        # final layer gates, but a failure at layer 7 (above the gate) does
+        # NOT gate, so the optimiser still sees the populated layer6 value.
+        #
+        # Under the OLD hardcoded gate_layer=3, both failed_layer=5 and
+        # failed_layer=7 would fall outside the gate (5 > 3 and 7 > 3), so
+        # neither case would gate — and the new-vs-old behavioural split
+        # would be invisible.  The split below is visible only under the
+        # new auto-infer.
+        import stencil_gen.optimizer as opt
+
+        state: dict = {}
+
+        def fake_score(scheme, kernel, params, *, max_layer, short_circuit):
+            r = StabilityReport.empty()
+            r.failed_layer = state["failed_layer"]
+            r.failed_reason = "synthetic"
+            r.layer5 = {"max_aligned_error": 1.0}
+            r.layer6 = {"transient_growth_bound": 42.0}
+            return r
+
+        monkeypatch.setattr(opt, "brady2d_stability_score", fake_score)
+        f = make_objective(
+            "E4", "classical", "layer6.transient_growth_bound",
+            max_layer=7,
+        )
+
+        # Below-gate failure: gates.  (Old hardcoded gate_layer=3 would
+        # NOT gate here — this is the behavioural split.)
+        state["failed_layer"] = 5
+        assert f(np.array([-0.77, 0.16])) == float("inf")
+
+        # Above-gate failure: does not gate; closure returns the populated
+        # layer6 value so the optimiser sees a finite landscape.
+        state["failed_layer"] = 7
+        assert f(np.array([-0.77, 0.16])) == 42.0
+
 
 class TestRunScipyLocal:
     """Driver-level tests for :func:`run_scipy_local`.
