@@ -58,6 +58,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     unzip \
     locales \
     file \
+    swig \
     && ln -sf /usr/bin/clang-${CLANG_VERSION} /usr/local/bin/clang \
     && ln -sf /usr/bin/clang++-${CLANG_VERSION} /usr/local/bin/clang++ \
     && ln -sf /usr/bin/clangd-${CLANG_VERSION} /usr/local/bin/clangd \
