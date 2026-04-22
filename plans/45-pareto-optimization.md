@@ -111,6 +111,23 @@ cd scripts/stencil_gen && SYMPY_CACHE_SIZE=50000 uv run python -m sweeps pareto 
   - File: `scripts/stencil_gen/tests/test_optimizer.py`
   - Test: `cd scripts/stencil_gen && uv run pytest tests/test_optimizer.py -x -q -k "TestGateLayerInfer"`
 
+- [ ] **45.0d** (review follow-up to 45.0b) Thread the auto-infer through the `sweeps optimize` CLI. `sweeps/optimize.py:415` still hardcodes `parser.add_argument("--gate-layer", type=int, default=3)`, and line 352 passes `gate_layer=args.gate_layer` straight into `make_objective`, so every CLI invocation overrides the new `None` default and never hits the auto-infer branch. The 2634-eval `+inf` DE run cited in 45.0b's rationale (and in `docs/handoff/next_steps.md`) was a CLI invocation — the library-only fix as shipped does NOT unblock that user-reported scenario; users of `python -m sweeps optimize --objective layer_bl42.max_spectral_abscissa` or `--objective layer6.*` still need to pass `--gate-layer N-1` manually. Fix: (a) change the default to `None` at line 415 and add help text describing the auto-infer behavior (`"default: max_layer-1"`); (b) in `_resolve_persisted_layers` (lines 97–128), when `args.gate_layer is None` compute the resolved value as `max(max_layer - 1, 0)` after `max_layer` itself is resolved, so the persisted `gate_layer` record reflects the actual gate the optimizer used (keeping the two `int(args.gate_layer)` call sites well-typed); (c) leave the `make_objective` call at line 348 passing the raw `args.gate_layer` (now possibly `None`, accepted by the updated signature). For the staged path, `inner_gate=args.gate_layer` at line 338 must also handle `None` — either resolve here or extend `run_staged_optimize` to accept `None` and compute the same `max(inner_max_layer - 1, 0)`; pick whichever is less invasive and note the choice in the commit message.
+  - File: `scripts/stencil_gen/sweeps/optimize.py` (and possibly `scripts/stencil_gen/stencil_gen/optimizer.py::run_staged_optimize` for `inner_gate`)
+  - Test: `cd scripts/stencil_gen && uv run pytest tests/test_optimizer.py -x -q -k "TestOptimizerBL42 or TestSweepOptimize or TestResolvePersistedLayers"` (all existing tests still pass); then run the smoke without `--gate-layer`:
+    ```bash
+    SYMPY_CACHE_SIZE=50000 uv run python -m sweeps optimize \
+        --scheme E4 --kernel tension \
+        --objective layer_bl42.max_spectral_abscissa \
+        --bounds 0.5 20 --method Nelder-Mead --n-restarts 2 --max-evals 50
+    ```
+    Expect a finite `best_objective` (not `+inf`) without passing `--gate-layer`. Add a regression test `test_cli_optimize_bl42_tension_auto_gate_layer` mirroring the existing `test_cli_optimize_bl42_tension` (at `tests/test_optimizer.py:~2107`) but with `--gate-layer` omitted; assert `"inf" not in proc.stdout` (same guard added in 44.5d).
+
+- [ ] **45.0e** (review follow-up to 45.0c) Add a test that distinguishes the new auto-infer from the old hardcoded `gate_layer=3` default. `test_default_gate_for_bl42_objective` mocks `failed_layer=2`; `2 <= 3` gates under the *old* default too, so the assertion holds under both implementations and the test does not pin down the behavioral change. `test_default_gate_for_layer6_objective` has the same structural gap (both old and new return `+inf`: the old via no-gate-then-missing-field, the new via gating). Add:
+  - `test_bl42_l3r_failure_returns_finite` — mocks `brady2d_stability_score` to return `StabilityReport` with `failed_layer=3`, `failed_reason="synthetic L3r failure"`, and `layer_bl42={"max_spectral_abscissa": 5.0}`. Calls `make_objective("E4", "classical", "layer_bl42.max_spectral_abscissa")` with no explicit `gate_layer`. Asserts `val == 5.0` (not `+inf`). Under the old hardcoded `gate_layer=3` this would gate to `+inf`; under the new auto-infer `gate_layer=2` the closure skips the gate and returns the extracted 5.0. This is the exact scenario the commit claims to unblock (the L3r self-gate +inf trap).
+  - Optional companion `test_layer6_lower_failure_with_populated_payload` — mocks `failed_layer=5` with an explicit `max_layer=7` kwarg (forcing `gate_layer=6`) plus populated `r.layer5` / `r.layer6` — verifies that a below-objective-layer failure gates while an at-or-above-objective-layer failure does not; helps guard the max_layer > objective-layer case (user passes `--max-layer` deeper than the objective field's native layer).
+  - File: `scripts/stencil_gen/tests/test_optimizer.py`
+  - Test: `cd scripts/stencil_gen && uv run pytest tests/test_optimizer.py -x -q -k "TestGateLayerInfer"` — all existing tests plus the new ones pass.
+
 ### 45.1 — `pareto` module: `ParetoResult`, `ParetoPoint`, `make_multi_objective`
 
 - [ ] **45.1a** Create `scripts/stencil_gen/stencil_gen/pareto.py` with two frozen dataclasses:
@@ -338,7 +355,7 @@ cd scripts/stencil_gen && SYMPY_CACHE_SIZE=50000 uv run python -m sweeps pareto 
 ```
 45.0a → 45.0a.1                         # nlopt platform fix + swig in Dockerfile (review follow-up)
   ↓
-45.0b → 45.0c                           # gate_layer auto-infer + tests
+45.0b → 45.0c → 45.0d → 45.0e           # gate_layer auto-infer + tests + CLI wiring + stronger test (45.0d/e review follow-up)
   ↓
 45.1a → 45.1b → 45.1c                   # pareto module: dataclasses + factory + tests
   ↓
