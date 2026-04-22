@@ -93,7 +93,7 @@ cd scripts/stencil_gen && SYMPY_CACHE_SIZE=50000 uv run python -m sweeps pareto 
   - File: `.devcontainer/Dockerfile`
   - Test: `git show HEAD:.devcontainer/Dockerfile | grep -qE '^\s*swig\b'` (passes once committed); full verification is a `docker build` + `uv sync` in a clean devcontainer.
 
-- [ ] **45.0b** Add `gate_layer` auto-inference to `make_objective`. Change signature at `optimizer.py:265` from `gate_layer: int = 3` to `gate_layer: int | None = None`. After `max_layer` is resolved (line 307), insert:
+- [x] **45.0b** Add `gate_layer` auto-inference to `make_objective`. Change signature at `optimizer.py:265` from `gate_layer: int = 3` to `gate_layer: int | None = None`. After `max_layer` is resolved (line 307), insert:
   ```python
   if gate_layer is None:
       gate_layer = max(max_layer - 1, 0)
@@ -102,7 +102,7 @@ cd scripts/stencil_gen && SYMPY_CACHE_SIZE=50000 uv run python -m sweeps pareto 
   - File: `scripts/stencil_gen/stencil_gen/optimizer.py`
   - Test: `cd scripts/stencil_gen && uv run pytest tests/test_optimizer.py -x -q -k "GateLayerInfer"`
 
-- [ ] **45.0c** Add `TestGateLayerInfer` class to `tests/test_optimizer.py` with 5 tests:
+- [x] **45.0c** Add `TestGateLayerInfer` class to `tests/test_optimizer.py` with 5 tests:
   - `test_default_gate_for_layer6_objective` — `make_objective("E4", "classical", "layer6.transient_growth_bound")` with no `gate_layer` kwarg infers `gate_layer=5`, `max_layer=6`.
   - `test_default_gate_for_bl42_objective` — same for `layer_bl42.max_spectral_abscissa` → `gate_layer=2`, `max_layer=3`.
   - `test_default_gate_for_layer1_objective_no_gate` — `layer1.boundary_gv_err` → `gate_layer=0`, `max_layer=1` (the no-gate degenerate case; verify the returned closure still works and returns finite values at known-feasible points).

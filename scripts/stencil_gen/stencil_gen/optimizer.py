@@ -267,7 +267,7 @@ def make_objective(
     kernel: str,
     report_field: str,
     *,
-    gate_layer: int = 3,
+    gate_layer: int | None = None,
     max_layer: int | None = None,
 ) -> Callable[[np.ndarray], float]:
     """Build a feasibility-gated objective ``f(x) -> float``.
@@ -290,7 +290,11 @@ def make_objective(
         :func:`extract_field`.
     gate_layer
         Highest layer whose failure forces ``+inf`` (the feasibility gate).
-        Defaults to 3, matching the cheap-inner stage of the cascade.
+        Defaults to ``max_layer - 1`` (floored at 0), so an objective living
+        in layer N gates on all strictly-earlier layers — the natural
+        feasibility gate for a cascade where layer N depends on layers
+        ``< N`` passing.  A value of 0 means no gate (the objective layer
+        is the only one run).
     max_layer
         Highest layer actually executed.  Defaults to the layer implied by
         ``report_field`` (``layer6.*`` → 6, ``kreiss.*`` → 2, …).  Raises
@@ -305,6 +309,8 @@ def make_objective(
                 "pass max_layer explicitly"
             )
         max_layer = inferred
+    if gate_layer is None:
+        gate_layer = max(max_layer - 1, 0)
     if max_layer < gate_layer:
         raise ValueError(
             f"max_layer={max_layer} is less than gate_layer={gate_layer}; "

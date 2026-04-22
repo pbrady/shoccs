@@ -391,6 +391,98 @@ class TestMakeObjectiveBL42:
         assert np.isfinite(val)
 
 
+class TestGateLayerInfer:
+    """Plan 45.0b: ``gate_layer`` defaults to ``max(max_layer - 1, 0)``.
+
+    Rationale: for an objective living in layer N, the natural feasibility
+    gate is "every strictly-earlier layer passes".  The old hard-coded
+    ``gate_layer=3`` caused layer-6/7 objectives to never gate (wasting
+    evals on infeasible points) and ``layer_bl42`` (layer 3) objectives to
+    gate themselves into a permanent ``+inf`` trap.
+    """
+
+    def test_default_gate_for_layer6_objective(self, monkeypatch):
+        import stencil_gen.optimizer as opt
+
+        captured: dict = {}
+
+        def fake_score(scheme, kernel, params, *, max_layer, short_circuit):
+            captured["max_layer"] = max_layer
+            r = StabilityReport.empty()
+            # Simulate a cascade failure at layer 5.  With auto-infer,
+            # gate_layer=5, so ``failed_layer <= gate_layer`` is True and
+            # the closure must return +inf.
+            r.failed_layer = 5
+            r.failed_reason = "synthetic L5 failure"
+            return r
+
+        monkeypatch.setattr(opt, "brady2d_stability_score", fake_score)
+        f = make_objective("E4", "classical", "layer6.transient_growth_bound")
+        val = f(np.array([-0.77, 0.16]))
+        assert captured["max_layer"] == 6
+        assert val == float("inf")
+
+    def test_default_gate_for_bl42_objective(self, monkeypatch):
+        import stencil_gen.optimizer as opt
+
+        captured: dict = {}
+
+        def fake_score(scheme, kernel, params, *, max_layer, short_circuit):
+            captured["max_layer"] = max_layer
+            r = StabilityReport.empty()
+            # layer_bl42 is layer 3; auto-inferred gate_layer=2.  An L2
+            # failure must gate.
+            r.failed_layer = 2
+            r.failed_reason = "synthetic L2 failure"
+            return r
+
+        monkeypatch.setattr(opt, "brady2d_stability_score", fake_score)
+        f = make_objective(
+            "E4", "classical", "layer_bl42.max_spectral_abscissa",
+        )
+        val = f(np.array([-0.77, 0.16]))
+        assert captured["max_layer"] == 3
+        assert val == float("inf")
+
+    def test_default_gate_for_layer1_objective_no_gate(self):
+        # layer1.* → max_layer=1, gate_layer=0 (degenerate no-gate case:
+        # failed_layer starts at 1, so ``failed_layer <= 0`` is never
+        # true).  Verify the closure works end-to-end at a known-feasible
+        # σ and returns a finite GV error.
+        f = make_objective("E2", "tension", "layer1.boundary_gv_err")
+        val = f(np.array([3.0]))
+        assert np.isfinite(val)
+        assert val >= 0.0
+
+    def test_explicit_gate_layer_preserved(self, monkeypatch):
+        # Passing gate_layer=3 explicitly with a layer6.* objective must
+        # override the auto-infer.  Simulate an L5 failure together with a
+        # populated layer6 payload: with gate_layer=3, the closure does
+        # NOT gate (3 < 5), and extract_field returns the stored value.
+        import stencil_gen.optimizer as opt
+
+        def fake_score(scheme, kernel, params, *, max_layer, short_circuit):
+            r = StabilityReport.empty()
+            r.failed_layer = 5
+            r.failed_reason = "synthetic"
+            r.layer6 = {"transient_growth_bound": 42.0}
+            return r
+
+        monkeypatch.setattr(opt, "brady2d_stability_score", fake_score)
+        f = make_objective(
+            "E4", "classical", "layer6.transient_growth_bound",
+            gate_layer=3,
+        )
+        val = f(np.array([-0.77, 0.16]))
+        assert val == 42.0
+
+    def test_no_auto_infer_raises_on_unknown_field(self):
+        # A field with no recognised layer prefix still raises from
+        # _infer_max_layer before gate_layer is considered.
+        with pytest.raises(ValueError, match="cannot infer max_layer"):
+            make_objective("E4", "classical", "bogus_field")
+
+
 class TestRunScipyLocal:
     """Driver-level tests for :func:`run_scipy_local`.
 
