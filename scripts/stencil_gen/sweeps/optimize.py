@@ -105,6 +105,10 @@ def _resolve_persisted_layers(
       ``max_layer`` falls back to ``_infer_max_layer(args.objective)`` for
       non-staged methods when ``--max-layer`` is absent, and to the staged
       inner-depth default of ``3`` for ``method == "staged"`` when absent.
+      ``gate_layer`` falls back to ``max(max_layer - 1, 0)`` when
+      ``--gate-layer`` is absent, matching ``make_objective``'s auto-infer
+      behaviour so the persisted record reflects the actual gate the
+      optimiser used.
     - ``validator_max_layer`` is ``args.validator_max_layer`` iff
       ``method == "staged"``, else ``None`` (and therefore omitted from the
       persisted dict).
@@ -114,7 +118,10 @@ def _resolve_persisted_layers(
     """
     if args.method == "staged":
         max_layer = args.max_layer if args.max_layer is not None else 3
-        return int(args.gate_layer), int(max_layer), int(args.validator_max_layer)
+        gate_layer = (
+            args.gate_layer if args.gate_layer is not None else max(max_layer - 1, 0)
+        )
+        return int(gate_layer), int(max_layer), int(args.validator_max_layer)
     if args.max_layer is not None:
         max_layer = int(args.max_layer)
     else:
@@ -125,7 +132,10 @@ def _resolve_persisted_layers(
                 "pass --max-layer explicitly"
             )
         max_layer = int(inferred)
-    return int(args.gate_layer), max_layer, None
+    gate_layer = (
+        args.gate_layer if args.gate_layer is not None else max(max_layer - 1, 0)
+    )
+    return int(gate_layer), max_layer, None
 
 
 def _run_cpp_validation(
@@ -330,13 +340,22 @@ def _run_method(
 ) -> OptimizeResult:
     method = args.method
     if method == "staged":
+        inner_max_layer = args.max_layer if args.max_layer is not None else 3
+        # ``make_objective`` auto-infers ``gate_layer = max(max_layer - 1, 0)``
+        # when ``None``; ``run_staged_optimize``'s ``inner_gate`` is a plain
+        # ``int`` so resolve the default here to keep its signature untouched.
+        inner_gate = (
+            args.gate_layer
+            if args.gate_layer is not None
+            else max(inner_max_layer - 1, 0)
+        )
         return run_staged_optimize(
             scheme=args.scheme,
             kernel=args.kernel,
             report_field=args.objective,
             bounds=bounds,
-            inner_gate=args.gate_layer,
-            inner_max_layer=args.max_layer if args.max_layer is not None else 3,
+            inner_gate=inner_gate,
+            inner_max_layer=inner_max_layer,
             validator_max_layer=args.validator_max_layer,
             top_k=args.top_k,
             method=args.inner_method,
@@ -412,7 +431,15 @@ def main(argv: list[str] | None = None) -> int:
         required=True,
         help='Dotted-path report field (e.g. "layer3.max_stab_eig", "layer6.transient_growth_bound").',
     )
-    parser.add_argument("--gate-layer", type=int, default=3)
+    parser.add_argument(
+        "--gate-layer",
+        type=int,
+        default=None,
+        help=(
+            "Highest layer whose failure forces +inf (the feasibility gate). "
+            "Default: max_layer-1 (auto-inferred from --objective; floored at 0)."
+        ),
+    )
     parser.add_argument(
         "--max-layer",
         type=int,

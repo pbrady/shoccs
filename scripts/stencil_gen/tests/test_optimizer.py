@@ -1586,8 +1586,10 @@ class TestOptimizeCLI:
         # Plan 43.8c: gate_layer and inferred max_layer round-trip (no
         # --max-layer was passed for this call, so max_layer is the inferred
         # layer3 from the "layer3.max_stab_eig" prefix).  Non-staged method,
-        # so validator_max_layer must be absent.
-        assert opt["gate_layer"] == 3
+        # so validator_max_layer must be absent.  Plan 45.0d: --gate-layer is
+        # now auto-inferred as ``max(max_layer - 1, 0)`` when omitted, so the
+        # persisted gate_layer reflects that (2 for an L3 objective).
+        assert opt["gate_layer"] == 2
         assert opt["max_layer"] == 3
         assert "validator_max_layer" not in opt
         # Existing top-level keys are untouched.
@@ -1627,8 +1629,9 @@ class TestOptimizeCLI:
         ] == pytest.approx(-0.75)
         # Plan 43.8c: explicit --max-layer 6 on the second call must round-trip
         # (no inference fallback).  Still non-staged, so no validator field.
+        # Plan 45.0d: with --gate-layer omitted, it auto-infers to max_layer-1.
         second_opt = kernel_bucket["layer6.transient_growth_bound"]
-        assert second_opt["gate_layer"] == 3
+        assert second_opt["gate_layer"] == 5
         assert second_opt["max_layer"] == 6
         assert "validator_max_layer" not in second_opt
 
@@ -1664,8 +1667,9 @@ class TestOptimizeCLI:
         ]
         # No --max-layer passed and method is staged, so the inner-depth
         # default of 3 is persisted; validator_max_layer is the explicit 7.
+        # Plan 45.0d: --gate-layer defaults to max(inner_max_layer - 1, 0) = 2.
         assert staged_opt["method"] == "staged"
-        assert staged_opt["gate_layer"] == 3
+        assert staged_opt["gate_layer"] == 2
         assert staged_opt["max_layer"] == 3
         assert staged_opt["validator_max_layer"] == 7
 
@@ -2200,6 +2204,49 @@ class TestOptimizerBL42:
                 "--kernel", "tension",
                 "--objective", "layer_bl42.max_spectral_abscissa",
                 "--gate-layer", "2",
+                "--bounds", "0.5", "20",
+                "--method", "Nelder-Mead",
+                "--n-restarts", "4",
+                "--max-evals", "40",
+                "--seed", "0",
+            ],
+            cwd=str(stencil_gen_dir),
+            env=env,
+            capture_output=True,
+            text=True,
+            timeout=900,
+        )
+        assert proc.returncode == 0, (
+            f"stdout:\n{proc.stdout}\n\nstderr:\n{proc.stderr}"
+        )
+        assert "best_objective" in proc.stdout
+        assert "inf" not in proc.stdout, "all evaluations returned +inf (vacuous run)"
+
+    @pytest.mark.slow
+    def test_cli_optimize_bl42_tension_auto_gate_layer(self):
+        """Same as ``test_cli_optimize_bl42_tension`` but with ``--gate-layer``
+        omitted — asserts the CLI's auto-infer path (plan 45.0d) produces a
+        finite result for the L3r objective without the user knowing to pass
+        ``--gate-layer 2`` manually. Under the pre-45.0d hardcoded
+        ``default=3`` this would have self-gated and every evaluation would
+        have returned ``+inf``.
+        """
+        import os
+        import subprocess
+        import sys
+        from pathlib import Path
+
+        stencil_gen_dir = Path(__file__).resolve().parent.parent
+        env = os.environ.copy()
+        env["SYMPY_CACHE_SIZE"] = env.get("SYMPY_CACHE_SIZE", "50000")
+        proc = subprocess.run(
+            [
+                sys.executable,
+                "-m",
+                "sweeps.optimize",
+                "--scheme", "E4",
+                "--kernel", "tension",
+                "--objective", "layer_bl42.max_spectral_abscissa",
                 "--bounds", "0.5", "20",
                 "--method", "Nelder-Mead",
                 "--n-restarts", "4",
