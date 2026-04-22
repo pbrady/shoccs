@@ -89,6 +89,10 @@ cd scripts/stencil_gen && SYMPY_CACHE_SIZE=50000 uv run python -m sweeps pareto 
   - File: `scripts/stencil_gen/pyproject.toml`
   - Test: `cd scripts/stencil_gen && uv sync && uv run python -c "import nlopt, pymoo; from pymoo.algorithms.moo.nsga2 import NSGA2; from pymoo.core.problem import ElementwiseProblem; from pymoo.indicators.hv import HV; print('nlopt', nlopt.__version__, 'pymoo', pymoo.__version__)"`
 
+- [ ] **45.0a.1** (review follow-up to 45.0a) Commit the `swig` package addition to `.devcontainer/Dockerfile`. 45.0a's commit (31d1753) and rationale both claim "swig + cmake [are] both present in .devcontainer/Dockerfile base-system stage", but swig is NOT in the committed Dockerfile — it exists only as an uncommitted working-tree diff at `.devcontainer/Dockerfile:61` adding `swig \` to the base-system `apt-get install` list. Building nlopt from the git source requires swig to generate the Python bindings during `uv sync`; without this commit, a fresh devcontainer rebuild from main cannot install nlopt and the 45.0a fix does not actually take effect for new environments. Stage and commit the existing working-tree diff (add `swig` to the `apt-get install` block around line 61 of `.devcontainer/Dockerfile`).
+  - File: `.devcontainer/Dockerfile`
+  - Test: `git show HEAD:.devcontainer/Dockerfile | grep -qE '^\s*swig\b'` (passes once committed); full verification is a `docker build` + `uv sync` in a clean devcontainer.
+
 - [ ] **45.0b** Add `gate_layer` auto-inference to `make_objective`. Change signature at `optimizer.py:265` from `gate_layer: int = 3` to `gate_layer: int | None = None`. After `max_layer` is resolved (line 307), insert:
   ```python
   if gate_layer is None:
@@ -332,7 +336,7 @@ cd scripts/stencil_gen && SYMPY_CACHE_SIZE=50000 uv run python -m sweeps pareto 
 ## Ordering
 
 ```
-45.0a                                   # nlopt platform fix (unblocks uv sync)
+45.0a → 45.0a.1                         # nlopt platform fix + swig in Dockerfile (review follow-up)
   ↓
 45.0b → 45.0c                           # gate_layer auto-infer + tests
   ↓
