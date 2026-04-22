@@ -160,7 +160,7 @@ cd scripts/stencil_gen && SYMPY_CACHE_SIZE=50000 uv run python -m sweeps pareto 
   - File: `scripts/stencil_gen/stencil_gen/pareto.py` (new)
   - Test: `cd scripts/stencil_gen && uv run pytest tests/test_pareto.py -x -q -k "TestParetoDataclasses"`
 
-- [ ] **45.1b** Add `make_multi_objective(scheme, kernel, report_fields, *, gate_layer=None, max_layer=None) -> Callable[[np.ndarray], np.ndarray]` to the same module:
+- [x] **45.1b** Add `make_multi_objective(scheme, kernel, report_fields, *, gate_layer=None, max_layer=None) -> Callable[[np.ndarray], np.ndarray]` to the same module:
   - Accepts a sequence of dotted-path fields (length ≥ 2).
   - Auto-infers `max_layer` as `max(_infer_max_layer(f) for f in report_fields)` and `gate_layer` as `max_layer - 1` (reusing 45.0b's floor).
   - Returns a closure `f(x: np.ndarray) -> np.ndarray` of shape `(len(report_fields),)`.
