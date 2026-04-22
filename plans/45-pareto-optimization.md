@@ -170,7 +170,7 @@ cd scripts/stencil_gen && SYMPY_CACHE_SIZE=50000 uv run python -m sweeps pareto 
   - File: `scripts/stencil_gen/stencil_gen/pareto.py`
   - Test: `cd scripts/stencil_gen && uv run pytest tests/test_pareto.py -x -q -k "TestMakeMultiObjective"`
 
-- [ ] **45.1c** Tests in `tests/test_pareto.py` (new file):
+- [x] **45.1c** Tests in `tests/test_pareto.py` (new file):
   - `TestParetoDataclasses`: construct a `ParetoPoint` and a `ParetoResult` with 3 members; assert frozen (raises `FrozenInstanceError` on assignment); assert `front` accepts tuples but not lists (or coerces — pick one; suggest: require tuple for immutability).
   - `TestMakeMultiObjective::test_shape_matches_field_count` — 2 fields → 2-vector; 3 fields → 3-vector.
   - `TestMakeMultiObjective::test_sentinel_on_gate_trip` — passing an infeasible param vector (e.g., `α = [5.0, 5.0]` for E4 classical, violating L1/L3) returns `[1e12, 1e12]`, not `[inf, inf]` or a partially-finite vector.
