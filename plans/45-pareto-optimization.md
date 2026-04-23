@@ -213,7 +213,7 @@ cd scripts/stencil_gen && SYMPY_CACHE_SIZE=50000 uv run python -m sweeps pareto 
 
 ### 45.3 — `pareto` CLI subcommand + `__main__.py` registration
 
-- [ ] **45.3a** Create `scripts/stencil_gen/sweeps/pareto.py` CLI module mirroring `sweeps/optimize.py`. Argparse surface:
+- [x] **45.3a** Create `scripts/stencil_gen/sweeps/pareto.py` CLI module mirroring `sweeps/optimize.py`. Argparse surface:
   - `--scheme {E2,E4}` (required)
   - `--kernel {classical,tension,gaussian,multiquadric}` (required)
   - `--objectives FIELD [FIELD ...]` (nargs=2+, required; each must be a valid dotted path)
