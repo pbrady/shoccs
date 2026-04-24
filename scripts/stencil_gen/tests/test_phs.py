@@ -2097,3 +2097,116 @@ if _KNOWN is not None:
                         checked += 1
             if checked == 0:
                 pytest.skip("brady2d_optima had no stored entries")
+
+
+# ---------------------------------------------------------------------------
+# 45.6b.3: Regression tests for per-run Pareto fronts under
+# sweeps/pareto_fronts/. Each JSON written by ``python -m sweeps pareto
+# --persist`` records stored objective values; this class recomputes them
+# via :func:`stencil_gen.pareto.make_multi_objective` and asserts a tight
+# match. Gated by 45.6b.1 (deterministic ARPACK in
+# ``spectral_abscissa_sparse``) and 45.6b.2 (regenerated fronts under that
+# regime) — without both, BL42 recompute is process-seeded and drifts.
+# ---------------------------------------------------------------------------
+
+_PARETO_FRONTS_DIR = (
+    Path(__file__).resolve().parent.parent / "sweeps" / "pareto_fronts"
+)
+
+
+def _load_pareto_fronts() -> list[tuple[Path, dict]]:
+    """Return ``(path, parsed_json)`` for every readable front, sorted by name."""
+    if not _PARETO_FRONTS_DIR.is_dir():
+        return []
+    loaded: list[tuple[Path, dict]] = []
+    for path in sorted(_PARETO_FRONTS_DIR.glob("*.json")):
+        try:
+            with open(path) as fh:
+                loaded.append((path, json.load(fh)))
+        except (OSError, ValueError):
+            continue
+    return loaded
+
+
+_PARETO_FRONTS = _load_pareto_fronts()
+
+
+@pytest.mark.slow
+class TestRegressionBrady2DPareto:
+    """Regression tests for Brady-Livescu 2D Pareto fronts.
+
+    For each JSON under ``sweeps/pareto_fronts/``, iterate the ``front``,
+    rebuild a multi-objective closure via
+    :func:`stencil_gen.pareto.make_multi_objective`, evaluate at the stored
+    ``x``, and assert the recomputed vector matches the stored ``objectives``
+    within 1% relative tolerance.  Additionally verify no stored front
+    contains a dominated member (guards against corrupt persistence).
+
+    Skipped entirely when ``sweeps/pareto_fronts/`` is empty or absent.
+    """
+
+    @pytest.fixture(autouse=True)
+    def _skip_if_absent(self):
+        if not _PARETO_FRONTS:
+            pytest.skip("sweeps/pareto_fronts/ empty or absent")
+
+    def test_each_front_member_objectives_match(self):
+        """Each stored front member reproduces its recorded objectives."""
+        import numpy as np
+
+        from stencil_gen.pareto import _PARETO_SENTINEL, make_multi_objective
+
+        checked = 0
+        for path, data in _PARETO_FRONTS:
+            scheme = data["scheme"]
+            kernel = data["kernel"]
+            objective_fields = tuple(data["objective_fields"])
+            f = make_multi_objective(scheme, kernel, objective_fields)
+            for idx, member in enumerate(data["front"]):
+                stored = np.asarray(member["objectives"], dtype=float)
+                if np.any(stored >= _PARETO_SENTINEL):
+                    continue
+                x = np.asarray(member["x"], dtype=float)
+                recomputed = np.asarray(f(x), dtype=float)
+                assert np.all(np.isfinite(recomputed)), (
+                    f"{path.name} front[{idx}]: recomputed non-finite "
+                    f"({recomputed}) at x={x}"
+                )
+                assert np.allclose(
+                    recomputed, stored, rtol=1e-2, atol=1e-8
+                ), (
+                    f"{path.name} front[{idx}]: recomputed {recomputed} "
+                    f"differs from stored {stored} by more than rtol=1e-2"
+                )
+                checked += 1
+        if checked == 0:
+            pytest.skip("no non-sentinel Pareto front members to check")
+
+    def test_each_front_is_non_dominated(self):
+        """No stored front contains a member dominated by another member."""
+        import numpy as np
+
+        from stencil_gen.pareto import _PARETO_SENTINEL
+
+        for path, data in _PARETO_FRONTS:
+            rows: list[np.ndarray] = []
+            for member in data["front"]:
+                obj = np.asarray(member["objectives"], dtype=float)
+                if np.any(obj >= _PARETO_SENTINEL):
+                    continue
+                rows.append(obj)
+            if len(rows) < 2:
+                continue
+            F = np.vstack(rows)
+            for i in range(len(F)):
+                for j in range(len(F)):
+                    if i == j:
+                        continue
+                    # j dominates i iff F[j] <= F[i] component-wise and
+                    # strictly less in at least one.
+                    leq = np.all(F[j] <= F[i])
+                    strict = np.any(F[j] < F[i])
+                    assert not (leq and strict), (
+                        f"{path.name}: front member {i} ({F[i]}) is "
+                        f"dominated by member {j} ({F[j]})"
+                    )
