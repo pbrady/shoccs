@@ -4,17 +4,17 @@
 
 ## What this codebase is
 
-SHOCCS is a C++ Cartesian cut-cell high-order PDE solver (`/workspace/src/`). The user is Peter Brady — author of the Brady-Livescu 2019 and 2021 papers cited throughout. The Python-side tool at `/workspace/scripts/stencil_gen/` began as a SymPy stencil derivation pipeline and has grown (plans 40–44) into a layered stability-scoring and optimization framework that:
+SHOCCS is a C++ Cartesian cut-cell high-order PDE solver (`/workspace/src/`). The user is Peter Brady — author of the Brady-Livescu 2019 and 2021 papers cited throughout. The Python-side tool at `/workspace/scripts/stencil_gen/` began as a SymPy stencil derivation pipeline and has grown (plans 40–45) into a layered stability-scoring and optimization framework that:
 
 - Evaluates any scheme/kernel/parameter choice against a cascade of **eight** stability layers (L1 GV error → L2 rigorous Kreiss → L3 1D eigenvalue → L3r BL §4.2 reflecting-hyperbolic → L4 2D local GV → L5 anisotropy → L6 non-normality → L7 sparse 2D eigenvalue → L8 full C++ simulation)
 - Optimizes boundary closures via scipy (Nelder-Mead, COBYQA, SHGO, differential_evolution, staged multi-fidelity)
 - Validates winners end-to-end by running the compiled C++ `shoccs` solver with the discovered parameters passed through Lua
 
-## Recent state (2026-04-15)
+## Recent state (2026-04-24)
 
-- Plans 40–44 are all complete. Git log from commit `843c974` forward shows the full trail.
-- The devcontainer was just rebuilt with `pymoo>=0.6` and `nlopt>=2.7` added to `scripts/stencil_gen/pyproject.toml` (plus `swig` added to the Dockerfile for nlopt's build).
-- Plan 45 (multi-objective Pareto via NSGA-II) was actively being scoped when this handoff was written.
+- Plans 40–45 are all substantially complete. Git log from commit `843c974` forward shows the full trail.
+- The devcontainer was rebuilt with `pymoo>=0.6` and `nlopt>=2.7` added to `scripts/stencil_gen/pyproject.toml` (plus `swig` added to the Dockerfile for nlopt's build).
+- Plan 45 (multi-objective Pareto via NSGA-II) landed its implementation tail: `sweeps pareto` CLI wired through `sweeps/__main__.py`, calibration JSONs committed under `sweeps/pareto_fronts/`, `TestRegressionBrady2DPareto` passing under deterministic ARPACK, and `pareto_reference.md` + cross-links live. Items 45.7c–e (meta.md `D-Opt-1` entry and two `.claude/skills/` updates) are the final remaining tail.
 
 ## File guide (this folder)
 
@@ -22,11 +22,11 @@ Read in this order if you want the full picture:
 
 1. **[framework_architecture.md](framework_architecture.md)** — what modules live where, their APIs, their dependency graph, and the C++/Lua/JSON integration surface. ~4000 words. The reference an agent needs to navigate the code.
 
-2. **[completed_plans.md](completed_plans.md)** — one-section-per-plan summary of what plans 40–44 delivered, public entry points, and inline corrections discovered during execution. ~3500 words. Skip to a specific plan's section when you need to understand what that plan did.
+2. **[completed_plans.md](completed_plans.md)** — one-section-per-plan summary of what plans 40–45 delivered, public entry points, and inline corrections discovered during execution. ~3500 words. Skip to a specific plan's section when you need to understand what that plan did.
 
 3. **[scientific_findings.md](scientific_findings.md)** — 10 non-obvious discoveries from the work that a new agent cannot derive by reading code alone. Examples: tension-spline fails BL42 universally (verified via 898-eval DE); classical-α has multiple feasible basins (BL found 101); L7 operator has physically-correct positive spectral abscissa from `div(c) > 0`; BL §4.2 eigenvalues are `±i(2k-1)π/2` not `±ikπ`. Read this before drawing conclusions from any stability number.
 
-4. **[next_steps.md](next_steps.md)** — plan 45 (queued), plans 46 and 47 (deeper queue), small follow-ups and backlog. Open decisions flagged per plan. Start here when the user says "continue" or "what's next."
+4. **[next_steps.md](next_steps.md)** — plans 46 and 47 queued, plus small follow-ups and backlog. Open decisions flagged per plan. Note: this file still describes plan 45 as queued; plan 45 has since landed (see `plans/45-pareto-optimization.md`). Start here when the user says "continue" or "what's next."
 
 5. **[operating_conventions.md](operating_conventions.md)** — how to launch ralph_wiggum, plan-file structure, the `.claude/skills/**` permission block, Python env conventions (`uv run`, `SYMPY_CACHE_SIZE`), C++ build commands, git hygiene. Read before touching anything.
 
@@ -58,11 +58,11 @@ from stencil_gen.cpp_bridge import run_cpp_brady2d
 result = run_cpp_brady2d("tension_E4u", {"sigma": 3.0}, N=31, t_final=10.0)
 ```
 
-**The CLI dispatch lives at `python -m sweeps <subcmd>`**, with 11 subcommands registered: `epsilon`, `tension`, `tension-penalty`, `footprint`, `comparison`, `alpha`, `mixed-epsilon`, `gv-stability-pareto`, `brady2d`, `optimize`, `all`.
+**The CLI dispatch lives at `python -m sweeps <subcmd>`**, with 12 subcommands registered: `epsilon`, `tension`, `tension-penalty`, `footprint`, `comparison`, `alpha`, `mixed-epsilon`, `gv-stability-pareto`, `pareto`, `brady2d`, `optimize`, `all`.
 
 ## Key artifacts to cite/reference
 
-- **Plans:** `/workspace/plans/40-*.md` through `44-*.md`. All items `[x]` except four `.claude/skills/**` edits that were manually completed this session. Plan 45 doesn't exist yet.
+- **Plans:** `/workspace/plans/40-*.md` through `45-*.md`. Plans 40–44 are fully `[x]`; plan 45 is in its final docs/skills phase (items 45.7c–e remaining). Plans 46 and 47 are queued per `next_steps.md`.
 - **Reference docs** (in `/workspace/scripts/stencil_gen/docs/`):
   - `brady2d_stability_reference.md` — L1–L8 cascade
   - `bl42_reference.md` — BL §4.2 reflecting-hyperbolic layer (L3r)
@@ -80,7 +80,7 @@ result = run_cpp_brady2d("tension_E4u", {"sigma": 3.0}, N=31, t_final=10.0)
 
 1. Read [MASTER.md](MASTER.md) (you're here), skim [next_steps.md](next_steps.md).
 2. Verify the devcontainer rebuild took: `cd scripts/stencil_gen && uv run python -c "import pymoo; print(pymoo.__version__)"`.
-3. If the user wants plan 45 (multi-objective Pareto): propose the scope from [next_steps.md](next_steps.md), resolve the three open decisions noted there, then write and execute the plan via ralph_wiggum.
+3. If the user wants plan 45 (multi-objective Pareto): the bulk of it has already landed — only items 45.7c–e remain (a `D-Opt-1` entry in `plans/meta.md` and two `.claude/skills/` updates). Check `plans/45-pareto-optimization.md` for the current checkbox state before starting.
 4. If the user wants something else: [next_steps.md](next_steps.md) lists plans 46, 47, and backlog items. Confirm direction before writing.
 
 ## What to do if the user asks about a specific topic
@@ -104,4 +104,4 @@ Three substantive findings from the session that should shape future work:
 
 ---
 
-**One-line summary:** Python scoring cascade + optimizer + C++ bridge, five plans deep, all passing, ready for multi-objective extension via pymoo (just added to the rebuilt devcontainer).
+**One-line summary:** Python scoring cascade + optimizer + multi-objective Pareto (pymoo/NSGA-II) + C++ bridge, six plans deep, all passing.
