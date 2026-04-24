@@ -24,6 +24,8 @@ import numpy as np
 from stencil_gen.optimizer import DEFAULT_BOUNDS
 from stencil_gen.pareto import ParetoResult, run_nsga2
 
+from ._pareto_io import save_pareto_front
+
 _KERNEL_CHOICES = ("tension", "gaussian", "multiquadric", "classical")
 _KERNEL_DIM = {"tension": 1, "gaussian": 1, "multiquadric": 1, "classical": 2}
 _CPP_SUPPORTED_KERNELS = ("classical", "tension", "gaussian", "multiquadric")
@@ -263,12 +265,8 @@ def main(argv: list[str] | None = None) -> int:
     _print_summary(result)
 
     if args.persist:
-        # Persistence lands in plan 45.4a (sweeps/_pareto_io.py).  Until that
-        # module exists, surface the request so users know the flag was seen.
-        print(
-            "\n[pareto] --persist: wiring lands in plan 45.4; this run did "
-            "not write a JSON file."
-        )
+        written = save_pareto_front(result)
+        print(f"\n[pareto] persisted front to {written}")
 
     if args.validate_with_cpp:
         # L8 bridge validation lands in plan 45.5a.  Until then, acknowledge
