@@ -313,21 +313,30 @@ cd scripts/stencil_gen && SYMPY_CACHE_SIZE=50000 uv run python -m sweeps pareto 
 
 ### 45.6 — Calibration runs + regression test
 
-- [ ] **45.6a** Run two seeded Pareto sweeps with `--persist` to populate `sweeps/pareto_fronts/`:
+- [x] **45.6a.1** Run the E4 classical calibration sweep with `--persist`:
   ```bash
   cd scripts/stencil_gen && SYMPY_CACHE_SIZE=50000 uv run python -m sweeps pareto \
       --scheme E4 --kernel classical \
       --objectives layer1.boundary_gv_err layer_bl42.max_spectral_abscissa \
       --bounds -2 2 0.05 2 --pop-size 40 --n-gen 30 --seed 1 --persist
+  ```
+  Commit the resulting JSON file. This is one of the two baseline fronts the regression test verifies.
+  - File: `scripts/stencil_gen/sweeps/pareto_fronts/E4_classical_layer1_boundary_gv_err__layer_bl42_max_spectral_abscissa.json`
+  - Test: `cd scripts/stencil_gen && uv run python -c "from pathlib import Path; import json; p = Path('sweeps/pareto_fronts/E4_classical_layer1_boundary_gv_err__layer_bl42_max_spectral_abscissa.json'); d = json.loads(p.read_text()); assert len(d['front']) >= 15, f'front too small: {len(d[\"front\"])}'; print('front_size=', len(d['front']), 'hv=', d['hv_trace'][-1])"`
+  - **Implementation note:** Wall time ~376 s (1200 evals). Result: front_size=30; `hv_trace[0]=0.757 → hv_trace[-1]=0.995` (monotone non-decreasing); GV-err ∈ [1.96e-3, 4.46e-2], BL42 ∈ [2.81e-15, 4.49e-1]; zero dominated pairs. Demonstrates the trade-off predicted in `scientific_findings.md` §9: member with BL42=2.81e-15 has GV-err=0.0446 (stability-focused closure, α≈[-1.46, 0.25]); member with GV-err=1.96e-3 has BL42=0.449 (dispersion-focused closure, α≈[-0.23, 0.050]). ref_point auto-fell-back to [1.0, 1.0] (the 20 uniform-random probes in `[(-2,2),(0.05,2)]` all sentinel'd — plausible given the feasibility region is narrow — but the finite sentinel keeps HV well-defined so the front is still meaningful; 8 of the final 40 members were still sentinel rows and got filtered out).
 
+- [ ] **45.6a.2** (split follow-up to 45.6a) Swap the tension-sweep objective pair. The original plan spec `--objectives layer1.boundary_gv_err layer6.transient_growth_bound` cannot produce a non-empty front on tension kernels: tension closures universally fail L3 BL42 (`max_spectral_abscissa ≈ 0.95 > 1e-10`, per `scientific_findings.md` discovery #9), and `make_multi_objective` runs `brady2d_stability_score` with `short_circuit=True` (pareto.py:215), so the pipeline aborts at L3 before L6 ever populates. Confirmed empirically: a full `pop=20, n_gen=20, seed=1` run at those bounds produced 400 sentinel evaluations and `front_size=0` in 135 s. Two options for the fix, pick one and note the choice in the commit:
+  (A) **Change objectives to L1 vs BL42** — same pair as the classical sweep, exercising a different kernel. This keeps the regression test uniform (every front uses fields that `extract_field` populates after short-circuit abort) and still demonstrates the tension-specific trade-off: tension has a much *cleaner* L1 gv_err than classical but a much *worse* L3 BL42 abscissa. Command:
+  ```bash
   cd scripts/stencil_gen && SYMPY_CACHE_SIZE=50000 uv run python -m sweeps pareto \
       --scheme E4 --kernel tension \
-      --objectives layer1.boundary_gv_err layer6.transient_growth_bound \
+      --objectives layer1.boundary_gv_err layer_bl42.max_spectral_abscissa \
       --bounds 0.5 20 --pop-size 20 --n-gen 20 --seed 1 --persist
   ```
-  Commit the resulting two JSON files. These are the baseline fronts the regression test verifies. Document wall times in the commit message. Expected front sizes: classical 2D should produce ~15–30 non-dominated points; tension 1D is constrained by being on a 1D curve so ~5–10 points.
-  - File: `scripts/stencil_gen/sweeps/pareto_fronts/E4_classical_layer1_boundary_gv_err__layer_bl42_max_spectral_abscissa.json`, `scripts/stencil_gen/sweeps/pareto_fronts/E4_tension_layer1_boundary_gv_err__layer6_transient_growth_bound.json`
-  - Test: `cd scripts/stencil_gen && uv run python -c "from pathlib import Path; import json; [print(p.name, len(json.loads(p.read_text())['front'])) for p in Path('sweeps/pareto_fronts').glob('*.json')]"`
+  Expected front size: 5–10 points along a 1D σ-curve.
+  (B) **Thread `short_circuit=False` through `make_multi_objective`/`run_nsga2`** — more invasive (requires a keyword-arg change on two public functions and on the CLI) but lets the original L1-vs-L6 pair stand. Only do this if there is a separate need for non-short-circuited cascades; it doubles per-eval cost for little gain given option A already gives a meaningful front.
+  - File: `scripts/stencil_gen/sweeps/pareto_fronts/E4_tension_<mangled>.json` (name depends on the chosen objectives)
+  - Test: `cd scripts/stencil_gen && uv run python -c "from pathlib import Path; import json; ps = list(Path('sweeps/pareto_fronts').glob('E4_tension_*.json')); assert ps, 'no tension front persisted'; d = json.loads(ps[0].read_text()); assert len(d['front']) >= 3, f'front too small: {len(d[\"front\"])}'; print(ps[0].name, 'front_size=', len(d['front']))"`
 
 - [ ] **45.6b** Add `TestRegressionBrady2DPareto` class to `tests/test_phs.py`, modeled on `TestRegressionBrady2DOptima` (lines 2020–2099 per agent finding #8):
   - Module-level load: `_PARETO_FRONTS = list((Path(__file__).resolve().parent.parent / "sweeps" / "pareto_fronts").glob("*.json"))` once at import, filter to only readable JSONs.
@@ -385,7 +394,7 @@ cd scripts/stencil_gen && SYMPY_CACHE_SIZE=50000 uv run python -m sweeps pareto 
   ↓
 45.5a → 45.5a.1 → 45.5b                 # C++ validation + persist/validate ordering fix (review follow-up)
   ↓
-45.6a → 45.6b                           # calibration runs + regression
+45.6a.1 → 45.6a.2 → 45.6b               # calibration runs (classical done; tension deferred) + regression
   ↓
 45.7a → 45.7b → 45.7c → 45.7d → 45.7e   # docs + meta + skills
 ```
@@ -400,7 +409,7 @@ Strictly sequential within each group. 45.5 (C++ validation) can be deferred wit
 - `make_objective(scheme, kernel, "layer_bl42.max_spectral_abscissa")` with no `gate_layer` kwarg returns a closure that produces finite values at known-L2-feasible, L3r-evaluable points (auto-infer working end-to-end, fixing the `+inf` trap from `docs/handoff/known_limitations.md`).
 - `run_nsga2("E4", "classical", ["layer1.boundary_gv_err", "layer_bl42.max_spectral_abscissa"], DEFAULT_BOUNDS[("E4","classical")], pop_size=12, n_gen=4, seed=1)` returns a `ParetoResult` with `len(front) >= 3` and a non-decreasing `hv_trace`.
 - `python -m sweeps pareto --help` lists `--objectives`, `--pop-size`, `--n-gen`, `--seed`, `--persist`, `--validate-with-cpp` among others.
-- `sweeps/pareto_fronts/` directory exists (committed via `.gitkeep`), contains 2 calibration JSONs from 45.6a, each with a non-empty `front` and a finite `hv_trace[-1]`.
+- `sweeps/pareto_fronts/` directory exists (committed via `.gitkeep`), contains 2 calibration JSONs from 45.6a.1 (classical, done) and 45.6a.2 (tension, still pending), each with a non-empty `front` and a finite `hv_trace[-1]`.
 - `TestRegressionBrady2DPareto` (marked `@pytest.mark.slow`) passes: every stored front member's objectives recompute within 1% of the stored values; no stored front contains dominated members.
 - `scripts/stencil_gen/docs/pareto_reference.md` exists (>2 KB) and is cross-linked from `optimization_reference.md` and `brady2d_stability_reference.md`; `docs/handoff/MASTER.md` lists it.
 - `plans/meta.md` contains `D-Opt-1` capturing the four decisions.
