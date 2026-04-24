@@ -22,7 +22,7 @@ Read in this order if you want the full picture:
 
 1. **[framework_architecture.md](framework_architecture.md)** — what modules live where, their APIs, their dependency graph, and the C++/Lua/JSON integration surface. ~4000 words. The reference an agent needs to navigate the code.
 
-2. **[completed_plans.md](completed_plans.md)** — one-section-per-plan summary of what plans 40–45 delivered, public entry points, and inline corrections discovered during execution. ~3500 words. Skip to a specific plan's section when you need to understand what that plan did.
+2. **[completed_plans.md](completed_plans.md)** — one-section-per-plan summary of what plans 40–44 delivered (plan 45 landed after this snapshot; see `plans/45-pareto-optimization.md`), public entry points, and inline corrections discovered during execution. ~3500 words. Skip to a specific plan's section when you need to understand what that plan did.
 
 3. **[scientific_findings.md](scientific_findings.md)** — 10 non-obvious discoveries from the work that a new agent cannot derive by reading code alone. Examples: tension-spline fails BL42 universally (verified via 898-eval DE); classical-α has multiple feasible basins (BL found 101); L7 operator has physically-correct positive spectral abscissa from `div(c) > 0`; BL §4.2 eigenvalues are `±i(2k-1)π/2` not `±ikπ`. Read this before drawing conclusions from any stability number.
 

@@ -1,5 +1,7 @@
 # Completed Plans Summary (Plans 40–44)
 
+> **Snapshot status (2026-04-15).** This file was drafted during plan-45 scoping and commits its pre-plan-45 state. Plan 45 (multi-objective Pareto via NSGA-II) landed 2026-04-24; see `plans/45-pareto-optimization.md` for the current state. Any reference below to plan 45 as "queued", to `gate_layer` auto-infer as unimplemented, or to multi-objective optimization as "not yet available" is stale.
+
 All five plans complete. Mid-air-but-blocked items: four skill-file edits (harness-blocked) and two explicitly deferred plan-42 follow-ups (E2 spline families, cut-cell spline families).
 
 ## Table of Contents
