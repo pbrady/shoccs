@@ -456,6 +456,195 @@ class TestParetoCLI:
 
 
 # ---------------------------------------------------------------------------
+# _run_front_cpp_validation (plan 45.5b)
+# ---------------------------------------------------------------------------
+
+
+class TestValidateWithCpp:
+    """Covers :func:`sweeps.pareto._run_front_cpp_validation` (plan 45.5b).
+
+    Exercises the four observable contracts:
+
+    1. Global skip when ``result.kernel`` is not in ``_CPP_SUPPORTED_KERNELS``
+       (returns ``None``, never enters the per-member loop).
+    2. Member count is capped at ``_CPP_VALIDATION_MAX_MEMBERS`` (10), in
+       ascending-``objectives[0]`` order, for fronts larger than the cap.
+    3. Per-member entry shape on success: ``x``, ``params``, ``l8_stable``,
+       ``l8_final_linf``, ``wall_time_s`` (+ ``cpp_cutcell_violates_197_288``
+       when the scheme/kernel pair is E4-classical).
+    4. A raising :func:`brady2d_stability_score` records ``l8_error`` on the
+       failing entry and lets the remaining members validate — matches the
+       ``sweeps.optimize._run_cpp_validation`` contract.
+    """
+
+    @staticmethod
+    def _fake_binary(tmp_path, monkeypatch):
+        """Make ``pareto_cli.SHOCCS_BINARY`` appear to exist for the duration."""
+        fake = tmp_path / "shoccs"
+        fake.write_text("")
+        monkeypatch.setattr(pareto_cli, "SHOCCS_BINARY", fake)
+
+    @staticmethod
+    def _make_result_n_members(
+        n: int,
+        *,
+        scheme: str = "E4",
+        kernel: str = "classical",
+    ) -> ParetoResult:
+        """Build an N-member ParetoResult with ``objectives[0]`` ascending by index."""
+        front = tuple(
+            _stub_point(
+                x=[-0.5 + 0.01 * i, 0.2],
+                objectives=[0.01 * i, 0.5 - 0.01 * i],
+            )
+            for i in range(n)
+        )
+        return ParetoResult(
+            front=front,
+            objective_fields=(
+                "layer1.boundary_gv_err",
+                "layer_bl42.max_spectral_abscissa",
+            ),
+            scheme=scheme,
+            kernel=kernel,
+            bounds=((-2.0, 2.0), (0.05, 2.0)),
+            method="NSGA-II",
+            pop_size=max(n, 1),
+            n_gen=1,
+            n_evals=max(n, 1),
+            seed=1,
+            compute_time=0.01,
+            hv_trace=(0.1,),
+            ref_point=(1.0, 1.0),
+            extras={},
+        )
+
+    def test_skips_on_unsupported_kernel(self, tmp_path, monkeypatch, capsys):
+        """Kernel absent from ``_CPP_SUPPORTED_KERNELS`` → ``None`` + 'skipped'."""
+        # The binary is wired up so the skip path is unambiguously the
+        # kernel-not-supported branch, not the missing-binary branch.
+        self._fake_binary(tmp_path, monkeypatch)
+
+        def _unexpected_call(*args, **kwargs):
+            raise AssertionError(
+                "brady2d_stability_score called for unsupported kernel"
+            )
+
+        monkeypatch.setattr(
+            pareto_cli, "brady2d_stability_score", _unexpected_call
+        )
+
+        result = self._make_result_n_members(3, kernel="phs")
+        out = pareto_cli._run_front_cpp_validation(result)
+        assert out is None
+        captured = capsys.readouterr().out
+        assert "skipped" in captured
+        assert "phs" in captured
+
+    def test_caps_at_10_members(self, tmp_path, monkeypatch):
+        """A 25-member front validates only 10 (ascending by objectives[0])."""
+        from stencil_gen.brady2d_stability import StabilityReport
+
+        self._fake_binary(tmp_path, monkeypatch)
+        monkeypatch.setattr(
+            pareto_cli,
+            "brady2d_stability_score",
+            lambda *a, **kw: StabilityReport(
+                layer8={
+                    "stable": True,
+                    "final_linf": 1e-4,
+                    "wall_time_s": 0.1,
+                },
+            ),
+        )
+
+        result = self._make_result_n_members(25)
+        out = pareto_cli._run_front_cpp_validation(result)
+        assert out is not None
+        assert len(out) == 10
+        # Deterministic: the first 10 have the 10 smallest objectives[0] values,
+        # i.e. indices 0..9 — their x[0] = -0.5 + 0.01 * i.
+        xs0 = [entry["x"][0] for entry in out]
+        assert xs0 == pytest.approx([-0.5 + 0.01 * i for i in range(10)])
+
+    def test_records_per_member_shape(self, tmp_path, monkeypatch):
+        """Every successful entry exposes the documented key set."""
+        from stencil_gen.brady2d_stability import StabilityReport
+
+        self._fake_binary(tmp_path, monkeypatch)
+        monkeypatch.setattr(
+            pareto_cli,
+            "brady2d_stability_score",
+            lambda *a, **kw: StabilityReport(
+                layer8={
+                    "stable": True,
+                    "final_linf": 2.5e-4,
+                    "wall_time_s": 0.33,
+                },
+            ),
+        )
+
+        result = self._make_result_n_members(3)
+        out = pareto_cli._run_front_cpp_validation(result)
+        assert out is not None
+        assert len(out) == 3
+        for entry in out:
+            assert set(entry.keys()) >= {
+                "x",
+                "params",
+                "l8_stable",
+                "l8_final_linf",
+                "wall_time_s",
+            }
+            assert entry["l8_stable"] is True
+            assert entry["l8_final_linf"] == pytest.approx(2.5e-4)
+            assert entry["wall_time_s"] == pytest.approx(0.33)
+            # E4-classical with 2D x → the cut-cell 197/288 diagnostic fires.
+            assert "cpp_cutcell_violates_197_288" in entry
+            assert "l8_error" not in entry
+
+    def test_failure_records_error_not_raises(self, tmp_path, monkeypatch, capsys):
+        """A single raising call records ``l8_error``; loop continues."""
+        from stencil_gen.brady2d_stability import StabilityReport
+
+        self._fake_binary(tmp_path, monkeypatch)
+        call_count = {"n": 0}
+
+        def _maybe_raise(*a, **kw):
+            call_count["n"] += 1
+            if call_count["n"] == 1:
+                raise RuntimeError("synthetic L8 failure")
+            return StabilityReport(
+                layer8={
+                    "stable": True,
+                    "final_linf": 1e-4,
+                    "wall_time_s": 0.1,
+                },
+            )
+
+        monkeypatch.setattr(
+            pareto_cli, "brady2d_stability_score", _maybe_raise
+        )
+
+        result = self._make_result_n_members(3)
+        out = pareto_cli._run_front_cpp_validation(result)
+        assert out is not None
+        assert len(out) == 3
+
+        # First member failed; subsequent members must still validate cleanly.
+        assert "l8_error" in out[0]
+        assert "synthetic L8 failure" in out[0]["l8_error"]
+        assert out[0]["l8_stable"] is False
+        assert np.isnan(out[0]["l8_final_linf"])
+        assert out[0]["wall_time_s"] == 0.0
+
+        assert "l8_error" not in out[1]
+        assert out[1]["l8_stable"] is True
+        assert "l8_error" not in out[2]
+        assert out[2]["l8_stable"] is True
+
+
+# ---------------------------------------------------------------------------
 # _pareto_io: save / load / iter round-trip
 # ---------------------------------------------------------------------------
 
