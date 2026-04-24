@@ -97,6 +97,89 @@ class TestSpectralAbscissa:
 
 
 # ---------------------------------------------------------------------------
+# TestSpectralAbscissaDeterminism (45.6b.1)
+# ---------------------------------------------------------------------------
+
+
+class TestSpectralAbscissaDeterminism:
+    """Tests that spectral_abscissa_sparse is cross-process deterministic.
+
+    scipy 1.17's eigs() draws a fresh OS-entropy Generator per call when
+    rng is None. For BL42-like operators whose eigenvalues cluster on the
+    imaginary axis, ARPACK convergence is highly sensitive to the starting
+    vector, so two calls with the same input can land on different
+    representative eigenvalues. Passing a fixed rng seed pins the starting
+    vector and eliminates that variance.
+    """
+
+    def _bl42_like_matrix(self, n: int = 100):
+        """Build a sparse matrix whose eigenvalues cluster on the imaginary axis.
+
+        This is the pathological regime where unpinned starting vectors
+        produce different ARPACK convergence paths across processes.
+        """
+        rng = np.random.default_rng(2026)
+        # Skew-symmetric matrices have purely imaginary eigenvalues, so this
+        # is a strong stand-in for the BL42 reflecting-hyperbolic operator.
+        A = rng.standard_normal((n, n))
+        L = 0.5 * (A - A.T)
+        return sp.csr_matrix(L)
+
+    def test_cross_process_deterministic(self):
+        """Two subprocess calls with the same rng_seed return byte-identical stdout."""
+        import subprocess
+        import sys
+
+        script = (
+            "import numpy as np, scipy.sparse as sp\n"
+            "from stencil_gen.non_normality import spectral_abscissa_sparse\n"
+            "rng = np.random.default_rng(2026)\n"
+            "n = 100\n"
+            "A = rng.standard_normal((n, n))\n"
+            "L = sp.csr_matrix(0.5 * (A - A.T))\n"
+            "max_re, _ = spectral_abscissa_sparse(L, k=10, rng_seed=0)\n"
+            "print(repr(max_re))\n"
+        )
+        out1 = subprocess.run(
+            [sys.executable, "-c", script],
+            capture_output=True, text=True, check=True,
+        ).stdout
+        out2 = subprocess.run(
+            [sys.executable, "-c", script],
+            capture_output=True, text=True, check=True,
+        ).stdout
+        assert out1 == out2, f"non-deterministic:\n  run1={out1!r}\n  run2={out2!r}"
+
+    def test_same_seed_same_result_in_process(self):
+        """Two calls with the same rng_seed return bit-identical max_re."""
+        L = self._bl42_like_matrix()
+        max_re_a, _ = spectral_abscissa_sparse(L, k=10, rng_seed=0)
+        max_re_b, _ = spectral_abscissa_sparse(L, k=10, rng_seed=0)
+        assert max_re_a == max_re_b
+
+    def test_rng_seed_override_quality_equivalent(self):
+        """Different seeds may trace different Arnoldi paths but agree in quality.
+
+        Both answers are within ARPACK's own tolerance of the true spectral
+        abscissa (0 for a skew-symmetric operator), so rng_seed is a path
+        selector, not a correctness knob.
+        """
+        L = self._bl42_like_matrix()
+        max_re_0, _ = spectral_abscissa_sparse(L, k=10, rng_seed=0)
+        max_re_1, _ = spectral_abscissa_sparse(L, k=10, rng_seed=1)
+        # Skew-symmetric ⇒ true spectral abscissa is 0.
+        assert abs(max_re_0) < 1e-8
+        assert abs(max_re_1) < 1e-8
+
+    def test_default_seed_is_zero(self):
+        """Omitting rng_seed uses the same path as rng_seed=0."""
+        L = self._bl42_like_matrix()
+        max_re_default, _ = spectral_abscissa_sparse(L, k=10)
+        max_re_explicit, _ = spectral_abscissa_sparse(L, k=10, rng_seed=0)
+        assert max_re_default == max_re_explicit
+
+
+# ---------------------------------------------------------------------------
 # TestNormMetrics (41.8c)
 # ---------------------------------------------------------------------------
 

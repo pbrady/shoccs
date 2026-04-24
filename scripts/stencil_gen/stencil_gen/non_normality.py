@@ -69,7 +69,7 @@ class NonNormalityReport:
 # ---------------------------------------------------------------------------
 
 
-def spectral_abscissa_sparse(L, k: int = 20, shift_invert: bool = True):
+def spectral_abscissa_sparse(L, k: int = 20, shift_invert: bool = True, rng_seed: int = 0):
     """Compute max Re(lambda) of sparse matrix L via Arnoldi iteration.
 
     Parameters
@@ -80,6 +80,13 @@ def spectral_abscissa_sparse(L, k: int = 20, shift_invert: bool = True):
         Number of eigenvalues to compute.
     shift_invert : bool
         Whether to use shift-invert mode on ArpackNoConvergence.
+    rng_seed : int
+        Seed for the ARPACK starting vector. scipy 1.17's ``eigs`` draws a
+        fresh OS-entropy Generator per call when rng is None, making
+        convergence path non-deterministic across processes for operators
+        (e.g. BL42) whose eigenvalues cluster on the imaginary axis. Passing
+        a fixed integer here pins that starting vector so repeated calls —
+        including across subprocess invocations — return identical values.
 
     Returns
     -------
@@ -106,7 +113,8 @@ def spectral_abscissa_sparse(L, k: int = 20, shift_invert: bool = True):
 
     # Primary: standard Arnoldi for rightmost eigenvalues
     try:
-        evals = eigs(L, k=k_use, which="LR", return_eigenvectors=False)
+        evals = eigs(L, k=k_use, which="LR", return_eigenvectors=False,
+                     rng=rng_seed)
         return float(np.max(evals.real)), evals
     except ArpackNoConvergence as exc:
         logger.debug("eigs(which='LR') did not converge: %s", exc)
@@ -120,7 +128,7 @@ def spectral_abscissa_sparse(L, k: int = 20, shift_invert: bool = True):
     if shift_invert:
         try:
             evals = eigs(L, k=k_use, sigma=0.0, which="LR",
-                         return_eigenvectors=False)
+                         return_eigenvectors=False, rng=rng_seed)
             return float(np.max(evals.real)), evals
         except (ArpackNoConvergence, ArpackError) as exc:
             logger.debug("Shift-invert eigs failed: %s", exc)
