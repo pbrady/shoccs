@@ -284,7 +284,7 @@ cd scripts/stencil_gen && SYMPY_CACHE_SIZE=50000 uv run python -m sweeps pareto 
 
 ### 45.5 — C++ validation of front members
 
-- [ ] **45.5a** In `sweeps/pareto.py::main`, when `--validate-with-cpp` is set: after the `ParetoResult` is constructed, iterate up to `min(len(front), 10)` members (sorted by first objective ascending for reproducibility), call `brady2d_stability_score(scheme, kernel, pt.params, max_layer=8, layer8_N=31, layer8_t_final=5.0)` for each, and append a `cpp_validation` dict to `ParetoResult.extras` with the shape:
+- [x] **45.5a** In `sweeps/pareto.py::main`, when `--validate-with-cpp` is set: after the `ParetoResult` is constructed, iterate up to `min(len(front), 10)` members (sorted by first objective ascending for reproducibility), call `brady2d_stability_score(scheme, kernel, pt.params, max_layer=8, layer8_N=31, layer8_t_final=5.0)` for each, and append a `cpp_validation` dict to `ParetoResult.extras` with the shape:
   ```python
   {"cpp_validation": [
       {"x": [...], "params": {...}, "l8_final_linf": float, "l8_stable": bool,
@@ -295,6 +295,7 @@ cd scripts/stencil_gen && SYMPY_CACHE_SIZE=50000 uv run python -m sweeps pareto 
   Skip validation for kernels outside `_CPP_SUPPORTED_KERNELS = ("classical", "tension", "gaussian", "multiquadric")` (reuse constant from `sweeps/optimize.py:44`). Log a clear "skipped (kernel not C++-supported)" if applicable. Do NOT abort the whole run if any individual L8 call fails; record `l8_error: "<exception message>"` in that entry.
   - File: `scripts/stencil_gen/sweeps/pareto.py`
   - Test: `cd scripts/stencil_gen && uv run pytest tests/test_sweep_pareto.py -x -q -k "TestValidateWithCpp"`
+  - **Implementation note:** Landed as `_run_front_cpp_validation(result, *, N, t_final, max_members)` returning `list[dict] | None`; `None` signals a global skip (unsupported kernel, unsupported scheme, empty front, or missing `shoccs` binary) so the caller omits the `cpp_validation` key entirely. Members are ordered ascending by `objectives[0]` before truncation — deterministic and matches the plan spec. `_record_cpp_cutcell_diagnostic` (imported from `stencil_gen.optimizer`) is reused so the `cpp_cutcell_violates_197_288` entry only appears for E4 classical, matching `sweeps/optimize.py`'s persistence shape. Per-member exceptions are captured as `l8_error = "<TypeName>: <msg>"` with `l8_stable=False`, `l8_final_linf=nan`, `wall_time_s=0.0` — the loop continues instead of aborting, matching the `[optimize] L8 raised (...)` contract. Added scheme check (E4 only has an L8 dispatch), which isn't strictly required by the plan spec but avoids a `NotImplementedError` blow-up downstream. Tests (`TestValidateWithCpp`) land in 45.5b.
 
 - [ ] **45.5b** Tests in `tests/test_sweep_pareto.py`:
   - `TestValidateWithCpp::test_skips_on_unsupported_kernel` — synthetic run with a kernel not in `_CPP_SUPPORTED_KERNELS` (mock); verify `extras["cpp_validation"]` absent or has a "skipped" record.

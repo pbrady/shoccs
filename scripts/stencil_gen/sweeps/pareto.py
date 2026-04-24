@@ -21,7 +21,9 @@ from typing import Any
 
 import numpy as np
 
-from stencil_gen.optimizer import DEFAULT_BOUNDS
+from stencil_gen.brady2d_stability import brady2d_stability_score
+from stencil_gen.cpp_bridge import SHOCCS_BINARY
+from stencil_gen.optimizer import DEFAULT_BOUNDS, _record_cpp_cutcell_diagnostic
 from stencil_gen.pareto import ParetoResult, run_nsga2
 
 from ._pareto_io import save_pareto_front
@@ -29,6 +31,10 @@ from ._pareto_io import save_pareto_front
 _KERNEL_CHOICES = ("tension", "gaussian", "multiquadric", "classical")
 _KERNEL_DIM = {"tension": 1, "gaussian": 1, "multiquadric": 1, "classical": 2}
 _CPP_SUPPORTED_KERNELS = ("classical", "tension", "gaussian", "multiquadric")
+_CPP_SUPPORTED_SCHEMES = ("E4",)
+_CPP_VALIDATION_N_DEFAULT = 31
+_CPP_VALIDATION_T_FINAL_DEFAULT = 5.0
+_CPP_VALIDATION_MAX_MEMBERS = 10
 
 
 def _mangle_objectives(fields: Sequence[str]) -> str:
@@ -92,6 +98,119 @@ def _validate_kernel_bounds_dim(
             f"kernel={kernel!r} expects {expected} bound pair(s); "
             f"got {len(bounds)}"
         )
+
+
+def _run_front_cpp_validation(
+    result: ParetoResult,
+    *,
+    N: int = _CPP_VALIDATION_N_DEFAULT,
+    t_final: float = _CPP_VALIDATION_T_FINAL_DEFAULT,
+    max_members: int = _CPP_VALIDATION_MAX_MEMBERS,
+) -> list[dict[str, Any]] | None:
+    """Re-run up to ``max_members`` front members at ``max_layer=8`` via shoccs.
+
+    Walks the non-dominated set in ascending order of the *first* objective
+    (deterministic, reproducible), calls :func:`brady2d_stability_score` at
+    L8 for each, and returns a list of ``{x, params, l8_stable, l8_final_linf,
+    wall_time_s [, cpp_cutcell_violates_197_288, l8_error]}`` dicts — one per
+    validated member.  A per-member failure is captured as ``l8_error`` and
+    does NOT abort the loop: the analytical Pareto front stands on its own;
+    L8 disagreement is purely diagnostic (same contract as
+    ``sweeps.optimize._run_cpp_validation``).
+
+    Returns ``None`` when validation is globally skipped: unsupported
+    ``(scheme, kernel)`` (L8 has no registered dispatch), empty front, or
+    the shoccs binary cannot be found.  The CLI uses ``None`` as the signal
+    to omit the ``cpp_validation`` key from ``ParetoResult.extras``.
+    """
+    if result.kernel not in _CPP_SUPPORTED_KERNELS:
+        print(
+            f"\n[pareto] --validate-with-cpp: skipped — kernel={result.kernel!r} "
+            "is not C++-supported."
+        )
+        return None
+    if result.scheme not in _CPP_SUPPORTED_SCHEMES:
+        print(
+            f"\n[pareto] --validate-with-cpp: skipped — scheme={result.scheme!r} "
+            "has no L8 bridge wired."
+        )
+        return None
+    if not result.front:
+        print("\n[pareto] --validate-with-cpp: skipped — empty front.")
+        return None
+    if not SHOCCS_BINARY.exists():
+        print(
+            f"\n[pareto] --validate-with-cpp: skipped — shoccs binary not found "
+            f"at {SHOCCS_BINARY}. Build it with `cmake --build build`."
+        )
+        return None
+
+    ordered = sorted(result.front, key=lambda p: float(p.objectives[0]))
+    members = ordered[: max(0, int(max_members))]
+    print(
+        f"\n[pareto] --validate-with-cpp: running L8 on {len(members)} of "
+        f"{len(result.front)} front members (N={N}, t_final={t_final})..."
+    )
+
+    entries: list[dict[str, Any]] = []
+    for i, pt in enumerate(members):
+        x_list = [float(v) for v in np.asarray(pt.x, dtype=float).ravel()]
+        entry: dict[str, Any] = {
+            "x": x_list,
+            "params": dict(pt.params),
+        }
+        # E4-classical cut-cell α₁ ≥ 197/288 diagnostic (absent for other
+        # scheme/kernel combinations, matching the optimizer persistence shape).
+        extras_tmp: dict[str, Any] = {}
+        _record_cpp_cutcell_diagnostic(
+            extras_tmp, result.scheme, result.kernel, pt.x
+        )
+        if "cpp_cutcell_violates_197_288" in extras_tmp:
+            entry["cpp_cutcell_violates_197_288"] = bool(
+                extras_tmp["cpp_cutcell_violates_197_288"]
+            )
+
+        try:
+            report = brady2d_stability_score(
+                result.scheme,
+                result.kernel,
+                pt.params,
+                max_layer=8,
+                short_circuit=False,
+                layer8_N=N,
+                layer8_t_final=t_final,
+            )
+        except Exception as exc:
+            msg = f"{type(exc).__name__}: {exc}"
+            print(f"[pareto]   member[{i}] L8 raised ({msg})")
+            entry["l8_error"] = msg
+            entry["l8_stable"] = False
+            entry["l8_final_linf"] = float("nan")
+            entry["wall_time_s"] = 0.0
+            entries.append(entry)
+            continue
+
+        if report.layer8 is None:
+            entry["l8_error"] = "layer8 not populated"
+            entry["l8_stable"] = False
+            entry["l8_final_linf"] = float("nan")
+            entry["wall_time_s"] = 0.0
+            entries.append(entry)
+            print(f"[pareto]   member[{i}] L8 did not populate a report")
+            continue
+
+        l8 = report.layer8
+        entry["l8_stable"] = bool(l8["stable"])
+        entry["l8_final_linf"] = float(l8["final_linf"])
+        entry["wall_time_s"] = float(l8["wall_time_s"])
+        entries.append(entry)
+        print(
+            f"[pareto]   member[{i}] stable={entry['l8_stable']} "
+            f"final_linf={entry['l8_final_linf']:.4e} "
+            f"wall={entry['wall_time_s']:.1f}s"
+        )
+
+    return entries
 
 
 def _print_summary(result: ParetoResult) -> None:
@@ -269,12 +388,9 @@ def main(argv: list[str] | None = None) -> int:
         print(f"\n[pareto] persisted front to {written}")
 
     if args.validate_with_cpp:
-        # L8 bridge validation lands in plan 45.5a.  Until then, acknowledge
-        # the request but do not pretend validation ran.
-        print(
-            "\n[pareto] --validate-with-cpp: wiring lands in plan 45.5; no "
-            "L8 runs executed this invocation."
-        )
+        validation = _run_front_cpp_validation(result)
+        if validation is not None:
+            result.extras["cpp_validation"] = validation
 
     return 0
 
