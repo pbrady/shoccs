@@ -1,5 +1,12 @@
 # Brady-Livescu 2D Analytical Stability Reference
 
+> Any field documented here (e.g. `layer1.boundary_gv_err`,
+> `layer_bl42.max_spectral_abscissa`, `layer6.transient_growth_bound`) is
+> a valid element of `--objective` in `python -m sweeps optimize` and of
+> `--objectives` in `python -m sweeps pareto` (multi-objective NSGA-II;
+> see [`pareto_reference.md`](pareto_reference.md)). Layer depth and gate
+> are auto-inferred from the field's layer prefix.
+
 ## Problem statement
 
 The benchmark is the two-dimensional varying-coefficient scalar advection

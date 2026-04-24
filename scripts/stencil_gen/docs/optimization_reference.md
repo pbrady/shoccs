@@ -326,12 +326,13 @@ so adding a new field is usually free:
 Documented here so future maintainers do not try to cover them in plan 43.
 The plan's "What this plan does NOT do" section is the source of truth.
 
-- **Multi-objective Pareto optimization.** NSGA-II / pymoo not included;
-  single-objective + feasibility cliff was judged sufficient. Weighted
-  scalarization works as a bridge. Deferred to plan 44.
+- **Multi-objective Pareto optimization.** Delivered in plan 45 via
+  pymoo NSGA-II — see the "Multi-objective (plan 45)" section below and
+  [`pareto_reference.md`](pareto_reference.md). The scalar drivers in this
+  reference remain the per-point building block.
 - **Multi-fidelity Bayesian optimization.** The staged cascade is a
   manual cheap-inner / expensive-validator pipeline, not BoTorch or
-  Emukit. Deferred to plan 45.
+  Emukit. Deferred to plan 46.
 - **Brady-Livescu 1D Euler reproduction.** Their 2019 objective requires
   a full nonlinear 1D Euler RK4 solver that this repo does not have.
   Deferred to plan 46.
@@ -345,10 +346,28 @@ The plan's "What this plan does NOT do" section is the source of truth.
   to the optimizer's reach. Use the standalone
   `sweeps/tension_penalty_sweep` and `sweeps/mixed_epsilon_sweep` CLIs.
 
+## Multi-objective (plan 45)
+
+For conflicting-metric trade-offs (e.g. `layer1.boundary_gv_err` against
+`layer_bl42.max_spectral_abscissa`) use `python -m sweeps pareto`, which
+runs pymoo NSGA-II over a vector-valued objective and writes a Pareto
+front as JSON. The scalar drivers documented above are the per-point
+building block; the multi-objective factory `make_multi_objective` wraps
+them into a length-`n_obj` closure and the driver `run_nsga2` evolves a
+population toward the front. Fronts persist per-run under
+`sweeps/pareto_fronts/<scheme>_<kernel>_<mangled_objectives>.json`. The
+`gate_layer` / `max_layer` auto-infer from the API reference above
+(`gate_layer = max(max_layer - 1, 0)` when omitted) applies identically
+to `make_multi_objective`, with `max_layer` taken as the deepest layer
+across the chosen objective fields. Full details, CLI examples, and the
+schema live in [`pareto_reference.md`](pareto_reference.md).
+
 ## References
 
 - Plan 41 — Brady-Livescu 2D analytical stability pipeline (L1–L7).
 - Plan 42 — C++ bridge runtime-parameterized stencils (L8).
 - Plan 43 — Stability optimization framework (this layer).
+- Plan 45 — Multi-objective Pareto extension
+  ([`pareto_reference.md`](pareto_reference.md)).
 - Brady & Livescu 2019 — Table 4 reports 101 E4 schemes discovered from
   random restarts, motivating the multi-seed alpha-basin survey.
