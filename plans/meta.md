@@ -367,6 +367,40 @@ For the 1st derivative (nu=1), the SBP property `Q + Qᵀ = B` where `B = diag(-
 - (b) Use −1 for all nu (incorrect for nu=2)
 - (c) Parameterize by full boundary matrix B
 
+### D-Opt-1: Multi-Objective Pareto Optimization Architecture (Plan 45)
+**Decision:** Four cross-cutting choices for the NSGA-II-based multi-objective driver shipped in plan 45:
+
+**(a) NSGA-II via pymoo over a pure-numpy implementation.**
+pymoo 0.6 is the standard, maintained implementation of NSGA-II/NSGA-III with a stable `ElementwiseProblem`/`Callback`/`HV` surface that composes cleanly with our existing scalar `make_objective` pattern. Writing a pure-numpy NSGA-II (fast non-dominated sort + crowding distance + tournament selection + SBX/polynomial operators) would be ~300 lines of optimizer code plus hypervolume-indicator code, all needing long-term maintenance. pymoo has no PyTorch/TensorFlow dependency (unlike BoTorch/Trieste), so the devcontainer footprint stays small. The dependency is opt-in at call sites — the existing scalar `sweeps optimize` path does not import pymoo.
+**Options:**
+- **(a) pymoo NSGA-II** ← CHOSEN
+- (b) Pure-numpy implementation
+- (c) BoTorch / Trieste (Bayesian multi-objective — deferred to plan 46)
+
+**(b) Per-run JSON persistence under `sweeps/pareto_fronts/` over a `known_values.json` key.**
+A full Pareto front is 15–40 members, each with `(x, params, objectives, report)` — hundreds of KB per run. Storing this under `known_values.json["brady2d_pareto"]` would bloat that file, create concurrency pitfalls (two concurrent runs racing on a single JSON), and produce noisy git diffs where a single member change rewrites the whole file. One file per `(scheme, kernel, objective_mangle)` gives O(1) updates, trivial parallel-safe concurrency, and clean diffs. Filenames are mangled via `{scheme}_{kernel}_{field1_dots_to_underscores}__{field2...}.json`. The directory is committed (via `.gitkeep`) and tracked (not in `.gitignore`), matching `output/` convention.
+**Options:**
+- **(a) Per-run JSON files under `sweeps/pareto_fronts/`** ← CHOSEN
+- (b) New key in `sweeps/known_values.json`
+- (c) SQLite / DuckDB
+
+**(c) Finite sentinel `1e12` over `+inf` for gate-fail / exception returns in `make_multi_objective`.**
+pymoo's hypervolume indicator (`pymoo.indicators.hv.HV`) rejects `+inf` objective values, and NSGA-II's `ftol` termination criterion propagates NaN when any column has `+inf`. The scalar `make_objective` returns `+inf` on gate-fail without issue because scipy/nlopt scalar drivers tolerate it; multi-objective must diverge from this convention. Sentinel `1e12` is large enough to dominate any realistic objective value (all measured SHOCCS stability metrics fall below ~100) but finite, keeping HV and non-dominated sort well-defined. Sentinel rows are filtered out of the final `ParetoResult.front`; the count is recorded in `extras["n_sentinel_filtered"]`.
+**Options:**
+- **(a) Finite sentinel `1e12`** ← CHOSEN
+- (b) `+inf` (pymoo HV/ftol break)
+- (c) `np.nan` (NSGA-II non-dominated sort breaks — NaN is incomparable)
+
+**(d) `gate_layer` auto-infer as `max(max_layer - 1, 0)` applies to both scalar `make_objective` and multi-objective `make_multi_objective`.**
+The old hardcoded `gate_layer=3` in `make_objective` made L6/L7 objectives never gate (waste — no early exit on L2 failure) and L3r objectives gate themselves (`+inf` trap documented in plan 44's handoff, reproduced as the 2634-eval DE run). The fix is to infer `gate_layer` from the objective field's native layer: `gate_layer = max(max_layer - 1, 0)`. The multi-objective factory (`make_multi_objective`) uses the max across its objective fields. Both entry points compute the value identically — one concept, two call sites. The `max(..., 0)` floor handles the degenerate `max_layer=1` case (no gate; objective is the only layer).
+**Options:**
+- **(a) `gate_layer = max(max_layer - 1, 0)` auto-infer in both scalar + multi-objective factories** ← CHOSEN
+- (b) Hardcoded `gate_layer=3` (old behavior — broken for L3r, L6, L7)
+- (c) Auto-infer only in `make_multi_objective`, leave `make_objective` hardcoded (inconsistent)
+
+**Why these are cross-cutting:** choices (a)–(c) pin the optimizer / persistence / sentinel surface that plans 46 (multi-fidelity Bayesian) and 47 (Brady-Livescu 1D Euler) will build on or contrast against. Choice (d) ties together `stencil_gen/optimizer.py` and `stencil_gen/pareto.py` — any future scalar driver (plan 46's Bayesian surrogate scalarization) must observe the same auto-infer contract so users can swap `make_objective` ↔ `make_multi_objective` without re-specifying `gate_layer`.
+**Implementing plan items:** 45.0b (auto-infer in `make_objective`), 45.0d (CLI wiring), 45.1b (`make_multi_objective`), 45.2a (`run_nsga2`), 45.4a (`_pareto_io.py`).
+
 ---
 
 ## Files Excluded from Migration Scope
