@@ -423,6 +423,28 @@ cd scripts/stencil_gen && SYMPY_CACHE_SIZE=50000 uv run python -m sweeps pareto 
   - File: `scripts/stencil_gen/docs/optimization_reference.md`
   - Test: `grep -n "Deferred to plan" scripts/stencil_gen/docs/optimization_reference.md` shows exactly one "plan 46" (Multi-fidelity Bayesian) and one "plan 47" (Brady-Livescu 1D Euler); `grep -A3 "Brady-Livescu 1D Euler reproduction" scripts/stencil_gen/docs/optimization_reference.md | grep -q "Deferred to plan 47"`.
 
+- [ ] **45.7b.3** (review follow-up to 45.7b.1) Reconcile the remaining MASTER.md-vs-sibling contradictions introduced by commit `b4e983c`. The 45.7b.1 implementation tracked the six siblings and refreshed MASTER.md to claim "plans 40–45", but the siblings themselves still carry 2026-04-15 framing that MASTER.md now falsely contradicts. The plan text for 45.7b.1 explicitly warned "do NOT leave the mixed state the commit currently produces"; the commit landed a new mixed state. Three concrete contradictions remain:
+  1. **MASTER.md says `completed_plans.md` summarizes "plans 40–45 delivered"** (line 25 of MASTER.md after the 45.7b.1 refresh), but `docs/handoff/completed_plans.md` line 1 is `# Completed Plans Summary (Plans 40–44)` and line 3 says `All five plans complete`. The file has no plan-45 section. An agent clicking through from MASTER.md will not find the plan-45 summary MASTER.md promises.
+  2. **`docs/handoff/known_limitations.md` lines 7–13** list "`gate_layer` doesn't auto-infer from the objective" as an open limitation with `Fix: Small (~30 lines) — ... See next_steps.md — scheduled as item 45.0 or a standalone micro-plan`. This was resolved by plan 45.0b (shipped, tested, merged). Similarly, lines 122–124 say `### No multi-objective optimization (yet)` / `Deferred to plan 45. Single-objective + feasibility cliff covers ~80% of use cases cleanly.` — also delivered. A new agent reading this will re-propose already-shipped work.
+  3. **`docs/handoff/next_steps.md` lines 17–69** contain a ~50-line "Plan 45 — Multi-Objective Pareto Optimization" section describing scope, three "open decisions" (all resolved during plan-45 execution), and an `ngsa2`-vs-fallback fork that no longer applies. MASTER.md has an inline caveat on its `next_steps.md` link description, but an agent who opens `next_steps.md` directly (as MASTER.md's own "Where the next agent should start" routing step 1 tells them to) sees the stale section without the caveat.
+
+  Fix (pick option A OR option B — do not mix):
+
+  **Option A (recommended, minimal)**: add a 3–5 line "Snapshot status" banner at the top of each of the three siblings (`completed_plans.md`, `known_limitations.md`, `next_steps.md`) immediately after the H1 title, stating:
+  ```markdown
+  > **Snapshot status (2026-04-15).** This file was drafted during plan-45 scoping and commits its pre-plan-45 state. Plan 45 (multi-objective Pareto via NSGA-II) landed 2026-04-24; see `plans/45-pareto-optimization.md` for the current state. Any reference below to plan 45 as "queued", to `gate_layer` auto-infer as unimplemented, or to multi-objective optimization as "not yet available" is stale.
+  ```
+  Then fix the one MASTER.md claim that the banner cannot rescue: change MASTER.md line 25's `summary of what plans 40–45 delivered` → `summary of what plans 40–44 delivered (plan 45 landed after this snapshot; see plans/45-pareto-optimization.md)`, matching the pattern the 45.7b.1 commit already used for `next_steps.md` on line 29.
+
+  **Option B (more work, cleaner long-term)**: add a `### Plan 45 — Multi-Objective Pareto Optimization (NSGA-II)` section to `completed_plans.md` mirroring the plans 40–44 template (Deliverables table, Public API, Corrections); strike the two resolved items from `known_limitations.md` (replacing with a one-line "Fixed in plan 45" stub pointer); delete the "Plan 45" section from `next_steps.md` and renumber the "Where the next agent should start" routing. This is substantially more content work (~100 lines of new summary), justified only if the user wants the handoff folder to be a single-source-of-truth rather than an append-only snapshot archive.
+
+  Default to A unless the user directs otherwise. After either option, verify:
+  - `grep -c "plans 40–45 delivered" docs/handoff/MASTER.md` returns `0` (under A) or the file content matches the claim (under B);
+  - `grep -c "Snapshot status" docs/handoff/*.md` returns at least `3` (under A);
+  - `grep -E "scheduled as item 45\.0|Deferred to plan 45" docs/handoff/known_limitations.md | wc -l` returns `0` (under B) or those occurrences all sit below a snapshot banner (under A).
+  - File: `docs/handoff/MASTER.md`, `docs/handoff/completed_plans.md`, `docs/handoff/known_limitations.md`, `docs/handoff/next_steps.md`
+  - Test: the three `grep` checks above; plus `git grep -n "plans 40–45 delivered" docs/handoff/` returns no hits (under A) or resolves to a file with a matching plan-45 section (under B).
+
 - [ ] **45.7c** Add a decision entry `D-Opt-1` to `plans/meta.md` capturing four cross-cutting choices: (a) pymoo NSGA-II chosen over pure-numpy (library stability + community support); (b) per-run JSON persistence under `sweeps/pareto_fronts/` chosen over a `known_values.json["brady2d_pareto"]` key (scale, concurrency, clean git diffs); (c) finite sentinel `1e12` over `+inf` for gate-fail (pymoo hypervolume and `ftol` termination both break on inf); (d) `gate_layer` auto-infer as `max_layer - 1` applies to both scalar `make_objective` and multi-objective `make_multi_objective` (consistent behavior).
   - File: `plans/meta.md`
   - Test: `grep -q "D-Opt-1" plans/meta.md`
@@ -458,7 +480,7 @@ cd scripts/stencil_gen && SYMPY_CACHE_SIZE=50000 uv run python -m sweeps pareto 
   ↓
 45.6a.1 → 45.6a.1.1 → 45.6a.2 → 45.6b.1 → 45.6b.2 → 45.6b.3   # calibration (classical done) + _report_to_dict fix + tension + BL42 determinism + regen JSONs + regression
   ↓
-45.7a → 45.7b → 45.7b.1 → 45.7b.2 → 45.7c → 45.7d → 45.7e   # docs (+ review follow-ups) + meta + skills
+45.7a → 45.7b → 45.7b.1 → 45.7b.2 → 45.7b.3 → 45.7c → 45.7d → 45.7e   # docs (+ review follow-ups) + meta + skills
 ```
 
 Strictly sequential within each group. 45.5 (C++ validation) can be deferred without breaking the rest; if `build/src/app/shoccs` is absent, mark 45.5a/b as conditional-skip items. 45.4 and 45.5 can swap (persistence vs. validation). 45.3c tests depend on 45.3a+b both landing.
