@@ -232,13 +232,14 @@ cd scripts/stencil_gen && SYMPY_CACHE_SIZE=50000 uv run python -m sweeps pareto 
   - File: `scripts/stencil_gen/sweeps/pareto.py` (new)
   - Test: `cd scripts/stencil_gen && uv run pytest tests/test_sweep_pareto.py -x -q -k "TestParetoCLI"`
 
-- [ ] **45.3b** Register the `pareto` subcommand in `sweeps/__main__.py`:
+- [x] **45.3b** Register the `pareto` subcommand in `sweeps/__main__.py`:
   - Add `from .pareto import main as pareto_main` at the top.
   - Add `sub_pareto = subparsers.add_parser("pareto", help="NSGA-II multi-objective Pareto front")` to the dispatch table alongside `optimize`. Hook its execution in the `if args.command == "pareto":` branch.
   - Do NOT add `pareto` to `_run_all()` (too expensive to run blindly; same exclusion as `optimize`).
   - Update the `pareto` help text to mention it's distinct from `gv-stability-pareto` (which is a 1D parametric scan, retained as-is).
   - File: `scripts/stencil_gen/sweeps/__main__.py`
   - Test: `cd scripts/stencil_gen && uv run python -m sweeps pareto --help`
+  - **Implementation note:** Used lazy import inside the `if args.command == "pareto":` branch (matches every other subcommand's pattern) rather than top-of-module import. Updated the existing `gv-stability-pareto` help text to cross-reference the new `pareto` subcommand. Verified `python -m sweeps pareto --help` exits 0 and `python -m sweeps --help` lists `pareto` between `gv-stability-pareto` and `brady2d`. Smoke-checked the dispatch by triggering the `--objectives` length-1 error path through `python -m sweeps pareto ...`.
 
 - [ ] **45.3c** Tests in `tests/test_sweep_pareto.py` (new):
   - `TestMangleObjectives::test_roundtrip_legible` — `_mangle_objectives(["layer1.boundary_gv_err", "layer_bl42.max_spectral_abscissa"])` returns exactly `"layer1_boundary_gv_err__layer_bl42_max_spectral_abscissa"`.

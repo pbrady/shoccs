@@ -70,7 +70,11 @@ def main() -> int:
 
     sub_pareto = subparsers.add_parser(
         "gv-stability-pareto",
-        help="GV-vs-stability Pareto sweep (research / documentation aid)",
+        help=(
+            "GV-vs-stability 1D parametric Pareto scan (research / documentation aid). "
+            "For NSGA-II multi-objective optimization across 2+ stability metrics, "
+            "use the 'pareto' subcommand instead."
+        ),
     )
     sub_pareto.add_argument("--scheme", choices=["E2", "E4"], required=True)
     sub_pareto.add_argument(
@@ -80,6 +84,73 @@ def main() -> int:
     sub_pareto.add_argument("--n-points", type=int, default=61, help="Number of sample points on the parameter grid")
     sub_pareto.add_argument("--n", type=int, default=40, help="Grid size for the stability eigenvalue")
     sub_pareto.add_argument("--param-max", type=float, default=20.0, help="Upper end of the parameter grid")
+
+    sub_pareto_nsga = subparsers.add_parser(
+        "pareto",
+        help=(
+            "NSGA-II multi-objective Pareto front over Brady-Livescu 2D stability "
+            "metrics. Distinct from 'gv-stability-pareto' (a 1D parametric scan)."
+        ),
+    )
+    sub_pareto_nsga.add_argument("--scheme", choices=["E2", "E4"], required=True)
+    sub_pareto_nsga.add_argument(
+        "--kernel",
+        choices=["tension", "gaussian", "multiquadric", "classical"],
+        required=True,
+    )
+    sub_pareto_nsga.add_argument(
+        "--objectives",
+        nargs="+",
+        required=True,
+        metavar="FIELD",
+        help='Two or more dotted-path report fields (e.g. "layer1.boundary_gv_err layer_bl42.max_spectral_abscissa").',
+    )
+    sub_pareto_nsga.add_argument(
+        "--bounds",
+        type=float,
+        nargs="+",
+        default=None,
+        metavar="VAL",
+        help="Flat list of bound pairs (lo hi [lo hi ...]). Falls back to DEFAULT_BOUNDS if absent.",
+    )
+    sub_pareto_nsga.add_argument("--pop-size", type=int, default=40)
+    sub_pareto_nsga.add_argument("--n-gen", type=int, default=50)
+    sub_pareto_nsga.add_argument("--seed", type=int, default=1)
+    sub_pareto_nsga.add_argument(
+        "--ref-point",
+        type=float,
+        nargs="+",
+        default=None,
+        metavar="V",
+        help="Reference point for the hypervolume indicator (one value per --objectives).",
+    )
+    sub_pareto_nsga.add_argument(
+        "--gate-layer",
+        type=int,
+        default=None,
+        help="Highest layer whose failure forces the sentinel vector. Default: max_layer-1.",
+    )
+    sub_pareto_nsga.add_argument(
+        "--max-layer",
+        type=int,
+        default=None,
+        help="Highest layer executed per evaluation. Default: max(_infer_max_layer(f) for f in --objectives).",
+    )
+    sub_pareto_nsga.add_argument(
+        "--persist",
+        action="store_true",
+        help="Persist the ParetoResult as JSON under sweeps/pareto_fronts/.",
+    )
+    sub_pareto_nsga.add_argument(
+        "--validate-with-cpp",
+        action="store_true",
+        help="Re-run up to 10 front members at max_layer=8 via the C++ bridge.",
+    )
+    sub_pareto_nsga.add_argument(
+        "--verbose",
+        action="store_true",
+        help="Forward to pymoo's minimize(verbose=True).",
+    )
 
     sub_brady2d = subparsers.add_parser(
         "brady2d",
@@ -264,6 +335,35 @@ def main() -> int:
             "--n", str(args.n),
             "--param-max", str(args.param_max),
         ])
+
+    if args.command == "pareto":
+        from .pareto import main as pareto_nsga_main
+
+        forwarded: list[str] = [
+            "--scheme", args.scheme,
+            "--kernel", args.kernel,
+            "--objectives", *args.objectives,
+            "--pop-size", str(args.pop_size),
+            "--n-gen", str(args.n_gen),
+            "--seed", str(args.seed),
+        ]
+        if args.bounds is not None:
+            forwarded.append("--bounds")
+            forwarded.extend(str(v) for v in args.bounds)
+        if args.ref_point is not None:
+            forwarded.append("--ref-point")
+            forwarded.extend(str(v) for v in args.ref_point)
+        if args.gate_layer is not None:
+            forwarded.extend(["--gate-layer", str(args.gate_layer)])
+        if args.max_layer is not None:
+            forwarded.extend(["--max-layer", str(args.max_layer)])
+        if args.persist:
+            forwarded.append("--persist")
+        if args.validate_with_cpp:
+            forwarded.append("--validate-with-cpp")
+        if args.verbose:
+            forwarded.append("--verbose")
+        return pareto_nsga_main(forwarded)
 
     if args.command == "brady2d":
         from .brady2d_sweep import main as brady2d_main
