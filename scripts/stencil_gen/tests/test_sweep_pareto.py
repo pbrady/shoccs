@@ -281,6 +281,179 @@ class TestParetoCLI:
         out = capsys.readouterr().out
         assert "persisted front to" not in out
 
+    def test_persist_and_validate_writes_cpp_validation_to_json(
+        self, monkeypatch, tmp_path
+    ):
+        """``--persist --validate-with-cpp`` must capture ``cpp_validation`` on disk.
+
+        Regression for plan 45.5a.1: ``_run_front_cpp_validation`` mutates
+        ``result.extras``, so it MUST run before ``save_pareto_front``; otherwise
+        the JSON misses the diagnostic payload.  This test monkeypatches the
+        validator (to avoid spinning up shoccs) but routes through the real
+        :func:`save_pareto_front` (with ``directory=tmp_path``) to catch the
+        on-disk shape.
+        """
+        stub = _stub_result(
+            objective_fields=("layer1.boundary_gv_err", "layer3.max_stab_eig"),
+        )
+        monkeypatch.setattr(pareto_cli, "run_nsga2", lambda **_: stub)
+
+        fake_validation = [
+            {
+                "x": [0.0, 0.0],
+                "params": {"alpha": [0.0, 0.0]},
+                "l8_stable": True,
+                "l8_final_linf": 1.2e-3,
+                "wall_time_s": 0.42,
+            }
+        ]
+
+        def _fake_validate(result, *args, **kwargs):
+            # Assert ordering: persistence must not have fired yet.  If
+            # save_pareto_front ran first, extras already holds the JSON-safe
+            # snapshot (no in-place cpp_validation from a prior run because
+            # the stub starts without one).  We only check the call count.
+            return fake_validation
+
+        monkeypatch.setattr(
+            pareto_cli, "_run_front_cpp_validation", _fake_validate
+        )
+
+        real_save = pareto_cli.save_pareto_front
+        save_calls: list[ParetoResult] = []
+
+        def _recording_save(result, *args, **kwargs):
+            # Capture the ParetoResult at the moment of persistence so we can
+            # confirm validation already mutated ``extras``.
+            save_calls.append(result)
+            # Delegate to the real implementation but force ``tmp_path`` so
+            # the working-copy ``sweeps/pareto_fronts/`` stays untouched.
+            return real_save(result, directory=tmp_path)
+
+        monkeypatch.setattr(pareto_cli, "save_pareto_front", _recording_save)
+
+        rc = pareto_cli.main(
+            [
+                "--scheme", "E4",
+                "--kernel", "classical",
+                "--objectives",
+                "layer1.boundary_gv_err",
+                "layer3.max_stab_eig",
+                "--pop-size", "6",
+                "--n-gen", "2",
+                "--seed", "1",
+                "--persist",
+                "--validate-with-cpp",
+            ]
+        )
+        assert rc == 0
+        assert len(save_calls) == 1
+        # The ParetoResult at save time already carries the validation payload
+        # (ordering fix: validate-before-persist).
+        assert save_calls[0].extras.get("cpp_validation") == fake_validation
+
+        written = tmp_path / (
+            "E4_classical_layer1_boundary_gv_err__layer3_max_stab_eig.json"
+        )
+        assert written.exists()
+        payload = json.loads(written.read_text())
+        assert payload["extras"].get("cpp_validation") == fake_validation
+
+    def test_persist_without_validate_omits_cpp_validation(
+        self, monkeypatch, tmp_path
+    ):
+        """``--persist`` alone must not emit a ``cpp_validation`` entry."""
+        stub = _stub_result(
+            objective_fields=("layer1.boundary_gv_err", "layer3.max_stab_eig"),
+        )
+        monkeypatch.setattr(pareto_cli, "run_nsga2", lambda **_: stub)
+
+        # If this fires, the CLI is inadvertently validating without the flag.
+        def _unexpected_validate(*args, **kwargs):
+            raise AssertionError(
+                "_run_front_cpp_validation called without --validate-with-cpp"
+            )
+
+        monkeypatch.setattr(
+            pareto_cli, "_run_front_cpp_validation", _unexpected_validate
+        )
+
+        real_save = pareto_cli.save_pareto_front
+        monkeypatch.setattr(
+            pareto_cli,
+            "save_pareto_front",
+            lambda result, *a, **kw: real_save(result, directory=tmp_path),
+        )
+
+        rc = pareto_cli.main(
+            [
+                "--scheme", "E4",
+                "--kernel", "classical",
+                "--objectives",
+                "layer1.boundary_gv_err",
+                "layer3.max_stab_eig",
+                "--pop-size", "6",
+                "--n-gen", "2",
+                "--seed", "1",
+                "--persist",
+            ]
+        )
+        assert rc == 0
+        written = tmp_path / (
+            "E4_classical_layer1_boundary_gv_err__layer3_max_stab_eig.json"
+        )
+        assert written.exists()
+        payload = json.loads(written.read_text())
+        assert "cpp_validation" not in payload["extras"]
+
+    def test_validate_without_persist_does_not_write_file(
+        self, monkeypatch, tmp_path
+    ):
+        """``--validate-with-cpp`` alone must not write JSON to disk."""
+        stub = _stub_result(
+            objective_fields=("layer1.boundary_gv_err", "layer3.max_stab_eig"),
+        )
+        monkeypatch.setattr(pareto_cli, "run_nsga2", lambda **_: stub)
+        monkeypatch.setattr(
+            pareto_cli,
+            "_run_front_cpp_validation",
+            lambda result, *a, **kw: [
+                {
+                    "x": [0.0, 0.0],
+                    "params": {"alpha": [0.0, 0.0]},
+                    "l8_stable": True,
+                    "l8_final_linf": 1.0e-3,
+                    "wall_time_s": 0.1,
+                }
+            ],
+        )
+
+        def _unexpected_save(*args, **kwargs):
+            raise AssertionError(
+                "save_pareto_front called without --persist"
+            )
+
+        monkeypatch.setattr(pareto_cli, "save_pareto_front", _unexpected_save)
+
+        rc = pareto_cli.main(
+            [
+                "--scheme", "E4",
+                "--kernel", "classical",
+                "--objectives",
+                "layer1.boundary_gv_err",
+                "layer3.max_stab_eig",
+                "--pop-size", "6",
+                "--n-gen", "2",
+                "--seed", "1",
+                "--validate-with-cpp",
+            ]
+        )
+        assert rc == 0
+        # The validator should have written into the (in-memory) ParetoResult.
+        assert stub.extras.get("cpp_validation") is not None
+        # No file should have been written into tmp_path.
+        assert list(tmp_path.iterdir()) == []
+
 
 # ---------------------------------------------------------------------------
 # _pareto_io: save / load / iter round-trip

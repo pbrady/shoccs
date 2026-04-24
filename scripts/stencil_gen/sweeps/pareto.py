@@ -383,14 +383,18 @@ def main(argv: list[str] | None = None) -> int:
 
     _print_summary(result)
 
-    if args.persist:
-        written = save_pareto_front(result)
-        print(f"\n[pareto] persisted front to {written}")
-
+    # Validate BEFORE persisting so the written JSON captures
+    # ``extras["cpp_validation"]`` when both flags are set.  Reversing the two
+    # would freeze the file on disk before the L8 diagnostics land in
+    # ``result.extras`` (see plan 45.5a.1 review follow-up).
     if args.validate_with_cpp:
         validation = _run_front_cpp_validation(result)
         if validation is not None:
             result.extras["cpp_validation"] = validation
+
+    if args.persist:
+        written = save_pareto_front(result)
+        print(f"\n[pareto] persisted front to {written}")
 
     return 0
 
