@@ -14,6 +14,7 @@ from stencil_gen.optimizer import (
     DEFAULT_BOUNDS,
     _COBYQA_AVAILABLE,
     OptimizeResult,
+    _report_to_dict,
     extract_field,
     make_objective,
     multi_start_optimize,
@@ -302,6 +303,39 @@ class TestExtractFieldBL42:
     def test_extract_layer_bl42_not_populated_returns_inf(self):
         r = StabilityReport.empty()
         assert extract_field(r, "layer_bl42.max_spectral_abscissa") == float("inf")
+
+
+class TestReportToDictLayerBL42:
+    def test_report_to_dict_includes_layer_bl42(self):
+        r = StabilityReport(
+            layer_bl42={"max_spectral_abscissa": 0.5},
+            overall_verdict="pass",
+        )
+        out = _report_to_dict(r)
+        assert "layer_bl42" in out
+        assert out["layer_bl42"]["max_spectral_abscissa"] == 0.5
+
+    def test_report_to_dict_layer_bl42_filters_non_numeric(self):
+        r = StabilityReport(
+            layer_bl42={
+                "spectral_abscissa_by_n": {21: 1e-12, 41: 2e-12},
+                "max_spectral_abscissa": 2e-12,
+                "purely_imaginary": True,
+            },
+            overall_verdict="pass",
+        )
+        out = _report_to_dict(r)
+        assert "layer_bl42" in out
+        # dict-valued entry dropped; numeric entries kept.
+        assert "spectral_abscissa_by_n" not in out["layer_bl42"]
+        assert out["layer_bl42"]["max_spectral_abscissa"] == pytest.approx(2e-12)
+        # bool is an int subclass; comprehension keeps it as float.
+        assert out["layer_bl42"]["purely_imaginary"] == 1.0
+
+    def test_report_to_dict_omits_layer_bl42_when_none(self):
+        r = StabilityReport.empty()
+        out = _report_to_dict(r)
+        assert "layer_bl42" not in out
 
 
 class TestMakeObjective:

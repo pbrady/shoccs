@@ -205,6 +205,12 @@ def _report_to_dict(report: StabilityReport) -> dict[str, Any]:
         out["layer2"] = {"is_stable": bool(report.layer2.is_stable)}
     if report.layer3 is not None:
         out["layer3"] = {"max_stab_eig": float(report.layer3["max_stab_eig"])}
+    if report.layer_bl42 is not None:
+        out["layer_bl42"] = {
+            k: float(v)
+            for k, v in report.layer_bl42.items()
+            if isinstance(v, (int, float))
+        }
     if report.layer4 is not None:
         out["layer4"] = {"max_local_gv_error": float(report.layer4["max_local_gv_error"])}
     if report.layer5 is not None:

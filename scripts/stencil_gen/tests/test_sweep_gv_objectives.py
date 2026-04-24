@@ -869,3 +869,44 @@ def test_rank_for_l8_prefers_layer6_then_layer3():
     ]
     ranked4 = brady2d_sweep.rank_for_l8(many, max_layer=6)
     assert len(ranked4) == brady2d_sweep.TOP_K_FOR_L8
+
+
+def test_report_to_dict_includes_layer_bl42():
+    """45.6a.1.1: sweep copy of _report_to_dict must serialize layer_bl42."""
+    from stencil_gen.brady2d_stability import StabilityReport
+
+    r = StabilityReport(
+        layer_bl42={"max_spectral_abscissa": 0.5},
+        overall_verdict="pass",
+    )
+    out = brady2d_sweep._report_to_dict(r)
+    assert "layer_bl42" in out
+    assert out["layer_bl42"]["max_spectral_abscissa"] == 0.5
+
+
+def test_report_to_dict_layer_bl42_filters_non_numeric():
+    """45.6a.1.1: dict-valued sub-entries (spectral_abscissa_by_n) are dropped."""
+    from stencil_gen.brady2d_stability import StabilityReport
+
+    r = StabilityReport(
+        layer_bl42={
+            "spectral_abscissa_by_n": {21: 1e-12, 41: 2e-12},
+            "max_spectral_abscissa": 2e-12,
+            "purely_imaginary": True,
+        },
+        overall_verdict="pass",
+    )
+    out = brady2d_sweep._report_to_dict(r)
+    assert "layer_bl42" in out
+    assert "spectral_abscissa_by_n" not in out["layer_bl42"]
+    assert out["layer_bl42"]["max_spectral_abscissa"] == pytest.approx(2e-12)
+    assert out["layer_bl42"]["purely_imaginary"] == 1.0
+
+
+def test_report_to_dict_omits_layer_bl42_when_none():
+    """45.6a.1.1: key absent when layer_bl42 is None (no crash, no spurious entry)."""
+    from stencil_gen.brady2d_stability import StabilityReport
+
+    r = StabilityReport.empty()
+    out = brady2d_sweep._report_to_dict(r)
+    assert "layer_bl42" not in out
