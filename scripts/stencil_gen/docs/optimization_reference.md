@@ -335,7 +335,7 @@ The plan's "What this plan does NOT do" section is the source of truth.
   Emukit. Deferred to plan 46.
 - **Brady-Livescu 1D Euler reproduction.** Their 2019 objective requires
   a full nonlinear 1D Euler RK4 solver that this repo does not have.
-  Deferred to plan 46.
+  Deferred to plan 47.
 - **Classical-α E2_1** (fourth-dim space). Second-order stability was
   judged inconsequential; skipped in favor of E4_1.
 - **E6 / E8 classical schemes.** No Python derivation pipeline exists.
