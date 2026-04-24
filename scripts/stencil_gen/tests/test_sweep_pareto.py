@@ -1,4 +1,4 @@
-"""Unit tests for :mod:`sweeps.pareto` (plan 45.3c).
+"""Unit tests for :mod:`sweeps.pareto` (plan 45.3c / 45.4c).
 
 Covers:
 
@@ -8,6 +8,11 @@ Covers:
 - ``python -m sweeps pareto --help`` subprocess smoke — confirms the dispatch
   wiring from ``sweeps/__main__.py`` survived the registration of the new
   subcommand.
+- :mod:`sweeps._pareto_io` — per-run JSON persistence save/load/iter
+  (plan 45.4a).
+- ``--persist`` wiring in :func:`sweeps.pareto.main` — verifies the CLI
+  actually calls :func:`save_pareto_front` when requested and skips it
+  otherwise (plan 45.4c review follow-up to 45.4b).
 
 ``TestParetoCLI::test_argparse_accepts_minimal_invocation`` stubs
 :func:`sweeps.pareto.run_nsga2` via ``monkeypatch`` so no pymoo / brady2d
@@ -16,6 +21,7 @@ pipeline is entered — keeps the test in the fast suite.
 
 from __future__ import annotations
 
+import json
 import os
 import subprocess
 import sys
@@ -27,6 +33,11 @@ import pytest
 from stencil_gen.pareto import ParetoPoint, ParetoResult
 
 from sweeps import pareto as pareto_cli
+from sweeps._pareto_io import (
+    iter_pareto_fronts,
+    load_pareto_front,
+    save_pareto_front,
+)
 
 
 # ---------------------------------------------------------------------------
@@ -192,3 +203,211 @@ class TestParetoCLI:
             assert needle in proc.stdout, (
                 f"missing {needle!r} in `python -m sweeps pareto --help` output"
             )
+
+    def test_persist_flag_invokes_save_pareto_front(self, monkeypatch, tmp_path, capsys):
+        """``--persist`` must call :func:`save_pareto_front` exactly once.
+
+        Stubs both :func:`run_nsga2` (to avoid pymoo/brady2d) and
+        :func:`save_pareto_front` (to keep the working-copy
+        ``sweeps/pareto_fronts/`` untouched — the CLI passes no ``directory=``
+        override, so an unmocked save would write into the repo).
+        """
+        stub = _stub_result(
+            objective_fields=("layer1.boundary_gv_err", "layer3.max_stab_eig"),
+        )
+        monkeypatch.setattr(pareto_cli, "run_nsga2", lambda **_: stub)
+
+        recorder: dict = {}
+        sentinel = tmp_path / "fake.json"
+
+        def _fake_save(result, *args, **kwargs):
+            recorder["called"] = recorder.get("called", 0) + 1
+            recorder["result"] = result
+            return sentinel
+
+        monkeypatch.setattr(pareto_cli, "save_pareto_front", _fake_save)
+
+        rc = pareto_cli.main(
+            [
+                "--scheme", "E4",
+                "--kernel", "classical",
+                "--objectives",
+                "layer1.boundary_gv_err",
+                "layer3.max_stab_eig",
+                "--pop-size", "6",
+                "--n-gen", "2",
+                "--seed", "1",
+                "--persist",
+            ]
+        )
+        assert rc == 0
+        assert recorder.get("called") == 1
+        assert recorder["result"] is stub
+        out = capsys.readouterr().out
+        assert "persisted front to" in out
+        assert str(sentinel) in out
+
+    def test_no_persist_does_not_invoke_save_pareto_front(
+        self, monkeypatch, capsys
+    ):
+        """Without ``--persist`` the IO helper must not be called."""
+        stub = _stub_result(
+            objective_fields=("layer1.boundary_gv_err", "layer3.max_stab_eig"),
+        )
+        monkeypatch.setattr(pareto_cli, "run_nsga2", lambda **_: stub)
+
+        recorder: dict = {}
+
+        def _fake_save(result, *args, **kwargs):
+            recorder["called"] = recorder.get("called", 0) + 1
+            return Path("/should/not/be/written.json")
+
+        monkeypatch.setattr(pareto_cli, "save_pareto_front", _fake_save)
+
+        rc = pareto_cli.main(
+            [
+                "--scheme", "E4",
+                "--kernel", "classical",
+                "--objectives",
+                "layer1.boundary_gv_err",
+                "layer3.max_stab_eig",
+                "--pop-size", "6",
+                "--n-gen", "2",
+                "--seed", "1",
+            ]
+        )
+        assert rc == 0
+        assert "called" not in recorder
+        out = capsys.readouterr().out
+        assert "persisted front to" not in out
+
+
+# ---------------------------------------------------------------------------
+# _pareto_io: save / load / iter round-trip
+# ---------------------------------------------------------------------------
+
+
+def _stub_point(
+    *,
+    x: list[float],
+    objectives: list[float],
+    params: dict | None = None,
+    report: dict | None = None,
+) -> ParetoPoint:
+    return ParetoPoint(
+        x=np.asarray(x, dtype=float),
+        params=params if params is not None else {"alpha": list(x)},
+        objectives=np.asarray(objectives, dtype=float),
+        report=report or {},
+    )
+
+
+def _stub_result_multi_member(
+    *,
+    scheme: str = "E4",
+    kernel: str = "classical",
+    objective_fields: tuple[str, ...] = (
+        "layer1.boundary_gv_err",
+        "layer_bl42.max_spectral_abscissa",
+    ),
+) -> ParetoResult:
+    """Build a 3-member ParetoResult exercising all serialised fields."""
+    front = (
+        _stub_point(x=[-0.8, 0.16], objectives=[3.6e-2, 0.95]),
+        _stub_point(x=[-0.5, 0.20], objectives=[8.0e-2, 0.30]),
+        _stub_point(x=[-0.2, 0.25], objectives=[1.0e-1, 1.0e-13]),
+    )
+    return ParetoResult(
+        front=front,
+        objective_fields=objective_fields,
+        scheme=scheme,
+        kernel=kernel,
+        bounds=((-2.0, 2.0), (0.05, 2.0)),
+        method="NSGA-II",
+        pop_size=12,
+        n_gen=4,
+        n_evals=48,
+        seed=1,
+        compute_time=1.234,
+        hv_trace=(0.1, 0.2, 0.25, 0.3),
+        ref_point=(1.1, 1.1),
+        extras={"n_sentinel_filtered": 2, "hv_n_nds": (3, 3, 3, 3)},
+    )
+
+
+class TestParetoIO:
+    def test_save_creates_file_at_mangled_path(self, tmp_path):
+        """Filename must be ``{scheme}_{kernel}_{mangled}.json``."""
+        result = _stub_result_multi_member()
+        written = save_pareto_front(result, directory=tmp_path)
+        expected = tmp_path / (
+            "E4_classical_"
+            "layer1_boundary_gv_err__layer_bl42_max_spectral_abscissa.json"
+        )
+        assert written == expected
+        assert expected.exists()
+        assert expected.stat().st_size > 0
+
+    def test_roundtrip_preserves_objectives(self, tmp_path):
+        """``load_pareto_front`` should round-trip every front member's arrays."""
+        result = _stub_result_multi_member()
+        written = save_pareto_front(result, directory=tmp_path)
+        loaded = load_pareto_front(written)
+
+        assert loaded["scheme"] == result.scheme
+        assert loaded["kernel"] == result.kernel
+        assert loaded["method"] == result.method
+        assert tuple(loaded["objective_fields"]) == result.objective_fields
+        assert loaded["pop_size"] == result.pop_size
+        assert loaded["n_gen"] == result.n_gen
+        assert loaded["n_evals"] == result.n_evals
+        assert loaded["seed"] == result.seed
+        assert loaded["compute_time"] == result.compute_time
+        assert tuple(loaded["ref_point"]) == result.ref_point
+        assert tuple(loaded["hv_trace"]) == result.hv_trace
+
+        assert len(loaded["front"]) == len(result.front)
+        for loaded_pt, pt in zip(loaded["front"], result.front):
+            assert loaded_pt["x"] == pt.x.tolist()
+            assert loaded_pt["objectives"] == pt.objectives.tolist()
+
+    def test_serializer_handles_numpy_arrays(self, tmp_path):
+        """numpy ndarrays and scalars in ``extras`` must not raise TypeError."""
+        result = _stub_result_multi_member()
+        # Swap in a numpy array and a numpy scalar via dataclass replace-equivalent.
+        # ``extras`` is a plain dict on a frozen dataclass, so mutate in place.
+        result.extras["np_array"] = np.array([1.0, 2.5, 3.75])
+        result.extras["np_scalar"] = np.float64(42.0)
+        written = save_pareto_front(result, directory=tmp_path)
+        raw = json.loads(written.read_text())
+        assert raw["extras"]["np_array"] == [1.0, 2.5, 3.75]
+        assert raw["extras"]["np_scalar"] == 42.0
+
+    def test_iter_discovers_multiple_files(self, tmp_path):
+        """``iter_pareto_fronts`` yields every ``*.json`` in the directory."""
+        a = save_pareto_front(
+            _stub_result_multi_member(
+                objective_fields=(
+                    "layer1.boundary_gv_err",
+                    "layer3.max_stab_eig",
+                )
+            ),
+            directory=tmp_path,
+        )
+        b = save_pareto_front(
+            _stub_result_multi_member(
+                scheme="E2",
+                objective_fields=(
+                    "layer1.boundary_gv_err",
+                    "layer_bl42.max_spectral_abscissa",
+                ),
+            ),
+            directory=tmp_path,
+        )
+        discovered = list(iter_pareto_fronts(tmp_path))
+        assert set(discovered) == {a, b}
+
+    def test_iter_on_missing_directory_yields_nothing(self, tmp_path):
+        """A nonexistent directory is a no-op, not an error."""
+        missing = tmp_path / "does_not_exist"
+        assert list(iter_pareto_fronts(missing)) == []
