@@ -241,7 +241,7 @@ cd scripts/stencil_gen && SYMPY_CACHE_SIZE=50000 uv run python -m sweeps pareto 
   - Test: `cd scripts/stencil_gen && uv run python -m sweeps pareto --help`
   - **Implementation note:** Used lazy import inside the `if args.command == "pareto":` branch (matches every other subcommand's pattern) rather than top-of-module import. Updated the existing `gv-stability-pareto` help text to cross-reference the new `pareto` subcommand. Verified `python -m sweeps pareto --help` exits 0 and `python -m sweeps --help` lists `pareto` between `gv-stability-pareto` and `brady2d`. Smoke-checked the dispatch by triggering the `--objectives` length-1 error path through `python -m sweeps pareto ...`.
 
-- [ ] **45.3c** Tests in `tests/test_sweep_pareto.py` (new):
+- [x] **45.3c** Tests in `tests/test_sweep_pareto.py` (new):
   - `TestMangleObjectives::test_roundtrip_legible` — `_mangle_objectives(["layer1.boundary_gv_err", "layer_bl42.max_spectral_abscissa"])` returns exactly `"layer1_boundary_gv_err__layer_bl42_max_spectral_abscissa"`.
   - `TestMangleObjectives::test_order_preserved` — two orderings of the same fields give different mangled filenames.
   - `TestParetoCLI::test_argparse_accepts_minimal_invocation` — `main(["--scheme", "E4", "--kernel", "classical", "--objectives", "layer1.boundary_gv_err", "layer3.max_stab_eig", "--pop-size", "6", "--n-gen", "2", "--seed", "1"])` exits 0 with mocked `run_nsga2`.
@@ -250,6 +250,7 @@ cd scripts/stencil_gen && SYMPY_CACHE_SIZE=50000 uv run python -m sweeps pareto 
   - `TestParetoCLI::test_dispatch_registered` — `python -m sweeps pareto --help` exits 0 (use `subprocess.run`).
   - File: `scripts/stencil_gen/tests/test_sweep_pareto.py` (new)
   - Test: `cd scripts/stencil_gen && uv run pytest tests/test_sweep_pareto.py -x -q -k "TestMangleObjectives or TestParetoCLI"`
+  - **Implementation note:** All 6 tests passed in 1.57s.  The minimal-invocation test stubs `sweeps.pareto.run_nsga2` via `monkeypatch` so no pymoo / brady2d pipeline is entered — stays in the fast suite.  The dispatch subprocess test invokes `python -m sweeps pareto --help` (not `python -m sweeps.pareto --help`) to exercise the top-level `sweeps/__main__.py` dispatch wiring added in 45.3b.  The `--help` output from the top-level dispatcher differs in framing from the subparser's own `--help`; relaxed the assertion from per-flag exact spelling to `--objectives`, `--pop-size`, `--n-gen`, `--seed` substring checks which are stable across both framings.
 
 ### 45.4 — Per-run JSON persistence to `sweeps/pareto_fronts/`
 
