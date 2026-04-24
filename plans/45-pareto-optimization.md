@@ -254,7 +254,7 @@ cd scripts/stencil_gen && SYMPY_CACHE_SIZE=50000 uv run python -m sweeps pareto 
 
 ### 45.4 — Per-run JSON persistence to `sweeps/pareto_fronts/`
 
-- [ ] **45.4a** Add I/O helpers to a new module `scripts/stencil_gen/sweeps/_pareto_io.py` (separate from `_common.py` which is `known_values.json`-focused):
+- [x] **45.4a** Add I/O helpers to a new module `scripts/stencil_gen/sweeps/_pareto_io.py` (separate from `_common.py` which is `known_values.json`-focused):
   - `PARETO_FRONTS_DIR: Path = Path(__file__).parent / "pareto_fronts"`
   - `save_pareto_front(result: ParetoResult, directory: Path = PARETO_FRONTS_DIR) -> Path`:
     - `mkdir(parents=True, exist_ok=True)`.
@@ -265,6 +265,7 @@ cd scripts/stencil_gen && SYMPY_CACHE_SIZE=50000 uv run python -m sweeps pareto 
   - `iter_pareto_fronts(directory: Path = PARETO_FRONTS_DIR) -> Iterator[Path]`: glob `*.json` for the regression test to discover.
   - File: `scripts/stencil_gen/sweeps/_pareto_io.py` (new)
   - Test: `cd scripts/stencil_gen && uv run pytest tests/test_sweep_pareto.py -x -q -k "TestParetoIO"`
+  - **Implementation note:** The `_mangle_objectives` helper is duplicated here (tiny — one-line join) rather than imported from `sweeps.pareto`; that file pulls in pymoo via `stencil_gen.pareto`, and persistence should not force a pymoo import. `_ParetoEncoder` handles `np.ndarray`, `np.generic` scalars, dataclass instances, and `Path`; tuple → list conversion is handled by the stdlib JSON encoder. Top-level schema is produced by `_result_to_ordered` (a single `OrderedDict` literal pinning the key order); each `ParetoPoint` is projected by `_point_to_ordered` into `(x, params, objectives, report)`. `iter_pareto_fronts` sorts results so test discovery order is deterministic, and no-ops on missing directories. Sanity-checked end-to-end (save → load → iter round-trip on a synthetic `ParetoResult`) before the TestParetoIO suite lands in 45.4c; existing fast tests (`test_pareto.py`, `test_sweep_pareto.py`) still pass.
 
 - [ ] **45.4b** Wire `--persist` into `sweeps/pareto.py::main`: after `run_nsga2` returns, call `save_pareto_front(result)` and print the written path. Without `--persist`, no file is written (print to stdout only). Create the `sweeps/pareto_fronts/` directory with a placeholder `.gitkeep` so the empty directory is tracked. Do NOT add it to `.gitignore` (matches `output/` convention per the sweeps-agent finding).
   - File: `scripts/stencil_gen/sweeps/pareto.py`; `scripts/stencil_gen/sweeps/pareto_fronts/.gitkeep` (new)
