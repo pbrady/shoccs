@@ -255,13 +255,25 @@ cd scripts/stencil_gen && uv run python -m sweeps optimize --scheme E4 --kernel 
   - File: `scripts/stencil_gen/sweeps/epsilon_sweep.py`, `scripts/stencil_gen/sweeps/__main__.py`, `scripts/stencil_gen/sweeps/known_values.json`, `scripts/stencil_gen/tests/test_phs.py`, `scripts/stencil_gen/tests/test_sweep_gv_objectives.py`
   - Test: `cd scripts/stencil_gen && uv run pytest tests/ -x -q` — 857 passed, 138 skipped, 1 xfailed.
 
-- [ ] **46.3c** Run E2 + E4 multiquadric `--include-gv` sweeps and persist:
-  - `cd scripts/stencil_gen && SYMPY_CACHE_SIZE=50000 uv run python -m sweeps epsilon --scheme E2 --kernel multiquadric --include-gv --update-known-values`
+- [ ] **46.3b.1.3** (review follow-up to `48881bb`): the 46.3b.1.2 commit set `CLI_DEFAULT_EPS_FLOOR=1.5` as a *kernel-agnostic* default — both `sweeps/__main__.py:sub_eps` and `sweeps/epsilon_sweep.py:main` apply the floor regardless of `--kernel`, and `__main__.py:274` unconditionally forwards `--eps-floor str(args.eps_floor)` to the dispatched subprocess. The module docstring claims "multiquadric and other kernels are not known to suffer from boundary-snap with floor=1.5 in the standard `[0.01, 10]` range", but this is asserted, not validated:
+  - The current persisted `E2_1.multiquadric.epsilon = 1.0` and `E4_1.multiquadric.epsilon = 1.0` are *below* the new floor (1.5). Running 46.3c as written will use floor=1.5 by default and move both persisted multiquadric values to >=1.5 — possibly snap-to-floor. There is no analog of the 46.3b.1a empirical landscape probe for multiquadric, so the resulting persisted values may be boundary-snapped without an explicit decision.
+  - The 46.3b.1.2 regression-test pattern (`test_e{2,4}_gaussian_epsilon_strictly_above_floor`) covers gaussian only. There is no `test_e{2,4}_multiquadric_epsilon_strictly_above_floor` analogue, so a multiquadric snap would not be caught by `pytest tests/test_phs.py`.
+  - **Decide and apply one of**:
+    - **A**: empirically probe the multiquadric `stab_eig(epsilon)` landscape at p=q=nextra=nu=1 (E2_1) and p=2/q=3/nextra=0/nu=1 (E4_1) over `[0.01, 10]` (e.g., 25-point logspace + a fine probe near suspected basins) to determine whether floor=1.5 yields a strictly-interior fine-sweep optimum for both schemes. If yes: proceed with 46.3c at the default floor and add `test_e{2,4}_multiquadric_epsilon_strictly_above_floor` regressions mirroring the gaussian pattern. If no: fall through to B or C.
+    - **B**: pass `--eps-floor 0.0` explicitly in the 46.3c commands so the multiquadric sweep uses the unconstrained grid-min (preserves the historical `multiquadric.epsilon=1.0` semantics). Document in 46.3c that the floor was deliberately bypassed for multiquadric and explain why (no multiquadric-specific landscape analysis was performed). Skip the new strictly-above-floor regression test for multiquadric.
+    - **C**: gate the floor on `kernel == "gaussian"` in `epsilon_sweep.py:fine_sweep` and `run_epsilon_sweep` (e.g., effective floor = `eps_floor if kernel == "gaussian" else 0.0`). Update the module docstring to state the floor is gaussian-specific. Run 46.3c at the default; multiquadric will use the unconstrained grid-min. Skip the new strictly-above-floor regression test for multiquadric.
+  - The default the plan picks here is the empirical answer for option A (cheapest path is to probe; if it works, A is the most consistent with the gaussian pattern).
+  - File: `plans/46-hardening.md` (record the decision); if option A: `scripts/stencil_gen/tests/test_phs.py` (add multiquadric strictly-above-floor regressions); if option C: `scripts/stencil_gen/sweeps/epsilon_sweep.py` (kernel-gate the floor).
+  - Test: analysis-only at this step; the chosen option's regression test is added in 46.3c.
+
+- [ ] **46.3c** Run E2 + E4 multiquadric `--include-gv` sweeps and persist, **using the 46.3b.1.3 chosen approach** (default A: floor=1.5; A-fail or B: pass `--eps-floor 0.0`; C: floor is auto-zero for multiquadric):
+  - `cd scripts/stencil_gen && SYMPY_CACHE_SIZE=50000 uv run python -m sweeps epsilon --scheme E2 --kernel multiquadric --include-gv --update-known-values` (append `--eps-floor 0.0` if 46.3b.1.3 chose option B).
   - Same for `--scheme E4`.
-  - Commit the resulting `known_values.json` deltas.
+  - Commit the resulting `known_values.json` deltas. If 46.3b.1.3 chose option A, also commit the new `test_e{2,4}_multiquadric_epsilon_strictly_above_floor` regression tests asserting `_KNOWN[scheme]["multiquadric"]["epsilon"] > CLI_DEFAULT_EPS_FLOOR + 1e-9`.
+  - Note the migration consequence in the commit message: `E{2,4}_1.multiquadric.epsilon` will move from `1.0` to whatever the constrained (or unconstrained, depending on B/C) optimum is — explicitly intentional, not a regression.
   - Verify the broader `TestRegressionGV` block now activates fully (the per-scheme GV entries check exits successfully without skips for any of the three kernels).
-  - File: `scripts/stencil_gen/sweeps/known_values.json`
-  - Test: `cd scripts/stencil_gen && uv run pytest tests/test_phs.py -x -q -k "TestRegressionGV"`
+  - File: `scripts/stencil_gen/sweeps/known_values.json` (and `tests/test_phs.py` for option A; and `sweeps/epsilon_sweep.py` for option C if not already done in 46.3b.1.3).
+  - Test: `cd scripts/stencil_gen && uv run pytest tests/test_phs.py -x -q -k "TestRegressionGV or TestRegressionE2Stability or TestRegressionE4Stability"`
 
 ### 46.4 — Activate `TestRegressionBrady2DSweep` (cheap classical seed)
 
@@ -332,7 +344,7 @@ cd scripts/stencil_gen && uv run python -m sweeps optimize --scheme E4 --kernel 
   ↓
 46.2a → 46.2b → 46.2b.1 → 46.2b.2 → 46.2c → 46.2d   # schema completeness + 16e11cf review follow-ups
   ↓
-46.3a → 46.3a.1 → 46.3a.2 → 46.3b → 46.3b.1 → 46.3b.1a → 46.3b.1.1 → 46.3b.1.2 → 46.3c # activate TestRegressionGV (tension, gaussian, multiquadric)
+46.3a → 46.3a.1 → 46.3a.2 → 46.3b → 46.3b.1 → 46.3b.1a → 46.3b.1.1 → 46.3b.1.2 → 46.3b.1.3 → 46.3c # activate TestRegressionGV (tension, gaussian, multiquadric)
   ↓
 46.4a                                    # activate TestRegressionBrady2DSweep
   ↓
