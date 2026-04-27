@@ -416,7 +416,17 @@ class TestRunNSGA2:
             f"front size {len(res.front)} == pop_size; sentinel filtering / "
             "selection did not run"
         )
-        assert res.extras["n_sentinel_filtered"] >= 0
+        # 46.5a's empirical analysis (probed seeds 1–11, n_gen ∈ {1,2,3,4,6,8},
+        # pop_size ∈ {10,20,40}) found pymoo's NSGA-II crowds out sentinel rows
+        # during selection before keep_mask sees them, so n_sentinel_filtered is
+        # always 0 at this budget. Hardening this into a regression signal: if a
+        # future pymoo upgrade changes selection so sentinels survive to res.F,
+        # this assert catches it instead of the test silently passing.
+        assert res.extras["n_sentinel_filtered"] == 0, (
+            "regression: pymoo no longer crowds out sentinel rows in selection "
+            "before keep_mask sees them; revisit the test budget or the "
+            "keep_mask filter"
+        )
 
     def test_ref_point_override(self):
         ref = (2.0, 2.0)
