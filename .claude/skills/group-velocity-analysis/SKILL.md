@@ -25,6 +25,10 @@ Group velocity `C(ξ) = dω/dξ` governs how wave packets propagate through fini
 | `anisotropy_over_coefficient_field(scheme, c_x, c_y, grid, theta, xi_mag)` | 2D anisotropy projected onto a varying flow field |
 | `ray_trace_group_velocity(C_field, x, xi, ...)` | Ray tracing dx/dt = C, dξ/dt = -∂C/∂x |
 | `brady2d_stability_score(scheme, kernel, params, max_layer=)` | Layered stability scoring for Brady-Livescu 2D benchmark |
+| `build_bl42_operator(D)` | 2×2 block operator for BL §4.2 reflecting hyperbolic system |
+| `layer_bl42_reflecting_hyperbolic(scheme, kernel, params, n_values=)` | L3r eigenvalue analysis on BL §4.2 (purely imaginary continuous spectrum) |
+| `make_multi_objective(scheme, kernel, fields, *, gate_layer=None, max_layer=None)` | Vector-valued objective factory for NSGA-II (plan 45); finite sentinel `1e12` on infeasibility |
+| `run_nsga2(scheme, kernel, fields, bounds, *, pop_size, n_gen, seed)` | Multi-objective Pareto driver via pymoo NSGA-II; returns `ParetoResult` with HV trace |
 
 ## Key Facts
 
@@ -44,6 +48,9 @@ Group velocity `C(ξ) = dω/dξ` governs how wave packets propagate through fini
 - Scoring boundary closures against the Brady-Livescu 2D varying-coefficient benchmark (L1-L7 layered pipeline)
 - Layer 8 closed-loop validation: re-running top survivors through the compiled C++ solver (`run_cpp_brady2d` / `sweeps brady2d --validate-with-cpp`) to confirm analytical L1-L7 verdicts empirically
 - Non-normality diagnostics: spectral/numerical abscissa, Kreiss constant, transient growth bound
+- Optimizing boundary-closure parameters against any `StabilityReport` field using `stencil_gen.optimizer` (Nelder-Mead, COBYQA, SHGO, DE, staged cascade, multi-start); the scoring pipeline is the objective function
+- Testing boundary closures against the BL §4.2 neutrally-stable hyperbolic system — the strictest `div(c) = 0` discriminator, purely imaginary continuous spectrum, energy-conserving reflecting BCs (available as `layer_bl42.*` fields in `StabilityReport`)
+- Multi-objective Pareto exploration when stability metrics conflict (e.g., tension closures have low `layer1.boundary_gv_err` but high `layer_bl42.max_spectral_abscissa`; classical closures have the opposite trade-off) — use `python -m sweeps pareto` for an NSGA-II driver that exposes the full front (plan 45). The single-objective optimizer collapses these onto a scalar; Pareto exposes the trade-off explicitly.
 
 ## Detailed Reference
 
@@ -51,3 +58,6 @@ For complete API documentation, usage examples, and mathematical derivations, se
 - `scripts/stencil_gen/docs/group_velocity_reference.md`
 - `scripts/stencil_gen/docs/brady2d_stability_reference.md` (layered stability pipeline for the Brady-Livescu 2D benchmark)
 - `docs/brady2d_cpp_bridge_reference.md` (L8 C++ bridge architecture: Lua template, subprocess runner, runtime-parameterized spline families)
+- `scripts/stencil_gen/docs/optimization_reference.md` (plan-43 optimizer: objective factory, local/global/staged drivers, multi-start, classical-α basin survey)
+- `scripts/stencil_gen/docs/bl42_reference.md` (plan-44 BL §4.2 reflecting-hyperbolic layer: problem statement, 2×2 block operator construction, calibration results)
+- `scripts/stencil_gen/docs/pareto_reference.md` (plan-45 NSGA-II multi-objective Pareto driver: `make_multi_objective`, `run_nsga2`, hypervolume tracking, per-run JSON persistence under `sweeps/pareto_fronts/`)

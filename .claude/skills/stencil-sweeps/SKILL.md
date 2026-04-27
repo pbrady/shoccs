@@ -45,6 +45,15 @@ uv run python -m sweeps brady2d --scheme E4 --kernel tension --param-range 2 4 3
 # Same, but re-run top-3 survivors against the compiled C++ solver (L8 end-to-end validation)
 uv run python -m sweeps brady2d --scheme E4 --kernel tension --param-range 2 4 11 --max-layer 3 --validate-with-cpp
 
+# Optimize boundary-closure parameters (Nelder-Mead, COBYQA, SHGO, DE, or staged cascade)
+uv run python -m sweeps optimize --scheme E4 --kernel tension --objective layer1.boundary_gv_err --bounds 0.5 20 --method staged --n-restarts 10
+
+# Optimize against the BL §4.2 neutrally-stable hyperbolic eigenvalue (L3r; strictest discriminator)
+uv run python -m sweeps optimize --scheme E4 --kernel tension --objective layer_bl42.max_spectral_abscissa --bounds 0.5 20 --method Nelder-Mead --max-evals 40
+
+# NSGA-II multi-objective Pareto front over 2-3 stability metrics (plan 45); persists to sweeps/pareto_fronts/
+uv run python -m sweeps pareto --scheme E4 --kernel classical --objectives layer1.boundary_gv_err layer_bl42.max_spectral_abscissa --bounds -2 2 0.05 2 --pop-size 40 --n-gen 30 --seed 1 --persist
+
 # Run all sweeps (quick mode for smoke testing)
 uv run python -m sweeps all --quick
 
@@ -75,7 +84,9 @@ uv run python -m sweeps epsilon --scheme E2 --update-known-values
 | `sweeps/tension_sweep.py` | Tension sigma sweeps |
 | `sweeps/tension_penalty_sweep.py` | 2D (sigma, gamma) joint sweeps |
 | `sweeps/footprint_sweep.py` | Boundary footprint (nextra) sweeps |
-| `sweeps/gv_stability_pareto.py` | Pareto-front (stability, gv_error) explorer |
+| `sweeps/gv_stability_pareto.py` | 1D parametric scan with dominance filter — read-only research/docs |
+| `sweeps/pareto.py` | NSGA-II multi-objective Pareto driver (plan 45); produces full fronts |
+| `sweeps/_pareto_io.py` | JSON serialization for `ParetoResult` → `sweeps/pareto_fronts/<scheme>_<kernel>_<mangled>.json` |
 | `sweeps/comparison.py` | Multi-method comparison tables |
 | `sweeps/alpha_extraction.py` | Extract stencil alphas from RBF weights |
 | `sweeps/brady2d_sweep.py` | Brady-Livescu §4.3 2D sweep; `--validate-with-cpp` re-runs top-3 survivors through the compiled C++ solver (L8) |
@@ -86,8 +97,11 @@ uv run python -m sweeps epsilon --scheme E2 --update-known-values
 - Exploring a new kernel type or scheme order
 - Producing comparison tables for documentation/papers
 - Diagnosing why a scheme is unstable at certain parameters
+- Optimizing boundary-closure parameters against a `StabilityReport` field (single-objective + feasibility cliff; staged cheap-inner + expensive-validator pipeline); persists to `known_values.json["brady2d_optima"]`. See `scripts/stencil_gen/docs/optimization_reference.md`.
+- Multi-objective Pareto exploration when two metrics genuinely conflict (e.g., `layer1.boundary_gv_err` vs `layer_bl42.max_spectral_abscissa`); use `sweeps pareto` (NSGA-II via pymoo). See `scripts/stencil_gen/docs/pareto_reference.md`.
 
 ## Detailed Reference
 
 For complete CLI documentation, JSON schema, and adding new sweeps, see:
-`scripts/stencil_gen/docs/sweeps_reference.md`
+- `scripts/stencil_gen/docs/sweeps_reference.md`
+- `scripts/stencil_gen/docs/pareto_reference.md` (plan 45 NSGA-II multi-objective driver)

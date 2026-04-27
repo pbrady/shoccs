@@ -452,13 +452,15 @@ cd scripts/stencil_gen && SYMPY_CACHE_SIZE=50000 uv run python -m sweeps pareto 
   - Test: `grep -q "D-Opt-1" plans/meta.md`
   - **Implementation note:** Landed a consolidated `D-Opt-1` entry covering all four cross-cutting choices as one decision with four sub-decisions (a)–(d), each with its own `**Options:**` block listing the chosen and the alternatives considered — matches the pattern used by `D1`, `D2`, `D3`, and `D15-1` where multiple related architectural choices share one decision ID. Placed after `DD22-4` and before the `---` Files-Excluded-from-Migration-Scope separator, so the optimization decisions sit at the tail of the Decision Log chronologically (plan 45 is the latest plan to land). The closing "Why these are cross-cutting" paragraph explicitly ties (a)–(c) to plans 46/47 for forward traceability and ties (d) to the scalar/multi-objective call-site symmetry that plan 46's Bayesian surrogate scalarization will need to preserve. "Implementing plan items" footer enumerates the five concrete items that encode each decision (45.0b, 45.0d, 45.1b, 45.2a, 45.4a) so a future agent can trace a decision back to its source commits without re-reading plan 45 end-to-end. Verification: `grep -n "D-Opt-1" plans/meta.md` → `385:### D-Opt-1: Multi-Objective Pareto Optimization Architecture (Plan 45)` (1 hit, as required).
 
-- [ ] **45.7d** Update `.claude/skills/stencil-sweeps/SKILL.md` with a `pareto` subcommand example and link to `pareto_reference.md`.
-  - **Blocked:** `.claude/skills/` path is write-protected by tool permissions. Needs manual edit after ralph completes.
+- [x] **45.7d** Update `.claude/skills/stencil-sweeps/SKILL.md` with a `pareto` subcommand example and link to `pareto_reference.md`.
+  - Completed manually in interactive session (the `.claude/skills/**` block applies to the ralph subprocess context, not the main interactive session).
+  - Added: `sweeps pareto` CLI example (E4 classical with BL42 + GV objectives); two new `Key Files` rows for `sweeps/pareto.py` and `sweeps/_pareto_io.py`; clarified `sweeps/gv_stability_pareto.py` is the read-only 1D scan; added "Multi-objective Pareto exploration" entry to "When to Use"; added `pareto_reference.md` to "Detailed Reference".
   - File: `.claude/skills/stencil-sweeps/SKILL.md`
   - Test: (no test)
 
-- [ ] **45.7e** Update `.claude/skills/group-velocity-analysis/SKILL.md` with a note that multi-objective Pareto is now the right tool when `layer1.boundary_gv_err` disagrees with stability-layer objectives (plan 45).
-  - **Blocked:** same permission constraint as 45.7d.
+- [x] **45.7e** Update `.claude/skills/group-velocity-analysis/SKILL.md` with a note that multi-objective Pareto is now the right tool when `layer1.boundary_gv_err` disagrees with stability-layer objectives (plan 45).
+  - Completed manually in interactive session.
+  - Added: `make_multi_objective` and `run_nsga2` rows to the function table; "Multi-objective Pareto exploration" entry to "When to Use" with the tension-vs-classical trade-off framing; `pareto_reference.md` to "Detailed Reference".
   - File: `.claude/skills/group-velocity-analysis/SKILL.md`
   - Test: (no test)
 
