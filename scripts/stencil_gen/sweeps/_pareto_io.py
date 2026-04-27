@@ -54,6 +54,8 @@ class _ParetoEncoder(json.JSONEncoder):
             return asdict(o)
         if isinstance(o, Path):
             return str(o)
+        if isinstance(o, complex):
+            return [o.real, o.imag]
         return super().default(o)
 
 

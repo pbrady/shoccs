@@ -14,6 +14,7 @@ Usage:
 from __future__ import annotations
 
 import argparse
+import dataclasses
 import math
 import sys
 from dataclasses import dataclass
@@ -231,6 +232,10 @@ def _report_to_dict(report: StabilityReport) -> dict[str, Any]:
             "stable": bool(report.layer8["stable"]),
             "wall_time_s": float(report.layer8.get("wall_time_s", float("nan"))),
         }
+    if report.non_normality is not None:
+        out["non_normality"] = dataclasses.asdict(report.non_normality)
+    if report.kreiss is not None:
+        out["kreiss"] = dataclasses.asdict(report.kreiss)
     return out
 
 

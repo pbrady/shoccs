@@ -26,6 +26,7 @@ The public API surface is:
 
 from __future__ import annotations
 
+import dataclasses
 import operator
 import re
 import time
@@ -752,6 +753,10 @@ def _report_to_dict(report) -> dict[str, Any]:
             "stable": bool(report.layer8["stable"]),
             "wall_time_s": float(report.layer8.get("wall_time_s", float("nan"))),
         }
+    if getattr(report, "non_normality", None) is not None:
+        out["non_normality"] = dataclasses.asdict(report.non_normality)
+    if getattr(report, "kreiss", None) is not None:
+        out["kreiss"] = dataclasses.asdict(report.kreiss)
     return out
 
 

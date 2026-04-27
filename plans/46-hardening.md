@@ -109,7 +109,7 @@ cd scripts/stencil_gen && uv run python -m sweeps optimize --scheme E4 --kernel 
   - File: `scripts/stencil_gen/stencil_gen/optimizer.py`, `scripts/stencil_gen/sweeps/brady2d_sweep.py`
   - Test: `cd scripts/stencil_gen && uv run pytest tests/test_optimizer.py tests/test_pareto.py -x -q -k "report_to_dict"`
 
-- [ ] **46.2b** Add `non_normality` and top-level `kreiss` field handlers to all three `_report_to_dict` copies, plus a `complex` handler in `_ParetoEncoder`:
+- [x] **46.2b** Add `non_normality` and top-level `kreiss` field handlers to all three `_report_to_dict` copies, plus a `complex` handler in `_ParetoEncoder`:
   - In each `_report_to_dict` copy: `if report.non_normality is not None: out["non_normality"] = dataclasses.asdict(report.non_normality)`. Same for `report.kreiss` (a `KreissResult` with a `complex` `witness_s` field).
   - In `scripts/stencil_gen/sweeps/_pareto_io.py` `_ParetoEncoder.default`: add `if isinstance(obj, complex): return [obj.real, obj.imag]` (matches the convention in `brady2d_cli.py:28`).
   - Without this, any future code path that populates `report.kreiss` (currently latent — `layer2_kreiss_gks` populates `report.kreiss`, not `report.layer2`, in plan 41's design) will crash at `json.dumps` time inside `save_pareto_front`.

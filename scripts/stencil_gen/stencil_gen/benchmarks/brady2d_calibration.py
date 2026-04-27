@@ -20,6 +20,7 @@ Calibration results (max_layer=6, 2026-04-12):
 
 from __future__ import annotations
 
+import dataclasses
 import logging
 import time
 from typing import Any
@@ -114,6 +115,12 @@ def _report_to_dict(report) -> dict[str, Any]:
             "max_spectral_abscissa": report.layer_bl42.get("max_spectral_abscissa"),
             "purely_imaginary": report.layer_bl42.get("purely_imaginary"),
         }
+
+    if report.non_normality is not None:
+        d["non_normality"] = dataclasses.asdict(report.non_normality)
+
+    if report.kreiss is not None:
+        d["kreiss"] = dataclasses.asdict(report.kreiss)
 
     return d
 
