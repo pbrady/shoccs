@@ -156,7 +156,7 @@ cd scripts/stencil_gen && uv run python -m sweeps optimize --scheme E4 --kernel 
 
 ### 46.3 — Activate `TestRegressionGV` (cheap, ~5–10 min total)
 
-- [ ] **46.3a** Run E2 + E4 tension `--include-gv` sweeps and persist:
+- [x] **46.3a** Run E2 + E4 tension `--include-gv` sweeps and persist:
   - `cd scripts/stencil_gen && SYMPY_CACHE_SIZE=50000 uv run python -m sweeps tension --scheme E2 --include-gv --update-known-values`
   - Same for `--scheme E4`.
   - Commit the resulting `known_values.json` deltas (should add `E2_1.tension_gv`, `E2_1.tension.gv_error`, and the same for E4).

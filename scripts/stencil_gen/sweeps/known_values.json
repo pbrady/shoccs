@@ -7,12 +7,14 @@
       "nu": 1
     },
     "tension": {
-      "sigma": 6.0,
+      "sigma": 3.462842,
       "stable_at": [
         20,
         40,
-        80
-      ]
+        80,
+        160
+      ],
+      "gv_error": 2.6518008702270195
     },
     "gaussian": {
       "epsilon": 2.0,
@@ -33,6 +35,16 @@
         80,
         160
       ]
+    },
+    "tension_gv": {
+      "sigma": 20.0,
+      "gv_error": 2.074641143264805,
+      "stable_at": [
+        20,
+        40,
+        80,
+        160
+      ]
     }
   },
   "E4_1": {
@@ -43,13 +55,14 @@
       "nu": 1
     },
     "tension": {
-      "sigma": 3.0,
+      "sigma": 0.0,
       "stable_at": [
         20,
         40,
         80,
         160
-      ]
+      ],
+      "gv_error": 7.238095238095238
     },
     "gaussian": {
       "epsilon": 0.9,
@@ -77,7 +90,17 @@
         "epsilon": 0.1,
         "n": 20
       }
-    ]
+    ],
+    "tension_gv": {
+      "sigma": 20.0,
+      "gv_error": 4.79897368164198,
+      "stable_at": [
+        20,
+        40,
+        80,
+        160
+      ]
+    }
   },
   "footprint": {
     "E4_nextra0_phs": {
