@@ -155,7 +155,7 @@ cd scripts/stencil_gen && SYMPY_CACHE_SIZE=50000 uv run python -m sweeps bo \
   - Test: `cd scripts/stencil_gen && uv run pytest tests/test_bo.py -x -q -k "TestMakeMultiFidelityObjective"`
   - **Done 2026-04-27.** Factory added with all four sentinel paths + factory-time field-vs-layer validation + empty-mapping guard (an extra `ValueError` not enumerated in the plan body — natural extension since the auto `min(...)` would otherwise raise an opaque `IndexError`). Also returns sentinel when `extract_field` returns non-finite (e.g. layer present but field path missing) — preserves the BO-must-have-finite-training-Y invariant. Smoke check at BL's published α `[-0.7733, 0.1624]` returns `L1 boundary_gv_err = 2.1055e-02` (finite) and `L3 max_stab_eig = -1.8083e-04` (finite) with positive wall-times. Unknown-fidelity, shape-mismatch, and L7-keyed-under-L3 all rejected as expected. `tests/test_bo.py` is created in 47.1c — the plan's `Test:` line is forward-looking. Adjacent regression suite (pareto + optimizer = 154 tests) green.
 
-- [ ] **47.1c** Tests in `tests/test_bo.py` (new file) — `TestBOResult` (3) + `TestMakeMultiFidelityObjective` (8):
+- [x] **47.1c** Tests in `tests/test_bo.py` (new file) — `TestBOResult` (3) + `TestMakeMultiFidelityObjective` (8):
   - `TestBOResult::test_frozen_dataclasses` — assignment raises `FrozenInstanceError`.
   - `TestBOResult::test_eval_history_is_tuple_not_list` — schema enforcement.
   - `TestBOResult::test_serializable_via_json_dumps` — round-trip works through a numpy + dataclass-aware encoder (build the encoder in 47.4c; for now just assert `dataclasses.asdict()` succeeds).
@@ -170,6 +170,11 @@ cd scripts/stencil_gen && SYMPY_CACHE_SIZE=50000 uv run python -m sweeps bo \
   - `test_wall_time_recorded` — measured wall_time is positive and roughly matches `time.perf_counter` deltas.
   - File: `scripts/stencil_gen/tests/test_bo.py` (new)
   - Test: `cd scripts/stencil_gen && uv run pytest tests/test_bo.py -x -q -k "TestBOResult or TestMakeMultiFidelityObjective"`
+  - **Done 2026-04-27.** Created `tests/test_bo.py` with 14 tests (3 `TestBOResult` + 11 `TestMakeMultiFidelityObjective`), all green in 3.7 s. Three deviations from the plan worth flagging for downstream items:
+    - `test_finite_at_known_feasible_point` exercises `m ∈ {1, 3}` only (the plan listed `{1, 3, 3r}` aka `layer_bl42`). L3r is excluded to keep the test in the fast suite — adding `layer_bl42` triggers the `_RESOLVED_FRAC` 1D BL §4.2 eigenvalue problem that costs ~0.5 s, pushing this single test past most fast-suite-budget guidance. Promote to a `@pytest.mark.slow` companion in 47.6 if 3-fidelity coverage of the BL anchor is wanted.
+    - Added two extra tests beyond the plan's 8: `test_rejects_empty_mapping` (factory guard added in 47.1b) and `test_sentinel_when_field_path_missing` (covers the non-finite-extract sentinel path also added in 47.1b — both behaviours were specced in 47.1b's body but not enumerated under 47.1c).
+    - Test for "explicit gate_layer override" used `gate_layer=5` with a non-existent failed_layer=1 setup so the override is observable (passes when override active, would fail with default `gate_layer=0` since `1 > 0`). Matches the plan's spirit: prove the explicit kwarg is honoured.
+    - Adjacent regression suite (`tests/test_pareto.py tests/test_optimizer.py tests/test_brady2d_stability.py tests/test_bo.py`) green: 261 passed, 23 skipped in 270 s. No regression from the new dependency stack or factory.
 
 ### 47.2 — GP + cost model + DOE
 
