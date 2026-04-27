@@ -81,7 +81,7 @@ cd scripts/stencil_gen && SYMPY_CACHE_SIZE=50000 uv run python -m sweeps bo \
   - `dependencies` += `"torch>=2.2,<3"`, `"gpytorch>=1.15,<2"`, `"botorch>=0.17,<0.18"`. Pin botorch at `<0.18` because the 0.17.x → 0.18 transition typically removes deprecated APIs (the 0.17.0 transition removed `get_fitted_map_saas_ensemble`, `qMultiObjectiveMaxValueEntropy`, `FullyBayesianPosterior`).
   - Add `[tool.uv]` section: `extra-index-url = ["https://download.pytorch.org/whl/cpu"]` to skip the ~3 GB of NVIDIA CUDA wheels the default index pulls. Our GP fits run in microseconds — no GPU benefit.
   - The existing `[tool.uv.sources]` nlopt git override stays as-is from plan 46.0a.
-  - Verify: `cd scripts/stencil_gen && uv sync` succeeds, `uv run python -c "import botorch; from botorch.acquisition.multi_fidelity import qMultiFidelityKnowledgeGradient; from botorch.models import SingleTaskMultiFidelityGP; from botorch.models.cost import AffineFidelityCostModel; print('botorch', botorch.__version__)"` returns the version cleanly.
+  - Verify: `cd scripts/stencil_gen && uv sync` succeeds, `uv run python -c "import botorch; from botorch.acquisition.knowledge_gradient import qMultiFidelityKnowledgeGradient; from botorch.models import SingleTaskMultiFidelityGP; from botorch.models.cost import AffineFidelityCostModel; print('botorch', botorch.__version__)"` returns the version cleanly.
   - Create empty skeleton module `scripts/stencil_gen/stencil_gen/bo.py` with module docstring citing Wu et al. 2020 + the BoTorch discrete-fidelity tutorial. Module imports: `numpy as np`, `torch`, `botorch`, plus the reused symbols from `optimizer.py` (`params_from_vector`, `vector_from_params`, `extract_field`, `_FIELD_LAYER_ALIAS`, `_infer_max_layer`, `_report_to_dict`, `DEFAULT_BOUNDS`).
   - File: `scripts/stencil_gen/pyproject.toml`, `scripts/stencil_gen/stencil_gen/bo.py` (new)
   - Test: `cd scripts/stencil_gen && uv sync && uv run python -c "import stencil_gen.bo; import botorch, torch, gpytorch; print('botorch', botorch.__version__, 'torch', torch.__version__, 'gpytorch', gpytorch.__version__)"`
@@ -91,12 +91,13 @@ cd scripts/stencil_gen && SYMPY_CACHE_SIZE=50000 uv run python -m sweeps bo \
   - Skeleton `bo.py` imports `numpy`, `torch`, `botorch` plus the seven reused symbols from `optimizer.py`; `__all__ = []` until 47.1a populates it.
   - Existing fast suite (865 passed, 137 skipped, 1 xfailed) green after install — no regression from the new dependency stack.
 
-- [ ] **47.0b** Fix stale `botorch.acquisition.multi_fidelity` import-path references in this plan file. The 47.0a Resolution note documents the correction (`qMultiFidelityKnowledgeGradient` lives at `botorch.acquisition.knowledge_gradient` in `botorch==0.17.x`), but two surrounding text references still cite the non-existent path:
+- [x] **47.0b** Fix stale `botorch.acquisition.multi_fidelity` import-path references in this plan file. The 47.0a Resolution note documents the correction (`qMultiFidelityKnowledgeGradient` lives at `botorch.acquisition.knowledge_gradient` in `botorch==0.17.x`), but two surrounding text references still cite the non-existent path:
   - 47.0a "Verify" bullet (currently line ~84): replace `from botorch.acquisition.multi_fidelity import qMultiFidelityKnowledgeGradient` with `from botorch.acquisition.knowledge_gradient import qMultiFidelityKnowledgeGradient` so the documented verification command actually runs to completion.
   - Completion-criteria second bullet (currently line ~421): same replacement so the criterion is achievable.
   - Leave the 47.0a Resolution note unchanged — it explains the historical confusion.
   - File: `plans/47-mfbo.md`
   - Test: `grep -n "acquisition\.multi_fidelity" plans/47-mfbo.md` returns only the Resolution-note line(s) that explain the correction (not the verify command or completion criterion).
+  - **Done 2026-04-27.** Replaced the two stale `botorch.acquisition.multi_fidelity` references (47.0a Verify bullet + completion criterion) with `botorch.acquisition.knowledge_gradient`. Remaining grep matches (lines 90, 94, 95) are all explanatory text describing the correction itself.
 
 ### 47.1 — Core dataclasses + multi-fidelity objective factory
 
@@ -425,7 +426,7 @@ Strictly sequential. 47.5 (validate + baseline) can run before 47.4d's tests if 
 ## Completion Criteria
 
 - `uv sync` succeeds on aarch64 with `botorch>=0.17,<0.18` + `torch>=2.2,<3` + `gpytorch>=1.15,<2`. CPU-only PyTorch wheel (~140 MB) installed; no NVIDIA stack pulled.
-- `import botorch; from botorch.acquisition.multi_fidelity import qMultiFidelityKnowledgeGradient; from botorch.models import SingleTaskMultiFidelityGP` runs without error.
+- `import botorch; from botorch.acquisition.knowledge_gradient import qMultiFidelityKnowledgeGradient; from botorch.models import SingleTaskMultiFidelityGP` runs without error.
 - `make_multi_fidelity_objective("E4", "classical", {1: "layer1.boundary_gv_err", 3: "layer3.max_stab_eig", 7: "layer7.max_spectral_abscissa"})` returns a closure; calling it at BL's published α returns 3-tuples `(value, wall_time, report)` for `m ∈ {1, 3, 7}`.
 - `run_mfbo` returns a `BOResult` with `len(eval_history) == budget_evals`, `seed`-reproducible across two consecutive runs, `gp_hyperparameters` populated, `n_evals_per_fidelity` summing to `budget_evals`.
 - `python -m sweeps bo --help` lists all flags including `--cheap-fidelities`, `--budget-evals`/`--budget-seconds`, `--baseline`, `--validate-with-cpp`, `--persist`.
