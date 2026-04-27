@@ -82,7 +82,7 @@ cd scripts/stencil_gen && uv run python -m sweeps optimize --scheme E4 --kernel 
 
 ### 46.1 — Sibling non-determinism: `numerical_abscissa_sparse`
 
-- [ ] **46.1a** Patch `numerical_abscissa_sparse` in `scripts/stencil_gen/stencil_gen/non_normality.py` line ~150 to mirror the `1c75893` 45.6b.1 fix on `spectral_abscissa_sparse`:
+- [x] **46.1a** Patch `numerical_abscissa_sparse` in `scripts/stencil_gen/stencil_gen/non_normality.py` line ~150 to mirror the `1c75893` 45.6b.1 fix on `spectral_abscissa_sparse`:
   - Add `rng_seed: int = 0` to the function signature.
   - Pass `rng=rng_seed` to the `eigsh(H, k=k_use, which="LA", return_eigenvectors=False)` call at line ~187.
   - Update docstring with the same note about cross-process determinism.

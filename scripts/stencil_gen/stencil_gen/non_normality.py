@@ -148,13 +148,21 @@ def spectral_abscissa_sparse(L, k: int = 20, shift_invert: bool = True, rng_seed
     )
 
 
-def numerical_abscissa_sparse(L) -> float:
+def numerical_abscissa_sparse(L, rng_seed: int = 0) -> float:
     """Compute max eigenvalue of (L + L^T)/2 — the numerical abscissa.
 
     Parameters
     ----------
     L : scipy.sparse matrix or dense ndarray
         The spatial operator.
+    rng_seed : int
+        Seed for the ARPACK starting vector. scipy 1.17's ``eigsh`` draws a
+        fresh OS-entropy Generator per call when rng is None, making
+        convergence path non-deterministic across processes for operators
+        whose top Hermitian-part eigenvalues are clustered. Passing a fixed
+        integer here pins that starting vector so repeated calls — including
+        across subprocess invocations — return identical values. Only
+        relevant for the sparse Arnoldi path (``n > 900``).
 
     Returns
     -------
@@ -184,7 +192,8 @@ def numerical_abscissa_sparse(L) -> float:
 
     k_use = min(1, n - 2) if n > 2 else 1
     try:
-        evals = eigsh(H, k=k_use, which="LA", return_eigenvectors=False)
+        evals = eigsh(H, k=k_use, which="LA", return_eigenvectors=False,
+                      rng=rng_seed)
         return float(np.max(evals))
     except (ArpackNoConvergence, ArpackError) as exc:
         logger.debug("eigsh(which='LA') failed: %s", exc)
