@@ -330,12 +330,12 @@ cd scripts/stencil_gen && uv run python -m sweeps optimize --scheme E4 --kernel 
 
 ### 46.6 — Diagnostic on silent fallback in `rank_for_l8`
 
-- [ ] **46.6a** Replace the silent `key = lambda p: 0.0` fallback in `scripts/stencil_gen/sweeps/brady2d_sweep.py:189`:
-  - Current `else: key = lambda p: 0.0` produces arbitrary equal-rank ordering when `max_layer < 3` or layer3 reports are missing — silently masks an unusable state.
-  - Replace with an explicit `warnings.warn(f"rank_for_l8: max_layer={max_layer} too shallow for meaningful ranking; using insertion order", UserWarning)` and `key = lambda p: 0.0` (preserve the same behavior, but make the silent case visible). User can grep `UserWarning` in CI logs.
-  - **Don't** convert to `assert False` — the function is called from sweep paths that legitimately run at `max_layer=1` or `max_layer=2` for fast diagnostics.
-  - File: `scripts/stencil_gen/sweeps/brady2d_sweep.py`
-  - Test: `cd scripts/stencil_gen && uv run pytest tests/test_sweep_brady2d.py -x -q -k "rank_for_l8 and shallow_max_layer"` (test added below if absent)
+- [x] **46.6a** Replace the silent `key = lambda p: 0.0` fallback in `scripts/stencil_gen/sweeps/brady2d_sweep.py:189`. Done.
+  - **Applied:** added `import warnings` to `sweeps/brady2d_sweep.py`. In the `else:` branch of `rank_for_l8`, prepended a `warnings.warn(..., UserWarning, stacklevel=2)` whose message names `max_layer`, explains the condition ("too shallow ... or layer3 reports missing"), states the fallback ("returning insertion order"), and gives the actionable remediation ("Run with max_layer >= 3 and ensure layer3 is populated"). Kept the `key = lambda p: 0.0` constant-key fallback unchanged (per plan: don't change behavior beyond making the silent case visible).
+  - **Test added:** `test_rank_for_l8_shallow_max_layer_warns` in `tests/test_sweep_gv_objectives.py` constructs two passing `SweepPoint`s with `layer3=None` (no layer3 report) and calls `rank_for_l8(points, max_layer=1)` inside `pytest.warns(UserWarning, match="too shallow")`. Asserts the warning fires *and* the function still returns both points (preserves the constant-key fallback semantics; `key=lambda p:0.0` keeps insertion order under stable `sorted`). Located alongside the existing `test_rank_for_l8_prefers_layer6_then_layer3` so the two tests are reviewed together.
+  - **Existing test unaffected:** `test_rank_for_l8_prefers_layer6_then_layer3` exercises Cases A (L6), B (L3 fallback), C (no passing — early return), D (top-K cap). None hits the new `else:` branch, so no spurious warnings.
+  - File: `scripts/stencil_gen/sweeps/brady2d_sweep.py`, `scripts/stencil_gen/tests/test_sweep_gv_objectives.py`
+  - Test: `cd scripts/stencil_gen && uv run pytest tests/test_sweep_gv_objectives.py -x -q -k "rank_for_l8"` — 2 passed. Full suite: `uv run pytest tests/ -x -q` — 865 passed, 137 skipped, 1 xfailed.
 
 ### 46.7 — Documentation: plan-number renumbering + dormant-test cleanup
 

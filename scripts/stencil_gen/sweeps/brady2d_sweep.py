@@ -17,6 +17,7 @@ import argparse
 import dataclasses
 import math
 import sys
+import warnings
 from dataclasses import dataclass
 from typing import Any
 
@@ -188,6 +189,13 @@ def rank_for_l8(points: list[SweepPoint], *, max_layer: int) -> list[SweepPoint]
     elif max_layer >= 3 and all(p.report.layer3 is not None for p in passing):
         key = lambda p: p.layer3_max_stab_eig()  # noqa: E731
     else:
+        warnings.warn(
+            f"rank_for_l8: max_layer={max_layer} too shallow (or layer3 reports missing) "
+            "for meaningful ranking; returning insertion order. Run with max_layer >= 3 "
+            "and ensure layer3 is populated for stability-ordered selection.",
+            UserWarning,
+            stacklevel=2,
+        )
         key = lambda p: 0.0  # noqa: E731
 
     return sorted(passing, key=key)[:TOP_K_FOR_L8]

@@ -875,6 +875,35 @@ def test_rank_for_l8_prefers_layer6_then_layer3():
     assert len(ranked4) == brady2d_sweep.TOP_K_FOR_L8
 
 
+def test_rank_for_l8_shallow_max_layer_warns():
+    """46.6a: rank_for_l8 emits UserWarning instead of silently degrading.
+
+    When max_layer < 3 (or layer3 reports are absent at >=3), the previous
+    behavior was to silently set the ranking key to a constant 0.0, producing
+    arbitrary equal-rank ordering with no diagnostic. After 46.6a, this case
+    must emit a UserWarning so it shows up in CI logs.
+    """
+    def _pt_no_layer3(param: float):
+        from stencil_gen.brady2d_stability import StabilityReport
+
+        report = StabilityReport.empty()
+        report.layer1 = {"boundary_gv_err": 1e-3}
+        report.overall_verdict = "pass"
+        return brady2d_sweep.SweepPoint(
+            param=param,
+            params_dict={"sigma": param},
+            report=report,
+        )
+
+    points = [_pt_no_layer3(1.0), _pt_no_layer3(2.0)]
+
+    with pytest.warns(UserWarning, match="too shallow"):
+        ranked = brady2d_sweep.rank_for_l8(points, max_layer=1)
+
+    assert len(ranked) == 2
+    assert {p.param for p in ranked} == {1.0, 2.0}
+
+
 def test_report_to_dict_includes_layer_bl42():
     """45.6a.1.1: sweep copy of _report_to_dict must serialize layer_bl42."""
     from stencil_gen.brady2d_stability import StabilityReport
