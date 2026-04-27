@@ -92,8 +92,9 @@ cd scripts/stencil_gen && uv run python -m sweeps optimize --scheme E4 --kernel 
 
 - [ ] **46.1b** Add `test_numerical_abscissa_sparse_deterministic_across_calls` to `tests/test_non_normality.py`:
   - Construct a synthetic 1000×1000 non-symmetric sparse matrix (forces the `eigsh` path: `n > 900`).
+  - **Gotcha — do not copy the skew-symmetric construction from `TestSpectralAbscissaDeterminism._bl42_like_matrix`.** That makes `H = (L+L^T)/2 = 0`, and `eigsh` on the zero matrix fails to converge, raising `RuntimeError: ... N > 900 prevents dense fallback` before the determinism path is exercised. Verified empirically against the current `numerical_abscissa_sparse` (`rng_seed=0`, n=1000 skew-symmetric → RuntimeError). Use a **non-symmetric** matrix whose Hermitian part has non-trivial spectrum, e.g. `A = rng.standard_normal((n, n)) - 5.0 * np.eye(n); L = sp.csr_matrix(A)` — this produces a well-conditioned `H = (L+L^T)/2` and gives finite results across both default and `rng_seed=42` calls.
   - Compute `numerical_abscissa_sparse(L)` twice; assert exact equality (not allclose) — `rng=0` should be byte-identical.
-  - Compute with `rng_seed=42` and verify it differs from the default (otherwise the seed is not actually being threaded through ARPACK).
+  - Compute with `rng_seed=42` and verify it differs from the default (otherwise the seed is not actually being threaded through ARPACK). At n=1000 with the construction above, the difference is at the ULP level (~1e-14 relative), so use `!=`, not `np.isclose`.
   - Mark `@pytest.mark.slow` if wall time exceeds 1 s.
   - File: `scripts/stencil_gen/tests/test_non_normality.py`
   - Test: `cd scripts/stencil_gen && uv run pytest tests/test_non_normality.py -x -q -k "test_numerical_abscissa_sparse_deterministic"`
