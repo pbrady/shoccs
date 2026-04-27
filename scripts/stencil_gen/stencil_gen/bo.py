@@ -39,8 +39,15 @@ from dataclasses import dataclass
 from typing import Callable
 
 import numpy as np
-import torch  # noqa: F401  # used in subsequent items
+import torch
 import botorch  # noqa: F401  # used in subsequent items
+from botorch.fit import fit_gpytorch_mll
+from botorch.models import MultiTaskGP
+from botorch.models.transforms import Standardize
+from gpytorch.constraints import GreaterThan
+from gpytorch.kernels import MaternKernel
+from gpytorch.likelihoods import GaussianLikelihood
+from gpytorch.mlls import ExactMarginalLogLikelihood
 
 from stencil_gen.brady2d_stability import brady2d_stability_score
 from stencil_gen.optimizer import (  # noqa: F401  # reused in subsequent items
@@ -320,9 +327,131 @@ def make_multi_fidelity_objective(
     return objective
 
 
+# --- multi-fidelity GP surrogate ---------------------------------------------
+
+
+def build_mf_gp(
+    train_X: np.ndarray | torch.Tensor,
+    train_Y: np.ndarray | torch.Tensor,
+    fidelity_dim: int,
+    num_fidelities: int,
+    *,
+    rank: int = 2,
+) -> MultiTaskGP:
+    """Build and fit an ICM-style multi-fidelity GP surrogate.
+
+    The surrogate is a :class:`MultiTaskGP` — BoTorch's purpose-built ICM
+    model — with a Matern-5/2 ARD data kernel and an Intrinsic
+    Coregionalization Model (ICM) parameterisation of the layer-pair
+    covariance ``B = W Wᵀ + diag(κ)``, with ``W`` of shape
+    ``(num_fidelities, rank)``, learned end-to-end via marginal-likelihood
+    optimisation.  This lets the data report the actual layer-pair
+    correlations rather than baking in a Kennedy-O'Hagan refinement chain
+    that the cascade does not satisfy (L3 ↔ L3r test different physics —
+    see ``docs/handoff/scientific_findings.md`` finding #1).
+
+    Parameters
+    ----------
+    train_X
+        Training inputs of shape ``(N, d + 1)`` where the column at
+        ``fidelity_dim`` holds integer-valued fidelity indices in
+        ``{0, ..., num_fidelities - 1}``.  Accepts NumPy or torch; converted
+        to ``torch.float64`` internally.
+    train_Y
+        Training targets of shape ``(N,)`` or ``(N, 1)``.  Sentinel rows must
+        be filtered upstream — the GP only fits on finite-value rows.
+    fidelity_dim
+        Column index of the fidelity feature in ``train_X``.  Conventionally
+        the last column (i.e. ``train_X.shape[-1] - 1``).
+    num_fidelities
+        Number of distinct fidelity levels (informational; the actual task
+        count is inferred from values present in the fidelity column).
+    rank
+        Rank of the ICM coregionalization factor ``W``.  ``rank=2`` is a good
+        default for 3–5 fidelities — large enough to capture non-trivial
+        layer-pair correlations, small enough to remain identifiable from
+        modest training data.
+
+    Returns
+    -------
+    MultiTaskGP
+        Fitted GP.  Hyperparameters can be inspected via:
+
+        - ``model.covar_module.kernels[0].lengthscale`` (Matern ARD).
+        - ``model.covar_module.kernels[1].covar_factor`` (W of the ICM
+          matrix).
+        - ``model.covar_module.kernels[1].var`` (diagonal κ of the ICM
+          matrix).
+        - ``model.likelihood.noise``.
+
+    Notes
+    -----
+    The plan body cited :class:`SingleTaskMultiFidelityGP` as the wrapper,
+    but that class always composes the user-supplied ``covar_module`` with a
+    fixed :class:`LinearTruncatedFidelityKernel` (the AR1 kernel we
+    explicitly want to avoid) or :class:`ExponentialDecayKernel`, so a
+    custom ICM kernel is not respected.  Hand-composing ``MaternKernel *
+    IndexKernel`` on a regular :class:`SingleTaskGP` worked but proved
+    fragile: ``fit_gpytorch_mll`` failed on ~70% of small noise-free
+    datasets due to NotPSDError during Cholesky factorisation.
+    :class:`MultiTaskGP` is BoTorch's purpose-built ICM model — same kernel
+    structure (Matern-on-data × IndexKernel-on-task), but with engineered
+    parameter initialisation and PSD-stable parameterisation that fits
+    reliably.  The MF-aware ``project`` helper that
+    :class:`SingleTaskMultiFidelityGP` adds beyond a plain GP is supplied
+    directly to ``qMultiFidelityKnowledgeGradient`` in 47.3a.
+
+    Outputs are standardised via :class:`Standardize`; without it the
+    marginal-likelihood optimiser fails on raw cascade scales
+    (``max_stab_eig`` is ~1e-12 while ``boundary_gv_err`` is ~1e-2 — five
+    orders of magnitude apart).
+    """
+    if num_fidelities < 1:
+        raise ValueError(f"num_fidelities must be ≥ 1, got {num_fidelities}")
+    if rank < 1:
+        raise ValueError(f"rank must be ≥ 1, got {rank}")
+
+    X = torch.as_tensor(train_X, dtype=torch.float64)
+    Y = torch.as_tensor(train_Y, dtype=torch.float64)
+    if Y.ndim == 1:
+        Y = Y.unsqueeze(-1)
+    if X.ndim != 2:
+        raise ValueError(f"train_X must be 2D, got shape {tuple(X.shape)}")
+    if Y.shape[0] != X.shape[0]:
+        raise ValueError(
+            f"train_X has {X.shape[0]} rows but train_Y has {Y.shape[0]}"
+        )
+    n_cols = X.shape[-1]
+    if not (0 <= fidelity_dim < n_cols):
+        raise ValueError(
+            f"fidelity_dim={fidelity_dim} out of range for train_X with "
+            f"{n_cols} columns"
+        )
+
+    n_data_dims = n_cols - 1
+    data_kernel = MaternKernel(nu=2.5, ard_num_dims=n_data_dims)
+
+    likelihood = GaussianLikelihood(noise_constraint=GreaterThan(1e-9))
+
+    model = MultiTaskGP(
+        train_X=X,
+        train_Y=Y,
+        task_feature=fidelity_dim,
+        covar_module=data_kernel,
+        likelihood=likelihood,
+        rank=rank,
+        all_tasks=list(range(num_fidelities)),
+        outcome_transform=Standardize(m=1),
+    )
+    mll = ExactMarginalLogLikelihood(model.likelihood, model)
+    fit_gpytorch_mll(mll)
+    return model
+
+
 __all__: list[str] = [
     "_BO_SENTINEL",
     "BOEval",
     "BOResult",
+    "build_mf_gp",
     "make_multi_fidelity_objective",
 ]
