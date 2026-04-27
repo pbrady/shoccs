@@ -323,11 +323,10 @@ cd scripts/stencil_gen && uv run python -m sweeps optimize --scheme E4 --kernel 
   - File: `scripts/stencil_gen/tests/test_optimizer.py`
   - Test: `cd scripts/stencil_gen && uv run pytest tests/test_optimizer.py -x -q -k "test_default_gate_for_bl42_objective or test_bl42_l3r_failure_returns_finite"` — 3 passed (2 parametrized + 1 standalone). Full file: `uv run pytest tests/test_optimizer.py -x -q` — 132 passed, 10 skipped.
 
-- [ ] **46.5c** Add a non-empty front guard to `test_result_metadata_populated` in `tests/test_pareto.py:480`:
-  - Current loop `for p in res.front: assert ...` is vacuous if `res.front` is empty (could happen with bad seeding on the synthetic ZDT1-like objective).
-  - Add `assert len(res.front) >= 1, "front must be non-empty for ZDT1-like; check seeding"` before the loop.
+- [x] **46.5c** Add a non-empty front guard to `test_result_metadata_populated` in `tests/test_pareto.py`. Done.
+  - **Applied:** added `assert len(res.front) >= 1, "front must be non-empty for ZDT1-like; check seeding"` immediately before the `for p in res.front:` dominance loop. Without it, an empty `res.front` (possible with bad seeding on the synthetic ZDT1-like objective) would let the test pass vacuously — the loop body would never execute and the only meaningful assertion would silently disappear. The guard is the same pattern applied in 46.5a and matches the existing `assert len(res.front) >= 2` in the slow `test_integration_classical_alpha_2d` immediately below.
   - File: `scripts/stencil_gen/tests/test_pareto.py`
-  - Test: `cd scripts/stencil_gen && uv run pytest tests/test_pareto.py -x -q -k "test_result_metadata_populated"`
+  - Test: `cd scripts/stencil_gen && uv run pytest tests/test_pareto.py -x -q -k "test_result_metadata_populated"` — 1 passed. Full file: `uv run pytest tests/test_pareto.py -x -q` — 22 passed, 1 skipped.
 
 ### 46.6 — Diagnostic on silent fallback in `rank_for_l8`
 

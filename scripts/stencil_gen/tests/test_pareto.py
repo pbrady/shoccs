@@ -496,6 +496,7 @@ class TestRunNSGA2:
         )
         # auto-picked ref_point must dominate the front
         ref = np.asarray(res.ref_point, dtype=float)
+        assert len(res.front) >= 1, "front must be non-empty for ZDT1-like; check seeding"
         for p in res.front:
             assert np.all(p.objectives <= ref + 1e-12)
 
