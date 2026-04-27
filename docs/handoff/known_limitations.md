@@ -95,21 +95,13 @@ See `operating_conventions.md` for details.
 
 ## Calibration / test artifacts
 
-### `brady2d_sweep` and `brady2d_optima` keys not populated
+### `brady2d_optima` key not populated
 
-**Problem:** Plan 43 defined the persistence schema for `known_values.json["brady2d_optima"]` and plan 42 defined `brady2d_sweep`. Neither key has been populated by running `--update-known-values` or `--persist` in a real sweep.
+**Problem:** Plan 43 defined the persistence schema for `known_values.json["brady2d_optima"]`. The key has not yet been populated by running `--update-known-values` or `--persist` in a real seeded optimization (each entry costs ~5–30 minutes of optimizer wall-time plus the `shoccs` binary). Plan 46.4 populated `known_values.json["brady2d_sweep"]["E4"]["classical"]`, so `TestRegressionBrady2DSweep` is now active for the classical seed; `brady2d_optima` remains deferred.
 
 **Workaround:** The corresponding regression tests (`TestRegressionBrady2DOptima`) skip gracefully when the key is absent.
 
-**Fix:** Run a single seeded optimization with `--update-known-values` to populate at least one entry, verify the regression test activates. Nothing complex; just hasn't been done.
-
-### `TestRegressionGV` is dormant
-
-**Problem:** Plan 40 added the GV-optimal persistence path (`--include-gv --update-known-values`). The tests are gated on `known_values.json["{kernel}_gv"]` entries being present. No production run has persisted these, so `TestRegressionGV` currently skips all 4 methods.
-
-**Workaround:** Same — gracefully skipped.
-
-**Fix:** Run `python -m sweeps tension --scheme E4 --include-gv --update-known-values` + Gaussian + MQ equivalents to populate. Non-urgent.
+**Fix:** Run a single seeded optimization with `--update-known-values` to populate at least one entry, verify the regression test activates. Defer to when an optimization run lands as part of plan 47 or hand-driven research.
 
 ### `brady2d_calibration` `max_layer` sensitivity
 
@@ -127,11 +119,11 @@ Deferred to plan 45. Single-objective + feasibility cliff covers ~80% of use cas
 
 ### No multi-fidelity Bayesian optimization
 
-Deferred to plan 46. The manual cascade (staged cheap-inner + expensive-validator) is a pragmatic approximation.
+Deferred to plan 47. The manual cascade (staged cheap-inner + expensive-validator) is a pragmatic approximation.
 
 ### No Brady-Livescu 1D Euler objective
 
-Deferred to plan 47. Our analytical cascade is stricter than BL's linear test but cannot see nonlinear blow-up modes that only a full Euler simulation can exhibit.
+Deferred to plan 48. Our analytical cascade is stricter than BL's linear test but cannot see nonlinear blow-up modes that only a full Euler simulation can exhibit.
 
 ### No 3D / tensor-product beyond 2D
 
@@ -158,3 +150,11 @@ This is fine and expected (review passes add follow-up items, correct stale crit
 ### Git CLAUDE.md and project rules override session instructions
 
 `/workspace/CLAUDE.md` tells you to set `SYMPY_CACHE_SIZE=50000`, use `uv run`, use `cmake --build build`, etc. Don't override these without reason. The user can be annoyed by cargo-culted reconfiguration.
+
+### Three copies of `_report_to_dict`
+
+**Problem:** `_report_to_dict` is implemented three times: `stencil_gen/optimizer.py`, `sweeps/brady2d_sweep.py`, `stencil_gen/benchmarks/brady2d_calibration.py`. Each serializes a `StabilityReport` to a JSON-compatible dict, but the three copies have diverged historically (different field coverage, different layer handling). Plan 46.2 patched all three in parallel to add `compute_time`, `non_normality`, `kreiss` (with diagnostic-array stripping per 46.2b.1), and `layer8`; `TestReportToDictSchemaParity` now keeps them in sync going forward.
+
+**Workaround:** Schema-parity test catches divergence at CI time.
+
+**Fix:** Consolidate into a single canonical implementation. Was deferred at plan 46 to avoid invalidating `known_values.json["brady2d_calibration"]` (the calibration data depends on the current schema). Future plan should consolidate when calibration data is regenerable.

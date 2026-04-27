@@ -38,6 +38,21 @@
 | 20 | `20-stencil-derivation-pipeline.md` | None (standalone) | SymPy pipeline for deriving stencil coefficients and generating C++ |
 | 21 | `21-e4-cut-cell-stencils.md` | Phase 20 | E4_1 cut-cell stencil generation via generalized TEMO pipeline |
 
+### Analysis: Group Velocity (Phases 34–36)
+
+| Phase | Plan File | Depends On | Goal |
+|-------|-----------|------------|------|
+| 34 | `34-group-velocity-analysis.md` | Phase 33 | Core group velocity module, interior + boundary analysis |
+| 35 | `35-group-velocity-cut-cell.md` | Phase 34 | Cut-cell psi-dependent group velocity, psi sweeps |
+| 36 | `36-group-velocity-2d.md` | Phase 35 | 2D/3D extension, varying coefficients, scaling comparison |
+
+### Maintenance: Test Suite (Phase 37)
+
+| Phase | Plan File | Depends On | Goal |
+|-------|-----------|------------|------|
+| 37 | `37-test-suite-refactoring.md` | None (standalone) | Separate research sweeps from regression tests, reduce default suite to <15s |
+| 38 | `38-sweep-extraction.md` | Phase 37 | Extract research sweeps to standalone scripts, remove from pytest |
+
 ### Design Documents
 
 | Document | Purpose |
@@ -398,7 +413,7 @@ The old hardcoded `gate_layer=3` in `make_objective` made L6/L7 objectives never
 - (b) Hardcoded `gate_layer=3` (old behavior — broken for L3r, L6, L7)
 - (c) Auto-infer only in `make_multi_objective`, leave `make_objective` hardcoded (inconsistent)
 
-**Why these are cross-cutting:** choices (a)–(c) pin the optimizer / persistence / sentinel surface that plans 46 (multi-fidelity Bayesian) and 47 (Brady-Livescu 1D Euler) will build on or contrast against. Choice (d) ties together `stencil_gen/optimizer.py` and `stencil_gen/pareto.py` — any future scalar driver (plan 46's Bayesian surrogate scalarization) must observe the same auto-infer contract so users can swap `make_objective` ↔ `make_multi_objective` without re-specifying `gate_layer`.
+**Why these are cross-cutting:** choices (a)–(c) pin the optimizer / persistence / sentinel surface that plans 47 (multi-fidelity Bayesian) and 48 (Brady-Livescu 1D Euler) will build on or contrast against. Choice (d) ties together `stencil_gen/optimizer.py` and `stencil_gen/pareto.py` — any future scalar driver (plan 47's Bayesian surrogate scalarization) must observe the same auto-infer contract so users can swap `make_objective` ↔ `make_multi_objective` without re-specifying `gate_layer`.
 **Implementing plan items:** 45.0b (auto-infer in `make_objective`), 45.0d (CLI wiring), 45.1b (`make_multi_objective`), 45.2a (`run_nsga2`), 45.4a (`_pareto_io.py`).
 
 ---

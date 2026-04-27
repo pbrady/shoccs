@@ -339,22 +339,17 @@ cd scripts/stencil_gen && uv run python -m sweeps optimize --scheme E4 --kernel 
 
 ### 46.7 — Documentation: plan-number renumbering + dormant-test cleanup
 
-- [ ] **46.7a** Renumber the queued plans in `docs/handoff/next_steps.md`: rename "Plan 46 — Multi-Fidelity Bayesian Optimization" to "Plan 47" and "Plan 47 — Brady-Livescu 1D Euler Reproduction" to "Plan 48". Add a new "Plan 46 — Hardening (this plan)" entry above them with a one-paragraph summary citing the review-pass-driven motivation.
+- [x] **46.7a** Renumber the queued plans in `docs/handoff/next_steps.md`: renamed "Plan 46 — Multi-Fidelity Bayesian Optimization" to "Plan 47", "Plan 47 — Brady-Livescu 1D Euler Reproduction" to "Plan 48", and added a new "Plan 46 — Hardening (this plan)" entry above them citing the review-pass-driven motivation. Done.
   - File: `docs/handoff/next_steps.md`
-  - Test: `grep -E '^## Plan [0-9]+' docs/handoff/next_steps.md | head -5`
+  - Test: `grep -E '^## Plan [0-9]+' docs/handoff/next_steps.md | head -5` — emits Plan 45, 46, 47, 48 in order.
 
-- [ ] **46.7b** Update `plans/meta.md` D-Opt-1 entry:
-  - The "Why these are cross-cutting" paragraph mentions "plans 46/47" referring to BO and 1D Euler. Update to "plans 47/48" to match 46.7a's renumbering.
-  - The `## Implementing plan items` footer references plan 45 items only; no change there.
+- [x] **46.7b** Updated `plans/meta.md` D-Opt-1 "Why these are cross-cutting" paragraph: renumbered "plans 46/47" → "plans 47/48" and "plan 46's Bayesian surrogate scalarization" → "plan 47's" to match 46.7a's renumbering. Done.
   - File: `plans/meta.md`
-  - Test: `grep -A 1 "cross-cutting" plans/meta.md | grep -E "(46|47|48)"`
+  - Test: `grep -A 1 "cross-cutting" plans/meta.md | grep -E "(46|47|48)"` — only 47/48 appear.
 
-- [ ] **46.7c** Update `docs/handoff/known_limitations.md`:
-  - Remove the "TestRegressionGV is dormant" entry (now active per 46.3).
-  - Update the "brady2d_sweep and brady2d_optima keys not populated" entry: `brady2d_sweep` is now populated for `E4_classical` (per 46.4); leave `brady2d_optima` deferred with a one-line note.
-  - Add a new "Three copies of `_report_to_dict`" code-smell entry under "Miscellaneous sharp edges": call out that consolidation was deferred at plan 46 to avoid invalidating `known_values.json["brady2d_calibration"]`; the hardening plan patched all three in parallel; future plan should consolidate when calibration data is regenerable.
+- [x] **46.7c** Updated `docs/handoff/known_limitations.md`: removed "TestRegressionGV is dormant" entry (now active per 46.3); collapsed "brady2d_sweep and brady2d_optima keys not populated" into a tighter "brady2d_optima key not populated" entry noting that `brady2d_sweep` is now populated for `E4_classical` per 46.4 (`TestRegressionBrady2DSweep` active for the classical seed); added "Three copies of `_report_to_dict`" code-smell entry under "Miscellaneous sharp edges" citing the parallel-patch + `TestReportToDictSchemaParity` defense. Done.
   - File: `docs/handoff/known_limitations.md`
-  - Test: `grep -c "TestRegressionGV is dormant" docs/handoff/known_limitations.md` (expect 0); `grep -c "Three copies of _report_to_dict" docs/handoff/known_limitations.md` (expect 1)
+  - Test: `grep -c "TestRegressionGV is dormant" docs/handoff/known_limitations.md` → 0; `grep -c "Three copies of " docs/handoff/known_limitations.md` → 1.
 
 ---
 

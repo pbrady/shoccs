@@ -49,7 +49,7 @@ A single-objective optimizer collapses these onto one metric. Pareto fronts expo
 **Out of scope:**
 - Constraint-aware Pareto (pymoo `Problem.evaluate(F, G)` for explicit inequalities) — the L1–L3 cascade handles constraints adequately.
 - 3D matplotlib plots (optional deps).
-- Multi-fidelity multi-objective (defer to plan 46).
+- Multi-fidelity multi-objective (defer to plan 47).
 
 ### Three open decisions (from session)
 
@@ -72,7 +72,13 @@ Similar to plan 44: ~250–300 lines, ~20 items across 6–7 phases. Phases will
 
 ---
 
-## Plan 46 — Multi-Fidelity Bayesian Optimization
+## Plan 46 — Hardening (this plan)
+
+**Status:** Active. Plan 45's review pass surfaced several recurring categories of bugs (CLI surfaces vs. library defaults, schema completeness, sibling non-determinism, vacuous tests, silent fallbacks). Most were fixed inline as in-plan follow-ups. Plan 46 addresses the **siblings** — the same patterns elsewhere in the codebase that the review pass didn't get to — and activates dormant `TestRegression*` infrastructure that has been sitting idle since plans 40–43 because the populating sweeps were never run. The result is a tighter regression net before plan 47 (Multi-Fidelity BO) starts piling on optimizer machinery. See `plans/46-hardening.md` for the item list.
+
+---
+
+## Plan 47 — Multi-Fidelity Bayesian Optimization
 
 **Why:** Our layered cascade (L1–L8) naturally has heterogeneous costs (sub-ms → minutes). A multi-fidelity BO library can spend most of its budget on cheap layers and only invoke expensive ones for the best candidates. Today's "manual cascade" (`run_staged_optimize`) is a hand-crafted approximation.
 
@@ -89,7 +95,7 @@ Similar to plan 44: ~250–300 lines, ~20 items across 6–7 phases. Phases will
 
 ---
 
-## Plan 47 — Brady-Livescu 1D Euler Reproduction
+## Plan 48 — Brady-Livescu 1D Euler Reproduction
 
 **Why:** The paper's actual optimization objective is a full 1D nonlinear Euler RK4 simulation — a two-phase score where phase 1 = "did it stay stable to t_c" and phase 2 = "how monotone is the boundary energy" (via total-variation deviation). They cite finding **101 E4 schemes**, **16 E6**, **3 E8**, **1079 T4**, **16 T6**, **25 T8** from random restarts, all passing their linear *and* nonlinear tests. Reproducing this objective lets us:
 - Validate our framework against a published reference.
