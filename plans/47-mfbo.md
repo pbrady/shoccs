@@ -222,7 +222,7 @@ cd scripts/stencil_gen && SYMPY_CACHE_SIZE=50000 uv run python -m sweeps bo \
     - **HF replica `.copy()` is intentional:** `X_cheap[:hf_anchors]` is a view into `X_unique`; copying defends against later in-place mutation in the BO loop accidentally aliasing the HF replicas to the cheap rows. Smoke test confirms `X_hf` rows match `X_cheap[:hf_anchors]` rows bytewise.
     - Smoke checks (from `python -c`): determinism across seeds ✓, seed=0 vs seed=1 differs ✓, all rows within bounds ✓, K=1 yields all-cheap ✓, K=2 yields cheap+HF only ✓, validation rejects empty bounds / insufficient cheap / inverted bounds. Existing 14 `tests/test_bo.py` tests still green at 3.7 s.
 
-- [ ] **47.2d** Tests in `tests/test_bo.py` — `TestMFGP` (4) + `TestCostModel` (4) + `TestDOE` (5):
+- [x] **47.2d** Tests in `tests/test_bo.py` — `TestMFGP` (4) + `TestCostModel` (4) + `TestDOE` (5):
   - `TestMFGP::test_gp_fits_on_synthetic_data` — 10-point synthetic data on a quadratic; assert posterior mean at training points within 1e-3 of training Y (after fit).
   - `test_index_kernel_correlation_matrix_psd` — extract the learned `B` matrix; verify positive semi-definite (eigenvalues ≥ 0).
   - `test_seed_determinism` — same seed produces identical hyperparameters across runs.
@@ -244,6 +244,11 @@ cd scripts/stencil_gen && SYMPY_CACHE_SIZE=50000 uv run python -m sweeps bo \
   - `test_fid_indices_dtype_is_int64` — `fid_indices.dtype == np.int64` (downstream tensor coercion in 47.3a/b assumes this).
   - File: `scripts/stencil_gen/tests/test_bo.py`
   - Test: `cd scripts/stencil_gen && uv run pytest tests/test_bo.py -x -q -k "TestMFGP or TestCostModel or TestDOE"`
+  - **Done 2026-04-27.** Added 29 tests across the three classes (5 + 6 + 12, expanding past the plan-body counts of 4 + 4 + 5 to cover the kwarg-validation paths that 47.2a/b/c added). All 29 green in 4.0 s; full `tests/test_bo.py` (43 tests) green in 4.8 s. Three deviations from the plan body:
+    - **`TestMFGP::test_noise_floor_respected`** asserts `noise == pytest.approx(1e-9, rel=1e-4)` rather than a strict `noise >= 1e-9`. The softplus reparameterisation that GPyTorch uses for the `GreaterThan(1e-9)` constraint can return a value ~3 ULPs below the bound at float32 precision (observed: `9.999999...e-10`). The test also asserts the constraint object is the documented `GreaterThan(1e-9)` so the floor mechanism is verified independently of the softplus rounding. This is the standard way to test reparameterised constraints in BoTorch/GPyTorch.
+    - **Added `TestMFGP::test_rejects_invalid_inputs`** (a 5th MFGP test, beyond the plan body's 4) parameterised over the four `ValueError` paths in `build_mf_gp` (`num_fidelities < 1`, `rank < 1`, out-of-range `fidelity_dim`, 1D `train_X`, mismatched `train_Y` rows). Without this, the 47.2a validation surface had no coverage. Same pattern as `TestDOE::test_validation_errors`.
+    - **Added `TestCostModel::test_cost_floor_disabled`** (a 5th CostModel test) covering `apply_cost_floor(..., floor_ratio=0.0)` — the docstring documents this disables the floor; the test pins it. **Added `TestCostModel::test_rejects_invalid_inputs`** (a 6th) covering the empty/negative-floor/negative-fidelity-dim `ValueError` paths in `build_cost_model`. The 47.2b body specced these but 47.2d's plan body did not enumerate them.
+    - The synthetic data uses 30 points (not the plan-body's "10-point") because `MultiTaskGP` with 3 fidelities + ICM rank=2 needs ≥ ~3 points per fidelity for the marginal-likelihood optimiser to identify both data and task hyperparameters; 10 points produced flat / under-fit posteriors. 30 points fits to `max abs err 3.6e-8` (well under the 1e-3 tolerance). Test `test_gp_fits_on_synthetic_data` is fast (~1 s) at this size.
 
 ### 47.3 — Acquisition + BO loop
 
