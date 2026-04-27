@@ -191,16 +191,31 @@ cd scripts/stencil_gen && uv run python -m sweeps optimize --scheme E4 --kernel 
   - File: `scripts/stencil_gen/sweeps/known_values.json`
   - Test: `cd scripts/stencil_gen && uv run pytest tests/test_phs.py -x -q -k "TestRegressionGV and gaussian"`
 
-- [ ] **46.3b.1** (review follow-up to 46.3b): the E2 gaussian sweep landed on the coarse-sweep lower bound — boundary-snap analogous to 46.3a.1's tension floor-snap.
+- [x] **46.3b.1** (review follow-up to 46.3b): record the empirical stab_eig profile for E2 + E4 gaussian and conclude that neither Option A nor a single global `--eps-floor` cleanly satisfies the "strictly-interior optimum for both schemes" criterion that 46.3a.2 imposed for tension. **The actual fix is split into 46.3b.1.1 (decide approach) and 46.3b.1.2 (apply + regression test).**
   - Empirically: `epsilon_sweep.py:142` uses `np.logspace(np.log10(0.01), np.log10(10), n_eps)`. For E2_1 gaussian, the coarse-best is exactly at `eps=0.01` (the lower bound) with `stab_eig=-9.346e-04`; the fine sweep then extrapolates *below* the coarse range to `eps=0.002492` with `stab_eig=-9.443e-04`. Persisted `E2_1.gaussian.epsilon` shifted from `2.0` to `0.002492` and `gv_error=8.09` (degraded from the previous interior-optimum region near `eps≈2`).
   - For gaussian RBF `phi(r)=exp(-(eps*r)^2)`, `eps→0` is the Driscoll-Fornberg polynomial-reproduction limit — well-defined mathematically, but the persisted optimum is now a function of where the coarse-sweep lower bound sits, not of the underlying math (the same issue plan 46.3a.2 flagged for tension).
-  - E4_1 gaussian (`eps=0.894157`, fine-best interior to coarse range) is unaffected; only E2 is sensitive.
-  - Pick one and apply:
-    - **Option A**: extend the coarse epsilon range downward (e.g., `np.logspace(-4, 1, n_eps)`) and rerun. If E2 still snaps to the new lower bound, that confirms the optimum is at `eps→0` and motivates Option B.
-    - **Option B**: add a CLI `--eps-floor` (default ≥ 0.5 or whichever value gives a strictly-interior E2 optimum) mirroring 46.3a.2's `--sigma-floor`, with a `boundary_snap` guard in `fine_sweep`. Persisted regression values then reflect a meaningful kernel parameter, not a degenerate constant-kernel limit.
-  - Whichever option: add a `test_e2_gaussian_epsilon_strictly_above_floor` (or `_above_lower_bound`) regression in `tests/test_phs.py` to prevent silent re-collapse.
-  - File: `scripts/stencil_gen/sweeps/epsilon_sweep.py`, `scripts/stencil_gen/sweeps/__main__.py`, `scripts/stencil_gen/sweeps/known_values.json`, `scripts/stencil_gen/tests/test_phs.py`
-  - Test: `cd scripts/stencil_gen && uv run pytest tests/test_phs.py -x -q -k "TestRegressionE2Stability or (TestRegressionGV and gaussian) or test_e2_gaussian_epsilon"`
+  - **Empirical stab_eig(eps) profile at n=40, p=q=nextra=nu=1 (E2_1) and p=2/q=3/nextra=0/nu=1 (E4_1)** (computed in plan-46.3b.1 loop, 25-point logspace from 0.001 to 10):
+    - **E2_1 gaussian** has multiple stable basins: global stab-min near `eps≈0.003` (`stab_eig≈-9.4e-4`); local min near `eps≈0.7–1.0` (`stab_eig≈-2.3e-4`); a narrow *unstable* zone near `eps≈1.47` (`stab_eig=+1.9e-3`); local min near `eps≈3.16` (`stab_eig≈-3.3e-5`); marginally stable for `eps>4.6` (`|stab_eig|<1e-8`). The pre-46.3b persisted value `eps=2.0` came from a coarser sweep that bracketed the upper local min.
+    - **E4_1 gaussian** is *unstable* for most of the range: highly unstable below `eps≈0.0015` (`stab_eig≈1.5e5` at `eps=0.001`); positive but small for `0.02–0.5` (`stab_eig≈0.05–0.1`); two narrow stable interior basins near `eps≈0.681` (`stab_eig≈-3.5e-4`) and `eps≈1.47` (`stab_eig≈-1.6e-5`); marginally unstable above (`stab_eig≈0.085`).
+  - **Why neither option works as written:**
+    - **Option A (extend coarse downward to `logspace(-4, 1)`)** would shift E2 to `eps≈0.003` (an interior optimum *in the extended range*, but still a degenerate-kernel limit) and would *break* E4 by exposing the highly-unstable region near `eps=0.001` and a spuriously-stable point at `eps=0.0015` (`stab_eig=-0.07`, which is "more negative" than any genuine optimum but reflects an ill-conditioned kernel). E4 would silently regress to a meaningless value.
+    - **Option B with a single global `--eps-floor`** has no value that gives strictly-interior optima for *both* schemes: E2 needs `floor>1.5` to skip the eps→0 monotone descent (interior min at `eps≈3.16`); E4 needs `floor<0.68` to access the 0.681 basin (the only basin below 1.0). These ranges are incompatible. With `floor=0.5`, E2 would still snap (its constrained coarse-min in `[0.5, 10]` lies at the floor or in the unstable 1.47 zone); with `floor=1.0`, E4's 0.681 basin is excluded and the persisted E4 value would shift to `eps≈1.47` (the secondary basin), changing the regression entry without a math-driven reason.
+  - **Implication:** the gaussian stability landscape has multiple disjoint stable basins with scheme-dependent topology. The single-floor pattern that worked for tension (where stab_eig is roughly monotone decreasing in `1/sigma`) does not transfer. A cleaner fix needs either (a) per-scheme floors, (b) a *local-minimum* detector instead of grid-min (a point is selected only if its stab_eig is more negative than both neighbors, naturally rejecting boundary-snap), or (c) an explicit acceptance that gaussian's stability optimum is at the eps→0 limit and the meaningful regression metric is `gaussian_gv` (the GV-optimum) rather than `gaussian` (the stability-optimum).
+  - **No code or `known_values.json` changes in this loop** — only the empirical analysis above. The persisted `E2_1.gaussian.epsilon=0.002492` and `E4_1.gaussian.epsilon=0.894157` from 46.3b stand pending the 46.3b.1.1 decision.
+  - File: `plans/46-hardening.md` (this file)
+  - Test: none (analysis-only)
+
+- [ ] **46.3b.1.1** Decide on the approach for fixing the gaussian boundary-snap, given the 46.3b.1 finding that no single global `--eps-floor` works. Options (in increasing complexity):
+  - **C1 (simplest, accept-and-document):** Leave `E2_1.gaussian.epsilon=0.002492` and `E4_1.gaussian.epsilon=0.894157` as-is. Document in `docs/handoff/known_limitations.md` that the gaussian-kernel "primary" entries reflect the *unconstrained grid-min* of stab_eig, which for E2 lands in the eps→0 polynomial-reproduction limit. The meaningful kernel-parameter regression metric for gaussian is `gaussian_gv` (the GV-optimum at a non-degenerate kernel parameter). Add a comment in `epsilon_sweep.py` documenting that gaussian stability landscape has multiple stable basins and the persisted primary entry is the global grid-min (which may be a degenerate-kernel limit).
+  - **C2 (per-scheme floor):** Add `--eps-floor` CLI arg with a per-scheme default (e.g., `0.5` for E2 and `0.5` for E4 — verify with sweeps that both yield strictly-interior optima at these floors; if not, choose larger floors per scheme). Mirror 46.3a.2's snap-warning. Re-run sweeps; persist new values. Add `test_*_gaussian_epsilon_strictly_above_floor` regressions for each scheme.
+  - **C3 (local-min detector):** Modify `fine_sweep` to filter the fine grid for *interior local minima only* (point's stab_eig is more negative than both adjacent points) and pick the most-negative such point. Falls back to grid-min if no local min exists. Add a `boundary_snap_warning` when the chosen point is within 1 grid step of either bound. This is the most principled fix but the largest code change.
+  - Pick one and record the rationale in this item before opening 46.3b.1.2.
+  - File: `plans/46-hardening.md`
+  - Test: none (decision-only)
+
+- [ ] **46.3b.1.2** Apply the 46.3b.1.1 chosen approach. Re-run E2 + E4 gaussian sweeps with `--include-gv --update-known-values`. Add a regression test in `tests/test_phs.py` (e.g., `test_e{2,4}_gaussian_epsilon_strictly_interior` for C2/C3, or `test_gaussian_known_limitations_documented` for C1) that prevents silent re-collapse to a boundary value.
+  - File: `scripts/stencil_gen/sweeps/epsilon_sweep.py`, `scripts/stencil_gen/sweeps/__main__.py`, `scripts/stencil_gen/sweeps/known_values.json`, `scripts/stencil_gen/tests/test_phs.py` (and `docs/handoff/known_limitations.md` if C1)
+  - Test: `cd scripts/stencil_gen && uv run pytest tests/test_phs.py -x -q -k "TestRegressionE2Stability or (TestRegressionGV and gaussian) or test_e2_gaussian_epsilon or test_e4_gaussian_epsilon or test_gaussian_known_limitations"`
 
 - [ ] **46.3c** Run E2 + E4 multiquadric `--include-gv` sweeps and persist:
   - `cd scripts/stencil_gen && SYMPY_CACHE_SIZE=50000 uv run python -m sweeps epsilon --scheme E2 --kernel multiquadric --include-gv --update-known-values`
@@ -279,7 +294,7 @@ cd scripts/stencil_gen && uv run python -m sweeps optimize --scheme E4 --kernel 
   ↓
 46.2a → 46.2b → 46.2b.1 → 46.2b.2 → 46.2c → 46.2d   # schema completeness + 16e11cf review follow-ups
   ↓
-46.3a → 46.3a.1 → 46.3a.2 → 46.3b → 46.3b.1 → 46.3c # activate TestRegressionGV (tension, gaussian, multiquadric)
+46.3a → 46.3a.1 → 46.3a.2 → 46.3b → 46.3b.1 → 46.3b.1.1 → 46.3b.1.2 → 46.3c # activate TestRegressionGV (tension, gaussian, multiquadric)
   ↓
 46.4a                                    # activate TestRegressionBrady2DSweep
   ↓
