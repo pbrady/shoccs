@@ -317,12 +317,11 @@ cd scripts/stencil_gen && uv run python -m sweeps optimize --scheme E4 --kernel 
   - File: `scripts/stencil_gen/tests/test_pareto.py`
   - Test: `cd scripts/stencil_gen && uv run pytest tests/test_pareto.py -x -q -k "test_sentinel_rows_excluded"` — 1 passed. Full file: `uv run pytest tests/test_pareto.py -x -q` — 22 passed, 1 skipped.
 
-- [ ] **46.5b** Strengthen `test_default_gate_for_bl42_objective` in `tests/test_optimizer.py:459`:
-  - Current test mocks `failed_layer=2`, which gates under both old (`gate_layer=3`) and new (`gate_layer=2` auto-inferred) defaults — vacuous as a regression for plan 45.0b.
-  - Add a sub-case (or new test method) with `r.failed_layer = 3` and `r.layer_bl42 = {"max_spectral_abscissa": 5.0}`. Assert the closure returns `5.0` (finite), not `+inf`. **This is the case that would have failed under the old hardcoded `gate_layer=3`** and is the true regression test for auto-infer.
-  - Cross-reference: `test_bl42_l3r_failure_returns_finite` already exists per 45.0e — verify the two tests don't duplicate, and consolidate or cross-link in docstrings if so.
+- [x] **46.5b** Strengthen `test_default_gate_for_bl42_objective` in `tests/test_optimizer.py:630`. Done.
+  - **Applied:** parametrized `test_default_gate_for_bl42_objective` over two sub-cases — (`failed_layer=2`, payload omitted, expects `+inf`) and (`failed_layer=3`, payload `{"max_spectral_abscissa": 5.0}`, expects `5.0`). The L3 sub-case is the regression-distinguishing addition: under the old hardcoded `gate_layer=3`, `failed_layer=3 <= 3` would gate to `+inf`, but under the new auto-infer (`gate_layer=2`), `failed_layer=3 > 2` does not gate and the closure returns the populated `layer_bl42` payload. Added inline comments explaining what each sub-case covers and cross-referenced `test_bl42_l3r_failure_returns_finite` (45.0e) which exercises the same L3 scenario standalone.
+  - **Cross-link:** updated `test_bl42_l3r_failure_returns_finite` docstring to point back at the parametrized form. Both tests retained — the standalone form preserves the named-scenario history of 45.0e; the parametrized form makes `test_default_gate_for_bl42_objective` self-evidently non-vacuous as a 45.0b auto-infer regression check.
   - File: `scripts/stencil_gen/tests/test_optimizer.py`
-  - Test: `cd scripts/stencil_gen && uv run pytest tests/test_optimizer.py -x -q -k "test_default_gate_for_bl42_objective or test_bl42_l3r_failure_returns_finite"`
+  - Test: `cd scripts/stencil_gen && uv run pytest tests/test_optimizer.py -x -q -k "test_default_gate_for_bl42_objective or test_bl42_l3r_failure_returns_finite"` — 3 passed (2 parametrized + 1 standalone). Full file: `uv run pytest tests/test_optimizer.py -x -q` — 132 passed, 10 skipped.
 
 - [ ] **46.5c** Add a non-empty front guard to `test_result_metadata_populated` in `tests/test_pareto.py:480`:
   - Current loop `for p in res.front: assert ...` is vacuous if `res.front` is empty (could happen with bad seeding on the synthetic ZDT1-like objective).

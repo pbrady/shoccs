@@ -627,7 +627,30 @@ class TestGateLayerInfer:
         assert captured["max_layer"] == 6
         assert val == float("inf")
 
-    def test_default_gate_for_bl42_objective(self, monkeypatch):
+    @pytest.mark.parametrize(
+        ("failed_layer", "layer_bl42_payload", "expected"),
+        [
+            # L2 failure: at the auto-inferred gate (gate_layer=2 for a
+            # layer-3 objective).  Gates under both old hardcoded
+            # gate_layer=3 and new auto-infer; this sub-case verifies the
+            # feasibility cliff fires for at-or-below-gate failures.
+            (2, None, float("inf")),
+            # L3 failure: above the gate.  Under the OLD hardcoded
+            # gate_layer=3 this would gate (failed_layer=3 <= 3) — a
+            # self-gate trap because the objective lives in the "failing"
+            # layer.  Under the NEW auto-inferred gate_layer=2,
+            # failed_layer=3 > 2 does NOT gate and the closure returns the
+            # populated ``layer_bl42`` payload.  This is the true
+            # regression case for plan 45.0b auto-infer; without it the
+            # test was vacuous (both old and new defaults gate at L2).
+            # See also ``test_bl42_l3r_failure_returns_finite`` (45.0e)
+            # which exercises the same L3-failure scenario standalone.
+            (3, {"max_spectral_abscissa": 5.0}, 5.0),
+        ],
+    )
+    def test_default_gate_for_bl42_objective(
+        self, monkeypatch, failed_layer, layer_bl42_payload, expected
+    ):
         import stencil_gen.optimizer as opt
 
         captured: dict = {}
@@ -635,10 +658,10 @@ class TestGateLayerInfer:
         def fake_score(scheme, kernel, params, *, max_layer, short_circuit):
             captured["max_layer"] = max_layer
             r = StabilityReport.empty()
-            # layer_bl42 is layer 3; auto-inferred gate_layer=2.  An L2
-            # failure must gate.
-            r.failed_layer = 2
-            r.failed_reason = "synthetic L2 failure"
+            r.failed_layer = failed_layer
+            r.failed_reason = f"synthetic L{failed_layer} failure"
+            if layer_bl42_payload is not None:
+                r.layer_bl42 = layer_bl42_payload
             return r
 
         monkeypatch.setattr(opt, "brady2d_stability_score", fake_score)
@@ -647,7 +670,7 @@ class TestGateLayerInfer:
         )
         val = f(np.array([-0.77, 0.16]))
         assert captured["max_layer"] == 3
-        assert val == float("inf")
+        assert val == expected
 
     def test_default_gate_for_layer1_objective_no_gate(self):
         # layer1.* → max_layer=1, gate_layer=0 (degenerate no-gate case:
@@ -698,6 +721,11 @@ class TestGateLayerInfer:
         # stored value.  This is the exact scenario 45.0b unblocks
         # (the 2634-eval +inf DE run documented in
         # ``docs/handoff/next_steps.md``).
+        #
+        # Cross-reference: ``test_default_gate_for_bl42_objective`` (above)
+        # covers the same L3-failure scenario as one parametrized sub-case
+        # alongside the L2-failure (at-gate) case.  This standalone form is
+        # retained for the named-scenario history of plan 45.0e.
         import stencil_gen.optimizer as opt
 
         def fake_score(scheme, kernel, params, *, max_layer, short_circuit):
