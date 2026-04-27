@@ -290,12 +290,19 @@ cd scripts/stencil_gen && uv run python -m sweeps optimize --scheme E4 --kernel 
 
 ### 46.4 — Activate `TestRegressionBrady2DSweep` (cheap classical seed)
 
-- [ ] **46.4a** Run a single `brady2d` sweep entry to populate the dormant key:
-  - `cd scripts/stencil_gen && SYMPY_CACHE_SIZE=50000 uv run python -m sweeps brady2d --scheme E4 --kernel classical --max-layer 3 --update-known-values`
-  - Commit the resulting `known_values.json["brady2d_sweep"]` entry.
-  - Verify activation: `uv run pytest tests/test_phs.py -x -q -k "TestRegressionBrady2DSweep"` — both sub-tests should run and pass.
+- [x] **46.4a.0** (blocker discovered while attempting 46.4a) Teach `save_known_values` to serialize the complex / numpy types now reachable via `_report_to_dict`. Done.
+  - **Bug:** running `python -m sweeps brady2d --scheme E4 --kernel classical --max-layer 3 --update-known-values` hit `TypeError: Object of type complex is not JSON serializable` inside `sweeps/_common.py:save_known_values`. Root cause: 46.2b added `kreiss = dataclasses.asdict(report.kreiss)` (which contains a `complex` `witness_s`) to all three `_report_to_dict` copies, but `save_known_values` still used default `json.dump` with no encoder. `_ParetoEncoder` in `sweeps/_pareto_io.py` handled `complex` (as `[real, imag]`) but was only wired into `save_pareto_front` — the `known_values.json` write path was missed.
+  - **Fix:** added a small `_KnownValuesEncoder` in `sweeps/_common.py` that handles `complex`, `np.ndarray`, `np.generic`, dataclasses, and `Path` (mirrors `_ParetoEncoder`); passed via `cls=` to `json.dump` in `save_known_values`. Did NOT import `_ParetoEncoder` from `_pareto_io.py` — keeps `_common.py`'s "no Pareto / pymoo" dependency posture intact (per `_pareto_io.py:1–12`).
+  - **Schema choice for `complex`:** list form `[real, imag]` to match `_ParetoEncoder`. The other complex-serializer in the codebase (`brady2d_cli.py:36–37`, dict form) writes a separate calibration JSON, not `known_values.json` — no conflict. Existing `known_values.json["brady2d_calibration"]` contains zero `kreiss` subdicts (verified: it predates 46.2b), so no migration of stored data was needed.
+  - **Test added:** `TestReportToDictSchemaParity::test_save_known_values_roundtrip` parametrized over the three serializers; constructs a fully-populated `StabilityReport` (with `kreiss.witness_s = 1+2j`), runs each `_report_to_dict`, round-trips through `save_known_values` + `load_known_values` (with `KNOWN_VALUES_PATH` monkey-patched to a `tmp_path`), and asserts `witness_s == [1.0, 2.0]`. Catches any future regression that re-introduces a complex / dataclass / ndarray field that the encoder doesn't handle.
+  - File: `scripts/stencil_gen/sweeps/_common.py`, `scripts/stencil_gen/tests/test_optimizer.py`
+  - Test: `cd scripts/stencil_gen && uv run pytest tests/test_optimizer.py -x -q -k "TestReportToDictSchemaParity"` — 18 passed.
+
+- [x] **46.4a** Run a single `brady2d` sweep entry to populate the dormant key. Done.
+  - Ran `SYMPY_CACHE_SIZE=50000 uv run python -m sweeps brady2d --scheme E4 --kernel classical --max-layer 3 --update-known-values`. Persisted `known_values.json["brady2d_sweep"]["E4"]["classical"]` with one point (the only classical entry — kernel has no parameter; `param=NaN`, `params_dict.alpha=[-0.7733, 0.1624]`, verdict `pass`, max_layer 3 max_stab_eig `-1.808e-04`).
+  - **Activation verified:** `TestRegressionBrady2DSweep::test_all_sweep_points_verdict_matches` previously skipped with "brady2d_sweep key absent from known_values.json"; now runs and passes (1 point checked, recompute matches stored `pass` verdict). The test class only has one sub-test (the plan-text "both sub-tests" was wrong — verified at `test_phs.py:2081`); the activation criterion is "no skip", which is met.
   - File: `scripts/stencil_gen/sweeps/known_values.json`
-  - Test: `cd scripts/stencil_gen && uv run pytest tests/test_phs.py -x -q -k "TestRegressionBrady2DSweep"`
+  - Test: `cd scripts/stencil_gen && uv run pytest tests/test_phs.py -x -q -k "TestRegressionBrady2DSweep"` — 1 passed (no skips). Full suite: `uv run pytest tests/ -x -q` — 863 passed, 137 skipped, 1 xfailed.
 
 ### 46.5 — Test hardening: vacuous assertions
 
@@ -359,7 +366,7 @@ cd scripts/stencil_gen && uv run python -m sweeps optimize --scheme E4 --kernel 
   ↓
 46.3a → 46.3a.1 → 46.3a.2 → 46.3b → 46.3b.1 → 46.3b.1a → 46.3b.1.1 → 46.3b.1.2 → 46.3b.1.3 → 46.3c # activate TestRegressionGV (tension, gaussian, multiquadric)
   ↓
-46.4a                                    # activate TestRegressionBrady2DSweep
+46.4a.0 → 46.4a                          # fix save_known_values complex encoder, then activate TestRegressionBrady2DSweep
   ↓
 46.5a → 46.5b → 46.5c                    # test hardening
   ↓

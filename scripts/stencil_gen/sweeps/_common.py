@@ -3,8 +3,11 @@
 from __future__ import annotations
 
 import json
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, is_dataclass, asdict
 from pathlib import Path
+from typing import Any
+
+import numpy as np
 
 KNOWN_VALUES_PATH = Path(__file__).parent / "known_values.json"
 
@@ -58,6 +61,32 @@ def print_table(
     print()
 
 
+class _KnownValuesEncoder(json.JSONEncoder):
+    """Encoder for ``known_values.json`` that handles types reachable via
+    ``_report_to_dict`` (complex, numpy scalars/arrays, dataclasses, Path).
+
+    Mirrors :class:`sweeps._pareto_io._ParetoEncoder` deliberately rather than
+    importing it: ``_common.py`` is a no-pareto/no-pymoo module and the
+    encoder is small enough to duplicate. ``complex`` is encoded as
+    ``[real, imag]`` to match the Pareto-front convention; the dict-form
+    encoding used by ``brady2d_cli.py`` writes to a separate calibration JSON
+    and does not feed ``known_values.json``.
+    """
+
+    def default(self, o: Any) -> Any:
+        if isinstance(o, np.ndarray):
+            return o.tolist()
+        if isinstance(o, np.generic):
+            return o.item()
+        if is_dataclass(o) and not isinstance(o, type):
+            return asdict(o)
+        if isinstance(o, Path):
+            return str(o)
+        if isinstance(o, complex):
+            return [o.real, o.imag]
+        return super().default(o)
+
+
 def load_known_values() -> dict:
     """Load known optimal values from JSON."""
     if not KNOWN_VALUES_PATH.exists():
@@ -69,7 +98,7 @@ def load_known_values() -> dict:
 def save_known_values(data: dict) -> None:
     """Save known optimal values to JSON."""
     with open(KNOWN_VALUES_PATH, "w") as f:
-        json.dump(data, f, indent=2)
+        json.dump(data, f, indent=2, cls=_KnownValuesEncoder)
         f.write("\n")
 
 

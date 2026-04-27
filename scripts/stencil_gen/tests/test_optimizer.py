@@ -486,6 +486,28 @@ class TestReportToDictSchemaParity:
         loaded = json.loads(blob)
         assert loaded["kreiss"]["witness_s"] == [1.0, 2.0]
 
+    @pytest.mark.parametrize("serializer", _serializers())
+    def test_save_known_values_roundtrip(
+        self, serializer, report, tmp_path, monkeypatch
+    ):
+        # 46.4a.0 regression: ``save_known_values`` must accept the complex /
+        # numpy / dataclass types reachable via ``_report_to_dict``.  Before
+        # 46.4a.0 the default ``json.dump`` raised
+        # ``TypeError: Object of type complex is not JSON serializable`` on
+        # ``kreiss.witness_s`` (added by 46.2b).
+        from sweeps import _common
+
+        path = tmp_path / "known_values.json"
+        monkeypatch.setattr(_common, "KNOWN_VALUES_PATH", path)
+        payload = {"brady2d_sweep": {"E4": {"classical": {
+            "report": serializer(report),
+        }}}}
+        _common.save_known_values(payload)
+        loaded = _common.load_known_values()
+        # ``complex`` round-trips as ``[real, imag]`` per the encoder.
+        kr = loaded["brady2d_sweep"]["E4"]["classical"]["report"]["kreiss"]
+        assert kr["witness_s"] == [1.0, 2.0]
+
 
 class TestMakeObjective:
     def test_objective_returns_finite_on_feasible(self):

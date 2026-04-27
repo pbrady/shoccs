@@ -377,5 +377,64 @@
         "purely_imaginary": false
       }
     }
+  },
+  "brady2d_sweep": {
+    "E4": {
+      "classical": {
+        "scheme": "E4",
+        "kernel": "classical",
+        "max_layer": 3,
+        "param_name": "param",
+        "points": [
+          {
+            "param": NaN,
+            "params_dict": {
+              "alpha": [
+                -0.7733323791884821,
+                0.1623961700641681
+              ]
+            },
+            "report": {
+              "overall_verdict": "pass",
+              "failed_layer": null,
+              "failed_reason": "",
+              "compute_time": 1.108928041998297,
+              "layer1": {
+                "interior_gv_err_x": 0.00013016508525931503,
+                "interior_gv_err_y": 0.00013016508525931503,
+                "boundary_gv_err": 0.021056053547695353,
+                "cutoff_fraction": 0.57422393669978
+              },
+              "layer2": {
+                "is_stable": true
+              },
+              "layer3": {
+                "max_stab_eig": -0.0001808367140203875
+              },
+              "layer_bl42": {
+                "max_spectral_abscissa": 6.002468414324108e-14,
+                "purely_imaginary": 1.0
+              },
+              "kreiss": {
+                "is_stable": true,
+                "witness_s": [
+                  0.09999999708627205,
+                  2.4245886402902557e-05
+                ],
+                "witness_sigma_min": 1.194607399154801e-05,
+                "imaginary_axis_perturbation_verdict": "not_checked",
+                "defective_kappa_detected": false,
+                "s_grid_shape": [
+                  80,
+                  31
+                ],
+                "compute_time": 0.49281316704582423,
+                "n_admissible_roots": 2
+              }
+            }
+          }
+        ]
+      }
+    }
   }
 }
