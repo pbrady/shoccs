@@ -38,6 +38,7 @@ def main() -> int:
     sub_tension.add_argument("--update-known-values", action="store_true", help="Update known_values.json with discovered optimal sigma")
     sub_tension.add_argument("--include-gv", action="store_true", help="Also compute boundary group-velocity error at each sigma (advisory)")
     sub_tension.add_argument("--check-gks", action="store_true", help="Run gks_group_velocity_check on D at sigma* and print outgoing-mode WARNINGs (advisory)")
+    sub_tension.add_argument("--sigma-floor", type=float, default=0.1, help="Restrict fine-sweep search to sigma >= sigma_floor (default 0.1) so the persisted tension entry stays distinct from the PHS k=2 limit (sigma=0)")
 
     sub_tension_pen = subparsers.add_parser("tension-penalty", help="Tension + conservation penalty sweep")
     sub_tension_pen.add_argument("--scheme", choices=["E2", "E4"], required=True)
@@ -278,6 +279,7 @@ def main() -> int:
             "--n-values", args.n_values,
             "--n-sigma", str(args.n_sigma),
             "--sigma-max", str(args.sigma_max),
+            "--sigma-floor", str(args.sigma_floor),
             *(["--update-known-values"] if args.update_known_values else []),
             *(["--include-gv"] if args.include_gv else []),
             *(["--check-gks"] if args.check_gks else []),

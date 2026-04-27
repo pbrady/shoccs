@@ -55,14 +55,14 @@
       "nu": 1
     },
     "tension": {
-      "sigma": 0.0,
+      "sigma": 0.1,
       "stable_at": [
         20,
         40,
         80,
         160
       ],
-      "gv_error": 7.238095238095238
+      "gv_error": 7.2349823022958315
     },
     "gaussian": {
       "epsilon": 0.9,

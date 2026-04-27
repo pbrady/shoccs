@@ -5,7 +5,10 @@ TestTensionSweepE2, TestTensionSweepE4 in test_phs.py.
 
 Sweeps the tension parameter sigma over a range including sigma=0
 (PHS k=2 limit) and reports stability of the resulting differentiation
-matrix at each grid size.
+matrix at each grid size. The persisted ``tension`` regression entry is
+restricted to ``sigma >= --sigma-floor`` (default 0.1) so it stays
+distinct from the ``phs_k2`` entry; pass ``--sigma-floor 0.0`` to
+permit the PHS k=2 limit as the optimum.
 
 Usage:
     uv run python -m sweeps.tension_sweep --scheme E2
@@ -85,8 +88,16 @@ def fine_sweep(
     nextra: int,
     nu: int,
     n_fine: int = 200,
+    sigma_floor: float = 0.0,
 ) -> tuple[float, float, float, float]:
     """Coarse-then-fine sweep at a single grid size.
+
+    ``sigma_floor`` restricts both the coarse and fine searches to
+    ``sigma >= sigma_floor``. This is used to prevent the persisted
+    ``tension.sigma`` from collapsing to the PHS k=2 limit (sigma=0),
+    which would make the ``tension`` regression entry structurally
+    identical to ``phs_k2`` (see plan 46.3a.1). Default 0.0 preserves
+    the historical library behavior; the CLI sets a non-zero default.
 
     Returns (best_coarse_sigma, best_coarse_se, best_fine_sigma, best_fine_se).
     """
@@ -98,14 +109,15 @@ def fine_sweep(
         )
         coarse.append((float(sigma), se))
 
-    best_coarse = min(coarse, key=lambda r: r[1])
+    coarse_search = [r for r in coarse if r[0] >= sigma_floor] or coarse
+    best_coarse = min(coarse_search, key=lambda r: r[1])
     sigma_best = best_coarse[0]
 
-    # Fine sweep: ±factor around best (or [0, 2] if best is near 0)
-    if sigma_best < 0.1:
-        lo, hi = 0.0, 2.0
+    # Fine sweep: ±factor around best (or [sigma_floor, 2.0] if best is near floor)
+    if sigma_best < max(sigma_floor, 0.1):
+        lo, hi = sigma_floor, 2.0
     else:
-        lo = max(0.0, sigma_best / 5)
+        lo = max(sigma_floor, sigma_best / 5)
         hi = sigma_best * 5
     sigmas_fine = np.linspace(lo, hi, n_fine)
     fine = []
@@ -116,7 +128,8 @@ def fine_sweep(
         )
         fine.append((float(sigma), se))
 
-    best_fine = min(fine, key=lambda r: r[1])
+    fine_search = [r for r in fine if r[0] >= sigma_floor] or fine
+    best_fine = min(fine_search, key=lambda r: r[1])
     return best_coarse[0], best_coarse[1], best_fine[0], best_fine[1]
 
 
@@ -128,8 +141,13 @@ def run_tension_sweep(
     *,
     include_gv: bool = False,
     check_gks: bool = False,
+    sigma_floor: float = 0.0,
 ) -> dict:
     """Run a full tension sigma sweep for a scheme.
+
+    ``sigma_floor`` is forwarded to :func:`fine_sweep` to keep the
+    persisted ``tension.sigma`` strictly above the PHS k=2 limit; see
+    that function for details.
 
     Returns a summary dict with best sigma and stable grid sizes.
     """
@@ -184,6 +202,7 @@ def run_tension_sweep(
     coarse_sigma, coarse_se, fine_sigma, fine_se = fine_sweep(
         n_fine_grid, sigmas,
         p=p, q=q, nextra=nextra, nu=nu,
+        sigma_floor=sigma_floor,
     )
     stable = fine_se < STABILITY_TOL
     print(f"\n  Fine sweep (n={n_fine_grid}):")
@@ -296,6 +315,12 @@ def main(argv: list[str] | None = None) -> int:
              "on D at sigma* and print any outgoing boundary modes as WARNINGs "
              "(advisory only; necessary-not-sufficient for instability)",
     )
+    parser.add_argument(
+        "--sigma-floor", type=float, default=0.1,
+        help="Restrict the fine-sweep search to sigma >= sigma_floor "
+             "(default 0.1) so the persisted tension entry stays distinct "
+             "from the PHS k=2 limit (sigma=0). Pass 0.0 to allow sigma=0.",
+    )
 
     args = parser.parse_args(argv)
     n_values = [int(x) for x in args.n_values.split(",")]
@@ -304,6 +329,7 @@ def main(argv: list[str] | None = None) -> int:
         args.scheme, n_values, args.n_sigma, args.sigma_max,
         include_gv=args.include_gv,
         check_gks=args.check_gks,
+        sigma_floor=args.sigma_floor,
     )
 
     if args.update_known_values:

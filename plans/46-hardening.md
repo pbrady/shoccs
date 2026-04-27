@@ -164,7 +164,7 @@ cd scripts/stencil_gen && uv run python -m sweeps optimize --scheme E4 --kernel 
   - File: `scripts/stencil_gen/sweeps/known_values.json`
   - Test: `cd scripts/stencil_gen && uv run pytest tests/test_phs.py -x -q -k "TestRegressionGV and tension"`
 
-- [ ] **46.3a.1** (review follow-up to `44c9945`): address the `E4_1.tension.sigma=0.0` collapse introduced by the 46.3a sweep.
+- [x] **46.3a.1** (review follow-up to `44c9945`): address the `E4_1.tension.sigma=0.0` collapse introduced by the 46.3a sweep.
   - The sweep moved `E4_1.tension.sigma` from `3.0 → 0.0`. `sigma=0` is the PHS k=2 limit (`tension_sweep.py:140`: "Include sigma=0 (PHS k=2 limit)"), so the `E4_1.tension` entry is now structurally identical to `E4_1.phs_k2`. This collapses regression coverage in two places:
     - `TestRegressionE4Stability.test_e4_tension_known_sigma` (`test_phs.py:1447`) and the `tension` branch of `test_e4_stable_at_multiple_grid_sizes` (`test_phs.py:1480`) now call `stability_eigenvalue` with `epsilon=0.0`, identical to the `phs_k2` branch — the suite tests one configuration twice. This is the same vacuous-test pattern plan 46.5 is hardening.
     - `test_scheme_primary_gv_error_match` for `E4_1.tension` (activated by 46.3a) is testing GV at sigma=0, i.e. the PHS k=2 GV — not a meaningful tension-kernel regression.
