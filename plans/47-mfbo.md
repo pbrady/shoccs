@@ -101,7 +101,7 @@ cd scripts/stencil_gen && SYMPY_CACHE_SIZE=50000 uv run python -m sweeps bo \
 
 ### 47.1 — Core dataclasses + multi-fidelity objective factory
 
-- [ ] **47.1a** Add `BOResult` and `BOPoint` frozen dataclasses + `_BO_SENTINEL` to `bo.py`, modeled on `pareto.py`'s `ParetoPoint`/`ParetoResult`:
+- [x] **47.1a** Add `BOResult` and `BOPoint` frozen dataclasses + `_BO_SENTINEL` to `bo.py`, modeled on `pareto.py`'s `ParetoPoint`/`ParetoResult`:
   ```python
   _BO_SENTINEL: float = 1e12  # finite sentinel; KG/MES break on inf
 
@@ -142,6 +142,7 @@ cd scripts/stencil_gen && SYMPY_CACHE_SIZE=50000 uv run python -m sweeps bo \
   Frozen with tuples (not lists) for immutability — same convention as `ParetoResult`.
   - File: `scripts/stencil_gen/stencil_gen/bo.py`
   - Test: `cd scripts/stencil_gen && uv run pytest tests/test_bo.py -x -q -k "TestBOResult"`
+  - **Done 2026-04-27.** Added `_BO_SENTINEL = 1e12`, `BOEval` (6 fields: x, params, fidelity, value, wall_time, report), `BOResult` (22 fields per the plan spec). `__all__` updated to export the three names. The plan named the per-eval class "BOPoint" in the heading but the schema in the body says `BOEval`; the body is authoritative — followed it. Verified by smoke check: instantiate both, assignment raises `FrozenInstanceError`, tuple-typed fields hold tuples, `dataclasses.asdict(BOResult)` round-trips. `tests/test_bo.py` will be created in 47.1c — the plan's `Test:` line for 47.1a is forward-looking. Adjacent `tests/test_pareto.py` still green (22 passed, 1 skipped).
 
 - [ ] **47.1b** Add `make_multi_fidelity_objective(scheme, kernel, report_fields_by_layer, *, gate_layer=None) -> Callable[[np.ndarray, int], tuple[float, float, dict]]`:
   - `report_fields_by_layer`: dict mapping layer index → dotted path, e.g. `{1: "layer1.boundary_gv_err", 3: "layer3.max_stab_eig", 7: "layer7.max_spectral_abscissa"}`. The HF layer is `max(report_fields_by_layer)`; the HF field is the optimization target.
