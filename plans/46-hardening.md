@@ -205,9 +205,20 @@ cd scripts/stencil_gen && uv run python -m sweeps optimize --scheme E4 --kernel 
   - File: `plans/46-hardening.md` (this file)
   - Test: none (analysis-only)
 
-- [ ] **46.3b.1.1** Decide on the approach for fixing the gaussian boundary-snap, given the 46.3b.1 finding that no single global `--eps-floor` works. Options (in increasing complexity):
+- [ ] **46.3b.1a** (review follow-up to `f5a8718`): the 46.3b.1 conclusion "Option B with a single global `--eps-floor` has no value that gives strictly-interior optima for *both* schemes" is empirically wrong because the underlying analysis was undersampled. The 25-point logspace from 0.001 to 10 has decade spacing ≈ 0.166 in log10, so its grid points near the E4 second basin are 1.46 and 2.15 — the latter is the start of the unstable zone, so the "narrow" basin label is an artifact of grid resolution. With 200-point fine probing in `[1.4, 2.5]` (log spacing ≈ 0.05 decade), the second basin's true minimum is at `eps≈2.0–2.1` with `stab_eig≈-6.1e-5`, not "near 1.47" (`-1.6e-5`); the basin extends from ~1.4 to ~2.1 before the unstable jump at 2.15. Re-running coarse sweeps in `[1.5, 10]` (15 logspace points) yields **E2 coarse-min at `eps≈3.38`** (`stab_eig≈-3.35e-5`) and **E4 coarse-min at `eps≈1.97`** (`stab_eig≈-5.7e-5`) — both strictly interior to the floor=1.5, [1.5, 10] window. The analysis premise also implicitly required E4's optimum to remain in the 0.681 basin specifically; this constraint is not justified mathematically (both basins are stable interior optima of `stab_eig(eps)`).
+  - **Correction:** a single global `--eps-floor=1.5` (or thereabouts) **is** a viable Option B. The 46.3b.1 conclusion was premature.
+  - **Action items before 46.3b.1.1 decides:**
+    - Re-probe E4 gaussian at fine resolution (`np.linspace(1.4, 2.5, 50)`) and record the second-basin minimum location and value in this item or in `46.3b.1`. Also probe E2 in `[1.5, 10]` to confirm the upper local minimum near `eps≈3.4`.
+    - Verify that a `floor=1.5` coarse+fine sweep on both schemes yields strictly-interior optima (not at floor, not at upper bound) and that the resulting `gv_error` values are reasonable (E2 currently degraded to 8.09 at `eps=0.002492`; the upper-basin value at `eps≈3.4` should be checked).
+    - Update the C2 description in `46.3b.1.1`: drop the misleading "0.5 for E2 and 0.5 for E4" example (the 46.3b.1 analysis itself shows floor=0.5 doesn't work for E2), and replace with the floor=1.5 candidate validated in the bullet above. Note that "per-scheme" defaults remain a fallback if a single global floor turns out not to satisfy a future scheme.
+    - Note that `E4_1.gaussian` currently sits at `eps=0.894157` (in the 0.681-basin region); a floor≥1.5 would migrate the persisted value to the second basin (`eps≈2.0`). Document this migration in `46.3b.1.2` so the regression delta is expected, not a surprise.
+  - File: `plans/46-hardening.md`
+  - Test: none (analysis-only; verifies the floor=1.5 hypothesis for input to 46.3b.1.1)
+
+- [ ] **46.3b.1.1** Decide on the approach for fixing the gaussian boundary-snap, **incorporating the floor=1.5 single-global-floor candidate validated in 46.3b.1a**. Options (in increasing complexity):
   - **C1 (simplest, accept-and-document):** Leave `E2_1.gaussian.epsilon=0.002492` and `E4_1.gaussian.epsilon=0.894157` as-is. Document in `docs/handoff/known_limitations.md` that the gaussian-kernel "primary" entries reflect the *unconstrained grid-min* of stab_eig, which for E2 lands in the eps→0 polynomial-reproduction limit. The meaningful kernel-parameter regression metric for gaussian is `gaussian_gv` (the GV-optimum at a non-degenerate kernel parameter). Add a comment in `epsilon_sweep.py` documenting that gaussian stability landscape has multiple stable basins and the persisted primary entry is the global grid-min (which may be a degenerate-kernel limit).
-  - **C2 (per-scheme floor):** Add `--eps-floor` CLI arg with a per-scheme default (e.g., `0.5` for E2 and `0.5` for E4 — verify with sweeps that both yield strictly-interior optima at these floors; if not, choose larger floors per scheme). Mirror 46.3a.2's snap-warning. Re-run sweeps; persist new values. Add `test_*_gaussian_epsilon_strictly_above_floor` regressions for each scheme.
+  - **C2a (single global `--eps-floor`, the validated 46.3b.1a candidate):** Add `--eps-floor` CLI arg defaulting to the value validated in 46.3b.1a (currently 1.5 unless that item finds a better one). Mirror 46.3a.2's snap-warning. Re-run sweeps; persist new values (E2 `eps≈3.4`, E4 `eps≈2.0`). Add a single `test_gaussian_epsilon_strictly_above_floor` regression covering both schemes.
+  - **C2b (per-scheme floor, fallback if C2a fails for a future scheme):** Add `--eps-floor` with a per-scheme default. Mirror 46.3a.2's snap-warning. Re-run sweeps; persist new values. Add `test_*_gaussian_epsilon_strictly_above_floor` regressions for each scheme. Use only if C2a turns out to not satisfy strictly-interior for both schemes.
   - **C3 (local-min detector):** Modify `fine_sweep` to filter the fine grid for *interior local minima only* (point's stab_eig is more negative than both adjacent points) and pick the most-negative such point. Falls back to grid-min if no local min exists. Add a `boundary_snap_warning` when the chosen point is within 1 grid step of either bound. This is the most principled fix but the largest code change.
   - Pick one and record the rationale in this item before opening 46.3b.1.2.
   - File: `plans/46-hardening.md`
@@ -294,7 +305,7 @@ cd scripts/stencil_gen && uv run python -m sweeps optimize --scheme E4 --kernel 
   ↓
 46.2a → 46.2b → 46.2b.1 → 46.2b.2 → 46.2c → 46.2d   # schema completeness + 16e11cf review follow-ups
   ↓
-46.3a → 46.3a.1 → 46.3a.2 → 46.3b → 46.3b.1 → 46.3b.1.1 → 46.3b.1.2 → 46.3c # activate TestRegressionGV (tension, gaussian, multiquadric)
+46.3a → 46.3a.1 → 46.3a.2 → 46.3b → 46.3b.1 → 46.3b.1a → 46.3b.1.1 → 46.3b.1.2 → 46.3c # activate TestRegressionGV (tension, gaussian, multiquadric)
   ↓
 46.4a                                    # activate TestRegressionBrady2DSweep
   ↓
