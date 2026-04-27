@@ -180,6 +180,53 @@ class TestSpectralAbscissaDeterminism:
 
 
 # ---------------------------------------------------------------------------
+# TestNumericalAbscissaDeterminism (46.1b)
+# ---------------------------------------------------------------------------
+
+
+class TestNumericalAbscissaDeterminism:
+    """Tests that numerical_abscissa_sparse is cross-call deterministic via rng_seed.
+
+    Mirrors TestSpectralAbscissaDeterminism but for the eigsh (Hermitian-part)
+    path inside numerical_abscissa_sparse. Only triggers above the n > 900
+    sparse Arnoldi threshold.
+    """
+
+    @staticmethod
+    def _nonsymmetric_matrix(n: int = 1000):
+        """Build an n x n non-symmetric sparse matrix whose Hermitian part has non-trivial spectrum.
+
+        Do not use a skew-symmetric construction here: H = (L + L^T) / 2 = 0
+        causes eigsh(which='LA') to fail to converge, raising RuntimeError
+        before the determinism path is exercised.
+        """
+        rng = np.random.default_rng(2026)
+        A = rng.standard_normal((n, n)) - 5.0 * np.eye(n)
+        return sp.csr_matrix(A)
+
+    def test_numerical_abscissa_sparse_deterministic_across_calls(self):
+        """Two calls at the default seed return byte-identical results; rng_seed=42 differs at the ULP level."""
+        L = self._nonsymmetric_matrix(1000)
+
+        # Default seed (rng_seed=0): byte-identical across consecutive calls.
+        na_a = numerical_abscissa_sparse(L)
+        na_b = numerical_abscissa_sparse(L)
+        assert na_a == na_b, (
+            f"default-seed calls diverged: {na_a!r} vs {na_b!r}; "
+            "rng_seed not threaded through eigsh"
+        )
+
+        # Different seed traces a different Arnoldi path. Difference is at
+        # the ULP level (~1e-14 relative); use != not np.isclose, since
+        # equality would mean the seed isn't reaching ARPACK.
+        na_seed42 = numerical_abscissa_sparse(L, rng_seed=42)
+        assert na_seed42 != na_a, (
+            f"rng_seed=42 produced same result as default ({na_a!r}); "
+            "seed not actually being threaded through ARPACK"
+        )
+
+
+# ---------------------------------------------------------------------------
 # TestNormMetrics (41.8c)
 # ---------------------------------------------------------------------------
 
