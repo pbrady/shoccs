@@ -29,6 +29,9 @@ def main() -> int:
     sub_eps.add_argument("--update-known-values", action="store_true", help="Update known_values.json with discovered optimal epsilon")
     sub_eps.add_argument("--include-gv", action="store_true", help="Also compute boundary group-velocity error at each epsilon (advisory)")
     sub_eps.add_argument("--check-gks", action="store_true", help="Run gks_group_velocity_check on D at eps* and print outgoing-mode WARNINGs (advisory)")
+    from .epsilon_sweep import CLI_DEFAULT_EPS_FLOOR
+
+    sub_eps.add_argument("--eps-floor", type=float, default=CLI_DEFAULT_EPS_FLOOR, help=f"Restrict fine-sweep search to epsilon >= eps_floor (default {CLI_DEFAULT_EPS_FLOOR}) so the persisted gaussian entry stays strictly above the eps -> 0 degenerate-kernel limit; see plan 46.3b.1.2")
 
     sub_tension = subparsers.add_parser("tension", help="Tension spline sigma sweep")
     sub_tension.add_argument("--scheme", choices=["E2", "E4"], required=True)
@@ -268,6 +271,7 @@ def main() -> int:
             "--kernel", args.kernel,
             "--n-values", args.n_values,
             "--n-eps", str(args.n_eps),
+            "--eps-floor", str(args.eps_floor),
             *(["--update-known-values"] if args.update_known_values else []),
             *(["--include-gv"] if args.include_gv else []),
             *(["--check-gks"] if args.check_gks else []),

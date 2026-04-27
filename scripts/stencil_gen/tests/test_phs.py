@@ -1415,6 +1415,27 @@ if _KNOWN is not None:
                 f"E2_1 Gaussian ε={eps} n=40: expected stable, got {se:.6e}"
             )
 
+        def test_e2_gaussian_epsilon_strictly_above_floor(self):
+            """E2_1 gaussian epsilon must be strictly above the CLI default eps_floor.
+
+            Plan 46.3b.1.2: the persisted ``E2_1.gaussian.epsilon`` must be a
+            genuine fine-sweep optimum from the upper stable basin, not the
+            value at the constraint boundary or the eps -> 0
+            polynomial-reproduction limit. At floor=0.0 the fine sweep
+            extrapolates below the coarse range to a degenerate-kernel
+            value (eps ≈ 0.0025); asserting strictly above the floor catches
+            a re-collapse if the floor is ever lowered.
+            """
+            from sweeps.epsilon_sweep import CLI_DEFAULT_EPS_FLOOR
+
+            eps = _KNOWN["E2_1"]["gaussian"]["epsilon"]
+            assert eps > CLI_DEFAULT_EPS_FLOOR + 1e-9, (
+                f"E2_1 gaussian epsilon={eps} must be strictly greater than "
+                f"the CLI default eps_floor={CLI_DEFAULT_EPS_FLOOR}; "
+                f"floor-snap or eps -> 0 collapse means the regression "
+                f"entry sits in a degenerate-kernel limit."
+            )
+
         def test_e2_stable_at_multiple_grid_sizes(self):
             """E2_1 tension and PHS k=2 are stable at known grid sizes."""
             kv = _KNOWN["E2_1"]
@@ -1464,6 +1485,25 @@ if _KNOWN is not None:
             )
             assert se < STABILITY_TOL, (
                 f"E4_1 Gaussian ε={eps} n=40: expected stable, got {se:.6e}"
+            )
+
+        def test_e4_gaussian_epsilon_strictly_above_floor(self):
+            """E4_1 gaussian epsilon must be strictly above the CLI default eps_floor.
+
+            Plan 46.3b.1.2: the persisted ``E4_1.gaussian.epsilon`` must be a
+            genuine fine-sweep optimum from the upper stable basin (~2.10),
+            not the lower 0.681-basin (silently excluded by the floor) or
+            the eps -> 0 degenerate-kernel limit. Asserting strictly above
+            the floor catches a re-collapse if the floor is ever lowered.
+            """
+            from sweeps.epsilon_sweep import CLI_DEFAULT_EPS_FLOOR
+
+            eps = _KNOWN["E4_1"]["gaussian"]["epsilon"]
+            assert eps > CLI_DEFAULT_EPS_FLOOR + 1e-9, (
+                f"E4_1 gaussian epsilon={eps} must be strictly greater than "
+                f"the CLI default eps_floor={CLI_DEFAULT_EPS_FLOOR}; "
+                f"floor-snap or basin-collapse means the regression entry "
+                f"lies outside the upper stable basin."
             )
 
         def test_e4_multiquadric_known_epsilon(self):

@@ -17,14 +17,14 @@
       "gv_error": 2.6465125577553485
     },
     "gaussian": {
-      "epsilon": 0.002492,
+      "epsilon": 3.511879,
       "stable_at": [
         20,
         40,
         80,
         160
       ],
-      "gv_error": 8.090034045983016
+      "gv_error": 2.0537811466317955
     },
     "multiquadric": {
       "epsilon": 1.0,
@@ -79,14 +79,14 @@
       "gv_error": 6.503000296681518
     },
     "gaussian": {
-      "epsilon": 0.894157,
+      "epsilon": 2.130173,
       "stable_at": [
         20,
         40,
         80,
         160
       ],
-      "gv_error": 8.08885366558505
+      "gv_error": 6.181216677920524
     },
     "multiquadric": {
       "epsilon": 1.0,

@@ -624,14 +624,18 @@ def test_check_gks_advisory_epsilon_e2_gaussian_no_false_positives(capsys):
     ``--check-gks`` argparse entry, the passthrough in ``sweeps/__main__.py``,
     or the ``print_gks_advisory`` call site inside ``run_epsilon_sweep`` cannot
     silently break the wiring.  The 40.7a verification confirmed that gaussian
-    at the smoke-run optimum has 1 inspected boundary mode and zero outgoing
-    boundary modes.
+    at the eps -> 0 polynomial-reproduction limit has 1 inspected boundary mode
+    and zero outgoing boundary modes.  Plan 46.3b.1.2 raised the default
+    ``--eps-floor`` to 1.5, which moves the smoke-run optimum into the upper
+    stable basin where an outgoing mode does appear; pass ``--eps-floor 0.0``
+    here to recover the eps -> 0 case that 40.7a was pinned to.
     """
     rc = epsilon_sweep.main([
         "--scheme", "E2",
         "--kernel", "gaussian",
         "--n-eps", "5",
         "--n-values", "40",
+        "--eps-floor", "0.0",
         "--check-gks",
     ])
     assert rc == 0

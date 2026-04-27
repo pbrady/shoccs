@@ -6,6 +6,20 @@ TestEpsilonSweepE4 in test_phs.py.
 Sweeps the shape parameter epsilon over a log-spaced range and reports
 stability of the resulting differentiation matrix at each grid size.
 
+The persisted ``gaussian`` regression entry is restricted to
+``epsilon >= --eps-floor`` (default 1.5) so it stays strictly above the
+``eps -> 0`` polynomial-reproduction (degenerate-kernel) limit and the
+narrow lower stable basins exposed by under-sampled coarse grids.
+Empirically (plan 46.3b.1a) the gaussian ``stab_eig(eps)`` landscape
+contains multiple disjoint stable basins; floor=1.5 places the
+constrained fine-sweep optimum strictly inside the upper basin for both
+E2 (``eps≈3.55``) and E4 (``eps≈2.10``). Pass ``--eps-floor 0.0`` to
+permit the unconstrained grid-min (which may snap to a degenerate-kernel
+limit). The floor is gaussian-specific in motivation but applies to all
+kernels for consistency; multiquadric and other kernels are not known
+to suffer from boundary-snap with floor=1.5 in the standard
+``[0.01, 10]`` range.
+
 Usage:
     uv run python -m sweeps.epsilon_sweep --scheme E2 --kernel gaussian
     uv run python -m sweeps.epsilon_sweep --scheme E4 --kernel multiquadric
@@ -38,6 +52,15 @@ from .gv_objectives import boundary_gv_error_max, print_gks_advisory
 # Floating-point eigenvalue solvers return tiny positive real parts (~1e-14)
 # for genuinely stable operators.  Use this threshold to distinguish true
 # instability from numerical noise.
+
+# CLI default for --eps-floor. Exposed as a module-level constant so the
+# regression test ``test_e{2,4}_gaussian_epsilon_strictly_above_floor`` can
+# assert the persisted gaussian entry stays strictly above the floor (plan
+# 46.3b.1.2). Empirically (plan 46.3b.1a) the gaussian stab_eig(eps)
+# landscape has multiple disjoint stable basins; floor=1.5 yields
+# strictly-interior optima for both E2 (~3.55) and E4 (~2.10).
+CLI_DEFAULT_EPS_FLOOR = 1.5
+
 
 def sweep_stability(
     kernel: str,
@@ -90,8 +113,25 @@ def fine_sweep(
     nextra: int,
     nu: int,
     n_fine: int = 200,
+    eps_floor: float = 0.0,
 ) -> tuple[float, float, float, float]:
     """Coarse-then-fine sweep at a single grid size.
+
+    ``eps_floor`` restricts both the coarse and fine searches to
+    ``epsilon >= eps_floor``. This is used to prevent the persisted
+    ``gaussian.epsilon`` from collapsing to the ``eps -> 0``
+    polynomial-reproduction (degenerate-kernel) limit or to a narrow
+    lower stable basin produced by an under-sampled coarse grid (see
+    plan 46.3b.1a). Default 0.0 preserves the historical library
+    behavior; the CLI sets a non-zero default.
+
+    When ``eps_floor > 0`` and the constrained fine-sweep optimum
+    lands *exactly* on the floor (within a few × ``np.spacing(eps_floor)``),
+    the function emits a ``UserWarning``: this signals that the persisted
+    optimum is determined by the floor rather than by the underlying
+    objective and the regression entry may be structurally degenerate
+    (see plan 46.3b.1.2). Callers passing ``eps_floor=0.0`` deliberately
+    permit the unconstrained grid-min and do not get the warning.
 
     Returns (best_coarse_eps, best_coarse_se, best_fine_eps, best_fine_se).
     """
@@ -103,11 +143,12 @@ def fine_sweep(
         )
         coarse.append((float(eps), se))
 
-    best_coarse = min(coarse, key=lambda r: r[1])
+    coarse_search = [r for r in coarse if r[0] >= eps_floor] or coarse
+    best_coarse = min(coarse_search, key=lambda r: r[1])
     eps_best = best_coarse[0]
 
-    # Fine sweep: ±1 decade around best
-    lo = max(0.001, eps_best / 10)
+    # Fine sweep: ±1 decade around best, clamped to [eps_floor, 100]
+    lo = max(eps_floor, 0.001, eps_best / 10)
     hi = min(100, eps_best * 10)
     epsilons_fine = np.linspace(lo, hi, n_fine)
     fine = []
@@ -118,7 +159,22 @@ def fine_sweep(
         )
         fine.append((float(eps), se))
 
-    best_fine = min(fine, key=lambda r: r[1])
+    fine_search = [r for r in fine if r[0] >= eps_floor] or fine
+    best_fine = min(fine_search, key=lambda r: r[1])
+
+    if eps_floor > 0.0:
+        snap_tol = max(4 * np.spacing(eps_floor), 1e-12)
+        if abs(best_fine[0] - eps_floor) <= snap_tol:
+            import warnings
+            warnings.warn(
+                f"fine_sweep: constrained optimum epsilon={best_fine[0]:.6g} "
+                f"snapped to eps_floor={eps_floor:.6g}; the persisted "
+                f"{kernel}.epsilon is determined by the floor rather than "
+                f"the objective. Consider raising --eps-floor (plan 46.3b.1.2).",
+                UserWarning,
+                stacklevel=2,
+            )
+
     return best_coarse[0], best_coarse[1], best_fine[0], best_fine[1]
 
 
@@ -130,8 +186,13 @@ def run_epsilon_sweep(
     *,
     include_gv: bool = False,
     check_gks: bool = False,
+    eps_floor: float = 0.0,
 ) -> dict:
     """Run a full epsilon sweep for a scheme/kernel combination.
+
+    ``eps_floor`` is forwarded to :func:`fine_sweep` to keep the
+    persisted ``{kernel}.epsilon`` strictly above the eps -> 0
+    degenerate-kernel limit; see that function for details.
 
     Returns a summary dict with best epsilon and stable grid sizes.
     """
@@ -183,6 +244,7 @@ def run_epsilon_sweep(
     coarse_eps, coarse_se, fine_eps, fine_se = fine_sweep(
         n_fine_grid, kernel, epsilons,
         p=p, q=q, nextra=nextra, nu=nu,
+        eps_floor=eps_floor,
     )
     stable = fine_se < STABILITY_TOL
     print(f"\n  Fine sweep (n={n_fine_grid}):")
@@ -294,6 +356,16 @@ def main(argv: list[str] | None = None) -> int:
              "on D at eps* and print any outgoing boundary modes as WARNINGs "
              "(advisory only; necessary-not-sufficient for instability)",
     )
+    parser.add_argument(
+        "--eps-floor", type=float, default=CLI_DEFAULT_EPS_FLOOR,
+        help=f"Restrict the fine-sweep search to epsilon >= eps_floor "
+             f"(default {CLI_DEFAULT_EPS_FLOOR}) so the persisted gaussian "
+             f"entry stays strictly above the eps -> 0 polynomial-reproduction "
+             f"limit. Empirically (plan 46.3b.1a) gaussian stab_eig(eps) has "
+             f"multiple disjoint stable basins; floor=1.5 yields strictly "
+             f"interior optima for both E2 (~3.55) and E4 (~2.10). Pass 0.0 "
+             f"to allow the unconstrained grid-min.",
+    )
 
     args = parser.parse_args(argv)
     n_values = [int(x) for x in args.n_values.split(",")]
@@ -302,6 +374,7 @@ def main(argv: list[str] | None = None) -> int:
         args.scheme, args.kernel, n_values, args.n_eps,
         include_gv=args.include_gv,
         check_gks=args.check_gks,
+        eps_floor=args.eps_floor,
     )
 
     if args.update_known_values:
