@@ -36,7 +36,7 @@ from __future__ import annotations
 
 import time
 from dataclasses import dataclass
-from typing import Callable
+from typing import Callable, Sequence
 
 import numpy as np
 import torch
@@ -582,6 +582,161 @@ def build_cost_model(
     return InverseCostWeightedUtility(cost_model=cost_model, use_mean=True)
 
 
+# --- initial design (DOE) ----------------------------------------------------
+
+
+def build_initial_design(
+    bounds: Sequence[tuple[float, float]],
+    fidelity_levels: Sequence[int],
+    *,
+    n_init: int | None = None,
+    hf_anchors: int = 3,
+    mid_anchors: int = 2,
+    seed: int = 0,
+) -> tuple[np.ndarray, np.ndarray]:
+    """Build a stratified Sobol' initial design for the BO loop.
+
+    The DOE has three goals: (i) cover the design space well in the cheap
+    fidelity (where evaluations are nearly free), (ii) seed enough HF data
+    that the GP's posterior at the target fidelity is informative from
+    iteration 0, and (iii) provide *paired* HF/cheap evaluations at the same
+    ``x`` so the ICM coregionalization matrix ``B = W Wᵀ + diag(κ)`` is
+    identifiable from data.  Without paired evaluations the marginal
+    likelihood cannot pin down the off-diagonal task correlations (Wu et al.
+    2020 §3.1; this is "Agent 2 pitfall #1" in the plan-47 design notes).
+
+    The stratification: of ``n_init`` total evaluations, ``hf_anchors`` go to
+    the HF level (paired with the first ``hf_anchors`` cheap-fidelity points
+    at identical ``x``), ``mid_anchors`` go to the median-cost fidelity (at
+    additional Sobol' draws), and the remaining ``n_init - hf_anchors -
+    mid_anchors`` go to the cheapest fidelity.  With the defaults
+    ``hf_anchors=3, mid_anchors=2`` and ``n_init = 5*d + 3`` (Loeppky et al.
+    2009), a 2D problem yields 8 cheap + 2 mid + 3 HF = 13 evaluations — a
+    reasonable approximation to the 70/20/10 design-intent split.
+
+    Parameters
+    ----------
+    bounds
+        Per-dimension ``(lo, hi)`` pairs; ``len(bounds)`` is the design
+        dimension ``d``.
+    fidelity_levels
+        External cascade layer indices (e.g. ``(1, 3, 7)`` or
+        ``(1, 3, 5, 6, 7)``).  Sorted ascending to derive the contiguous
+        internal index ``0..K-1`` returned in ``fid_indices``.  The cheapest
+        fidelity is index ``0``; the HF fidelity is index ``K - 1``; the mid
+        fidelity is the median index ``K // 2`` when ``K >= 3``.  When
+        ``K == 2``, ``mid_anchors`` is silently zeroed (no median fidelity to
+        anchor on); when ``K == 1`` the entire design lives at that single
+        fidelity (``hf_anchors`` and ``mid_anchors`` ignored).
+    n_init
+        Total number of evaluations.  Defaults to ``5*d + 3``.
+    hf_anchors
+        Number of HF anchor points; the first ``hf_anchors`` cheap-fidelity
+        ``x``-values are replicated at the HF level for paired evaluation.
+        Must satisfy ``hf_anchors <= n_init - mid_anchors`` (otherwise there
+        are no cheap points to pair with).
+    mid_anchors
+        Number of mid-fidelity points (additional unique Sobol' draws).
+        Silently zeroed when ``K < 3``.
+    seed
+        Seed for :class:`torch.quasirandom.SobolEngine` (the engine is
+        scrambled).  Same seed → identical ``(X, fid_indices)`` output.
+
+    Returns
+    -------
+    X_init : np.ndarray
+        Float64 array of shape ``(n_init, d)``.  The first ``n_cheap`` rows
+        are cheap-fidelity Sobol' draws; the next ``mid_anchors`` (when
+        ``K >= 3``) are mid-fidelity draws; the final ``hf_anchors`` rows are
+        the HF replicas (a verbatim copy of the first ``hf_anchors`` cheap
+        rows).
+    fid_indices : np.ndarray
+        Int64 array of shape ``(n_init,)``.  Holds *internal contiguous*
+        fidelity indices ``0..K-1`` aligned with ``sorted(fidelity_levels)``,
+        not the external layer numbers.  The BO module is the only place that
+        does this internal indexing — the caller is responsible for
+        translating back to external layers when invoking the cascade.
+
+    Raises
+    ------
+    ValueError
+        If ``bounds`` or ``fidelity_levels`` is empty; if ``n_init`` is not
+        positive; if ``hf_anchors`` or ``mid_anchors`` is negative; or if
+        ``hf_anchors`` exceeds the available cheap-fidelity slot count.
+    """
+    if not bounds:
+        raise ValueError("bounds must be non-empty")
+    if not fidelity_levels:
+        raise ValueError("fidelity_levels must be non-empty")
+    if hf_anchors < 0:
+        raise ValueError(f"hf_anchors must be ≥ 0, got {hf_anchors}")
+    if mid_anchors < 0:
+        raise ValueError(f"mid_anchors must be ≥ 0, got {mid_anchors}")
+
+    bounds_arr = np.asarray(bounds, dtype=float)
+    if bounds_arr.ndim != 2 or bounds_arr.shape[1] != 2:
+        raise ValueError(
+            f"bounds must be a sequence of (lo, hi) pairs, got shape "
+            f"{bounds_arr.shape}"
+        )
+    if np.any(bounds_arr[:, 0] >= bounds_arr[:, 1]):
+        raise ValueError(f"bounds must satisfy lo < hi for every dim: {bounds}")
+
+    d = bounds_arr.shape[0]
+    if n_init is None:
+        n_init = 5 * d + 3
+    if n_init <= 0:
+        raise ValueError(f"n_init must be > 0, got {n_init}")
+
+    sorted_levels = sorted(set(fidelity_levels))
+    K = len(sorted_levels)
+    cheap_idx = 0
+    hf_idx = K - 1
+    mid_idx = K // 2  # median index; coincides with cheap_idx when K==1
+
+    # Collapse mid into "no mid" when there is no distinct median fidelity.
+    if K < 3:
+        mid_anchors = 0
+    if K == 1:
+        # Single fidelity: ignore HF anchors (no distinct HF level to anchor).
+        hf_anchors = 0
+
+    n_cheap = n_init - hf_anchors - mid_anchors
+    if n_cheap < hf_anchors:
+        raise ValueError(
+            f"need at least hf_anchors={hf_anchors} cheap points to pair "
+            f"with HF replicas, but n_cheap = n_init - hf_anchors - "
+            f"mid_anchors = {n_cheap}"
+        )
+    if n_cheap < 0:
+        raise ValueError(
+            f"n_init={n_init} too small for hf_anchors={hf_anchors} + "
+            f"mid_anchors={mid_anchors}"
+        )
+
+    sobol = torch.quasirandom.SobolEngine(d, scramble=True, seed=seed)
+    n_unique = n_cheap + mid_anchors
+    raw = sobol.draw(n_unique).numpy().astype(np.float64, copy=False)
+
+    lo = bounds_arr[:, 0]
+    span = bounds_arr[:, 1] - bounds_arr[:, 0]
+    X_unique = lo + raw * span  # broadcasts over n_unique rows
+
+    X_cheap = X_unique[:n_cheap]
+    X_mid = X_unique[n_cheap : n_cheap + mid_anchors]
+    X_hf = X_cheap[:hf_anchors].copy()  # paired with first hf_anchors cheap x's
+
+    X_init = np.vstack([X_cheap, X_mid, X_hf]) if (mid_anchors or hf_anchors) else X_cheap
+    fid_indices = np.concatenate(
+        [
+            np.full(n_cheap, cheap_idx, dtype=np.int64),
+            np.full(mid_anchors, mid_idx, dtype=np.int64),
+            np.full(hf_anchors, hf_idx, dtype=np.int64),
+        ]
+    )
+    return X_init, fid_indices
+
+
 __all__: list[str] = [
     "_BO_SENTINEL",
     "BOEval",
@@ -589,6 +744,7 @@ __all__: list[str] = [
     "DEFAULT_COST_TABLE",
     "apply_cost_floor",
     "build_cost_model",
+    "build_initial_design",
     "build_mf_gp",
     "make_multi_fidelity_objective",
 ]
