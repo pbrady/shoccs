@@ -306,11 +306,11 @@ cd scripts/stencil_gen && uv run python -m sweeps optimize --scheme E4 --kernel 
 
 ### 46.5 — Test hardening: vacuous assertions
 
-- [ ] **46.5a** Strengthen `test_sentinel_rows_excluded` in `tests/test_pareto.py:410`:
-  - Replace `assert res.extras["n_sentinel_filtered"] >= 0` (trivially true — counts can't be negative) with `assert res.extras["n_sentinel_filtered"] >= 1, "expected at least one infeasible eval to have been filtered"`.
-  - If the assertion is unreliable at the test's `pop_size=20, n_gen=4` budget, also assert `len(res.front) < 20` to prove the filter ran (a 20-member final population would mean nothing was filtered).
+- [x] **46.5a** Strengthen `test_sentinel_rows_excluded` in `tests/test_pareto.py:410`. Done.
+  - **Empirical finding:** at the test's `pop_size=20, n_gen=4` budget, `n_sentinel_filtered = 0` for every seed probed (1–11) and across `n_gen ∈ {1, 2, 3, 4, 6, 8}` × `pop_size ∈ {10, 20, 40}`. pymoo's NSGA-II selection crowds out sentinel rows *before* `res.F` is returned, so the `keep_mask` filter in `pareto.py:438` never has anything to remove. The plan's `>= 1` assertion is therefore unreachable at any reasonable budget for this objective construction; took the plan's prescribed fallback path.
+  - **Applied:** added `assert len(res.front) >= 1` (non-empty guard, defends per-point asserts below from vacuous loop on regression) and `assert len(res.front) < 20` (strict subset of pop_size proves selection / filtering pipeline ran). Kept `>= 0` as a sanity check; comment updated to explain the population-size guard is the meaningful signal.
   - File: `scripts/stencil_gen/tests/test_pareto.py`
-  - Test: `cd scripts/stencil_gen && uv run pytest tests/test_pareto.py -x -q -k "test_sentinel_rows_excluded"`
+  - Test: `cd scripts/stencil_gen && uv run pytest tests/test_pareto.py -x -q -k "test_sentinel_rows_excluded"` — 1 passed. Full file: `uv run pytest tests/test_pareto.py -x -q` — 22 passed, 1 skipped.
 
 - [ ] **46.5b** Strengthen `test_default_gate_for_bl42_objective` in `tests/test_optimizer.py:459`:
   - Current test mocks `failed_layer=2`, which gates under both old (`gate_layer=3`) and new (`gate_layer=2` auto-inferred) defaults — vacuous as a regression for plan 45.0b.

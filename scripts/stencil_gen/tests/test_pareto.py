@@ -400,13 +400,22 @@ class TestRunNSGA2:
             seed=4,
             objective=_half_sentinel,
         )
+        # Front must be non-empty — without this, the per-point asserts below
+        # are vacuous when run_nsga2 returns an empty front.
+        assert len(res.front) >= 1, "front must be non-empty for half-sentinel objective"
         for p in res.front:
             assert np.all(np.isfinite(p.objectives))
             assert np.all(p.objectives < _PARETO_SENTINEL)
-        # With ~half the initial population in the infeasible region the
-        # survivors that carry sentinel fitness should be filtered out of the
-        # final front.  Budget is small enough that some sentinel rows survive
-        # the final generation.
+        # With ~half the initial population in the infeasible region, the final
+        # non-dominated front must be a strict subset of the pop_size=20 — a
+        # 20-member final front would indicate no filtering / no selection ran.
+        # Empirically pymoo's NSGA-II crowds out sentinel rows during selection
+        # so n_sentinel_filtered is typically 0 at this budget; the population-
+        # size guard is the meaningful signal that the pipeline did real work.
+        assert len(res.front) < 20, (
+            f"front size {len(res.front)} == pop_size; sentinel filtering / "
+            "selection did not run"
+        )
         assert res.extras["n_sentinel_filtered"] >= 0
 
     def test_ref_point_override(self):
