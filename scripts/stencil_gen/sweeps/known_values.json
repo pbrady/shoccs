@@ -27,10 +27,14 @@
       "gv_error": 2.0537811466317955
     },
     "multiquadric": {
-      "epsilon": 1.0,
+      "epsilon": 2.679738,
       "stable_at": [
-        40
-      ]
+        20,
+        40,
+        80,
+        160
+      ],
+      "gv_error": 2.6235133022220056
     },
     "phs_k2": {
       "stable_at": [
@@ -53,6 +57,16 @@
     "gaussian_gv": {
       "epsilon": 1.941492,
       "gv_error": 1.9010555541664145,
+      "stable_at": [
+        20,
+        40,
+        80,
+        160
+      ]
+    },
+    "multiquadric_gv": {
+      "epsilon": 10.0,
+      "gv_error": 2.1436167116968674,
       "stable_at": [
         20,
         40,
@@ -89,10 +103,14 @@
       "gv_error": 6.181216677920524
     },
     "multiquadric": {
-      "epsilon": 1.0,
+      "epsilon": 1.569657,
       "stable_at": [
-        40
-      ]
+        20,
+        40,
+        80,
+        160
+      ],
+      "gv_error": 6.281680154252788
     },
     "phs_k2": {
       "stable_at": [
@@ -122,6 +140,16 @@
     "gaussian_gv": {
       "epsilon": 1.366448,
       "gv_error": 4.8733775220793385,
+      "stable_at": [
+        20,
+        40,
+        80,
+        160
+      ]
+    },
+    "multiquadric_gv": {
+      "epsilon": 10.0,
+      "gv_error": 4.87217216095809,
       "stable_at": [
         20,
         40,

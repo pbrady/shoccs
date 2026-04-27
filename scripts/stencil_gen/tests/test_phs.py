@@ -1436,6 +1436,25 @@ if _KNOWN is not None:
                 f"entry sits in a degenerate-kernel limit."
             )
 
+        def test_e2_multiquadric_epsilon_strictly_above_floor(self):
+            """E2_1 multiquadric epsilon must be strictly above the CLI default eps_floor.
+
+            Plan 46.3c: the persisted ``E2_1.multiquadric.epsilon`` must be a
+            genuine fine-sweep optimum (~2.68), not the historical hardcoded
+            ``1.0`` (which was below floor=1.5 and never a refined optimum)
+            or a constraint-boundary snap. Asserting strictly above the floor
+            catches a re-collapse if the floor is ever lowered.
+            """
+            from sweeps.epsilon_sweep import CLI_DEFAULT_EPS_FLOOR
+
+            eps = _KNOWN["E2_1"]["multiquadric"]["epsilon"]
+            assert eps > CLI_DEFAULT_EPS_FLOOR + 1e-9, (
+                f"E2_1 multiquadric epsilon={eps} must be strictly greater "
+                f"than the CLI default eps_floor={CLI_DEFAULT_EPS_FLOOR}; "
+                f"floor-snap means the regression entry lies at the "
+                f"constraint boundary, not at a real local minimum."
+            )
+
         def test_e2_stable_at_multiple_grid_sizes(self):
             """E2_1 tension and PHS k=2 are stable at known grid sizes."""
             kv = _KNOWN["E2_1"]
@@ -1515,6 +1534,27 @@ if _KNOWN is not None:
             )
             assert se < STABILITY_TOL, (
                 f"E4_1 multiquadric ε={eps} n=40: expected stable, got {se:.6e}"
+            )
+
+        def test_e4_multiquadric_epsilon_strictly_above_floor(self):
+            """E4_1 multiquadric epsilon must be strictly above the CLI default eps_floor.
+
+            Plan 46.3c: the persisted ``E4_1.multiquadric.epsilon`` must be a
+            genuine fine-sweep optimum from the upper stable basin (~1.57),
+            not the lower basin near eps≈1.13 (silently excluded by the
+            floor) or the historical hardcoded ``1.0``. The narrow margin
+            (~0.07 above floor) is acceptable: the basin curvature is well
+            behaved, and any genuine floor-snap is also caught by the
+            ``snap_tol`` warning emitted from ``fine_sweep``.
+            """
+            from sweeps.epsilon_sweep import CLI_DEFAULT_EPS_FLOOR
+
+            eps = _KNOWN["E4_1"]["multiquadric"]["epsilon"]
+            assert eps > CLI_DEFAULT_EPS_FLOOR + 1e-9, (
+                f"E4_1 multiquadric epsilon={eps} must be strictly greater "
+                f"than the CLI default eps_floor={CLI_DEFAULT_EPS_FLOOR}; "
+                f"floor-snap or basin-collapse means the regression entry "
+                f"lies outside the upper stable basin."
             )
 
         def test_e4_stable_at_multiple_grid_sizes(self):

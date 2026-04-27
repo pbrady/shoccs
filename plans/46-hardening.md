@@ -280,15 +280,13 @@ cd scripts/stencil_gen && uv run python -m sweeps optimize --scheme E4 --kernel 
   - File: `plans/46-hardening.md` (decision recorded; no code changes in this item)
   - Test: none (analysis-only; the strictly-above-floor regression tests are added in 46.3c)
 
-- [ ] **46.3c** Run E2 + E4 multiquadric `--include-gv` sweeps and persist, using the 46.3b.1.3 Option A approach (kernel-agnostic default `--eps-floor=1.5`):
-  - `cd scripts/stencil_gen && SYMPY_CACHE_SIZE=50000 uv run python -m sweeps epsilon --scheme E2 --kernel multiquadric --include-gv --update-known-values`
-  - Same for `--scheme E4`.
-  - Commit the resulting `known_values.json` deltas. Empirically (46.3b.1.3, library `fine_sweep` at floor=1.5): `E2_1.multiquadric.epsilon: 1.0 → ~2.68`, `E4_1.multiquadric.epsilon: 1.0 → ~1.57`. Both are strictly-interior fine-sweep optima of `stab_eig(eps)` (margins 1.18 / 0.07 above floor).
-  - Add `test_e2_multiquadric_epsilon_strictly_above_floor` and `test_e4_multiquadric_epsilon_strictly_above_floor` to `TestRegressionE2Stability` / `TestRegressionE4Stability` in `tests/test_phs.py`, mirroring the gaussian pattern at `test_phs.py:1418` and `:1490`. Each asserts `_KNOWN[scheme]["multiquadric"]["epsilon"] > CLI_DEFAULT_EPS_FLOOR + 1e-9`.
-  - Note the migration consequence in the commit message: `E{2,4}_1.multiquadric.epsilon` moves from a hardcoded historical `1.0` (never a fine-sweep optimum, witness `stable_at=[40]` only) to a true fine-sweep optimum in the upper stable basin. For E4, this excludes the lower basin near `eps≈1.13` (more stable but inaccessible above floor=1.5); same trade-off as the gaussian-E4 migration in 46.3b.1.2.
-  - Verify the broader `TestRegressionGV` block now activates fully (the per-scheme GV entries check exits successfully without skips for any of the three kernels).
+- [x] **46.3c** Run E2 + E4 multiquadric `--include-gv` sweeps and persist, using the 46.3b.1.3 Option A approach (kernel-agnostic default `--eps-floor=1.5`). Done.
+  - **Persisted values:** `E2_1.multiquadric.epsilon` `1.0 → 2.679738` (`gv_error 2.624`, fine-min margin ~1.18 above floor); `E4_1.multiquadric.epsilon` `1.0 → 1.569657` (`gv_error 6.282`, fine-min margin ~0.07 above floor). Both match the 46.3b.1.3 empirical predictions. `multiquadric_gv` entries also added (both schemes: `eps=10.0`, GV-optimum boundary-locked at `--eps-max`; same boundary-locked status as the existing tension_gv entries, out of scope per 46.3a.1).
+  - **Migration consequence:** `E{2,4}_1.multiquadric.epsilon` moves from a hardcoded historical `1.0` (never a fine-sweep optimum, witness `stable_at=[40]` only) to a true fine-sweep optimum in the upper stable basin. For E4 this silently excludes the lower basin near `eps≈1.13` (more stable, `stab_eig=-1.51e-3`, but inaccessible above floor=1.5); same trade-off as the gaussian-E4 migration in 46.3b.1.2. The lower basin remains accessible via `--eps-floor 0.0` for research purposes.
+  - **Tests added:** `test_e2_multiquadric_epsilon_strictly_above_floor` and `test_e4_multiquadric_epsilon_strictly_above_floor` to `TestRegressionE2Stability` / `TestRegressionE4Stability`, mirroring the gaussian pattern. Each asserts `_KNOWN[scheme]["multiquadric"]["epsilon"] > CLI_DEFAULT_EPS_FLOOR + 1e-9`.
+  - **TestRegressionGV per-scheme block activated:** `test_scheme_gv_entries_match_stored_error` and `test_scheme_primary_gv_error_match` now PASS (no skips) for all six scheme×kernel combinations (E2/E4 × {tension, gaussian, multiquadric}). The remaining skips for `test_footprint_*` and `test_tension_penalty_*` are out of scope for 46.3.
   - File: `scripts/stencil_gen/sweeps/known_values.json`, `scripts/stencil_gen/tests/test_phs.py`
-  - Test: `cd scripts/stencil_gen && uv run pytest tests/test_phs.py -x -q -k "TestRegressionGV or TestRegressionE2Stability or TestRegressionE4Stability"`
+  - Test: `cd scripts/stencil_gen && uv run pytest tests/ -x -q` — 859 passed, 138 skipped, 1 xfailed.
 
 ### 46.4 — Activate `TestRegressionBrady2DSweep` (cheap classical seed)
 
