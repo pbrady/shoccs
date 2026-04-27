@@ -930,6 +930,414 @@ def build_acquisition(
     return acquisition, optimize
 
 
+# --- end-to-end BO driver ----------------------------------------------------
+
+
+def _recommend_incumbent(
+    model: MultiTaskGP,
+    bounds: Sequence[tuple[float, float]],
+    target_fidelity_index: int,
+    d: int,
+    seed: int,
+    *,
+    n_grid: int = 1024,
+) -> np.ndarray:
+    """Return ``argmin_x μ_n(x, m=target)`` on a Sobol' grid of *n_grid* points.
+
+    Posterior mean (not best observed) — standard for noisy or multi-fidelity
+    GPs where the cheap-fidelity surrogate may be biased relative to HF.  The
+    Sobol' engine is scrambled with the supplied *seed* so the recommendation
+    is reproducible across runs.
+    """
+    sobol = torch.quasirandom.SobolEngine(d, scramble=True, seed=seed)
+    raw = sobol.draw(n_grid).double()
+    bounds_arr = torch.tensor(
+        [[lo, hi] for lo, hi in bounds], dtype=torch.float64
+    )
+    lo = bounds_arr[:, 0]
+    hi = bounds_arr[:, 1]
+    X = lo + raw * (hi - lo)
+    fid_col = torch.full(
+        (n_grid, 1), float(target_fidelity_index), dtype=torch.float64
+    )
+    X_full = torch.cat([X, fid_col], dim=1)
+    model.eval()
+    with torch.no_grad():
+        mean = model.posterior(X_full).mean.squeeze(-1)
+    idx = int(torch.argmin(mean).item())
+    return X[idx].detach().cpu().numpy()
+
+
+def run_mfbo(
+    scheme: str,
+    kernel: str,
+    report_fields_by_layer: dict[int, str],
+    bounds: Sequence[tuple[float, float]],
+    *,
+    budget_evals: int | None = None,
+    budget_seconds: float | None = None,
+    cost_table: dict[int, float] | None = None,
+    seed: int = 0,
+    n_init: int | None = None,
+    num_fantasies: int = 64,
+    verbose: bool = False,
+    objective: Callable[[np.ndarray, int], tuple[float, float, dict]] | None = None,
+) -> BOResult:
+    """Drive a multi-fidelity Bayesian optimisation loop end-to-end.
+
+    Wires the dataclasses (47.1a), objective factory (47.1b), GP surrogate
+    (47.2a), cost model (47.2b), DOE (47.2c), and acquisition (47.3a) into a
+    single driver:
+
+    1. Seed RNGs (``torch``, ``numpy``, Sobol' engines) for reproducibility.
+    2. Resolve the per-fidelity cost table (default: filtered slice of
+       :data:`DEFAULT_COST_TABLE`).
+    3. Build the multi-fidelity objective via
+       :func:`make_multi_fidelity_objective` (or use an injected *objective*
+       hook for tests).
+    4. Generate the stratified initial design via :func:`build_initial_design`
+       and evaluate every ``(x_i, m_i)`` pair.
+    5. While budget allows: refit the GP on finite (non-sentinel) rows, check
+       variance / stagnation guards, build cost-aware qMFKG via
+       :func:`build_acquisition`, optimise the acquisition with
+       :func:`optimize_acqf_mixed` (mixed continuous/discrete), evaluate at
+       the chosen ``(x, m)``.
+    6. Recommend the incumbent ``x_inc = argmin μ_n(x, m=hf)`` on a 1024-point
+       Sobol' grid (posterior mean, not best observed).
+    7. Re-evaluate the cascade at ``x_inc`` at HF to populate the returned
+       ``best_objective`` and ``best_report`` from real data, not the GP
+       posterior.
+
+    Parameters
+    ----------
+    scheme, kernel
+        Forwarded to :func:`brady2d_stability_score` (and to
+        :func:`params_from_vector` for the per-eval ``params`` payload).
+    report_fields_by_layer
+        Mapping ``layer index → dotted field path``.  ``max(...)`` is the HF
+        target; the corresponding field is the optimisation objective.
+    bounds
+        Per-dimension ``(lo, hi)`` design-space bounds.  Length is the design
+        dimension ``d``; the GP appends one fidelity column for a total of
+        ``d + 1`` inputs.
+    budget_evals
+        Total number of cascade evaluations (initial design + acquisition
+        steps + final HF re-evaluation at the incumbent).  Mutually exclusive
+        with *budget_seconds*; exactly one must be set.  ``sum(n_evals_per_
+        fidelity.values()) == budget_evals`` after the run.  Must be ``>= 2``
+        to leave room for at least one initial design point and the final
+        HF re-evaluation.
+    budget_seconds
+        Wall-time budget in seconds.  Mutually exclusive with *budget_evals*.
+    cost_table
+        Per-layer cost dict ``{external layer index: seconds}``.  Defaults to
+        :data:`DEFAULT_COST_TABLE` filtered to ``report_fields_by_layer``.
+        Floored via :func:`apply_cost_floor` before construction of the
+        cost-aware utility.
+    seed
+        Master RNG seed.  Setting the same seed across two runs produces the
+        same :attr:`BOResult.best_x` to within ``1e-6``.
+    n_init
+        Initial design size; defaults to ``5*d + 3`` (Loeppky et al. 2009).
+    num_fantasies
+        Forwarded to :func:`build_acquisition`.  Default 64.
+    verbose
+        If ``True``, print one line per evaluation.
+    objective
+        Override hook for tests: a callable
+        ``(x: np.ndarray, m_external: int) -> (value, wall_time, report)``
+        that bypasses :func:`make_multi_fidelity_objective`.  When supplied,
+        *scheme*/*kernel*/*report_fields_by_layer* are still recorded in the
+        returned :class:`BOResult` but the cascade is not invoked.
+
+    Returns
+    -------
+    BOResult
+        Frozen record with the full eval history, per-fidelity counts and
+        wall times, final GP hyperparameters, and the recommended incumbent.
+
+    Raises
+    ------
+    ValueError
+        If neither or both of *budget_evals* and *budget_seconds* are set; if
+        *report_fields_by_layer* is empty; if *cost_table* is missing entries
+        for layers in *report_fields_by_layer*; if *bounds* is empty; if
+        *budget_evals* is below 2.
+    """
+    if (budget_evals is None) == (budget_seconds is None):
+        raise ValueError(
+            "exactly one of budget_evals or budget_seconds must be set"
+        )
+    if budget_evals is not None and budget_evals < 2:
+        raise ValueError(
+            f"budget_evals must be >= 2 (>=1 for init + 1 final HF re-eval), "
+            f"got {budget_evals}"
+        )
+    if not report_fields_by_layer:
+        raise ValueError("report_fields_by_layer must not be empty")
+    if not bounds:
+        raise ValueError("bounds must be non-empty")
+
+    torch.manual_seed(seed)
+    np.random.seed(seed)
+
+    fidelity_levels = tuple(sorted(report_fields_by_layer))
+    K = len(fidelity_levels)
+    hf_level = fidelity_levels[-1]
+    target_fid_idx = K - 1
+    int_to_ext = dict(enumerate(fidelity_levels))
+    ext_to_int = {f: i for i, f in int_to_ext.items()}
+
+    if cost_table is None:
+        missing = [f for f in fidelity_levels if f not in DEFAULT_COST_TABLE]
+        if missing:
+            raise ValueError(
+                f"DEFAULT_COST_TABLE has no entries for layers {missing}; "
+                "pass an explicit cost_table"
+            )
+        cost_table_resolved = {f: DEFAULT_COST_TABLE[f] for f in fidelity_levels}
+    else:
+        missing = [f for f in fidelity_levels if f not in cost_table]
+        if missing:
+            raise ValueError(
+                f"cost_table missing entries for layers {missing}"
+            )
+        cost_table_resolved = {f: cost_table[f] for f in fidelity_levels}
+    floored_costs = apply_cost_floor(cost_table_resolved)
+
+    if objective is None:
+        objective = make_multi_fidelity_objective(
+            scheme, kernel, report_fields_by_layer
+        )
+
+    bounds_t = tuple((float(lo), float(hi)) for lo, hi in bounds)
+    d = len(bounds_t)
+
+    X_init, fid_init = build_initial_design(
+        bounds_t, fidelity_levels, n_init=n_init, seed=seed
+    )
+
+    eval_history: list[BOEval] = []
+    n_evals_per_fid: dict[int, int] = {f: 0 for f in fidelity_levels}
+    wall_time_per_fid: dict[int, float] = {f: 0.0 for f in fidelity_levels}
+
+    t_start = time.perf_counter()
+
+    def evaluate(x: np.ndarray, fid_internal: int) -> BOEval:
+        ext_layer = int_to_ext[int(fid_internal)]
+        x_arr = np.asarray(x, dtype=float)
+        value, wt, rep = objective(x_arr, ext_layer)
+        try:
+            params = params_from_vector(kernel, x_arr)
+        except Exception:
+            params = {}
+        ev = BOEval(
+            x=x_arr.copy(),
+            params=params,
+            fidelity=ext_layer,
+            value=float(value),
+            wall_time=float(wt),
+            report=rep,
+        )
+        eval_history.append(ev)
+        n_evals_per_fid[ext_layer] += 1
+        wall_time_per_fid[ext_layer] += float(wt)
+        if verbose:
+            print(
+                f"[run_mfbo] eval #{len(eval_history)} layer={ext_layer} "
+                f"value={value:.6g} wt={wt:.3f}s"
+            )
+        return ev
+
+    def acq_budget_exhausted() -> bool:
+        # Reserve one slot for the final HF re-evaluation at the incumbent.
+        if budget_evals is not None and len(eval_history) >= budget_evals - 1:
+            return True
+        if (
+            budget_seconds is not None
+            and (time.perf_counter() - t_start) >= budget_seconds
+        ):
+            return True
+        return False
+
+    # Initial design (truncated when the budget has no room for it).
+    for x_i, m_i in zip(X_init, fid_init):
+        if acq_budget_exhausted():
+            break
+        evaluate(x_i, int(m_i))
+
+    stop_reason = "budget"
+    converged = False
+    final_model: MultiTaskGP | None = None
+
+    while not acq_budget_exhausted():
+        finite_mask = np.array(
+            [
+                np.isfinite(e.value) and e.value < _BO_SENTINEL / 2
+                for e in eval_history
+            ]
+        )
+        n_finite = int(finite_mask.sum())
+        # Need at least K finite rows to identify the per-task hyperparameters,
+        # and at least 2 to fit the marginal likelihood at all.
+        if n_finite < max(2, K):
+            stop_reason = "error"
+            break
+
+        finite_evals = [e for e, m in zip(eval_history, finite_mask) if m]
+        X_train = np.array(
+            [
+                np.concatenate([e.x, [float(ext_to_int[e.fidelity])]])
+                for e in finite_evals
+            ]
+        )
+        Y_train = np.array([e.value for e in finite_evals])
+
+        try:
+            model = build_mf_gp(
+                X_train, Y_train, fidelity_dim=d, num_fidelities=K
+            )
+        except Exception:
+            stop_reason = "error"
+            break
+        final_model = model
+
+        # Incumbent + variance guard.  The variance check is best-effort: a
+        # numerical hiccup in posterior() should not abort the run.
+        try:
+            x_inc_loop = _recommend_incumbent(
+                model, bounds_t, target_fid_idx, d, seed
+            )
+            X_inc_full = torch.cat(
+                [
+                    torch.as_tensor(x_inc_loop, dtype=torch.float64),
+                    torch.tensor([float(target_fid_idx)], dtype=torch.float64),
+                ]
+            ).unsqueeze(0)
+            with torch.no_grad():
+                var_inc = float(model.posterior(X_inc_full).variance.item())
+            spread = max(
+                float(np.max(Y_train)) - float(np.min(Y_train)), 1e-12
+            )
+            if var_inc < 1e-6 * spread ** 2:
+                stop_reason = "variance"
+                converged = True
+                break
+        except Exception:
+            pass
+
+        # Stagnation guard: at least 10 finite HF evals + the running best is
+        # older than the last 10.
+        hf_finite = [
+            e
+            for e in eval_history
+            if e.fidelity == hf_level
+            and np.isfinite(e.value)
+            and e.value < _BO_SENTINEL / 2
+        ]
+        if len(hf_finite) >= 10:
+            best_idx = min(
+                range(len(hf_finite)), key=lambda i: hf_finite[i].value
+            )
+            if best_idx <= len(hf_finite) - 11:
+                stop_reason = "stagnation"
+                converged = True
+                break
+
+        # Cost-aware acquisition + mixed continuous/discrete optimiser.
+        try:
+            cost_util = build_cost_model(cost_table_resolved, fidelity_dim=d)
+            _, optimize = build_acquisition(
+                model,
+                cost_util,
+                target_fid_idx,
+                num_fantasies=num_fantasies,
+            )
+            x_next, fid_next, _ = optimize(bounds_t, list(range(K)))
+        except Exception:
+            stop_reason = "error"
+            break
+
+        evaluate(x_next, fid_next)
+
+    # Final recommendation: posterior mean over a 1024-pt Sobol' grid at HF.
+    if final_model is not None:
+        try:
+            x_inc = _recommend_incumbent(
+                final_model, bounds_t, target_fid_idx, d, seed
+            )
+        except Exception:
+            x_inc = X_init[0].copy() if len(X_init) else np.zeros(d)
+    else:
+        # GP never fit (initial design entirely infeasible, or budget exhausted
+        # before any iteration).  Fall back to best observed HF, else first
+        # design point.
+        hf_obs = [
+            e
+            for e in eval_history
+            if e.fidelity == hf_level
+            and np.isfinite(e.value)
+            and e.value < _BO_SENTINEL / 2
+        ]
+        if hf_obs:
+            x_inc = min(hf_obs, key=lambda e: e.value).x.copy()
+        elif len(X_init):
+            x_inc = X_init[0].copy()
+        else:
+            x_inc = np.zeros(d)
+
+    final_eval = evaluate(x_inc, target_fid_idx)
+    total_time = time.perf_counter() - t_start
+
+    hf_eval_history = tuple(e for e in eval_history if e.fidelity == hf_level)
+
+    if final_model is not None:
+        with torch.no_grad():
+            ls = final_model.covar_module.kernels[0].lengthscale.detach().cpu().numpy()
+            W = final_model.covar_module.kernels[1].covar_factor.detach().cpu().numpy()
+            v = final_model.covar_module.kernels[1].var.detach().cpu().numpy()
+            noise_arr = final_model.likelihood.noise.detach().cpu().numpy()
+        gp_hyp = {
+            "lengthscale": np.atleast_1d(ls.squeeze()).tolist(),
+            "icm_W": W.tolist(),
+            "icm_var": np.atleast_1d(v.squeeze()).tolist(),
+            "noise": float(np.atleast_1d(noise_arr.squeeze())[0]),
+        }
+    else:
+        gp_hyp = {}
+
+    n_sentinel_filtered = sum(
+        1
+        for e in eval_history
+        if not (np.isfinite(e.value) and e.value < _BO_SENTINEL / 2)
+    )
+
+    return BOResult(
+        best_x=np.asarray(x_inc, dtype=float).copy(),
+        best_params=final_eval.params,
+        best_objective=final_eval.value,
+        best_report=final_eval.report,
+        method="BoTorch-qMFKG",
+        scheme=scheme,
+        kernel=kernel,
+        bounds=bounds_t,
+        fidelity_levels=fidelity_levels,
+        hf_level=hf_level,
+        report_fields_by_layer=dict(report_fields_by_layer),
+        cost_model=floored_costs,
+        n_evals_per_fidelity=dict(n_evals_per_fid),
+        wall_time_per_fidelity=dict(wall_time_per_fid),
+        total_compute_time=total_time,
+        eval_history=tuple(eval_history),
+        hf_eval_history=hf_eval_history,
+        gp_hyperparameters=gp_hyp,
+        seed=seed,
+        converged=converged,
+        stop_reason=stop_reason,
+        extras={"n_sentinel_filtered": n_sentinel_filtered},
+    )
+
+
 __all__: list[str] = [
     "_BO_SENTINEL",
     "BOEval",
@@ -941,4 +1349,5 @@ __all__: list[str] = [
     "build_initial_design",
     "build_mf_gp",
     "make_multi_fidelity_objective",
+    "run_mfbo",
 ]
