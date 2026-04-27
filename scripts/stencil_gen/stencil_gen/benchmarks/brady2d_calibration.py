@@ -110,6 +110,13 @@ def _report_to_dict(report) -> dict[str, Any]:
             "max_spectral_abscissa": report.layer7.get("max_spectral_abscissa"),
         }
 
+    if report.layer8 is not None:
+        d["layer8"] = {
+            "final_linf": float(report.layer8["final_linf"]),
+            "stable": bool(report.layer8["stable"]),
+            "wall_time_s": float(report.layer8.get("wall_time_s", float("nan"))),
+        }
+
     if report.layer_bl42 is not None:
         d["layer_bl42"] = {
             "max_spectral_abscissa": report.layer_bl42.get("max_spectral_abscissa"),

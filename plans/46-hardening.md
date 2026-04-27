@@ -138,7 +138,7 @@ cd scripts/stencil_gen && uv run python -m sweeps optimize --scheme E4 --kernel 
   - File: `plans/46-hardening.md`
   - Test: `grep -c 'currently latent' plans/46-hardening.md` (expect 0)
 
-- [ ] **46.2c** Add `layer8` serialization to `brady2d_calibration._report_to_dict`:
+- [x] **46.2c** Add `layer8` serialization to `brady2d_calibration._report_to_dict`:
   - File: `scripts/stencil_gen/stencil_gen/benchmarks/brady2d_calibration.py:66`. The other two copies already handle `layer8`; this one diverges. Calibration is currently always `max_layer ≤ 7`, so the gap is benign — but plan 47 (Multi-Fidelity BO) might want to calibrate at L8, and a silent drop would be a debugging nightmare.
   - File: `scripts/stencil_gen/stencil_gen/benchmarks/brady2d_calibration.py`
   - Test: `cd scripts/stencil_gen && uv run pytest tests/test_benchmarks.py -x -q -k "calibration and layer8"` (test added in 46.2d)
