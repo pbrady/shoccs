@@ -42,10 +42,13 @@ import numpy as np
 import torch
 import botorch  # noqa: F401  # used in subsequent items
 from botorch.acquisition.cost_aware import InverseCostWeightedUtility
+from botorch.acquisition.knowledge_gradient import qMultiFidelityKnowledgeGradient
+from botorch.acquisition.utils import project_to_target_fidelity
 from botorch.fit import fit_gpytorch_mll
 from botorch.models import MultiTaskGP
 from botorch.models.deterministic import GenericDeterministicModel
 from botorch.models.transforms import Standardize
+from botorch.optim.optimize import optimize_acqf_mixed
 from gpytorch.constraints import GreaterThan
 from gpytorch.kernels import MaternKernel
 from gpytorch.likelihoods import GaussianLikelihood
@@ -737,12 +740,203 @@ def build_initial_design(
     return X_init, fid_indices
 
 
+# --- acquisition + mixed optimiser -------------------------------------------
+
+
+def build_acquisition(
+    model: MultiTaskGP,
+    cost_utility: InverseCostWeightedUtility,
+    target_fidelity_index: int,
+    *,
+    num_fantasies: int = 64,
+    candidate_set_size: int = 512,
+) -> tuple[qMultiFidelityKnowledgeGradient, Callable[..., tuple[np.ndarray, int, float]]]:
+    """Build a cost-aware multi-fidelity KG acquisition + mixed optimiser.
+
+    Wraps :class:`qMultiFidelityKnowledgeGradient` (BoTorch 0.17.x;
+    ``botorch.acquisition.knowledge_gradient`` — *not* the
+    ``multi_fidelity`` submodule cited in some BoTorch docs) with a target-
+    fidelity projection and an inverse-cost utility, then returns both the
+    raw acquisition object and a closure that runs
+    :func:`botorch.optim.optimize.optimize_acqf_mixed` over the design space
+    (continuous in ``x``) and the discrete set of candidate fidelities (a
+    sequence of internal contiguous indices ``0..K-1``).  ``q=1`` because our
+    HF cost is too high to amortise batched candidate generation.
+
+    Parameters
+    ----------
+    model
+        Fitted :class:`MultiTaskGP` (built by :func:`build_mf_gp`).  The GP's
+        ``_task_feature`` attribute identifies the fidelity column.
+    cost_utility
+        :class:`InverseCostWeightedUtility` (from :func:`build_cost_model`).
+        Weights expected information gain by ``1 / cost(m)``.
+    target_fidelity_index
+        Internal contiguous fidelity index of the HF target (``K - 1`` for
+        ``sorted(fidelity_levels)``).  KG's inner argmax is over the
+        posterior mean projected to this fidelity.
+    num_fantasies
+        Number of fantasy samples for the KG inner optimisation.  Default 64
+        per the BoTorch discrete-MF tutorial; trade-off is acquisition cost
+        vs. KG variance.
+    candidate_set_size
+        Default ``raw_samples`` for :func:`optimize_acqf_mixed` (passable per-
+        call via the returned closure's ``raw_samples`` kwarg).
+
+    Returns
+    -------
+    acquisition : qMultiFidelityKnowledgeGradient
+        The raw acquisition object.  Callers can inspect ``num_fantasies``,
+        ``current_value``, etc. for diagnostics.
+    optimize : callable
+        ``optimize(bounds, fidelity_choices, *, num_restarts=5,
+        raw_samples=None, options=None) -> (x_next, fidelity_next,
+        acq_value)``.  ``bounds`` is a length-``d`` sequence of ``(lo, hi)``
+        pairs covering only the design dimensions (the fidelity column is
+        bounded internally to ``[min, max]`` of ``fidelity_choices``).
+        ``fidelity_choices`` is a sequence of internal fidelity indices to
+        consider as candidates.  Returns ``x_next`` (numpy array, shape
+        ``(d,)``), ``fidelity_next`` (internal index, int), and the
+        acquisition value at the optimum (float).
+
+    Notes
+    -----
+    Side effect on *model*: this function mutates ``model._output_tasks`` and
+    ``model._num_outputs`` so the GP appears single-output (the target task)
+    to qMFKG's ``num_outputs > 1`` check at construction time.  MultiTaskGP's
+    posterior already returns just the target task's posterior when ``X``'s
+    task column equals ``target_fidelity_index`` (via the ``project``
+    closure), so the multi-output check is a false positive — but qMFKG
+    raises :class:`UnsupportedError` regardless unless we silence it.  The
+    BO loop builds a fresh GP per iteration so this side effect is
+    well-contained; callers who reuse the GP for non-acquisition purposes
+    after this function should restore the attributes themselves.
+
+    Fallback to MES: if KG diagnostics show degeneracy (Gumbel-sampling
+    collapse, all fantasies within ``1e-6``, multi-modal posterior trapping),
+    swap to ``qMultiFidelityMaxValueEntropy`` — the import path is
+    ``from botorch.acquisition.max_value_entropy_search import
+    qMultiFidelityMaxValueEntropy`` (also *not* under the
+    ``multi_fidelity`` submodule).  The constructor signature differs (MES
+    needs a ``candidate_set`` of points, not ``current_value``) but the
+    surrounding ``project`` / ``cost_aware_utility`` plumbing is identical.
+    """
+    if num_fantasies < 1:
+        raise ValueError(f"num_fantasies must be ≥ 1, got {num_fantasies}")
+    if candidate_set_size < 1:
+        raise ValueError(
+            f"candidate_set_size must be ≥ 1, got {candidate_set_size}"
+        )
+
+    fidelity_dim = int(model._task_feature)
+    d_total = int(model.train_inputs[0].shape[-1])  # design dims + 1 task col
+    n_tasks = int(model.num_tasks)
+    if not (0 <= target_fidelity_index < n_tasks):
+        raise ValueError(
+            f"target_fidelity_index={target_fidelity_index} out of range "
+            f"for GP with num_tasks={n_tasks}"
+        )
+
+    # Specialise the GP to the target task so it appears single-output to
+    # qMFKG's ``num_outputs > 1`` check.  See "Notes" above.
+    model._output_tasks = [target_fidelity_index]
+    model._num_outputs = 1
+
+    def project(X: torch.Tensor) -> torch.Tensor:
+        return project_to_target_fidelity(
+            X=X,
+            target_fidelities={fidelity_dim: float(target_fidelity_index)},
+            d=X.shape[-1],
+        )
+
+    # KG's ``current_value`` is the best posterior mean at the target
+    # fidelity over training inputs — standard for noisy / multi-fidelity
+    # GPs (the best *observed* point can be unreliable when the cheap-
+    # fidelity surrogate is biased relative to HF).
+    model.eval()
+    with torch.no_grad():
+        current_value = model.posterior(project(model.train_inputs[0])).mean.max()
+
+    acquisition = qMultiFidelityKnowledgeGradient(
+        model=model,
+        num_fantasies=num_fantasies,
+        current_value=current_value,
+        cost_aware_utility=cost_utility,
+        project=project,
+    )
+
+    def optimize(
+        bounds: Sequence[tuple[float, float]],
+        fidelity_choices: Sequence[int],
+        *,
+        num_restarts: int = 5,
+        raw_samples: int | None = None,
+        options: dict | None = None,
+    ) -> tuple[np.ndarray, int, float]:
+        if not bounds:
+            raise ValueError("bounds must be non-empty")
+        if not fidelity_choices:
+            raise ValueError("fidelity_choices must be non-empty")
+        if len(bounds) != d_total - 1:
+            raise ValueError(
+                f"bounds has {len(bounds)} dims but the GP expects "
+                f"{d_total - 1} design dims (excluding the fidelity column "
+                f"at index {fidelity_dim})"
+            )
+        for f in fidelity_choices:
+            if not (0 <= int(f) < n_tasks):
+                raise ValueError(
+                    f"fidelity_choices contains {f}, out of range "
+                    f"[0, {n_tasks})"
+                )
+
+        # Assemble the (2, d_total) bounds tensor.  Walk the d_total columns;
+        # the fidelity column gets [min, max] over fidelity_choices and the
+        # design columns consume from `bounds` in order.  Robust to any
+        # task_feature index, not just the last column.
+        lo = torch.zeros(d_total, dtype=torch.float64)
+        hi = torch.zeros(d_total, dtype=torch.float64)
+        design_iter = iter(bounds)
+        f_min = float(min(fidelity_choices))
+        f_max = float(max(fidelity_choices))
+        for i in range(d_total):
+            if i == fidelity_dim:
+                lo[i] = f_min
+                hi[i] = f_max
+            else:
+                lo_b, hi_b = next(design_iter)
+                lo[i] = float(lo_b)
+                hi[i] = float(hi_b)
+        bnds_tensor = torch.stack([lo, hi])
+
+        fixed_features_list = [
+            {fidelity_dim: float(f)} for f in fidelity_choices
+        ]
+
+        candidate, acq_value = optimize_acqf_mixed(
+            acq_function=acquisition,
+            bounds=bnds_tensor,
+            q=1,
+            num_restarts=num_restarts,
+            raw_samples=raw_samples if raw_samples is not None else candidate_set_size,
+            fixed_features_list=fixed_features_list,
+            options=options or {},
+        )
+        cand = candidate.detach().cpu().numpy().reshape(d_total)
+        fidelity_next = int(round(float(cand[fidelity_dim])))
+        x_next = np.delete(cand, fidelity_dim)
+        return x_next, fidelity_next, float(acq_value.item())
+
+    return acquisition, optimize
+
+
 __all__: list[str] = [
     "_BO_SENTINEL",
     "BOEval",
     "BOResult",
     "DEFAULT_COST_TABLE",
     "apply_cost_floor",
+    "build_acquisition",
     "build_cost_model",
     "build_initial_design",
     "build_mf_gp",
