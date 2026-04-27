@@ -232,10 +232,16 @@ cd scripts/stencil_gen && SYMPY_CACHE_SIZE=50000 uv run python -m sweeps bo \
   - `test_cost_floor_applied` — set `c(L1) = 0.001` and `c(L7) = 1.0`; assert effective cost(L1) ≥ 0.05 (floor active).
   - `test_cost_table_persisted_in_BOResult` — `BOResult.cost_model` reflects the actual table used (not `None`).
   - `TestDOE::test_n_init_default` — for `d=2` returns 13 points.
-  - `test_fidelity_stratification` — 70/20/10 allocation matches.
+  - `test_fidelity_stratification_default_split` — with `n_init=13, hf_anchors=3, mid_anchors=2, K=5`, assert exact counts `n_cheap=8, n_mid=2, n_hf=3` per the kwarg-derived split (NOT literal 70/20/10 — the 47.2c "Done" note documents that `hf_anchors`/`mid_anchors` are literal counts, not ratio targets, so the plan-body example "9 × cheap, 3 × mid, 2 × HF" is wrong arithmetic; implementation is authoritative).
+  - `test_fidelity_stratification_clean_ratio` — with explicit `n_init=10, hf_anchors=1, mid_anchors=2, K=5`, assert `n_cheap=7, n_mid=2, n_hf=1` (a clean 70/20/10 ratio reachable with these kwargs).
   - `test_hf_anchor_paired_with_cheap` — at least 3 (x, fid=hf) points share x with (x, fid=cheap) points.
+  - `test_hf_replicas_are_independent_copies` — mutate `X_init` rows at HF indices; assert cheap-fidelity rows remain unchanged (defends against the `.copy()` regressing to a view).
   - `test_seed_determinism` — same seed, same `(X, fid)`.
   - `test_bounds_respected` — every point in `X_init` is within `bounds`.
+  - `test_K1_single_fidelity_all_cheap` — `fidelity_levels=(7,)` with default kwargs returns `n_init` rows all at internal index 0; `hf_anchors`/`mid_anchors` silently ignored (graceful degradation per the 47.2c docstring).
+  - `test_K2_mid_anchors_silently_zeroed` — `fidelity_levels=(1, 7)`, `mid_anchors=2` requested but result has zero mid-fidelity rows; only cheap + HF appear in `fid_indices`.
+  - `test_validation_errors` — parametrized over: `bounds=()` raises; `fidelity_levels=()` raises; `bounds=[(1.0, 0.0)]` (lo ≥ hi) raises; `n_init=0` raises; `n_init=-1` raises; `hf_anchors=-1` raises; `mid_anchors=-1` raises; `n_init=2, hf_anchors=3, mid_anchors=0` (insufficient cheap to pair with HF) raises. All raise `ValueError`.
+  - `test_fid_indices_dtype_is_int64` — `fid_indices.dtype == np.int64` (downstream tensor coercion in 47.3a/b assumes this).
   - File: `scripts/stencil_gen/tests/test_bo.py`
   - Test: `cd scripts/stencil_gen && uv run pytest tests/test_bo.py -x -q -k "TestMFGP or TestCostModel or TestDOE"`
 
