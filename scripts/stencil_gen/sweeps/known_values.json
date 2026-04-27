@@ -7,14 +7,14 @@
       "nu": 1
     },
     "tension": {
-      "sigma": 3.462842,
+      "sigma": 3.488263,
       "stable_at": [
         20,
         40,
         80,
         160
       ],
-      "gv_error": 2.6518008702270195
+      "gv_error": 2.6465125577553485
     },
     "gaussian": {
       "epsilon": 2.0,
@@ -55,14 +55,14 @@
       "nu": 1
     },
     "tension": {
-      "sigma": 0.1,
+      "sigma": 1.488031,
       "stable_at": [
         20,
         40,
         80,
         160
       ],
-      "gv_error": 7.2349823022958315
+      "gv_error": 6.503000296681518
     },
     "gaussian": {
       "epsilon": 0.9,

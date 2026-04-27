@@ -1506,6 +1506,27 @@ if _KNOWN is not None:
                     f"expected unstable, got {se:.6e}"
                 )
 
+        def test_e4_tension_sigma_strictly_above_floor(self):
+            """E4_1 tension sigma must be strictly above the CLI default sigma_floor.
+
+            Plan 46.3a.2: the persisted ``E4_1.tension.sigma`` must be a
+            genuine fine-sweep optimum, not the value at the constraint
+            boundary. At floors below 1.0 the constrained E4 optimum
+            snaps exactly to the floor, making the tension regression
+            entry numerically indistinguishable from the PHS k=2 limit.
+            Asserting strictly above the floor catches a re-collapse if
+            the floor is ever lowered.
+            """
+            from sweeps.tension_sweep import CLI_DEFAULT_SIGMA_FLOOR
+
+            sigma = _KNOWN["E4_1"]["tension"]["sigma"]
+            assert sigma > CLI_DEFAULT_SIGMA_FLOOR + 1e-9, (
+                f"E4_1 tension sigma={sigma} must be strictly greater than "
+                f"the CLI default sigma_floor={CLI_DEFAULT_SIGMA_FLOOR}; "
+                f"floor-snap means the regression entry is structurally "
+                f"identical to phs_k2."
+            )
+
     class TestRegressionFootprint:
         """Fast regression spot-checks for E4 nextra stability.
 

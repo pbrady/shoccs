@@ -6,8 +6,12 @@ TestTensionSweepE2, TestTensionSweepE4 in test_phs.py.
 Sweeps the tension parameter sigma over a range including sigma=0
 (PHS k=2 limit) and reports stability of the resulting differentiation
 matrix at each grid size. The persisted ``tension`` regression entry is
-restricted to ``sigma >= --sigma-floor`` (default 0.1) so it stays
-distinct from the ``phs_k2`` entry; pass ``--sigma-floor 0.0`` to
+restricted to ``sigma >= --sigma-floor`` (default 1.0) so it stays
+strictly above the PHS k=2 limit at ``sigma=0`` — at floors below 1.0
+the constrained E4 fine-sweep optimum lands exactly on the floor
+(``sigma_floor=0.1`` and ``0.5`` both produce floor-snap), which
+collapses the ``E4_1.tension`` regression entry into a near-duplicate
+of ``E4_1.phs_k2`` (see plan 46.3a.2). Pass ``--sigma-floor 0.0`` to
 permit the PHS k=2 limit as the optimum.
 
 Usage:
@@ -38,6 +42,13 @@ from .gv_objectives import boundary_gv_error_max, print_gks_advisory
 # Floating-point eigenvalue solvers return tiny positive real parts (~1e-14)
 # for genuinely stable operators.  Use this threshold to distinguish true
 # instability from numerical noise.
+
+# CLI default for --sigma-floor. Exposed as a module-level constant so the
+# regression test ``test_e4_tension_sigma_strictly_above_floor`` can assert
+# that the persisted tension entry stays strictly above the floor (plan
+# 46.3a.2). Empirically the E4 constrained fine-sweep optimum snaps to the
+# floor for floors below 1.0; only at floor=1.0 does it land strictly above.
+CLI_DEFAULT_SIGMA_FLOOR = 1.0
 
 def sweep_stability(
     n_values: list[int],
@@ -99,6 +110,15 @@ def fine_sweep(
     identical to ``phs_k2`` (see plan 46.3a.1). Default 0.0 preserves
     the historical library behavior; the CLI sets a non-zero default.
 
+    When ``sigma_floor > 0`` and the constrained fine-sweep optimum
+    lands *exactly* on the floor (within a few × ``np.spacing(sigma_floor)``),
+    the function emits a ``UserWarning``: this signals that the persisted
+    optimum is determined by the floor rather than by the underlying
+    objective and the test/regression entry is structurally similar to
+    the PHS k=2 limit (see plan 46.3a.2). Callers passing
+    ``sigma_floor=0.0`` deliberately permit ``sigma=0`` and do not get
+    the warning.
+
     Returns (best_coarse_sigma, best_coarse_se, best_fine_sigma, best_fine_se).
     """
     coarse = []
@@ -130,6 +150,20 @@ def fine_sweep(
 
     fine_search = [r for r in fine if r[0] >= sigma_floor] or fine
     best_fine = min(fine_search, key=lambda r: r[1])
+
+    if sigma_floor > 0.0:
+        snap_tol = max(4 * np.spacing(sigma_floor), 1e-12)
+        if abs(best_fine[0] - sigma_floor) <= snap_tol:
+            import warnings
+            warnings.warn(
+                f"fine_sweep: constrained optimum sigma={best_fine[0]:.6g} "
+                f"snapped to sigma_floor={sigma_floor:.6g}; the persisted "
+                f"tension.sigma is determined by the floor rather than the "
+                f"objective. Consider raising --sigma-floor (plan 46.3a.2).",
+                UserWarning,
+                stacklevel=2,
+            )
+
     return best_coarse[0], best_coarse[1], best_fine[0], best_fine[1]
 
 
@@ -316,10 +350,13 @@ def main(argv: list[str] | None = None) -> int:
              "(advisory only; necessary-not-sufficient for instability)",
     )
     parser.add_argument(
-        "--sigma-floor", type=float, default=0.1,
-        help="Restrict the fine-sweep search to sigma >= sigma_floor "
-             "(default 0.1) so the persisted tension entry stays distinct "
-             "from the PHS k=2 limit (sigma=0). Pass 0.0 to allow sigma=0.",
+        "--sigma-floor", type=float, default=CLI_DEFAULT_SIGMA_FLOOR,
+        help=f"Restrict the fine-sweep search to sigma >= sigma_floor "
+             f"(default {CLI_DEFAULT_SIGMA_FLOOR}) so the persisted tension "
+             f"entry stays strictly above the PHS k=2 limit (sigma=0). "
+             f"Empirically the E4 constrained optimum lands exactly on the "
+             f"floor for floors below 1.0; only at floor=1.0 does it land "
+             f"strictly above (see plan 46.3a.2). Pass 0.0 to allow sigma=0.",
     )
 
     args = parser.parse_args(argv)
