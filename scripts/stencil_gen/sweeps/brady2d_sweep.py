@@ -235,7 +235,10 @@ def _report_to_dict(report: StabilityReport) -> dict[str, Any]:
     if report.non_normality is not None:
         out["non_normality"] = dataclasses.asdict(report.non_normality)
     if report.kreiss is not None:
-        out["kreiss"] = dataclasses.asdict(report.kreiss)
+        kr_dict = dataclasses.asdict(report.kreiss)
+        kr_dict.pop("sigma_min_field", None)
+        kr_dict.pop("s_grid", None)
+        out["kreiss"] = kr_dict
     return out
 
 
