@@ -2366,3 +2366,84 @@ class TestOptimizerBL42:
         )
         assert "best_objective" in proc.stdout
         assert "inf" not in proc.stdout, "all evaluations returned +inf (vacuous run)"
+
+
+class TestSweepsMainDispatchGateLayerInfer:
+    """Plan 46.0b: assert ``python -m sweeps optimize`` (umbrella dispatch)
+    forwards ``--gate-layer`` only when the user passes it explicitly.
+
+    The bug fixed in 46.0a is that ``sweeps/__main__.py`` registered
+    ``--gate-layer`` with ``default=3`` and forwarded it unconditionally,
+    nullifying the standalone-CLI auto-infer added in 45.0d for users hitting
+    the documented entry point. These tests pin the dispatch-level contract:
+    omitting ``--gate-layer`` must result in the standalone CLI receiving no
+    ``--gate-layer`` flag at all (so its own ``default=None`` and auto-infer
+    kick in); passing it explicitly must round-trip the value untouched.
+    """
+
+    def _capture_forwarded(self, monkeypatch, argv: list[str]) -> list[str]:
+        """Run ``sweeps.__main__.main()`` with ``argv`` and return the args
+        the dispatcher forwarded into ``sweeps.optimize.main``."""
+        import sys
+
+        from sweeps import __main__ as main_mod
+        from sweeps import optimize as opt_mod
+
+        captured: list[list[str]] = []
+
+        def fake_optimize_main(forwarded: list[str]) -> int:
+            captured.append(list(forwarded))
+            return 0
+
+        monkeypatch.setattr(opt_mod, "main", fake_optimize_main)
+        monkeypatch.setattr(sys, "argv", argv)
+        rc = main_mod.main()
+        assert rc == 0, f"dispatcher returned {rc}"
+        assert len(captured) == 1, f"expected one forward, got {len(captured)}"
+        return captured[0]
+
+    def test_dispatch_omitting_gate_layer_uses_auto_infer(self, monkeypatch):
+        """When ``--gate-layer`` is omitted, the dispatcher must NOT inject it
+        with a hardcoded value — the standalone CLI's ``default=None`` then
+        auto-infers ``max(max_layer - 1, 0)`` (= 2 for an L3 objective).
+        """
+        forwarded = self._capture_forwarded(
+            monkeypatch,
+            [
+                "sweeps", "optimize",
+                "--scheme", "E4",
+                "--kernel", "tension",
+                "--objective", "layer_bl42.max_spectral_abscissa",
+                "--bounds", "0.5", "20",
+                "--method", "Nelder-Mead",
+                "--max-evals", "5",
+            ],
+        )
+        assert "--gate-layer" not in forwarded, (
+            "dispatcher must not forward --gate-layer when the user omitted "
+            "it; otherwise the standalone CLI's None default and auto-infer "
+            "(plan 45.0d) are bypassed."
+        )
+
+    def test_dispatch_explicit_gate_layer_preserved(self, monkeypatch):
+        """When ``--gate-layer N`` is passed, the dispatcher forwards it
+        verbatim.
+        """
+        forwarded = self._capture_forwarded(
+            monkeypatch,
+            [
+                "sweeps", "optimize",
+                "--scheme", "E4",
+                "--kernel", "tension",
+                "--objective", "layer_bl42.max_spectral_abscissa",
+                "--bounds", "0.5", "20",
+                "--method", "Nelder-Mead",
+                "--max-evals", "5",
+                "--gate-layer", "4",
+            ],
+        )
+        assert "--gate-layer" in forwarded
+        idx = forwarded.index("--gate-layer")
+        assert forwarded[idx + 1] == "4", (
+            f"expected --gate-layer 4 to round-trip; got {forwarded[idx + 1]!r}"
+        )

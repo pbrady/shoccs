@@ -209,7 +209,12 @@ def main() -> int:
         required=True,
         help='Dotted-path report field (e.g. "layer3.max_stab_eig", "layer6.transient_growth_bound").',
     )
-    sub_opt.add_argument("--gate-layer", type=int, default=3)
+    sub_opt.add_argument(
+        "--gate-layer",
+        type=int,
+        default=None,
+        help="Layer N where failure short-circuits to +inf. Default: max(--max-layer - 1, 0) auto-inferred from objective.",
+    )
     sub_opt.add_argument("--max-layer", type=int, default=None)
     sub_opt.add_argument(
         "--bounds",
@@ -390,7 +395,6 @@ def main() -> int:
             "--scheme", args.scheme,
             "--kernel", args.kernel,
             "--objective", args.objective,
-            "--gate-layer", str(args.gate_layer),
             "--method", args.method,
             "--n-restarts", str(args.n_restarts),
             "--max-evals", str(args.max_evals),
@@ -403,6 +407,8 @@ def main() -> int:
             "--de-popsize", str(args.de_popsize),
             "--de-maxiter", str(args.de_maxiter),
         ]
+        if args.gate_layer is not None:
+            forwarded.extend(["--gate-layer", str(args.gate_layer)])
         if args.max_layer is not None:
             forwarded.extend(["--max-layer", str(args.max_layer)])
         if args.bounds is not None:
