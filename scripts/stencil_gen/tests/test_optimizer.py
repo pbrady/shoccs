@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from dataclasses import replace
 
 import numpy as np
@@ -336,6 +337,154 @@ class TestReportToDictLayerBL42:
         r = StabilityReport.empty()
         out = _report_to_dict(r)
         assert "layer_bl42" not in out
+
+
+class TestReportToDictSchemaParity:
+    """Plan 46.2d: enforce schema parity across the three ``_report_to_dict``
+    copies (``optimizer``, ``brady2d_sweep``, ``brady2d_calibration``).
+
+    Future-proofs the schema: any new field added to ``StabilityReport`` will
+    fail this test until added to all three serializers.  Also guards the
+    bloat strip from 46.2b.1: the heavy diagnostic ndarrays on ``KreissResult``
+    must not survive into the serialized form.
+    """
+
+    @staticmethod
+    def _fully_populated_report():
+        """Build a ``StabilityReport`` with every public field set."""
+        from stencil_gen.gks_kreiss import KreissResult
+        from stencil_gen.non_normality import NonNormalityReport
+
+        kr = KreissResult(
+            is_stable=True,
+            witness_s=1.0 + 2.0j,
+            witness_sigma_min=0.5,
+            imaginary_axis_perturbation_verdict="all_incoming",
+            defective_kappa_detected=False,
+            s_grid_shape=(30, 80),
+            compute_time=0.1,
+            sigma_min_field=np.zeros((30, 80)),
+            s_grid=np.zeros((30, 80), dtype=complex),
+            n_admissible_roots=4,
+        )
+        nn = NonNormalityReport(
+            spectral_abscissa=-1.0,
+            numerical_abscissa=-0.5,
+            henrici_departure=0.01,
+            eigenvector_condition=10.0,
+            pseudospectral_abscissae={1e-3: 0.1, 1e-2: 0.2},
+            kreiss_constant=2.0,
+            transient_growth_bound=5.0,
+            n=100,
+            compute_time=0.5,
+        )
+        return StabilityReport(
+            layer1={
+                "boundary_gv_err": 1e-4,
+                "interior_gv_err_x": 1e-5,
+                "interior_gv_err_y": 1e-5,
+                "cutoff_fraction": 0.1,
+            },
+            layer2=KreissResult(is_stable=True, witness_sigma_min=0.42),
+            layer3={"max_stab_eig": -1.5e-4},
+            layer4={"max_local_gv_error": 0.05},
+            layer5={"max_aligned_error": 0.04},
+            layer6={
+                "spectral_abscissa": -2e-3,
+                "kreiss_constant": 3.7,
+                "transient_growth_bound": 12.5,
+                "henrici_departure": 0.01,
+            },
+            layer7={"max_spectral_abscissa": 5e-4},
+            layer8={"final_linf": 1e-3, "stable": True, "wall_time_s": 1.0},
+            layer_bl42={
+                "max_spectral_abscissa": 1e-12,
+                "purely_imaginary": True,
+                "spectral_abscissa_by_n": {21: 1e-12},
+            },
+            non_normality=nn,
+            kreiss=kr,
+            overall_verdict="pass",
+            failed_layer=None,
+            failed_reason="",
+            compute_time=1.5,
+        )
+
+    @staticmethod
+    def _serializers():
+        from stencil_gen.benchmarks.brady2d_calibration import (
+            _report_to_dict as _calib_serialize,
+        )
+        from stencil_gen.optimizer import _report_to_dict as _opt_serialize
+        from sweeps.brady2d_sweep import _report_to_dict as _sweep_serialize
+
+        return [
+            pytest.param(_opt_serialize, id="optimizer"),
+            pytest.param(_sweep_serialize, id="brady2d_sweep"),
+            pytest.param(_calib_serialize, id="brady2d_calibration"),
+        ]
+
+    @pytest.fixture
+    def report(self):
+        return self._fully_populated_report()
+
+    @pytest.mark.parametrize("serializer", _serializers())
+    def test_all_layers_present(self, serializer, report):
+        out = serializer(report)
+        for k in (
+            "layer1", "layer2", "layer3", "layer4", "layer5",
+            "layer6", "layer7", "layer8", "layer_bl42",
+        ):
+            assert k in out, f"missing {k!r} in {serializer.__module__} output"
+
+    @pytest.mark.parametrize("serializer", _serializers())
+    def test_top_level_metadata_present(self, serializer, report):
+        out = serializer(report)
+        for k in (
+            "compute_time",
+            "failed_layer",
+            "failed_reason",
+            "overall_verdict",
+            "non_normality",
+            "kreiss",
+        ):
+            assert k in out, f"missing {k!r} in {serializer.__module__} output"
+
+    @pytest.mark.parametrize("serializer", _serializers())
+    def test_kreiss_diagnostic_arrays_stripped(self, serializer, report):
+        # 46.2b.1 bloat guard: heavy diagnostic ndarrays on KreissResult
+        # (sigma_min_field shape (30, 80), s_grid same shape complex) must
+        # not survive into the serialized form.  Re-introducing them
+        # silently inflates Pareto JSON files by ~40 KB per record.
+        out = serializer(report)
+        assert "sigma_min_field" not in out["kreiss"]
+        assert "s_grid" not in out["kreiss"]
+
+    @pytest.mark.parametrize("serializer", _serializers())
+    def test_serialized_under_bloat_threshold(self, serializer, report):
+        from sweeps._pareto_io import _ParetoEncoder
+
+        out = serializer(report)
+        blob = json.dumps(out, cls=_ParetoEncoder)
+        # 4 KB ceiling: legitimate scalar payload is ~1.2 KB; un-stripped
+        # diagnostic arrays push past 40 KB.  Comfortable margin either way.
+        assert len(blob) < 4096, (
+            f"{serializer.__module__} serialized to {len(blob)} bytes — "
+            "did the kreiss-array strip regress?"
+        )
+
+    @pytest.mark.parametrize("serializer", _serializers())
+    def test_pareto_encoder_roundtrip(self, serializer, report):
+        # ``KreissResult.witness_s`` is ``complex``; the encoder must handle
+        # it (46.2b added the ``complex`` -> ``[real, imag]`` rule).
+        from sweeps._pareto_io import _ParetoEncoder
+
+        out = serializer(report)
+        blob = json.dumps(out, cls=_ParetoEncoder)
+        # Round-trip parses without error and preserves witness_s as a
+        # 2-element list.
+        loaded = json.loads(blob)
+        assert loaded["kreiss"]["witness_s"] == [1.0, 2.0]
 
 
 class TestMakeObjective:

@@ -143,7 +143,7 @@ cd scripts/stencil_gen && uv run python -m sweeps optimize --scheme E4 --kernel 
   - File: `scripts/stencil_gen/stencil_gen/benchmarks/brady2d_calibration.py`
   - Test: `cd scripts/stencil_gen && uv run pytest tests/test_benchmarks.py -x -q -k "calibration and layer8"` (test added in 46.2d)
 
-- [ ] **46.2d** Add `TestReportToDictSchemaParity` to `tests/test_optimizer.py`:
+- [x] **46.2d** Add `TestReportToDictSchemaParity` to `tests/test_optimizer.py`:
   - Build a fully-populated `StabilityReport` with all 15 fields set (use synthetic data; no need for real eigenvalues). Populate `kreiss` with a `KreissResult` whose `sigma_min_field` and `s_grid` are non-None ndarrays (e.g., `np.zeros((30, 80))` and `np.zeros((30, 80), dtype=complex)`) — this mirrors the real `layer2_kreiss_gks` output.
   - Run each of the three `_report_to_dict` copies on it.
   - Assert each output has all expected keys for the layers run, plus `compute_time`, `failed_layer`, `failed_reason`, `overall_verdict`, `non_normality`, `kreiss`.
