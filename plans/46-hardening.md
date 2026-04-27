@@ -111,8 +111,8 @@ cd scripts/stencil_gen && uv run python -m sweeps optimize --scheme E4 --kernel 
 
 - [x] **46.2b** Add `non_normality` and top-level `kreiss` field handlers to all three `_report_to_dict` copies, plus a `complex` handler in `_ParetoEncoder`:
   - In each `_report_to_dict` copy: `if report.non_normality is not None: out["non_normality"] = dataclasses.asdict(report.non_normality)`. Same for `report.kreiss` (a `KreissResult` with a `complex` `witness_s` field).
-  - In `scripts/stencil_gen/sweeps/_pareto_io.py` `_ParetoEncoder.default`: add `if isinstance(obj, complex): return [obj.real, obj.imag]` (matches the convention in `brady2d_cli.py:28`).
-  - Without this, any future code path that populates `report.kreiss` (currently latent — `layer2_kreiss_gks` populates `report.kreiss`, not `report.layer2`, in plan 41's design) will crash at `json.dumps` time inside `save_pareto_front`.
+  - In `scripts/stencil_gen/sweeps/_pareto_io.py` `_ParetoEncoder.default`: add `if isinstance(obj, complex): return [obj.real, obj.imag]`. Note: `brady2d_cli.py:36–37` serializes `complex` as `{"real": ..., "imag": ...}` (dict form); `_ParetoEncoder` deliberately diverges to `[real, imag]` (list form) because the existing Pareto JSON consumers (`load_pareto_front` callers, `TestRegressionBrady2DPareto`) treat objective arrays as positional lists. The divergence is intentional — do not "fix" it by aligning the two encoders.
+  - Without this, any code path that populates `report.kreiss` will crash at `json.dumps` time inside `save_pareto_front`. `report.kreiss` is populated alongside `report.layer2` whenever `max_layer >= 2` (`brady2d_stability.py:1210`); the field is *not* latent — every Pareto run that exercises layer 2 hits this code path.
   - File: `scripts/stencil_gen/stencil_gen/optimizer.py`, `scripts/stencil_gen/sweeps/brady2d_sweep.py`, `scripts/stencil_gen/stencil_gen/benchmarks/brady2d_calibration.py`, `scripts/stencil_gen/sweeps/_pareto_io.py`
   - Test: `cd scripts/stencil_gen && uv run pytest tests/test_pareto.py tests/test_sweep_pareto.py -x -q -k "kreiss or non_normality or complex"`
 
@@ -132,7 +132,7 @@ cd scripts/stencil_gen && uv run python -m sweeps optimize --scheme E4 --kernel 
   - File: `scripts/stencil_gen/stencil_gen/optimizer.py`, `scripts/stencil_gen/sweeps/brady2d_sweep.py`, `scripts/stencil_gen/stencil_gen/benchmarks/brady2d_calibration.py`
   - Test: `cd scripts/stencil_gen && uv run pytest tests/test_optimizer.py tests/test_pareto.py tests/test_sweep_pareto.py -x -q -k "kreiss"` (after 46.2d adds the schema-parity test that exercises this)
 
-- [ ] **46.2b.2** (review follow-up to `16e11cf`): correct two factual errors in the 46.2b plan-text body so the next pass starts from accurate background:
+- [x] **46.2b.2** (review follow-up to `16e11cf`): correct two factual errors in the 46.2b plan-text body so the next pass starts from accurate background:
   - Replace "(matches the convention in `brady2d_cli.py:28`)" with a note that `brady2d_cli.py:36–37` actually serializes `complex` as `{"real": ..., "imag": ...}` (dict form), and that the `_ParetoEncoder` deliberately diverges to `[real, imag]` (list form) because the existing Pareto JSON consumers (`load_pareto_front` callers, `TestRegressionBrady2DPareto`) treat objective arrays as positional lists. Cite the divergence explicitly so future readers don't "fix" the inconsistency by mistake.
   - Replace the "(currently latent — `layer2_kreiss_gks` populates `report.kreiss`, not `report.layer2`, in plan 41's design)" parenthetical with an accurate statement: `report.kreiss` is populated alongside `report.layer2` whenever `max_layer >= 2` (`brady2d_stability.py:1210`); the field is *not* latent. Keep the rest of the rationale (Pareto JSON would crash without the `complex` handler) — that part is still correct.
   - File: `plans/46-hardening.md`
