@@ -164,6 +164,18 @@ cd scripts/stencil_gen && uv run python -m sweeps optimize --scheme E4 --kernel 
   - File: `scripts/stencil_gen/sweeps/known_values.json`
   - Test: `cd scripts/stencil_gen && uv run pytest tests/test_phs.py -x -q -k "TestRegressionGV and tension"`
 
+- [ ] **46.3a.1** (review follow-up to `44c9945`): address the `E4_1.tension.sigma=0.0` collapse introduced by the 46.3a sweep.
+  - The sweep moved `E4_1.tension.sigma` from `3.0 → 0.0`. `sigma=0` is the PHS k=2 limit (`tension_sweep.py:140`: "Include sigma=0 (PHS k=2 limit)"), so the `E4_1.tension` entry is now structurally identical to `E4_1.phs_k2`. This collapses regression coverage in two places:
+    - `TestRegressionE4Stability.test_e4_tension_known_sigma` (`test_phs.py:1447`) and the `tension` branch of `test_e4_stable_at_multiple_grid_sizes` (`test_phs.py:1480`) now call `stability_eigenvalue` with `epsilon=0.0`, identical to the `phs_k2` branch — the suite tests one configuration twice. This is the same vacuous-test pattern plan 46.5 is hardening.
+    - `test_scheme_primary_gv_error_match` for `E4_1.tension` (activated by 46.3a) is testing GV at sigma=0, i.e. the PHS k=2 GV — not a meaningful tension-kernel regression.
+  - Pick one fix and apply it:
+    - **Option A (preferred): constrain the fine-sweep search away from the PHS limit** in `sweeps/tension_sweep.py:104–110` so `sigma_best > sigma_floor` (e.g., `sigma_floor = 0.1`). Re-run E4 (and E2 if affected) with `--include-gv --update-known-values`. Persisted `tension.sigma` should be a non-degenerate tension value; `tension.gv_error` recomputed at the new sigma. Document the floor in the sweep docstring.
+    - **Option B**: remove the `E4_1.tension` entry entirely (and its `gv_error` field) when the fine-sweep optimum is the PHS limit, with the sweep emitting `tension_collapsed_to_phs_k2: true` in `known_values.json` to make the collapse explicit. Adjust `TestRegressionE4Stability` to skip the tension branch when this flag is set.
+  - Whichever option: also re-check `E2_1.tension.sigma=3.462842` is a *true* fine-sweep optimum and not a coarse-sweep artifact (the previous value was 6.0 — verify the new value is reproducible).
+  - **Boundary-locked `tension_gv` entries** (`E2_1.tension_gv.sigma = E4_1.tension_gv.sigma = 20.0`, equal to `--sigma-max`) are out of scope for this item — they require a separate decision about widening the search range and are not regressions caused by 44c9945.
+  - File: `scripts/stencil_gen/sweeps/tension_sweep.py`, `scripts/stencil_gen/sweeps/known_values.json`
+  - Test: `cd scripts/stencil_gen && uv run pytest tests/test_phs.py -x -q -k "TestRegressionE4Stability or (TestRegressionGV and tension)"` (assert E4 tension sigma differs from 0.0 and tests still pass)
+
 - [ ] **46.3b** Run E2 + E4 gaussian `--include-gv` sweeps and persist:
   - `cd scripts/stencil_gen && SYMPY_CACHE_SIZE=50000 uv run python -m sweeps epsilon --scheme E2 --kernel gaussian --include-gv --update-known-values`
   - Same for `--scheme E4`.
@@ -248,7 +260,7 @@ cd scripts/stencil_gen && uv run python -m sweeps optimize --scheme E4 --kernel 
   ↓
 46.2a → 46.2b → 46.2b.1 → 46.2b.2 → 46.2c → 46.2d   # schema completeness + 16e11cf review follow-ups
   ↓
-46.3a → 46.3b → 46.3c                    # activate TestRegressionGV (tension, gaussian, multiquadric)
+46.3a → 46.3a.1 → 46.3b → 46.3c          # activate TestRegressionGV (tension, gaussian, multiquadric)
   ↓
 46.4a                                    # activate TestRegressionBrady2DSweep
   ↓
