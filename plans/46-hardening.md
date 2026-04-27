@@ -312,6 +312,14 @@ cd scripts/stencil_gen && uv run python -m sweeps optimize --scheme E4 --kernel 
   - File: `scripts/stencil_gen/tests/test_pareto.py`
   - Test: `cd scripts/stencil_gen && uv run pytest tests/test_pareto.py -x -q -k "test_sentinel_rows_excluded"` — 1 passed. Full file: `uv run pytest tests/test_pareto.py -x -q` — 22 passed, 1 skipped.
 
+- [ ] **46.5a.1** (review follow-up to `809cc59`): the 46.5a commit retained the *exact* vacuous line that 46.5a flagged for replacement — `tests/test_pareto.py:419` still has `assert res.extras["n_sentinel_filtered"] >= 0`, which is trivially true (counts are non-negative by definition). The 46.5a plan body explicitly said "Replace `assert res.extras["n_sentinel_filtered"] >= 0` (trivially true — counts can't be negative) with `assert res.extras["n_sentinel_filtered"] >= 1`". The new `len(res.front) >= 1` / `len(res.front) < 20` guards are good additions, but they don't make the targeted vacuous line non-vacuous; they just compensate by adding coverage elsewhere. The line that prompted 46.5a still passes for any non-negative integer.
+  - **Pick one and apply:**
+    - **Option A (preferred):** convert the line into a regression signal for the documented empirical finding — `assert res.extras["n_sentinel_filtered"] == 0, "regression: pymoo no longer crowds out sentinel rows in selection before keep_mask sees them; revisit the test budget or the keep_mask filter"`. This hardens the empirical claim from the commit message into an automated check: if a future pymoo upgrade changes selection behavior such that sentinels start surviving to `res.F`, this test catches it instead of silently passing.
+    - **Option B:** delete the `>= 0` line entirely. The new front-size guards already cover the regression coverage; the line adds noise without signal.
+  - Do NOT replace with `>= 1` — 46.5a's empirical analysis (probed seeds 1–11, n_gen ∈ {1,2,3,4,6,8}, pop_size ∈ {10,20,40}) established that `n_sentinel_filtered` is unreachable at any reasonable budget for this objective. That conclusion stands; this item is about removing or hardening the vacuous line, not re-litigating the budget.
+  - File: `scripts/stencil_gen/tests/test_pareto.py`
+  - Test: `cd scripts/stencil_gen && uv run pytest tests/test_pareto.py -x -q -k "test_sentinel_rows_excluded"`
+
 - [ ] **46.5b** Strengthen `test_default_gate_for_bl42_objective` in `tests/test_optimizer.py:459`:
   - Current test mocks `failed_layer=2`, which gates under both old (`gate_layer=3`) and new (`gate_layer=2` auto-inferred) defaults — vacuous as a regression for plan 45.0b.
   - Add a sub-case (or new test method) with `r.failed_layer = 3` and `r.layer_bl42 = {"max_spectral_abscissa": 5.0}`. Assert the closure returns `5.0` (finite), not `+inf`. **This is the case that would have failed under the old hardcoded `gate_layer=3`** and is the true regression test for auto-infer.
@@ -368,7 +376,7 @@ cd scripts/stencil_gen && uv run python -m sweeps optimize --scheme E4 --kernel 
   ↓
 46.4a.0 → 46.4a                          # fix save_known_values complex encoder, then activate TestRegressionBrady2DSweep
   ↓
-46.5a → 46.5b → 46.5c                    # test hardening
+46.5a → 46.5a.1 → 46.5b → 46.5c          # test hardening (46.5a.1 is review follow-up to 809cc59)
   ↓
 46.6a                                    # rank_for_l8 diagnostic
   ↓
