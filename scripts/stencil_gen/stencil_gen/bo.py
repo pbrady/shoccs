@@ -41,8 +41,10 @@ from typing import Callable
 import numpy as np
 import torch
 import botorch  # noqa: F401  # used in subsequent items
+from botorch.acquisition.cost_aware import InverseCostWeightedUtility
 from botorch.fit import fit_gpytorch_mll
 from botorch.models import MultiTaskGP
+from botorch.models.deterministic import GenericDeterministicModel
 from botorch.models.transforms import Standardize
 from gpytorch.constraints import GreaterThan
 from gpytorch.kernels import MaternKernel
@@ -448,10 +450,145 @@ def build_mf_gp(
     return model
 
 
+# --- cost model + cost-aware utility -----------------------------------------
+
+
+# Default per-layer wall-time costs (seconds) from plan 46 measurements.  Keys
+# are *external* cascade layer indices; the contiguous internal fidelity index
+# 0..K-1 used by the GP/acquisition is derived by sorting the keys ascending.
+# L3r is keyed at external index 5 by plan 47.4a convention (it sits between
+# L3=3 and L6=6 in cost) — even though it shares ``max_layer=3`` with L3
+# inside :func:`brady2d_stability_score`, the BO module treats it as a
+# distinct fidelity so the ICM kernel can learn an L3-vs-L3r task correlation.
+# The CLI (47.4a) translates this synthetic ``5`` to the ``layer_bl42`` field
+# name when invoking the cascade.
+DEFAULT_COST_TABLE: dict[int, float] = {
+    1: 0.076,  # L1: GV dispersion (interior + boundary)
+    3: 0.038,  # L3: 1D advection eigenvalue
+    5: 0.486,  # L3r: BL §4.2 reflecting-hyperbolic spectrum
+    6: 0.846,  # L6: non-normality on 1D operator
+    7: 1.434,  # L7: full 2D varying-coefficient spectral abscissa
+}
+
+
+# Cost floor as a fraction of the most expensive layer's cost.  Caps the
+# acquisition's preference for the cheapest layer when the cost ratio is so
+# extreme (here ``c(L7)/c(L3) ≈ 38``) that the cost-aware utility would
+# otherwise keep querying the cheapest layer indefinitely, even after the GP
+# has learned that layer is uncorrelated with HF.
+_DEFAULT_COST_FLOOR_RATIO: float = 0.05
+
+
+def apply_cost_floor(
+    cost_table: dict[int, float],
+    *,
+    floor_ratio: float = _DEFAULT_COST_FLOOR_RATIO,
+) -> dict[int, float]:
+    """Return a copy of *cost_table* with a per-entry cost floor applied.
+
+    For each entry ``c(m)``, the floored cost is
+    ``max(c(m), floor_ratio * max_n c(n))`` — any layer whose cost is below
+    ``floor_ratio`` of the most expensive layer is lifted to that floor.
+    Prevents qMFKG from over-exploiting the cheapest layer; see Wu et al. 2020
+    §4.2 for the cost-weighted KG formulation that motivates the floor.
+
+    Parameters
+    ----------
+    cost_table
+        Mapping ``layer index → cost (seconds)``.  Caller's choice of layer
+        indices; the function does not interpret them.
+    floor_ratio
+        Per-entry floor as a fraction of the most expensive layer's cost.
+        Pass ``0.0`` to disable (not recommended).
+
+    Returns
+    -------
+    dict[int, float]
+        New dict with the same keys as *cost_table* and floored values.
+
+    Raises
+    ------
+    ValueError
+        If *cost_table* is empty or *floor_ratio* is negative.
+    """
+    if not cost_table:
+        raise ValueError("cost_table must not be empty")
+    if floor_ratio < 0:
+        raise ValueError(f"floor_ratio must be ≥ 0, got {floor_ratio}")
+    hf_cost = max(cost_table.values())
+    floor = floor_ratio * hf_cost
+    return {layer: max(cost, floor) for layer, cost in cost_table.items()}
+
+
+def build_cost_model(
+    cost_table: dict[int, float],
+    fidelity_dim: int,
+    *,
+    floor_ratio: float = _DEFAULT_COST_FLOOR_RATIO,
+) -> InverseCostWeightedUtility:
+    """Build the inverse-cost-weighted utility for cost-aware MF acquisition.
+
+    Wraps a step-function deterministic cost model in
+    :class:`InverseCostWeightedUtility` so qMFKG (47.3a) weights expected
+    information gain by ``1 / cost(m)``.  The deterministic model reads the
+    *internal* contiguous fidelity index (integer-rounded) from column
+    ``fidelity_dim`` of its input tensor and looks up the corresponding cost
+    in a floored copy of *cost_table*.
+
+    Parameters
+    ----------
+    cost_table
+        Mapping ``external layer index → cost (seconds)``.  Sorted ascending
+        to derive the internal contiguous index ``0..K-1``: e.g. for keys
+        ``{1, 3, 5, 6, 7}``, internal index ``0`` ↔ layer 1, ``4`` ↔ layer 7.
+    fidelity_dim
+        Column index of the fidelity feature in the acquisition's ``X``
+        tensor.  Conventionally the last column (``train_X.shape[-1] - 1``).
+    floor_ratio
+        Forwarded to :func:`apply_cost_floor`.  Default ``0.05``.
+
+    Returns
+    -------
+    InverseCostWeightedUtility
+        Utility with ``use_mean=True`` (the default; the deterministic cost
+        model has no posterior variance, so the choice is moot — but ``True``
+        matches the BoTorch discrete-MF tutorial).
+
+    Raises
+    ------
+    ValueError
+        If *cost_table* is empty, *floor_ratio* is negative, or
+        *fidelity_dim* is negative.
+    """
+    if fidelity_dim < 0:
+        raise ValueError(f"fidelity_dim must be ≥ 0, got {fidelity_dim}")
+    floored = apply_cost_floor(cost_table, floor_ratio=floor_ratio)
+    sorted_layers = sorted(floored)
+    cost_lookup = torch.tensor(
+        [floored[layer] for layer in sorted_layers],
+        dtype=torch.float64,
+    )
+    n_layers = len(sorted_layers)
+
+    def cost_fn(X: torch.Tensor) -> torch.Tensor:
+        # ``X`` has shape ``(..., d + 1)``; the fidelity column holds integer
+        # internal indices.  Round and clamp before lookup to defend against
+        # NaN or out-of-range values from the acquisition optimiser.
+        fid = X[..., fidelity_dim].round().long().clamp(0, n_layers - 1)
+        lookup = cost_lookup.to(dtype=X.dtype, device=X.device)
+        return lookup[fid].unsqueeze(-1)
+
+    cost_model = GenericDeterministicModel(f=cost_fn, num_outputs=1)
+    return InverseCostWeightedUtility(cost_model=cost_model, use_mean=True)
+
+
 __all__: list[str] = [
     "_BO_SENTINEL",
     "BOEval",
     "BOResult",
+    "DEFAULT_COST_TABLE",
+    "apply_cost_floor",
+    "build_cost_model",
     "build_mf_gp",
     "make_multi_fidelity_objective",
 ]
