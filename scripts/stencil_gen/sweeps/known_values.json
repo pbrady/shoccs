@@ -17,10 +17,14 @@
       "gv_error": 2.6465125577553485
     },
     "gaussian": {
-      "epsilon": 2.0,
+      "epsilon": 0.002492,
       "stable_at": [
-        40
-      ]
+        20,
+        40,
+        80,
+        160
+      ],
+      "gv_error": 8.090034045983016
     },
     "multiquadric": {
       "epsilon": 1.0,
@@ -39,6 +43,16 @@
     "tension_gv": {
       "sigma": 20.0,
       "gv_error": 2.074641143264805,
+      "stable_at": [
+        20,
+        40,
+        80,
+        160
+      ]
+    },
+    "gaussian_gv": {
+      "epsilon": 1.941492,
+      "gv_error": 1.9010555541664145,
       "stable_at": [
         20,
         40,
@@ -65,10 +79,14 @@
       "gv_error": 6.503000296681518
     },
     "gaussian": {
-      "epsilon": 0.9,
+      "epsilon": 0.894157,
       "stable_at": [
-        40
-      ]
+        20,
+        40,
+        80,
+        160
+      ],
+      "gv_error": 8.08885366558505
     },
     "multiquadric": {
       "epsilon": 1.0,
@@ -94,6 +112,16 @@
     "tension_gv": {
       "sigma": 20.0,
       "gv_error": 4.79897368164198,
+      "stable_at": [
+        20,
+        40,
+        80,
+        160
+      ]
+    },
+    "gaussian_gv": {
+      "epsilon": 1.366448,
+      "gv_error": 4.8733775220793385,
       "stable_at": [
         20,
         40,

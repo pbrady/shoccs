@@ -184,12 +184,23 @@ cd scripts/stencil_gen && uv run python -m sweeps optimize --scheme E4 --kernel 
   - File: `scripts/stencil_gen/sweeps/tension_sweep.py`, `scripts/stencil_gen/sweeps/__main__.py`, `scripts/stencil_gen/sweeps/known_values.json`, `scripts/stencil_gen/tests/test_phs.py`
   - Test: `cd scripts/stencil_gen && uv run pytest tests/test_phs.py -x -q -k "TestRegressionE4Stability or (TestRegressionGV and tension) or test_e4_tension_sigma_strictly_above_floor"`
 
-- [ ] **46.3b** Run E2 + E4 gaussian `--include-gv` sweeps and persist:
+- [x] **46.3b** Run E2 + E4 gaussian `--include-gv` sweeps and persist:
   - `cd scripts/stencil_gen && SYMPY_CACHE_SIZE=50000 uv run python -m sweeps epsilon --scheme E2 --kernel gaussian --include-gv --update-known-values`
   - Same for `--scheme E4`.
   - Commit the resulting `known_values.json` deltas.
   - File: `scripts/stencil_gen/sweeps/known_values.json`
   - Test: `cd scripts/stencil_gen && uv run pytest tests/test_phs.py -x -q -k "TestRegressionGV and gaussian"`
+
+- [ ] **46.3b.1** (review follow-up to 46.3b): the E2 gaussian sweep landed on the coarse-sweep lower bound — boundary-snap analogous to 46.3a.1's tension floor-snap.
+  - Empirically: `epsilon_sweep.py:142` uses `np.logspace(np.log10(0.01), np.log10(10), n_eps)`. For E2_1 gaussian, the coarse-best is exactly at `eps=0.01` (the lower bound) with `stab_eig=-9.346e-04`; the fine sweep then extrapolates *below* the coarse range to `eps=0.002492` with `stab_eig=-9.443e-04`. Persisted `E2_1.gaussian.epsilon` shifted from `2.0` to `0.002492` and `gv_error=8.09` (degraded from the previous interior-optimum region near `eps≈2`).
+  - For gaussian RBF `phi(r)=exp(-(eps*r)^2)`, `eps→0` is the Driscoll-Fornberg polynomial-reproduction limit — well-defined mathematically, but the persisted optimum is now a function of where the coarse-sweep lower bound sits, not of the underlying math (the same issue plan 46.3a.2 flagged for tension).
+  - E4_1 gaussian (`eps=0.894157`, fine-best interior to coarse range) is unaffected; only E2 is sensitive.
+  - Pick one and apply:
+    - **Option A**: extend the coarse epsilon range downward (e.g., `np.logspace(-4, 1, n_eps)`) and rerun. If E2 still snaps to the new lower bound, that confirms the optimum is at `eps→0` and motivates Option B.
+    - **Option B**: add a CLI `--eps-floor` (default ≥ 0.5 or whichever value gives a strictly-interior E2 optimum) mirroring 46.3a.2's `--sigma-floor`, with a `boundary_snap` guard in `fine_sweep`. Persisted regression values then reflect a meaningful kernel parameter, not a degenerate constant-kernel limit.
+  - Whichever option: add a `test_e2_gaussian_epsilon_strictly_above_floor` (or `_above_lower_bound`) regression in `tests/test_phs.py` to prevent silent re-collapse.
+  - File: `scripts/stencil_gen/sweeps/epsilon_sweep.py`, `scripts/stencil_gen/sweeps/__main__.py`, `scripts/stencil_gen/sweeps/known_values.json`, `scripts/stencil_gen/tests/test_phs.py`
+  - Test: `cd scripts/stencil_gen && uv run pytest tests/test_phs.py -x -q -k "TestRegressionE2Stability or (TestRegressionGV and gaussian) or test_e2_gaussian_epsilon"`
 
 - [ ] **46.3c** Run E2 + E4 multiquadric `--include-gv` sweeps and persist:
   - `cd scripts/stencil_gen && SYMPY_CACHE_SIZE=50000 uv run python -m sweeps epsilon --scheme E2 --kernel multiquadric --include-gv --update-known-values`
@@ -268,7 +279,7 @@ cd scripts/stencil_gen && uv run python -m sweeps optimize --scheme E4 --kernel 
   ↓
 46.2a → 46.2b → 46.2b.1 → 46.2b.2 → 46.2c → 46.2d   # schema completeness + 16e11cf review follow-ups
   ↓
-46.3a → 46.3a.1 → 46.3a.2 → 46.3b → 46.3c # activate TestRegressionGV (tension, gaussian, multiquadric)
+46.3a → 46.3a.1 → 46.3a.2 → 46.3b → 46.3b.1 → 46.3c # activate TestRegressionGV (tension, gaussian, multiquadric)
   ↓
 46.4a                                    # activate TestRegressionBrady2DSweep
   ↓
