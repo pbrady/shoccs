@@ -91,6 +91,13 @@ cd scripts/stencil_gen && SYMPY_CACHE_SIZE=50000 uv run python -m sweeps bo \
   - Skeleton `bo.py` imports `numpy`, `torch`, `botorch` plus the seven reused symbols from `optimizer.py`; `__all__ = []` until 47.1a populates it.
   - Existing fast suite (865 passed, 137 skipped, 1 xfailed) green after install — no regression from the new dependency stack.
 
+- [ ] **47.0b** Fix stale `botorch.acquisition.multi_fidelity` import-path references in this plan file. The 47.0a Resolution note documents the correction (`qMultiFidelityKnowledgeGradient` lives at `botorch.acquisition.knowledge_gradient` in `botorch==0.17.x`), but two surrounding text references still cite the non-existent path:
+  - 47.0a "Verify" bullet (currently line ~84): replace `from botorch.acquisition.multi_fidelity import qMultiFidelityKnowledgeGradient` with `from botorch.acquisition.knowledge_gradient import qMultiFidelityKnowledgeGradient` so the documented verification command actually runs to completion.
+  - Completion-criteria second bullet (currently line ~421): same replacement so the criterion is achievable.
+  - Leave the 47.0a Resolution note unchanged — it explains the historical confusion.
+  - File: `plans/47-mfbo.md`
+  - Test: `grep -n "acquisition\.multi_fidelity" plans/47-mfbo.md` returns only the Resolution-note line(s) that explain the correction (not the verify command or completion criterion).
+
 ### 47.1 — Core dataclasses + multi-fidelity objective factory
 
 - [ ] **47.1a** Add `BOResult` and `BOPoint` frozen dataclasses + `_BO_SENTINEL` to `bo.py`, modeled on `pareto.py`'s `ParetoPoint`/`ParetoResult`:
@@ -390,7 +397,7 @@ cd scripts/stencil_gen && SYMPY_CACHE_SIZE=50000 uv run python -m sweeps bo \
 ## Ordering
 
 ```
-47.0a                                       # deps + skeleton
+47.0a → 47.0b                               # deps + skeleton; plan-file import-path fix
   ↓
 47.1a → 47.1b → 47.1c                       # dataclasses + factory + tests
   ↓
