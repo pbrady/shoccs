@@ -238,6 +238,19 @@ Important constraints:
   resolved from the repo and plan.
 - Keep changes small, verifiable, and directly tied to the next plan item.
 - Leave the repository in a committed state if you made changes.
+- Tests run in the FOREGROUND. Never set run_in_background=true on pytest,
+  uv run pytest, ctest, or any test command. Tests here finish in seconds to
+  a couple minutes — foregrounding blocks the tool call cleanly.
+- For any background command you truly must background, wait via TaskOutput
+  / BashOutput with block=true. Do NOT write shell polling loops of the form
+  'while kill -0 \$pid; do sleep N; done': in zsh, when \$pid expansion is
+  empty, 'kill -0' defaults to the current process group and returns 0,
+  making the loop infinite. This pattern has hung this harness. If you
+  genuinely need a shell poll, use:
+      pid=\$(pgrep -f "pattern" | head -1)
+      while [ -n "\$pid" ] && kill -0 "\$pid" 2>/dev/null; do
+        sleep 5; pid=\$(pgrep -f "pattern" | head -1)
+      done
 ${STATUS_INSTRUCTIONS}
 EOF_PROMPT
 }
@@ -273,6 +286,14 @@ Required process:
 8. If there are no actionable issues, make no changes.
 9. Return a concise plain-text summary of what you reviewed and whether you
    updated the plan.
+
+Background-task hygiene (applies to any test/command you invoke):
+- Run tests in the FOREGROUND. Never set run_in_background=true on pytest,
+  uv run pytest, ctest, or any test command.
+- For any background command you truly must background, wait via TaskOutput
+  / BashOutput with block=true. Do NOT write 'while kill -0 \$pid; do sleep
+  N; done' polling loops — in zsh, empty \$pid expansion makes 'kill -0'
+  target the current process group and return 0, hanging the loop forever.
 EOF_PROMPT
 }
 
