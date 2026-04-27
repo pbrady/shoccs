@@ -176,6 +176,14 @@ cd scripts/stencil_gen && uv run python -m sweeps optimize --scheme E4 --kernel 
   - File: `scripts/stencil_gen/sweeps/tension_sweep.py`, `scripts/stencil_gen/sweeps/known_values.json`
   - Test: `cd scripts/stencil_gen && uv run pytest tests/test_phs.py -x -q -k "TestRegressionE4Stability or (TestRegressionGV and tension)"` (assert E4 tension sigma differs from 0.0 and tests still pass)
 
+- [ ] **46.3a.2** (review follow-up to `be2011f`): the floor=0.1 fix produced an optimum *exactly at the floor*, not strictly above it — `E4_1.tension.sigma=0.1==sigma_floor`, and `tension.gv_error=7.235` is within 0.04% of the PHS-k=2 value 7.238. Empirically (`fine_sweep` with floors 0.1/0.5/1.0): for E4 the constrained minimum lands exactly at the floor for both 0.1 and 0.5; only at floor=1.0 does the optimum land strictly above (sigma≈1.49). This means the persisted `E4_1.tension.sigma` is a function of the CLI flag default, not of the underlying math: a future reviewer changing `--sigma-floor` would silently change the regression value, and the `test_e4_tension_known_sigma` / `test_e4_stable_at_multiple_grid_sizes` "tension" branches still test a configuration that is numerically indistinguishable from `phs_k2` (stab_eig differs by < 0.2%). 46.3a.1's stated success criterion ("`sigma_best > sigma_floor`") is not actually met. Pick one and apply:
+  - **Option A.2 (preferred)**: raise the CLI default `--sigma-floor` in `scripts/stencil_gen/sweeps/__main__.py` and `scripts/stencil_gen/sweeps/tension_sweep.py` to a value where the fine-sweep optimum lands *strictly* above the floor for both E2 and E4 (empirically `1.0` works for E4 → sigma≈1.49; verify E2 still picks 3.46 unchanged). Re-run E2 + E4 with `--include-gv --update-known-values`. Add a guard in `fine_sweep` that raises `ValueError` (or emits a `UserWarning` if the caller passed `sigma_floor=0.0`) when the returned `best_fine` equals the floor to within a few × `np.spacing(sigma_floor)` — this catches the floor-snap collapse for any future re-run.
+  - **Option B.2**: switch to plan-46.3a.1's Option B for E4 specifically: detect the floor-snap in `run_tension_sweep`, emit `tension_collapsed_to_phs_k2: true` in `known_values.json` for E4_1, drop `E4_1.tension.sigma` and `E4_1.tension.gv_error`, and have `TestRegressionE4Stability.test_e4_tension_known_sigma` / `test_e4_stable_at_multiple_grid_sizes` skip the tension branch when the flag is set. E2 keeps its genuine optimum (sigma=3.46) and is unaffected.
+  - Whichever option: add a pytest regression `test_e4_tension_sigma_strictly_above_floor` (or equivalent) in `tests/test_phs.py` that asserts `_KNOWN["E4_1"]["tension"]["sigma"] > _CLI_DEFAULT_SIGMA_FLOOR + 1e-9` (Option A.2) or that the `tension_collapsed_to_phs_k2` flag is set (Option B.2). The current state has no automated guard against re-collapse.
+  - Do NOT change library default `sigma_floor=0.0` — the historical-behavior preservation rationale from `be2011f` remains valid.
+  - File: `scripts/stencil_gen/sweeps/tension_sweep.py`, `scripts/stencil_gen/sweeps/__main__.py`, `scripts/stencil_gen/sweeps/known_values.json`, `scripts/stencil_gen/tests/test_phs.py`
+  - Test: `cd scripts/stencil_gen && uv run pytest tests/test_phs.py -x -q -k "TestRegressionE4Stability or (TestRegressionGV and tension) or test_e4_tension_sigma_strictly_above_floor"`
+
 - [ ] **46.3b** Run E2 + E4 gaussian `--include-gv` sweeps and persist:
   - `cd scripts/stencil_gen && SYMPY_CACHE_SIZE=50000 uv run python -m sweeps epsilon --scheme E2 --kernel gaussian --include-gv --update-known-values`
   - Same for `--scheme E4`.
@@ -260,7 +268,7 @@ cd scripts/stencil_gen && uv run python -m sweeps optimize --scheme E4 --kernel 
   ↓
 46.2a → 46.2b → 46.2b.1 → 46.2b.2 → 46.2c → 46.2d   # schema completeness + 16e11cf review follow-ups
   ↓
-46.3a → 46.3a.1 → 46.3b → 46.3c          # activate TestRegressionGV (tension, gaussian, multiquadric)
+46.3a → 46.3a.1 → 46.3a.2 → 46.3b → 46.3c # activate TestRegressionGV (tension, gaussian, multiquadric)
   ↓
 46.4a                                    # activate TestRegressionBrady2DSweep
   ↓
