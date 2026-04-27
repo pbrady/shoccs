@@ -34,12 +34,15 @@ acquisition, and ``run_mfbo`` driver are added in subsequent items of plan 47
 
 from __future__ import annotations
 
+import time
 from dataclasses import dataclass
+from typing import Callable
 
 import numpy as np
 import torch  # noqa: F401  # used in subsequent items
 import botorch  # noqa: F401  # used in subsequent items
 
+from stencil_gen.brady2d_stability import brady2d_stability_score
 from stencil_gen.optimizer import (  # noqa: F401  # reused in subsequent items
     DEFAULT_BOUNDS,
     _FIELD_LAYER_ALIAS,
@@ -204,8 +207,122 @@ class BOResult:
     extras: dict
 
 
+# --- multi-fidelity objective factory ----------------------------------------
+
+
+def make_multi_fidelity_objective(
+    scheme: str,
+    kernel: str,
+    report_fields_by_layer: dict[int, str],
+    *,
+    gate_layer: int | None = None,
+) -> Callable[[np.ndarray, int], tuple[float, float, dict]]:
+    """Build a multi-fidelity objective ``f(x, m) -> (value, wall_time, report)``.
+
+    Mirrors :func:`stencil_gen.optimizer.make_objective` but routes through a
+    per-fidelity field selection and returns the wall-time + serialised report
+    alongside the scalar value, so the BO loop can record per-eval cost without
+    a side channel.
+
+    Parameters
+    ----------
+    scheme, kernel
+        Forwarded to :func:`brady2d_stability_score`.
+    report_fields_by_layer
+        Mapping ``{layer_index: dotted_field_path}``.  ``max(...)`` is the HF
+        target; the HF field is the optimisation objective.  Cheaper layers'
+        fields are surrogates that the GP correlates with the HF objective via
+        the ICM coregionalization matrix.
+    gate_layer
+        Highest layer whose failure forces the sentinel value.  Defaults to
+        ``max(min(layers) - 1, 0)`` — only layers strictly *cheaper* than the
+        cheapest fidelity in ``report_fields_by_layer`` gate; the cheapest
+        fidelity itself is always a usable result.  Pass ``0`` to disable
+        gating entirely.
+
+    Returns
+    -------
+    Callable[[np.ndarray, int], tuple[float, float, dict]]
+        Closure ``f(x, m)``.  On any of:
+
+        - ``m`` not in ``report_fields_by_layer``,
+        - shape mismatch in :func:`params_from_vector`,
+        - exception from :func:`brady2d_stability_score`,
+        - gate trip (failed layer ≤ ``gate_layer``),
+
+        returns ``(_BO_SENTINEL, measured_wall_time, {"error": str(...)})``.
+        On success, returns
+        ``(extract_field(report, field_at_m), wall_time, _report_to_dict(report))``.
+
+    Raises
+    ------
+    ValueError
+        At factory time, if any field's :func:`_infer_max_layer` exceeds the
+        layer it is keyed under (you cannot extract ``layer7.*`` from an
+        ``m=3`` run).  Also raised when ``report_fields_by_layer`` is empty.
+    """
+    if not report_fields_by_layer:
+        raise ValueError("report_fields_by_layer must not be empty")
+    for layer, field in report_fields_by_layer.items():
+        inferred = _infer_max_layer(field)
+        if inferred is not None and inferred > layer:
+            raise ValueError(
+                f"field {field!r} requires max_layer={inferred} but is keyed "
+                f"under layer={layer}; cannot extract a field from a layer "
+                "that is not run"
+            )
+    layers_sorted = sorted(report_fields_by_layer)
+    if gate_layer is None:
+        gate_layer = max(layers_sorted[0] - 1, 0)
+
+    def objective(x: np.ndarray, m: int) -> tuple[float, float, dict]:
+        if m not in report_fields_by_layer:
+            return (
+                _BO_SENTINEL,
+                0.0,
+                {"error": f"unknown fidelity m={m}"},
+            )
+        t0 = time.perf_counter()
+        try:
+            params = params_from_vector(kernel, x)
+            report = brady2d_stability_score(
+                scheme,
+                kernel,
+                params,
+                max_layer=m,
+                short_circuit=True,
+            )
+        except Exception as exc:
+            return (
+                _BO_SENTINEL,
+                time.perf_counter() - t0,
+                {"error": str(exc)},
+            )
+        wall_time = time.perf_counter() - t0
+        if (
+            report.failed_layer is not None
+            and report.failed_layer <= gate_layer
+        ):
+            return (
+                _BO_SENTINEL,
+                wall_time,
+                _report_to_dict(report),
+            )
+        value = extract_field(report, report_fields_by_layer[m])
+        if not np.isfinite(value):
+            return (
+                _BO_SENTINEL,
+                wall_time,
+                _report_to_dict(report),
+            )
+        return (float(value), wall_time, _report_to_dict(report))
+
+    return objective
+
+
 __all__: list[str] = [
     "_BO_SENTINEL",
     "BOEval",
     "BOResult",
+    "make_multi_fidelity_objective",
 ]
