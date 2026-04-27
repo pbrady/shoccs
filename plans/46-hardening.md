@@ -249,7 +249,7 @@ cd scripts/stencil_gen && uv run python -m sweeps optimize --scheme E4 --kernel 
     - `E4_1.gaussian.epsilon`: `0.894157 → ~2.10` (0.681-basin → second basin); `gv_error`: `8.09 → ~6.16`.
     - These deltas are intentional, not regressions; both new values are strictly-interior local minima of `stab_eig(eps)` per 46.3b.1a's fine probes.
   - File: `scripts/stencil_gen/sweeps/epsilon_sweep.py`, `scripts/stencil_gen/sweeps/__main__.py`, `scripts/stencil_gen/sweeps/known_values.json`, `scripts/stencil_gen/tests/test_phs.py` (and `docs/handoff/known_limitations.md` if C1)
-  - Test: `cd scripts/stencil_gen && uv run pytest tests/test_phs.py -x -q -k "TestRegressionE2Stability or (TestRegressionGV and gaussian) or test_e2_gaussian_epsilon or test_e4_gaussian_epsilon or test_gaussian_known_limitations"`
+  - Test: `cd scripts/stencil_gen && uv run pytest tests/test_phs.py -x -q -k "TestRegressionE2Stability or TestRegressionE4Stability or (TestRegressionGV and gaussian) or test_e2_gaussian_epsilon or test_e4_gaussian_epsilon or test_gaussian_known_limitations"` (both stability classes are needed: the migration moves *both* `E2_1.gaussian.epsilon` and `E4_1.gaussian.epsilon`, so `test_e2_gaussian_optimal_epsilon` *and* `test_e4_gaussian_known_epsilon` must both be re-exercised; pytest `-k` substring matching does NOT pick up `test_e4_gaussian_known_epsilon` from the `test_e4_gaussian_epsilon` token because of the intervening `_known_`).
 
 - [ ] **46.3c** Run E2 + E4 multiquadric `--include-gv` sweeps and persist:
   - `cd scripts/stencil_gen && SYMPY_CACHE_SIZE=50000 uv run python -m sweeps epsilon --scheme E2 --kernel multiquadric --include-gv --update-known-values`
