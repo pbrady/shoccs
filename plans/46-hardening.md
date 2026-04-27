@@ -116,15 +116,38 @@ cd scripts/stencil_gen && uv run python -m sweeps optimize --scheme E4 --kernel 
   - File: `scripts/stencil_gen/stencil_gen/optimizer.py`, `scripts/stencil_gen/sweeps/brady2d_sweep.py`, `scripts/stencil_gen/stencil_gen/benchmarks/brady2d_calibration.py`, `scripts/stencil_gen/sweeps/_pareto_io.py`
   - Test: `cd scripts/stencil_gen && uv run pytest tests/test_pareto.py tests/test_sweep_pareto.py -x -q -k "kreiss or non_normality or complex"`
 
+- [ ] **46.2b.1** (review follow-up to `16e11cf`): strip heavy diagnostic arrays from the serialized `kreiss` subdict in all three `_report_to_dict` copies:
+  - The 46.2b commit (`16e11cf`) wrote `out["kreiss"] = dataclasses.asdict(report.kreiss)` unfiltered. `KreissResult` contains two `Optional[np.ndarray]` fields tagged `repr=False` for diagnostics: `sigma_min_field` (shape `s_grid_shape`, default `(30, 80)` per `layer2_kreiss_gks`) and `s_grid` (same shape, complex). Both are populated by every `kreiss_stability_check` return path (`gks_kreiss.py:475–563`). Empirically a single record now serializes to ~41 KB (verified via `_report_to_dict` round-trip with a default-grid `KreissResult`); a 50-member Pareto front would write a ~2 MB JSON file vs. the prior ~30 KB.
+  - Note also: the plan-text claim "currently latent — layer2_kreiss_gks populates report.kreiss, not report.layer2" is wrong. `_run_layered_stability_analysis` at `brady2d_stability.py:1210` does `report.kreiss = kr` whenever `max_layer >= 2`, so the bloat affects every Pareto run that rebuilds reports (the default path through `nsga2_pareto_front` at `stencil_gen/pareto.py:464`). The 46.2b code is correct in spirit but currently dumps far more than is useful.
+  - Fix in each of the three copies (`stencil_gen/optimizer.py:758`, `sweeps/brady2d_sweep.py:235`, `stencil_gen/benchmarks/brady2d_calibration.py:120`):
+    ```python
+    if report.kreiss is not None:
+        kr_dict = dataclasses.asdict(report.kreiss)
+        kr_dict.pop("sigma_min_field", None)
+        kr_dict.pop("s_grid", None)
+        out["kreiss"] = kr_dict
+    ```
+    (Use `out` for the optimizer/sweep copies and `d` for the calibration copy — match the local variable name already in scope.)
+  - Do NOT remove the `complex` handler from `_ParetoEncoder` — `witness_s` is still a `complex` and still needs encoding. `s_grid_shape` is a `tuple[int, ...]` and continues to serialize as a list via the default JSON encoder.
+  - File: `scripts/stencil_gen/stencil_gen/optimizer.py`, `scripts/stencil_gen/sweeps/brady2d_sweep.py`, `scripts/stencil_gen/stencil_gen/benchmarks/brady2d_calibration.py`
+  - Test: `cd scripts/stencil_gen && uv run pytest tests/test_optimizer.py tests/test_pareto.py tests/test_sweep_pareto.py -x -q -k "kreiss"` (after 46.2d adds the schema-parity test that exercises this)
+
+- [ ] **46.2b.2** (review follow-up to `16e11cf`): correct two factual errors in the 46.2b plan-text body so the next pass starts from accurate background:
+  - Replace "(matches the convention in `brady2d_cli.py:28`)" with a note that `brady2d_cli.py:36–37` actually serializes `complex` as `{"real": ..., "imag": ...}` (dict form), and that the `_ParetoEncoder` deliberately diverges to `[real, imag]` (list form) because the existing Pareto JSON consumers (`load_pareto_front` callers, `TestRegressionBrady2DPareto`) treat objective arrays as positional lists. Cite the divergence explicitly so future readers don't "fix" the inconsistency by mistake.
+  - Replace the "(currently latent — `layer2_kreiss_gks` populates `report.kreiss`, not `report.layer2`, in plan 41's design)" parenthetical with an accurate statement: `report.kreiss` is populated alongside `report.layer2` whenever `max_layer >= 2` (`brady2d_stability.py:1210`); the field is *not* latent. Keep the rest of the rationale (Pareto JSON would crash without the `complex` handler) — that part is still correct.
+  - File: `plans/46-hardening.md`
+  - Test: `grep -c 'currently latent' plans/46-hardening.md` (expect 0)
+
 - [ ] **46.2c** Add `layer8` serialization to `brady2d_calibration._report_to_dict`:
   - File: `scripts/stencil_gen/stencil_gen/benchmarks/brady2d_calibration.py:66`. The other two copies already handle `layer8`; this one diverges. Calibration is currently always `max_layer ≤ 7`, so the gap is benign — but plan 47 (Multi-Fidelity BO) might want to calibrate at L8, and a silent drop would be a debugging nightmare.
   - File: `scripts/stencil_gen/stencil_gen/benchmarks/brady2d_calibration.py`
   - Test: `cd scripts/stencil_gen && uv run pytest tests/test_benchmarks.py -x -q -k "calibration and layer8"` (test added in 46.2d)
 
 - [ ] **46.2d** Add `TestReportToDictSchemaParity` to `tests/test_optimizer.py`:
-  - Build a fully-populated `StabilityReport` with all 15 fields set (use synthetic data; no need for real eigenvalues).
+  - Build a fully-populated `StabilityReport` with all 15 fields set (use synthetic data; no need for real eigenvalues). Populate `kreiss` with a `KreissResult` whose `sigma_min_field` and `s_grid` are non-None ndarrays (e.g., `np.zeros((30, 80))` and `np.zeros((30, 80), dtype=complex)`) — this mirrors the real `layer2_kreiss_gks` output.
   - Run each of the three `_report_to_dict` copies on it.
   - Assert each output has all expected keys for the layers run, plus `compute_time`, `failed_layer`, `failed_reason`, `overall_verdict`, `non_normality`, `kreiss`.
+  - **Bloat guard (per 46.2b.1):** assert `"sigma_min_field" not in out["kreiss"]` and `"s_grid" not in out["kreiss"]` for each serializer. Without the strip, this assertion catches a regression that re-introduces ~40 KB of diagnostic data per Pareto record. Also assert `len(json.dumps(out, cls=_ParetoEncoder)) < 4096` for the synthetic report — comfortably above the legitimate scalar payload (~1 KB) but well below what un-stripped diagnostic arrays produce.
   - Run the result through `json.dumps` with `_ParetoEncoder` to confirm no crash.
   - Single test, parametrized over the three copies: `@pytest.mark.parametrize("serializer", [opt._report_to_dict, sweep._report_to_dict, calib._report_to_dict])`.
   - Future-proofs the schema: any new field added to `StabilityReport` will fail this test until added to all serializers.
@@ -223,7 +246,7 @@ cd scripts/stencil_gen && uv run python -m sweeps optimize --scheme E4 --kernel 
   ↓
 46.1a → 46.1b                            # sibling non-determinism + test
   ↓
-46.2a → 46.2b → 46.2c → 46.2d            # schema completeness across 3 _report_to_dict copies
+46.2a → 46.2b → 46.2b.1 → 46.2b.2 → 46.2c → 46.2d   # schema completeness + 16e11cf review follow-ups
   ↓
 46.3a → 46.3b → 46.3c                    # activate TestRegressionGV (tension, gaussian, multiquadric)
   ↓
