@@ -101,7 +101,7 @@ cd scripts/stencil_gen && uv run python -m sweeps optimize --scheme E4 --kernel 
 
 ### 46.2 — Schema completeness: `_report_to_dict` × 3 + `_ParetoEncoder`
 
-- [ ] **46.2a** Add `compute_time` serialization to two of the three `_report_to_dict` copies:
+- [x] **46.2a** Add `compute_time` serialization to two of the three `_report_to_dict` copies:
   - `scripts/stencil_gen/stencil_gen/optimizer.py` line ~706: append `"compute_time": float(report.compute_time)` to the returned dict.
   - `scripts/stencil_gen/sweeps/brady2d_sweep.py` line ~195: same addition.
   - The third copy (`brady2d_calibration.py:72`) already has it — leave alone.

@@ -715,6 +715,7 @@ def _report_to_dict(report) -> dict[str, Any]:
         "overall_verdict": getattr(report, "overall_verdict", "unknown"),
         "failed_layer": getattr(report, "failed_layer", None),
         "failed_reason": getattr(report, "failed_reason", ""),
+        "compute_time": float(getattr(report, "compute_time", 0.0)),
     }
     if getattr(report, "layer1", None) is not None:
         out["layer1"] = {

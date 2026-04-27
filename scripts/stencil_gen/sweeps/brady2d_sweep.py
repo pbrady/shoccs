@@ -198,6 +198,7 @@ def _report_to_dict(report: StabilityReport) -> dict[str, Any]:
         "overall_verdict": report.overall_verdict,
         "failed_layer": report.failed_layer,
         "failed_reason": report.failed_reason,
+        "compute_time": float(report.compute_time),
     }
     if report.layer1 is not None:
         out["layer1"] = {k: float(v) for k, v in report.layer1.items() if isinstance(v, (int, float))}
