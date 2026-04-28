@@ -451,13 +451,14 @@ class TestBOCLI:
         assert staged_calls[0]["bounds"] == [(0.5, 20.0)]
         # Plan-body literal: n_restarts=10 for the baseline.
         assert staged_calls[0]["n_restarts"] == 10
-        # Plan 47.5b.1 (fix branch 2): inner_gate / inner_max_layer must NOT
-        # be passed explicitly — staged's canonical defaults flow through so
-        # the baseline matches "vanilla run_staged_optimize" modulo only the
-        # validator-depth fairness fix.  HF=L3 here ⇒ validator_max_layer=3
-        # (max(hf_level, 3)).
-        assert "inner_gate" not in staged_calls[0]
-        assert "inner_max_layer" not in staged_calls[0]
+        # Plan 47.5b.1.1 (fix branch 1): the BO baseline must match
+        # ``python -m sweeps optimize --method staged ...``'s CLI-resolved
+        # defaults (the user-facing reference) rather than
+        # ``run_staged_optimize``'s function-level defaults.  CLI form is
+        # ``inner_max_layer=3``, ``inner_gate=max(3-1,0)=2``.  HF=L3 here ⇒
+        # ``validator_max_layer=3`` (``max(hf_level, 3)`` fairness fix).
+        assert staged_calls[0]["inner_gate"] == 2
+        assert staged_calls[0]["inner_max_layer"] == 3
         assert staged_calls[0]["validator_max_layer"] == 3
         out = capsys.readouterr().out
         # New behaviour: side-by-side comparison appears.
@@ -469,12 +470,14 @@ class TestBOCLI:
     def test_baseline_staged_uses_canonical_inner_gate_at_hf_l7(
         self, monkeypatch, capsys
     ):
-        """Plan 47.5b.1: with HF=L7, validator_max_layer flows through as 7
-        and ``inner_gate`` / ``inner_max_layer`` stay at staged's canonical
-        defaults (not passed by the BO baseline shim).
+        """Plan 47.5b.1.1: with HF=L7, the BO baseline matches the
+        ``sweeps optimize --method staged`` CLI defaults (``inner_gate=2``,
+        ``inner_max_layer=3``) and lifts ``validator_max_layer`` to 7
+        (fairness fix tracking MF-BO's HF target).
 
-        This is the second half of the 47.5b.1 contract: fairness-fix raises
-        validator depth; canonical defaults preserve the inner-stage gate.
+        This is the second half of the 47.5b.1.1 contract: fairness-fix
+        raises validator depth; the CLI-default inner-stage gate is
+        passed explicitly so the baseline is what users actually invoke.
         """
         from dataclasses import replace
 
@@ -547,7 +550,10 @@ class TestBOCLI:
         assert len(staged_calls) == 1
         # Fairness fix: validator depth tracks MF-BO's HF target.
         assert staged_calls[0]["validator_max_layer"] == 7
-        # Canonical defaults preserved.
-        assert "inner_gate" not in staged_calls[0]
-        assert "inner_max_layer" not in staged_calls[0]
+        # CLI-default inner-stage gate (plan 47.5b.1.1, fix branch 1):
+        # ``inner_max_layer = min(3, validator_max_layer) = 3``,
+        # ``inner_gate = max(inner_max_layer - 1, 0) = 2``.  Same values
+        # for HF=L3 and HF=L7 because ``min(3, ...)`` saturates at 3.
+        assert staged_calls[0]["inner_gate"] == 2
+        assert staged_calls[0]["inner_max_layer"] == 3
         capsys.readouterr()
