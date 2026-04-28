@@ -557,3 +557,173 @@ class TestBOCLI:
         assert staged_calls[0]["inner_gate"] == 2
         assert staged_calls[0]["inner_max_layer"] == 3
         capsys.readouterr()
+
+
+# ---------------------------------------------------------------------------
+# TestBaselineStaged — failure-mode coverage for ``--baseline staged`` (47.5b.2)
+# ---------------------------------------------------------------------------
+
+
+class TestBaselineStaged:
+    """Plan 47.5b.2: a baseline failure must not lose the MF-BO investment.
+
+    Pre-fix, an exception from ``run_staged_optimize`` propagated past the
+    summary-print and ``--persist`` blocks, discarding the ~5 minutes of
+    BO wall-time the user just invested.  These tests pin the post-fix
+    contract: the failure is recorded under
+    ``result.extras["baseline"]["error"]``, the run continues to print and
+    persist, and the summary table renders cleanly with ``None``-valued
+    numeric fields.
+    """
+
+    def test_baseline_failure_does_not_lose_persistence(
+        self, monkeypatch, capsys, tmp_path
+    ):
+        """Plan 47.5b.2: ``run_staged_optimize`` raising still leaves a
+        persisted MF-BO JSON on disk with the baseline failure recorded."""
+        from dataclasses import replace
+
+        history = (
+            _make_bo_eval(fidelity=1, value=0.10),
+            _make_bo_eval(fidelity=3, value=-1.0e-3),
+        )
+
+        def _fake_run_mfbo(**kwargs):
+            stub = _make_bo_result(history)
+            return replace(
+                stub,
+                fidelity_levels=(1, 3),
+                hf_level=3,
+                report_fields_by_layer={
+                    1: "layer1.boundary_gv_err",
+                    3: "layer3.max_stab_eig",
+                },
+                cost_model={1: 0.076, 3: 0.038},
+                n_evals_per_fidelity={1: 5, 3: 5},
+                wall_time_per_fidelity={1: 0.4, 3: 0.2},
+                bounds=((0.5, 20.0),),
+                kernel="tension",
+                best_x=np.array([10.0]),
+                best_params={"sigma": 10.0},
+                best_objective=-1.0e-3,
+                extras={"n_sentinel_filtered": 0},
+            )
+
+        def _boom(**kwargs):
+            raise RuntimeError("synthetic baseline boom")
+
+        # Redirect the persist target so the test does not write into the
+        # repo's ``sweeps/bo_runs/`` directory.  Patching ``BO_RUNS_DIR`` is
+        # not sufficient because ``save_bo_run`` binds its ``directory``
+        # default at function-definition time; wrap the call instead.
+        import sweeps._bo_io as bo_io_mod
+
+        original_save = bo_io_mod.save_bo_run
+
+        def _save_to_tmp(result, directory=tmp_path):
+            return original_save(result, directory=directory)
+
+        monkeypatch.setattr(bo_cli, "run_mfbo", _fake_run_mfbo)
+        monkeypatch.setattr(bo_cli, "run_staged_optimize", _boom)
+        monkeypatch.setattr(bo_io_mod, "save_bo_run", _save_to_tmp)
+
+        rc = bo_cli.main(
+            [
+                "--scheme", "E4",
+                "--kernel", "tension",
+                "--objective", "layer3.max_stab_eig",
+                "--cheap-fidelities", "1",
+                "--bounds", "0.5", "20",
+                "--budget-evals", "10",
+                "--seed", "1",
+                "--baseline", "staged",
+                "--persist",
+            ]
+        )
+        # (a) run completes despite the baseline failure.
+        assert rc == 0
+
+        # (b) persisted JSON exists.
+        persisted = tmp_path / "E4_tension_layer3_max_stab_eig_1.json"
+        assert persisted.exists(), (
+            f"persisted file missing; tmp_path contents: {list(tmp_path.iterdir())}"
+        )
+
+        # (c) extras.baseline.error captures the exception message.
+        payload = json.loads(persisted.read_text())
+        baseline = payload["extras"]["baseline"]
+        assert "RuntimeError" in baseline["error"]
+        assert "synthetic baseline boom" in baseline["error"]
+        assert baseline["method"] == "staged"
+
+        # (d) MF-BO fields are present and finite (the BO investment is preserved).
+        assert "best_x" in payload
+        assert payload["best_x"] == [10.0]
+        assert payload["best_objective"] == pytest.approx(-1.0e-3)
+        assert len(payload["eval_history"]) > 0
+
+        # (e) stdout warns about the failure but does not raise.
+        out = capsys.readouterr().out
+        assert "--baseline staged: run_staged_optimize raised" in out
+        assert "RuntimeError" in out
+
+    def test_baseline_failure_print_summary_renders(self, monkeypatch, capsys):
+        """Plan 47.5b.2: ``_print_summary`` survives a None-valued baseline_record.
+
+        The failure-sentinel dict has ``best_objective=None`` and
+        ``compute_time=None``; the ``isinstance(sg_obj, (int, float))``
+        branch on ``bo.py:271`` is the only thing keeping the summary
+        formatting from raising ``TypeError`` on the missing numerics.
+        """
+        from dataclasses import replace
+
+        def _fake_run_mfbo(**kwargs):
+            stub = _make_bo_result()
+            return replace(
+                stub,
+                fidelity_levels=(1, 3),
+                hf_level=3,
+                report_fields_by_layer={
+                    1: "layer1.boundary_gv_err",
+                    3: "layer3.max_stab_eig",
+                },
+                cost_model={1: 0.076, 3: 0.038},
+                n_evals_per_fidelity={1: 5, 3: 5},
+                wall_time_per_fidelity={1: 0.4, 3: 0.2},
+                bounds=((0.5, 20.0),),
+                kernel="tension",
+                best_x=np.array([10.0]),
+                best_params={"sigma": 10.0},
+                best_objective=-1.0e-3,
+                extras={"n_sentinel_filtered": 0},
+            )
+
+        def _boom(**kwargs):
+            raise ValueError("synthetic boom for summary")
+
+        monkeypatch.setattr(bo_cli, "run_mfbo", _fake_run_mfbo)
+        monkeypatch.setattr(bo_cli, "run_staged_optimize", _boom)
+
+        rc = bo_cli.main(
+            [
+                "--scheme", "E4",
+                "--kernel", "tension",
+                "--objective", "layer3.max_stab_eig",
+                "--cheap-fidelities", "1",
+                "--bounds", "0.5", "20",
+                "--budget-evals", "10",
+                "--seed", "1",
+                "--baseline", "staged",
+            ]
+        )
+        assert rc == 0
+
+        out = capsys.readouterr().out
+        # Side-by-side comparison still rendered (None coerces to "None"
+        # via the ``str(sg_obj)`` else-branch).
+        assert "comparison (side-by-side)" in out
+        assert "staged" in out
+        # The MF-BO row is still well-formed in scientific notation.
+        assert "BoTorch-qMFKG" in out
+        # Failure breadcrumb visible.
+        assert "synthetic boom for summary" in out

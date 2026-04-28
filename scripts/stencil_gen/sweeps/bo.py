@@ -670,13 +670,38 @@ def main(argv: list[str] | None = None) -> int:
         parser.error(str(exc))
 
     # --- baseline (47.5b) ---------------------------------------------------
+    # A baseline failure must NOT lose the MF-BO investment (plan 47.5b.2):
+    # ``run_staged_optimize`` can blow up on ill-conditioned candidates or
+    # propagate exceptions from ``brady2d_stability_score``; for ~5-minute
+    # benchmark runs that means a successful BOResult is silently discarded
+    # before ``--persist`` fires.  Mirror the failure-record convention from
+    # :func:`_run_cpp_validation` (``l8_error`` on the L8-raises path) — record
+    # ``error`` plus None-valued numeric fields so :func:`_print_summary`'s
+    # ``isinstance(sg_obj, (int, float))`` branch falls through to ``str(...)``
+    # and the persisted JSON captures the failure for post-hoc inspection.
     baseline_record: dict | None = None
     if args.baseline == "staged":
-        baseline_record = _run_staged_baseline(
-            result,
-            bounds=bounds,
-            seed=args.seed,
-        )
+        try:
+            baseline_record = _run_staged_baseline(
+                result,
+                bounds=bounds,
+                seed=args.seed,
+            )
+        except Exception as exc:
+            msg = f"{type(exc).__name__}: {exc}"
+            print(
+                f"\n[bo] --baseline staged: run_staged_optimize raised {msg}; "
+                "continuing without baseline."
+            )
+            baseline_record = {
+                "error": msg,
+                "method": "staged",
+                "compute_time": None,
+                "best_objective": None,
+                "best_x": None,
+                "n_evals": 0,
+                "n_evals_at_hf": 0,
+            }
         result.extras["baseline"] = baseline_record
 
     # --- C++ validation (47.5a) --------------------------------------------
