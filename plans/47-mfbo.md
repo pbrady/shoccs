@@ -424,7 +424,7 @@ cd scripts/stencil_gen && SYMPY_CACHE_SIZE=50000 uv run python -m sweeps bo \
       - Mutex guard fires correctly: `uv run python -m sweeps bo --scheme E4 --kernel tension --objective layer3.max_stab_eig --cheap-fidelities 1` exits with `sweeps bo: error: one of the arguments --budget-evals --budget-seconds is required`. The `n_init` budget-vs-init-design guard from 47.3b.1 also fires correctly under the dispatch path: `--budget-evals 4` (with default `n_init=8`) errors with `sweeps.bo: error: budget_evals=4 too small for initial design n_init=8: ...` (the inner parser's prog tag). Demonstrates that errors raised by `bo_main` after parse-time correctly surface through the `__main__.py` shim.
     - No regressions to other subcommands. Only changes are additions: one new subparser block, one new dispatch branch.
 
-- [ ] **47.4c** Create `scripts/stencil_gen/sweeps/_bo_io.py` with persistence helpers, modeled on `_pareto_io.py`:
+- [x] **47.4c** Create `scripts/stencil_gen/sweeps/_bo_io.py` with persistence helpers, modeled on `_pareto_io.py`:
   - `BO_RUNS_DIR: Path = Path(__file__).parent / "bo_runs"`.
   - `save_bo_run(result: BOResult, directory: Path = BO_RUNS_DIR) -> Path`:
     - Filename: `{scheme}_{kernel}_{mangled_objective}_{seed}.json`. Including seed avoids clobbering across replicates.
@@ -435,6 +435,11 @@ cd scripts/stencil_gen && SYMPY_CACHE_SIZE=50000 uv run python -m sweeps bo \
   - Create `sweeps/bo_runs/.gitkeep` so the empty directory tracks (matches `pareto_fronts/` convention).
   - File: `scripts/stencil_gen/sweeps/_bo_io.py` (new), `scripts/stencil_gen/sweeps/bo_runs/.gitkeep` (new)
   - Test: `cd scripts/stencil_gen && uv run pytest tests/test_sweep_bo.py -x -q -k "TestBOIO"`
+  - **Done 2026-04-28.** New file `scripts/stencil_gen/sweeps/_bo_io.py` (~150 lines) — `BO_RUNS_DIR`, `_mangle_objective`, `_BOEncoder`, `_eval_to_ordered`, `_result_to_ordered`, `save_bo_run`, `load_bo_run`, `iter_bo_runs`. Followed `_pareto_io.py` structure verbatim. Created `sweeps/bo_runs/.gitkeep` to track the empty directory. Three notes for 47.4d's test designer:
+    - **Filename format pinned:** `{scheme}_{kernel}_{mangled_HF_field}_{seed}.json` where the HF field is read from `result.report_fields_by_layer[result.hf_level]` (NOT iterated across all layer fields — BO has a single objective, the HF target). Mangling collapses to a one-liner `field.replace(".", "_")` since there is no tuple to join (no `__` separator like Pareto). The 47.4d `test_filename_includes_seed` will assert that `_1.json` and `_2.json` produce two distinct files.
+    - **Smoke-tested end-to-end:** `python -m sweeps bo --scheme E4 --kernel tension --objective layer3.max_stab_eig --cheap-fidelities 1 --bounds 0.5 20 --budget-evals 10 --seed 1 --n-init 8 --persist` writes `E4_tension_layer3_max_stab_eig_1.json` with a 713-line JSON payload (best_x, eval_history with 10 entries, full per-fidelity breakdown). Round-trip via `json.load` reproduces all 22 BOResult top-level fields and the nested BOEval list. Complex-value handling verified by injecting `extras={"witness_s": 1.0+2.0j}` — encoder emits `[1.0, 2.0]` without `TypeError`. Removed the smoke-test JSON; only `.gitkeep` remains in `bo_runs/`.
+    - **CLI `--persist` already wired (plan 47.4a deferral path):** `sweeps/bo.py` lines 471–481 attempt `from ._bo_io import save_bo_run` inside a try/except ImportError. With `_bo_io.py` now present, the success branch fires; the deferred-message branch is dead code. 47.4a's pre-existing comment "deferred to plan 47.4c" is technically stale but the runtime path is correct. Clean up in 47.4d if convenient (e.g. promote the import to module top).
+    - **Test stub:** `tests/test_sweep_bo.py` is 47.4d's deliverable — the plan's `Test:` line above is forward-looking (same convention as 47.1a/b/2a/2b/2c/3a). Adjacent test suite (`tests/test_bo.py + test_pareto.py + test_optimizer.py` = 225 passed, 12 skipped) green at 6m03s; no regression.
 
 - [ ] **47.4d** Tests in `tests/test_sweep_bo.py` (new) — `TestBOCLI` (6) + `TestBOIO` (5):
   - `TestBOCLI::test_argparse_minimal_invocation` — mock `run_mfbo`, verify CLI dispatch.
