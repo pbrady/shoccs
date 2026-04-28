@@ -1612,17 +1612,39 @@ class TestRunMFBO:
             f"(hf_on={hf_on}/{len(acq_on)}); mechanism inert"
         )
 
-    def test_adaptive_hf_floor_reverts_when_cheap_predicate_fails(self):
-        # 47.3i: when the cheap surrogate is NOT well-fit (n_cheap_finite <
-        # max(2*d, K)), the mechanism is inactive and on-run reproduces the
-        # off-run behaviour.  Construct an init where the cheap row count
-        # falls short of the threshold throughout the (single) acquisition
-        # iteration: ``d=2, K=2 ⇒ threshold = max(2*d=4, K=2) = 4``.  With
-        # ``n_init=6, hf_anchors=3, mid_anchors=0`` (silently zeroed for
-        # K=2), n_cheap=3 < 4 in the init.  Setting ``budget_evals=7``
-        # leaves room for exactly the init + final HF re-eval — no
-        # acquisition iterations run, so the cost-table-affecting block
-        # is never reached.  The two runs must be bytewise identical.
+    def test_adaptive_hf_floor_reverts_when_cheap_predicate_fails(
+        self, monkeypatch
+    ):
+        # 47.3i.1 (gap 1): when ``cheap_well_fit`` is False, the cost-floor
+        # block at ``bo.py:1538-1593`` MUST be entered (``adaptive_hf_floor``
+        # is not None) but the swap branch at line 1579 MUST NOT fire — the
+        # effective cost table reverts to ``cost_table_resolved``.
+        #
+        # The pre-47.3i.1 form of this test (``budget_evals=7``) was
+        # vacuous: the acquisition loop never ran (init exhausted the
+        # budget on entry), so the cost-floor block was never visited and
+        # the bytewise-equality assertions held trivially regardless of
+        # the predicate logic.  Bumping to ``budget_evals=8`` runs exactly
+        # one acquisition iteration with ``n_cheap=3 < threshold=4`` at
+        # the start, so the cost-floor block IS entered but the swap
+        # branch IS NOT.  A spy on ``bo.build_cost_model`` records every
+        # cost table passed to it; we assert (a) ≥1 call (the loop ran)
+        # and (b) every recorded table equals ``cost_table_resolved``
+        # (the swap branch never fired).  If line 1579 is inverted or
+        # removed, the swap fires when ``cheap_well_fit=False`` and at
+        # least one recorded table will differ.
+        #
+        # Deviation from the 47.3i.1 plan body's "rewrite the test so at
+        # least 2 acquisition iterations actually execute": holding
+        # ``cheap_well_fit=False`` across 2+ iters is hard because each
+        # cheap pick bumps ``n_cheap_finite`` toward the threshold, and
+        # forcing HF picks via ``hf_priority_warmup`` makes the cost
+        # utility's argmax fidelity-invariant (all candidates same cost)
+        # — defeating the broken-predicate divergence.  One iter with
+        # spy instrumentation gives a stricter contract than two iters
+        # with bytewise-equality alone, since the spy catches a single
+        # erroneous swap directly rather than relying on the trajectory
+        # diverging from it.
         bounds = [(-1.0, 1.0), (-1.0, 1.0)]
         report_fields = {
             1: "layer1.boundary_gv_err",
@@ -1642,18 +1664,68 @@ class TestRunMFBO:
             kernel="classical",
             report_fields_by_layer=report_fields,
             bounds=bounds,
-            budget_evals=7,
+            budget_evals=8,
             n_init=6,
-            hf_anchors=3,  # n_cheap = 6 - 3 - 0 = 3 < max(4, 2) = 4
+            hf_anchors=3,  # n_cheap = 6 - 3 - 0 = 3 < max(2*2, 2) = 4
             cost_table=cost_table,
             seed=0,
             objective=objective,
         )
+
+        # Force ``hf_uncertain=True`` by patching τ=0 so the criterion
+        # ``var_hf_grid > 0 * spread_hf**2 = 0`` is satisfied for any
+        # positive posterior variance.  This isolates the
+        # ``cheap_well_fit`` arm of the AND gate at line 1579: the swap
+        # is then prevented ONLY by ``cheap_well_fit=False``, so a
+        # mutation that drops ``cheap_well_fit`` exposes the bug.
+        # Without this patch, ``hf_uncertain`` could be False on its own
+        # (e.g., on a confidently-fit GP), making the test silently
+        # pass even with a partially-removed predicate.
+        import stencil_gen.bo as bo_mod
+        monkeypatch.setattr(bo_mod, "_ADAPTIVE_HF_FLOOR_TAU", 0.0)
+
+        # Spy on bo.build_cost_model: record every cost table passed to it.
+        real_build = bo_mod.build_cost_model
+        recorded: list[dict] = []
+
+        def spy(table, **kw):
+            recorded.append(dict(table))
+            return real_build(table, **kw)
+
+        monkeypatch.setattr(bo_mod, "build_cost_model", spy)
+
         r_off = run_mfbo(**common)
+        recorded.clear()  # off-run records irrelevant; reset for on-run
+
         r_on = run_mfbo(adaptive_hf_floor=1.0, **common)
 
-        # When the cheap-well-fit predicate is never true, the mechanism
-        # produces exactly the same trajectory.
+        # The acquisition loop must have run at least once (so the
+        # cost-floor block was entered).  With n_init=6 and
+        # budget_evals=8, the loop runs exactly once before the budget
+        # check exits (reserving one slot for the final HF re-eval).
+        assert len(recorded) >= 1, (
+            f"acquisition loop never ran (recorded={len(recorded)}); "
+            f"the cost-floor block at bo.py:1538-1593 was never entered. "
+            f"stop_reason={r_on.stop_reason!r}, "
+            f"n_evals_total={sum(r_on.n_evals_per_fidelity.values())}"
+        )
+
+        # cost_table_resolved is the raw user-supplied table (NOT floored;
+        # build_cost_model applies its own internal floor).  When the
+        # swap branch is skipped, effective_cost_table = cost_table_resolved.
+        expected_table = dict(cost_table)
+        for i, t in enumerate(recorded):
+            assert t == expected_table, (
+                f"call #{i} cost table {t} differs from expected "
+                f"{expected_table}: the swap branch fired despite "
+                f"cheap_well_fit=False (n_cheap=3 < max(4, 2)=4). "
+                f"This means the predicate at bo.py:1579 was inverted "
+                f"or removed (the cheap_well_fit gate is no longer "
+                f"blocking the swap)."
+            )
+
+        # Bytewise trajectory equality (the original 47.3i contract):
+        # with no swap, on-run reproduces off-run.
         np.testing.assert_allclose(
             r_off.best_x, r_on.best_x, atol=1e-9,
             err_msg="adaptive floor changed best_x despite predicate failure",
@@ -1662,6 +1734,117 @@ class TestRunMFBO:
         assert r_off.n_evals_per_fidelity == r_on.n_evals_per_fidelity, (
             f"adaptive floor changed eval counts despite predicate failure: "
             f"off={dict(r_off.n_evals_per_fidelity)} "
+            f"on={dict(r_on.n_evals_per_fidelity)}"
+        )
+
+    def test_adaptive_hf_floor_reverts_when_certain(self, monkeypatch):
+        # 47.3i.1 (gap 2): when the HF posterior is "certain" (i.e., the
+        # ``hf_uncertain`` predicate is False), the cost-floor block at
+        # ``bo.py:1538-1593`` MUST be entered but the swap branch at
+        # line 1579 MUST NOT fire — the effective cost table reverts to
+        # ``cost_table_resolved``.
+        #
+        # Mechanism: monkeypatch ``_ADAPTIVE_HF_FLOOR_TAU`` to a huge
+        # value so the criterion ``var_hf_grid > τ * spread_hf**2``
+        # cannot be satisfied (the GP posterior variance is bounded by
+        # ``Y_train`` range squared, so any tau ≫ 1 / spread^2 makes
+        # ``hf_uncertain`` permanently False).  With ``cheap_well_fit``
+        # held True (n_cheap=5 ≥ max(2*d=4, K=2)=4), this exercises the
+        # ``and`` short-circuit on the OTHER side of the predicate from
+        # the gap-1 test.  Across multiple acquisition iterations, the
+        # spy records every cost table passed to ``build_cost_model``;
+        # all must equal ``cost_table_resolved`` (no swap fired).
+        #
+        # If line 1579 is inverted or removed, the swap fires (because
+        # the gate intended to keep it inactive when hf_uncertain=False
+        # is bypassed) and the recorded tables diverge from
+        # ``cost_table_resolved``.
+        bounds = [(-1.0, 1.0), (-1.0, 1.0)]
+        report_fields = {
+            1: "layer1.boundary_gv_err",
+            7: "layer7.max_spectral_abscissa",
+        }
+        cost_table = {1: 0.01, 7: 1.0}
+        x_star = np.array([0.3, -0.2])
+
+        def objective(x, m):
+            x = np.asarray(x, dtype=float)
+            biases = {1: 1000.0, 7: 0.0}
+            val = float(np.sum((x - x_star) ** 2)) + biases.get(m, 0.0)
+            return val, 0.001, {}
+
+        common = dict(
+            scheme="E2",
+            kernel="classical",
+            report_fields_by_layer=report_fields,
+            bounds=bounds,
+            budget_evals=12,
+            n_init=8,
+            hf_anchors=3,  # n_cheap = 8 - 3 - 0 = 5 ≥ max(4, 2) = 4
+            cost_table=cost_table,
+            seed=0,
+            objective=objective,
+        )
+
+        # Monkeypatch the threshold constant to a huge value so
+        # ``var_hf_grid > τ * spread_hf**2`` is unsatisfiable across the
+        # entire run.  ``_ADAPTIVE_HF_FLOOR_TAU`` is a module-level
+        # constant in ``stencil_gen.bo`` (default 0.01); patching to
+        # 1e30 forces the absolute threshold above any plausible
+        # posterior variance.
+        import stencil_gen.bo as bo_mod
+        monkeypatch.setattr(bo_mod, "_ADAPTIVE_HF_FLOOR_TAU", 1e30)
+
+        # Spy on bo.build_cost_model — same instrumentation as gap 1.
+        real_build = bo_mod.build_cost_model
+        recorded: list[dict] = []
+
+        def spy(table, **kw):
+            recorded.append(dict(table))
+            return real_build(table, **kw)
+
+        monkeypatch.setattr(bo_mod, "build_cost_model", spy)
+
+        r_off = run_mfbo(**common)
+        recorded.clear()
+
+        r_on = run_mfbo(adaptive_hf_floor=1.0, **common)
+
+        # The loop must run at least once.  With n_init=8 and
+        # budget_evals=12, the loop runs ≥1 acquisition iteration
+        # before the budget check (reserving one slot for the final HF
+        # re-eval).  Larger budget than the gap-1 test, so we can
+        # exercise the cost-floor block multiple times.
+        assert len(recorded) >= 1, (
+            f"acquisition loop never ran (recorded={len(recorded)}); "
+            f"the cost-floor block at bo.py:1538-1593 was never entered. "
+            f"stop_reason={r_on.stop_reason!r}, "
+            f"n_evals_total={sum(r_on.n_evals_per_fidelity.values())}"
+        )
+
+        # Every recorded cost table must equal cost_table_resolved.
+        # When ``hf_uncertain=False`` (forced by the τ patch), the swap
+        # branch is skipped regardless of ``cheap_well_fit``.
+        expected_table = dict(cost_table)
+        for i, t in enumerate(recorded):
+            assert t == expected_table, (
+                f"call #{i} cost table {t} differs from expected "
+                f"{expected_table}: the swap branch fired despite "
+                f"hf_uncertain=False (forced via τ=1e30 patch). This "
+                f"means the predicate at bo.py:1579 was inverted or "
+                f"removed."
+            )
+
+        # Bytewise trajectory equality: with no swap, on-run = off-run.
+        np.testing.assert_allclose(
+            r_off.best_x, r_on.best_x, atol=1e-9,
+            err_msg="adaptive floor changed best_x despite predicate "
+            "failure (hf_uncertain=False via τ patch)",
+        )
+        assert r_off.stop_reason == r_on.stop_reason
+        assert r_off.n_evals_per_fidelity == r_on.n_evals_per_fidelity, (
+            f"adaptive floor changed eval counts despite predicate "
+            f"failure: off={dict(r_off.n_evals_per_fidelity)} "
             f"on={dict(r_on.n_evals_per_fidelity)}"
         )
 
