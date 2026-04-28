@@ -1029,6 +1029,7 @@ def run_mfbo(
     n_init: int | None = None,
     hf_anchors: int | None = None,
     min_acquisition_iterations: int | None = None,
+    hf_explore_bias: float = 0.0,
     num_fantasies: int = 64,
     verbose: bool = False,
     objective: Callable[[np.ndarray, int], tuple[float, float, dict]] | None = None,
@@ -1108,6 +1109,25 @@ def run_mfbo(
         delay forces the loop to consume some acquisition budget so that the
         incumbent recommendation reflects post-GP-fit evidence rather than
         the DOE alone.
+    hf_explore_bias
+        Target lower bound on the HF fraction of acquisition picks (47.3g).
+        Must lie in ``[0, 1]``.  Default ``0.0`` disables the mechanism and
+        preserves the pre-47.3g cost-aware contract (qMFKG picks ``(x, m)``
+        unconstrained).  When ``> 0``, before each acquisition step we
+        compute the running HF fraction among acquisition picks made so far
+        (the initial design is excluded — its stratification is governed by
+        :func:`build_initial_design`) and, if that fraction would still be
+        below *hf_explore_bias* even after this iteration, we restrict the
+        ``fidelity_choices`` argument to ``optimize_acqf_mixed`` to ``[HF]``
+        only.  qMFKG then picks the optimal ``x`` for HF specifically rather
+        than ``x_next`` chosen for a cheaper layer with the fidelity
+        overridden post-hoc.  This addresses the cost-aware utility's
+        tendency to under-sample HF when the cost ratio is large
+        (``c(HF) / c(cheap) >> 1``) and HF coverage in the GP is still
+        sparse — a regime where the basin floor of the objective cannot be
+        resolved without forcing more HF picks (Wu et al. 2020 §4 motivates
+        a similar quota; the BoTorch tutorial does not, which is why the
+        default is off).
     num_fantasies
         Forwarded to :func:`build_acquisition`.  Default 64.
     verbose
@@ -1153,6 +1173,10 @@ def run_mfbo(
         raise ValueError("report_fields_by_layer must not be empty")
     if not bounds:
         raise ValueError("bounds must be non-empty")
+    if not (0.0 <= hf_explore_bias <= 1.0):
+        raise ValueError(
+            f"hf_explore_bias must lie in [0, 1], got {hf_explore_bias}"
+        )
 
     torch.manual_seed(seed)
     np.random.seed(seed)
@@ -1436,7 +1460,30 @@ def run_mfbo(
                 target_fid_idx,
                 num_fantasies=num_fantasies,
             )
-            x_next, fid_next, _ = optimize(bounds_t, list(range(K)))
+            # 47.3g: HF explore-bias quota.  When ``hf_explore_bias > 0``,
+            # restrict the acquisition's ``fidelity_choices`` to ``[HF]``
+            # only whenever the running HF fraction (among acquisition
+            # picks made so far) is below the target.  qMFKG then picks
+            # the optimal ``x`` for HF specifically rather than re-using
+            # an ``x_next`` chosen for a cheaper layer.  The initial
+            # design's stratification is excluded from the fraction —
+            # ``build_initial_design`` already governs that.
+            fidelity_choices: list[int] = list(range(K))
+            if hf_explore_bias > 0.0:
+                acq_evals = eval_history[n_init_actual:]
+                n_acq_done = len(acq_evals)
+                n_acq_hf_done = sum(
+                    1 for e in acq_evals if e.fidelity == hf_level
+                )
+                # Even if we pick HF this iteration, the post-iter fraction
+                # is ``(n_hf + 1) / (n_done + 1)``.  We force HF whenever
+                # the no-HF projection ``n_hf / (n_done + 1)`` is below
+                # the target — i.e. when picking anything other than HF
+                # would leave the running fraction below quota.
+                projected_no_hf = n_acq_hf_done / (n_acq_done + 1)
+                if projected_no_hf < hf_explore_bias:
+                    fidelity_choices = [target_fid_idx]
+            x_next, fid_next, _ = optimize(bounds_t, fidelity_choices)
         except Exception:
             stop_reason = "error"
             break

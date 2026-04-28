@@ -1278,6 +1278,130 @@ class TestRunMFBO:
                 f"got {n_hf_in_init} (n_init={n_init})"
             )
 
+    # --- 47.3g: HF explore-bias floor on the cost-aware acquisition --------
+
+    def test_hf_explore_bias_validates_range(self):
+        # 47.3g: must lie in [0, 1].  NaN, negative, and >1 all rejected.
+        bounds = [(-1.0, 1.0), (-1.0, 1.0)]
+        common = dict(
+            scheme="E2",
+            kernel="classical",
+            report_fields_by_layer=self._hf_canonical_fields(),
+            bounds=bounds,
+            budget_evals=10,
+            n_init=8,
+            hf_anchors=3,
+            seed=0,
+            objective=lambda x, m: (0.0, 0.0, {}),
+        )
+        for bad in [-0.1, 1.1, float("nan")]:
+            with pytest.raises(ValueError, match="hf_explore_bias"):
+                run_mfbo(hf_explore_bias=bad, **common)
+
+    def test_hf_explore_bias_default_off_preserves_cost_aware_contract(self):
+        # 47.3g: the default (``hf_explore_bias=0.0``) must reproduce the
+        # pre-47.3g behaviour exactly.  Compare two runs identical except
+        # for an explicit ``hf_explore_bias=0.0`` (which should be a no-op
+        # alias for the default).
+        bounds = [(-1.0, 1.0), (-1.0, 1.0)]
+        objective, _ = self._rough_objective()
+        common = dict(
+            scheme="E2",
+            kernel="classical",
+            report_fields_by_layer=self._hf_canonical_fields(),
+            bounds=bounds,
+            budget_evals=15,
+            n_init=8,
+            hf_anchors=3,
+            seed=0,
+            objective=objective,
+        )
+        r_default = run_mfbo(**common)
+        r_explicit_zero = run_mfbo(hf_explore_bias=0.0, **common)
+        np.testing.assert_allclose(
+            r_default.best_x, r_explicit_zero.best_x, atol=1e-9
+        )
+        assert r_default.stop_reason == r_explicit_zero.stop_reason
+        assert (
+            r_default.n_evals_per_fidelity
+            == r_explicit_zero.n_evals_per_fidelity
+        )
+
+    def test_hf_explore_bias_increases_hf_fraction(self):
+        # 47.3g: with the bias enabled, the HF fraction among acquisition
+        # picks must rise to >= the requested target.  Use a high target
+        # (``0.5``) on a 2-fidelity objective with a large cost ratio so
+        # the cost-aware utility otherwise drives most picks to cheap.
+        # The injected ``objective`` skips the cascade; ``cost_table``
+        # is overridden to put cost(L7) = 100 * cost(L1) so HF is
+        # heavily penalised by the inverse-cost utility.
+        bounds = [(-1.0, 1.0), (-1.0, 1.0)]
+        # 2-fidelity (cheap=L1, HF=L7) — Branin-like cost ratio.
+        report_fields = {
+            1: "layer1.boundary_gv_err",
+            7: "layer7.max_spectral_abscissa",
+        }
+        cost_table = {1: 0.01, 7: 1.0}  # 100x cost ratio
+        x_star = np.array([0.3, -0.2])
+
+        def objective(x, m):
+            x = np.asarray(x, dtype=float)
+            biases = {1: 1000.0, 7: 0.0}
+            val = (
+                float(np.sum((x - x_star) ** 2)) + biases.get(m, 0.0)
+            )
+            return val, 0.001, {}
+
+        common = dict(
+            scheme="E2",
+            kernel="classical",
+            report_fields_by_layer=report_fields,
+            bounds=bounds,
+            budget_evals=20,
+            n_init=8,
+            hf_anchors=3,
+            cost_table=cost_table,
+            seed=0,
+            objective=objective,
+        )
+
+        # Without bias: HF fraction among acquisition picks is typically
+        # well below 50% under a 100x cost ratio.
+        r_off = run_mfbo(**common)
+        n_init = 8  # excludes init from the fraction
+        acq_off = r_off.eval_history[n_init:]
+        hf_off = sum(1 for e in acq_off if e.fidelity == 7)
+        # With bias=0.5: HF fraction must reach the target.
+        r_on = run_mfbo(hf_explore_bias=0.5, **common)
+        acq_on = r_on.eval_history[n_init:]
+        hf_on = sum(1 for e in acq_on if e.fidelity == 7)
+
+        # Sanity: at least one acquisition iteration ran in both cases —
+        # otherwise the fraction is undefined.
+        assert len(acq_off) > 0 and len(acq_on) > 0, (
+            f"no acquisition iterations: off={len(acq_off)} on={len(acq_on)} "
+            f"(stop_reasons: off={r_off.stop_reason!r} on={r_on.stop_reason!r})"
+        )
+        frac_on = hf_on / len(acq_on)
+        # The bias enforces fraction >= target after each step.  Allow a
+        # one-pick slack for the very first acquisition (where the
+        # projected fraction starts at 0/1 = 0 < 0.5 ⇒ first pick is
+        # forced HF, then the running fraction climbs).
+        assert frac_on >= 0.5, (
+            f"with bias=0.5, HF fraction {frac_on:.2%} should be >= 50% "
+            f"(hf_on={hf_on}/{len(acq_on)})"
+        )
+        # And the bias must actually have changed something — either the
+        # fraction rose or the run consumed a different number of evals.
+        # We don't pin the exact ``hf_off`` count because the cost-aware
+        # utility's pick is a function of the GP's posterior, which is
+        # sensitive to seed/noise.  We assert the directional contract:
+        # bias-on >= bias-off in HF fraction.
+        frac_off = hf_off / len(acq_off)
+        assert frac_on >= frac_off, (
+            f"bias=0.5 reduced HF fraction: on={frac_on:.2%} off={frac_off:.2%}"
+        )
+
 
 # ---------------------------------------------------------------------------
 # 47.3c: TestAcquisition — qMFKG construction + mixed-optimiser smoke tests
