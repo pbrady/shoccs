@@ -503,6 +503,19 @@ _DEFAULT_COST_FLOOR_RATIO: float = 0.05
 _ADAPTIVE_HF_FLOOR_TAU: float = 0.01
 
 
+# 47.3k.1: floor on the default for ``run_mfbo``'s ``min_acquisition_iterations``
+# kwarg.  The default resolves to ``max(_MIN_ACQ_ITERATIONS_FLOOR, K)`` where
+# ``K`` is the number of fidelity levels.  Raised from ``5`` to ``15`` after
+# the AugmentedBranin sweep documented in plan 47.3k showed ``min_acq=20``
+# lifts the empirical best from ``3.55`` to ``1.25`` (3-seed, 99 s budget-
+# exit) — the GP-uniform-collapse failure mode that the 47.3d combined
+# absolute+relative variance-guard criterion only partially defends against
+# needs more acquisition headroom on smooth synthetic objectives.  Exposed
+# as a module-level constant so 47.3k.4's empirical re-measurement can flip
+# the default without touching :func:`run_mfbo`'s body.
+_MIN_ACQ_ITERATIONS_FLOOR: int = 15
+
+
 def apply_cost_floor(
     cost_table: dict[int, float],
     *,
@@ -1204,14 +1217,16 @@ def run_mfbo(
     min_acquisition_iterations
         Minimum number of acquisition iterations that must run after the
         initial design before the variance early-exit guard can fire (47.3f).
-        When ``None``, defaults to ``max(K, 5)`` where ``K`` is the number of
-        fidelity levels.  Defends against the GP collapsing uniformly to its
-        noise floor on smooth synthetic objectives — the 47.3d combined
+        When ``None``, defaults to ``max(_MIN_ACQ_ITERATIONS_FLOOR, K)`` where
+        ``K`` is the number of fidelity levels and
+        :data:`_MIN_ACQ_ITERATIONS_FLOOR` is currently ``15`` (raised from
+        ``5`` in 47.3k.1).  Defends against the GP collapsing uniformly to
+        its noise floor on smooth synthetic objectives — the 47.3d combined
         absolute+relative criterion is necessary but not sufficient when the
-        initial design alone seeds enough HF data to satisfy both halves; this
-        delay forces the loop to consume some acquisition budget so that the
-        incumbent recommendation reflects post-GP-fit evidence rather than
-        the DOE alone.
+        initial design alone seeds enough HF data to satisfy both halves;
+        this delay forces the loop to consume some acquisition budget so
+        that the incumbent recommendation reflects post-GP-fit evidence
+        rather than the DOE alone.
     hf_explore_bias
         Target lower bound on the HF fraction of acquisition picks (47.3g).
         Must lie in ``[0, 1]``.  Default ``0.0`` disables the mechanism and
@@ -1429,15 +1444,22 @@ def run_mfbo(
         hf_anchors if hf_anchors is not None else max(3, d + 2)
     )
 
-    # 47.3f: minimum acquisition iterations before the variance guard can
-    # fire.  Default ``max(K, 5)``: at least ``K`` so every fidelity gets a
-    # chance to be picked under cost-aware acquisition before we declare
-    # convergence, and at least ``5`` so the GP's posterior at the incumbent
-    # has time to become non-uniform after the DOE.
+    # 47.3f / 47.3k.1: minimum acquisition iterations before the variance
+    # guard can fire.  Default ``max(_MIN_ACQ_ITERATIONS_FLOOR, K)``: at
+    # least ``K`` so every fidelity gets a chance to be picked under cost-
+    # aware acquisition before we declare convergence, and at least
+    # :data:`_MIN_ACQ_ITERATIONS_FLOOR` so the GP's posterior at the
+    # incumbent has time to become non-uniform after the DOE.  The
+    # :data:`_MIN_ACQ_ITERATIONS_FLOOR` was raised from ``5`` to ``15`` in
+    # 47.3k.1 after the AugmentedBranin sweep showed ``min_acq=20`` lifts
+    # the empirical floor from ``3.55`` to ``1.25`` (3-seed best, 99 s
+    # budget-exit) — the GP-uniform-collapse failure mode the 47.3d
+    # combined absolute+relative criterion only partially defends against
+    # needs more acquisition headroom on smooth synthetic objectives.
     min_acq_iters = (
         min_acquisition_iterations
         if min_acquisition_iterations is not None
-        else max(K, 5)
+        else max(_MIN_ACQ_ITERATIONS_FLOOR, K)
     )
 
     # Resolve n_init to the same default that build_initial_design uses

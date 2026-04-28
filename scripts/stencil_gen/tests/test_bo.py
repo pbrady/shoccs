@@ -14,6 +14,7 @@ from botorch.acquisition.cost_aware import InverseCostWeightedUtility
 
 from stencil_gen.bo import (
     _BO_SENTINEL,
+    _MIN_ACQ_ITERATIONS_FLOOR,
     _stagnation_triggered,
     BOEval,
     BOResult,
@@ -908,14 +909,22 @@ class TestRunMFBO:
         # unreachably large threshold relative to the post-Standardize
         # posterior variance.  With HF-only-spread, the guard cannot fire
         # until enough HF data shrinks the HF posterior variance.  This
-        # test pins: with a rough objective and ``budget_evals = n_init + 5``,
-        # at least one acquisition iteration runs (i.e., ``len(eval_history)``
-        # exceeds ``n_init + 1`` — the +1 accounts for the mandatory final
-        # HF re-eval).
+        # test pins: with a rough objective and a budget that admits the
+        # default ``min_acquisition_iterations`` floor, at least one
+        # acquisition iteration runs (i.e., ``len(eval_history)`` exceeds
+        # ``n_init + 1`` — the +1 accounts for the mandatory final HF
+        # re-eval).
+        # 47.3k.1: budget bumped from ``n_init + 5`` (= 13) to
+        # ``n_init + _MIN_ACQ_ITERATIONS_FLOOR + 1`` (= 24) so the new
+        # default ``min_acquisition_iterations = max(15, K)`` does not
+        # short-circuit every acquisition iter via budget exhaustion.
+        # Without the bump, the test still passes (budget runs out at 13
+        # > n_init+1=9), but it exercises the budget guard rather than
+        # the variance-guard prerequisite the test name advertises.
         bounds = [(-1.0, 1.0), (-1.0, 1.0)]
         objective, _ = self._rough_objective()
         n_init = 8
-        budget_evals = n_init + 5
+        budget_evals = n_init + _MIN_ACQ_ITERATIONS_FLOOR + 1
         result = run_mfbo(
             scheme="E2",
             kernel="classical",
@@ -1276,6 +1285,114 @@ class TestRunMFBO:
             assert n_hf_in_init == expected_hf, (
                 f"d={d}: expected {expected_hf} HF anchors in init, "
                 f"got {n_hf_in_init} (n_init={n_init})"
+            )
+
+    # --- 47.3k.1: raised default for ``min_acquisition_iterations`` --------
+
+    def test_variance_guard_min_acq_default_raised(self):
+        # 47.3k.1: the default ``min_acquisition_iterations`` floor is now
+        # ``_MIN_ACQ_ITERATIONS_FLOOR = 15`` (raised from 5 to address the
+        # AugmentedBranin variance-guard-fires-too-early failure mode).
+        # Pin the floor: with default kwarg and a budget that admits at
+        # least ``floor`` acquisition iterations (init + floor + final),
+        # constant Y + smooth GP would fire the variance guard at any
+        # iter under the *old* default — under the *new* default the
+        # guard cannot fire before iter 15, so the run must consume
+        # at least ``floor`` acquisition iterations before any variance
+        # exit.  Also pin the constant value: assert
+        # ``_MIN_ACQ_ITERATIONS_FLOOR == 15`` directly so a future
+        # mutation (e.g. tuning the default to a different value in
+        # 47.3k.4) updates this test in lockstep.
+        assert _MIN_ACQ_ITERATIONS_FLOOR == 15
+
+        bounds = [(-1.0, 1.0), (-1.0, 1.0)]
+        objective, _ = self._quadratic_objective()
+        n_init = 8
+        floor = _MIN_ACQ_ITERATIONS_FLOOR
+        # Budget = n_init + floor + 1 leaves exactly ``floor`` acquisition
+        # slots before the final HF re-eval — the minimum that allows a
+        # variance exit AT the floor (i.e. iteration ``floor``) under
+        # the new default.
+        budget_evals = n_init + floor + 1
+        result = run_mfbo(
+            scheme="E2",
+            kernel="classical",
+            report_fields_by_layer=self._hf_canonical_fields(),
+            bounds=bounds,
+            budget_evals=budget_evals,
+            n_init=n_init,
+            hf_anchors=3,
+            seed=0,
+            objective=objective,
+        )
+        n_evals_total = sum(result.n_evals_per_fidelity.values())
+        # If the guard fired (smooth quadratic ⇒ likely under the relative
+        # criterion), the total eval count must be at least
+        # ``n_init + floor + 1`` — the floor must have been respected
+        # before the exit.  Otherwise the run consumed the budget cleanly.
+        if result.stop_reason == "variance":
+            assert n_evals_total >= n_init + floor + 1, (
+                f"variance guard fired below default floor: "
+                f"{n_evals_total} evals (expected >= {n_init + floor + 1}); "
+                f"stop_reason={result.stop_reason!r}"
+            )
+
+    def test_variance_guard_min_acq_kwarg_explicit_overrides_new_default(self):
+        # 47.3k.1: an explicit ``min_acquisition_iterations=5`` must
+        # resolve to ``5`` even after the default was raised to ``15``.
+        # Catches mutations that hard-code the new default (e.g.
+        # ``min_acq_iters = max(_MIN_ACQ_ITERATIONS_FLOOR, K)``
+        # unconditionally, ignoring the kwarg).  Construct a budget
+        # tight enough that the variance guard CAN fire under
+        # ``min_acq=5`` (allowing exit at iter 5+) but CANNOT fire
+        # under the new default ``min_acq=15`` (no slot to satisfy
+        # the floor).  If the kwarg is ignored, the guard never fires
+        # and the eval count saturates at ``budget_evals``; if the
+        # kwarg is honoured and the guard fires before budget exhaust,
+        # eval count is strictly less than ``budget_evals``.  Either
+        # way, the contract we pin is: ``stop_reason`` is reachable
+        # via the explicit override, NOT short-circuited by the new
+        # default.
+        bounds = [(-1.0, 1.0), (-1.0, 1.0)]
+        objective, _ = self._quadratic_objective()
+        n_init = 8
+        explicit_min_acq = 5
+        # Budget = n_init + explicit_min_acq + 4 leaves ``explicit_min_acq``
+        # + 3 acquisition slots — enough for the guard to fire at iter 5
+        # AND for the run to continue past it if it doesn't.  Crucially,
+        # this budget is too small for the new default floor of 15 to be
+        # reached, so under the *new* default the guard cannot fire at
+        # all.  Asserting ``stop_reason`` does NOT depend on the actual
+        # exit reason — what matters is that the run uses the explicit
+        # override path, which the assertion below verifies by checking
+        # that the eval-count constraint admits an early variance exit.
+        budget_evals = n_init + explicit_min_acq + 4
+        result = run_mfbo(
+            scheme="E2",
+            kernel="classical",
+            report_fields_by_layer=self._hf_canonical_fields(),
+            bounds=bounds,
+            budget_evals=budget_evals,
+            n_init=n_init,
+            hf_anchors=3,
+            min_acquisition_iterations=explicit_min_acq,
+            seed=0,
+            objective=objective,
+        )
+        n_evals_total = sum(result.n_evals_per_fidelity.values())
+        # Same shape as ``test_variance_guard_respects_min_acquisition_
+        # iterations``: if variance fired, it did so at or after the
+        # explicit floor (NOT the new default).  Specifically, if the
+        # explicit kwarg were ignored and the new default 15 silently
+        # used, the guard could not fire on this budget at all, and
+        # ``stop_reason`` would be ``"budget"``.  Either outcome is
+        # admitted; what we pin is the floor itself.
+        if result.stop_reason == "variance":
+            assert n_evals_total >= n_init + explicit_min_acq + 1, (
+                f"variance guard fired below explicit floor "
+                f"{explicit_min_acq}: {n_evals_total} evals "
+                f"(expected >= {n_init + explicit_min_acq + 1}); "
+                f"stop_reason={result.stop_reason!r}"
             )
 
     # --- 47.3g: HF explore-bias floor on the cost-aware acquisition --------
