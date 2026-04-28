@@ -16,21 +16,32 @@ from __future__ import annotations
 
 import argparse
 import sys
+from typing import Any
 
 import numpy as np
 
+from stencil_gen.brady2d_stability import L8_FINAL_LINF_TOL, brady2d_stability_score
 from stencil_gen.bo import (
     DEFAULT_COST_TABLE,
     BOResult,
     run_mfbo,
 )
-from stencil_gen.optimizer import DEFAULT_BOUNDS, _infer_max_layer
+from stencil_gen.cpp_bridge import SHOCCS_BINARY
+from stencil_gen.optimizer import (
+    DEFAULT_BOUNDS,
+    _infer_max_layer,
+    _record_cpp_cutcell_diagnostic,
+)
 
 
 _KERNEL_CHOICES = ("tension", "gaussian", "multiquadric", "classical")
 _KERNEL_DIM = {"tension": 1, "gaussian": 1, "multiquadric": 1, "classical": 2}
 _BASELINE_CHOICES = ("none", "staged")
 _COST_MODEL_CHOICES = ("constant", "empirical")
+_CPP_SUPPORTED_KERNELS = ("classical", "tension", "gaussian", "multiquadric")
+_CPP_SUPPORTED_SCHEMES = ("E4",)
+_CPP_VALIDATION_N_DEFAULT = 31
+_CPP_VALIDATION_T_FINAL_DEFAULT = 5.0
 
 # Default canonical report field for each external fidelity index.  Keys
 # match :data:`stencil_gen.bo.DEFAULT_COST_TABLE`; in particular external
@@ -247,6 +258,126 @@ def _print_summary(result: BOResult, *, baseline: dict | None = None) -> None:
         )
 
 
+def _run_cpp_validation(
+    result: BOResult,
+    *,
+    N: int = _CPP_VALIDATION_N_DEFAULT,
+    t_final: float = _CPP_VALIDATION_T_FINAL_DEFAULT,
+) -> dict[str, Any] | None:
+    """Re-run ``result.best_x`` at ``max_layer=8`` via the shoccs bridge.
+
+    Returns a JSON-friendly dict with keys ``l8_stable``, ``l8_final_linf``,
+    ``wall_time_s`` (and ``cpp_cutcell_violates_197_288`` for E4-classical),
+    or ``None`` when validation is globally skipped: empty / non-finite
+    winner, unsupported ``(scheme, kernel)``, or the shoccs binary cannot
+    be found.  Per-call failures (L8 raises, bridge returns no payload)
+    are captured as ``l8_error`` and do **not** raise — the analytical MF-BO
+    verdict stands; L8 disagreement is purely diagnostic, matching the
+    contract in :func:`sweeps.optimize._run_cpp_validation` and
+    :func:`sweeps.pareto._run_front_cpp_validation`.
+
+    The ``l8_`` prefix on the stable/final_linf keys mirrors the per-member
+    schema in the Pareto module so the persisted JSON can be ingested by a
+    common downstream parser.
+    """
+    if not result.best_params:
+        print(
+            "\n[bo] --validate-with-cpp: skipping — MF-BO did not produce a "
+            "feasible winner (best_params is empty)."
+        )
+        return None
+    if not np.isfinite(result.best_objective):
+        print(
+            "\n[bo] --validate-with-cpp: skipping — best_objective is "
+            "non-finite; the analytical stack did not produce a feasible winner."
+        )
+        return None
+    if result.kernel not in _CPP_SUPPORTED_KERNELS:
+        print(
+            f"\n[bo] --validate-with-cpp: skipping — kernel={result.kernel!r} "
+            "is not C++-supported."
+        )
+        return None
+    if result.scheme not in _CPP_SUPPORTED_SCHEMES:
+        print(
+            f"\n[bo] --validate-with-cpp: skipping — scheme={result.scheme!r} "
+            "has no L8 bridge wired."
+        )
+        return None
+    if not SHOCCS_BINARY.exists():
+        print(
+            f"\n[bo] --validate-with-cpp: skipping — shoccs binary not found "
+            f"at {SHOCCS_BINARY}. Build it with `cmake --build build`."
+        )
+        return None
+
+    print(
+        f"\n[bo] --validate-with-cpp: running L8 ({result.scheme}/{result.kernel}) "
+        f"at N={N}, t_final={t_final}..."
+    )
+
+    entry: dict[str, Any] = {}
+    _record_cpp_cutcell_diagnostic(entry, result.scheme, result.kernel, result.best_x)
+
+    try:
+        report = brady2d_stability_score(
+            result.scheme,
+            result.kernel,
+            result.best_params,
+            max_layer=8,
+            short_circuit=False,
+            layer8_N=N,
+            layer8_t_final=t_final,
+        )
+    except Exception as exc:
+        msg = f"{type(exc).__name__}: {exc}"
+        print(f"[bo] L8 raised ({msg}); recording as failure.")
+        entry["l8_stable"] = False
+        entry["l8_final_linf"] = float("nan")
+        entry["wall_time_s"] = 0.0
+        entry["l8_error"] = msg
+        return entry
+
+    if report.layer8 is None:
+        print(
+            "[bo] L8 did not populate a report (unexpected with "
+            "short_circuit=False); recording as failure."
+        )
+        entry["l8_stable"] = False
+        entry["l8_final_linf"] = float("nan")
+        entry["wall_time_s"] = 0.0
+        entry["l8_error"] = "layer8 not populated"
+        return entry
+
+    l8 = report.layer8
+    entry["l8_stable"] = bool(l8["stable"])
+    entry["l8_final_linf"] = float(l8["final_linf"])
+    entry["wall_time_s"] = float(l8["wall_time_s"])
+
+    passed = entry["l8_stable"] and entry["l8_final_linf"] <= L8_FINAL_LINF_TOL
+    if passed:
+        print(
+            f"[bo] L8 PASS: final_linf={entry['l8_final_linf']:.4e} "
+            f"(wall={entry['wall_time_s']:.1f}s)"
+        )
+    elif entry["l8_stable"]:
+        print(
+            f"[bo] WARNING: L8 soft-failure: "
+            f"final_linf={entry['l8_final_linf']:.4e} > "
+            f"L8_FINAL_LINF_TOL={L8_FINAL_LINF_TOL} "
+            f"(wall={entry['wall_time_s']:.1f}s). "
+            "Analytical best_objective unchanged — L8 disagreement is diagnostic."
+        )
+    else:
+        print(
+            f"[bo] WARNING: L8 FAIL "
+            f"(stable=False, final_linf={entry['l8_final_linf']:.4e}, "
+            f"wall={entry['wall_time_s']:.1f}s). "
+            "Analytical best_objective unchanged — L8 disagreement is diagnostic."
+        )
+    return entry
+
+
 def _resolve_cost_table(
     cost_model: str,
     fidelity_layers: list[int],
@@ -454,16 +585,13 @@ def main(argv: list[str] | None = None) -> int:
         )
 
     # --- C++ validation (47.5a) --------------------------------------------
+    # Validation runs BEFORE --persist so the persisted JSON includes the
+    # cpp_validation payload (lesson from plan 45.5a.1: reversing the order
+    # would write a stale snapshot that does not reflect the L8 verdict).
     if args.validate_with_cpp:
-        # The full implementation lives in 47.5a: re-run result.best_x at
-        # max_layer=8 via brady2d_stability_score and store under
-        # result.extras["cpp_validation"].  Validation must run BEFORE
-        # --persist so the persisted JSON includes the cpp_validation
-        # payload (lesson from plan 45.5a.1).
-        print(
-            "\n[bo] --validate-with-cpp: deferred to plan 47.5a; flag accepted "
-            "but no L8 re-evaluation executed yet."
-        )
+        validation = _run_cpp_validation(result)
+        if validation is not None:
+            result.extras["cpp_validation"] = validation
 
     _print_summary(result, baseline=baseline_record)
 
