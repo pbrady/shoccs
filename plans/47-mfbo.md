@@ -381,6 +381,30 @@ cd scripts/stencil_gen && SYMPY_CACHE_SIZE=50000 uv run python -m sweeps bo \
     - **Test result:** `pytest tests/test_bo.py -k "TestStagnationGuard or test_stagnation"` → 14 passed (11 new + 3 existing `TestRunMFBO::test_stagnation_*`) in 9.15 s. Full `tests/test_bo.py` → 71 passed + 1 skipped (slow) in 187 s. Adjacent regression suite (`tests/test_pareto.py + test_optimizer.py`) → 154 passed + 11 skipped in 184 s. No regression.
     - **Deviation from plan body:** added 7 tests beyond the 4 enumerated in the plan body (boundary, custom-window, invalid-window, tie-break). The extras directly cover the helper's full behaviour surface — the plan body's "(a)–(d)" was a minimum-viable list, not exhaustive. Tie-break is the most important addition: without it, the rule "best is the *earliest* tied index" lives only in Python `min` semantics, and a refactor to `numpy.argmin` (which returns the *earliest* tied index too, but is a different object) or a manual loop would change observable behaviour silently if the guard ever encounters tied minima (common when many cheap HF evals return identical mock values in tests).
 
+- [ ] **47.3f** Tighten the variance guard + cost-aware utility so smooth synthetic objectives reach Branin's basin within the 47.6a budget. Empirical sweep run during the 47.6a attempt (2026-04-28) showed that the 47.3d-tuned guard, while no longer firing immediately after init, still under-explores HF on the AugmentedBranin (`botorch.test_functions.multi_fidelity.AugmentedBranin`) test function — the published synthetic the tutorial uses. Concretely, with `n_init=8, budget_evals=30, seed=0` (the literal 47.6a configuration), the BO bails out after only 10 evals with `stop_reason="variance"` and `best_objective ≈ 3.5` (basin floor 0.398). The closest configuration the current machinery can reach is `n_init=24, seed=1` → `best_objective ≈ 0.63` (still > 0.5), with most cheaper-budget seeds clustering at 1.6–9.4. Two issues compound:
+  - **(i) Smooth-objective uniform GP collapse residue.** The 47.3d combined absolute + relative variance criterion (`var_inc < 1e-6 * spread_hf**2 AND var_inc < 1e-3 * max_var_grid`) holds when the GP has *non-uniform* uncertainty. AugmentedBranin's surface is smooth enough that with only 3 HF anchors (default `hf_anchors=3`) the GP collapses uniformly and the relative criterion still fires.
+  - **(ii) Cost-aware HF under-sampling.** Even when the guard does NOT fire, the cost-aware utility steers most acquisition picks to LF (DEFAULT_COST_TABLE: c(L1)=0.076, c(L7)=1.434 → 19× cost ratio). Empirically only 4–6 of the 30 evals hit HF, leaving the basin under-resolved. The 1024-pt Sobol incumbent recommender then refines on the GP's HF posterior mean — but the posterior is built from too few HF anchors to localise the basin floor below 0.5.
+  - **Empirical data (2026-04-28, AugmentedBranin two-fidelity hook):**
+
+    | n_init | hf_anchors | seed | budget | elapsed | best_obj | stop_reason |
+    |---|---|---|---|---|---|---|
+    | 8  | 3 | 0 | 30 | 3.5 s  | 3.55  | variance |
+    | 8  | 3 | 1 | 30 | 25.1 s | 5.77  | error    |
+    | 13 | 3 | 1 | 30 | 40.4 s | 2.84  | budget   |
+    | 16 | 3 | 1 | 30 | 35.6 s | 0.63  | budget   |
+    | 18 | 3 | 2 | 30 | 31.7 s | 1.67  | budget   |
+    | 20 | 5 | 1 | 30 | 27.1 s | 1.14  | budget   |
+    | 24 | 7 | 1 | 30 | 19.0 s | **0.63** | budget |
+  - **Pick one fix:**
+    1. **Stronger variance-guard prerequisites.** Require ≥ K acquisition iterations (not just init) before the variance guard can fire, regardless of relative-uncertainty criterion. Pragmatic; addresses (i) but not (ii). ~10 lines.
+    2. **Explore-bias floor on cost-aware utility.** Apply a per-fidelity exploration floor — e.g., reserve ≥ 25 % of acquisition picks for HF when the GP's HF-only spread is small, by upweighting `1/cost(hf)` adaptively. Addresses (ii). Touches `build_cost_model` or `build_acquisition`. Riskier — the cost-aware tutorial does NOT do this and it deviates from BoTorch convention.
+    3. **Auto-scale `n_init` and `hf_anchors` with problem dimension.** Loeppky 2009 says `5*d + 3` for total init; for MF problems the effective HF anchor count should also scale with dimension. Currently `hf_anchors=3` is fixed regardless of `d`. Bumping the default to `max(3, d + 2)` would seed init with 4 HF anchors for 2D Branin (insufficient on its own — needs (1) or (2)).
+    4. **Combine (1) + (3).** The cleanest: stronger variance-guard prerequisites AND dimension-scaled HF anchor defaults. Each addresses a distinct failure mode; together they make 47.6a's `n_init=8, budget_evals=30, seed=0` configuration reach the basin reliably.
+  - Recommended: **(4)**. Implement (1) as `min_acquisition_iterations: int = max(K, 5)` parameter to `run_mfbo` (default chosen so the variance guard cannot fire before at least K acquisition iterations, where K = number of fidelities). Implement (3) by changing `build_initial_design`'s `hf_anchors` default from `3` to `max(3, d + 2)`. Add a regression test in `TestRunMFBO::test_variance_guard_respects_min_acquisition_iterations` and update `TestDOE::test_n_init_default` if the auto-scaled HF count changes total init for d=2.
+  - **Acceptance criterion:** with the literal 47.6a configuration `n_init=8, budget_evals=30, seed=0`, the AugmentedBranin two-fidelity hook reaches `best_objective < 0.5` in ≤ 60s (no other parameter changes). Once 47.3f is done, 47.6a's status flips from blocked to ready.
+  - File: `scripts/stencil_gen/stencil_gen/bo.py`, `scripts/stencil_gen/tests/test_bo.py`
+  - Test: `cd scripts/stencil_gen && uv run pytest tests/test_bo.py -x -q -k "TestRunMFBO or TestDOE"`
+
 ### 47.4 — CLI + persistence
 
 - [x] **47.4a** Create `scripts/stencil_gen/sweeps/bo.py` CLI module mirroring `sweeps/pareto.py`:
@@ -582,7 +606,9 @@ cd scripts/stencil_gen && SYMPY_CACHE_SIZE=50000 uv run python -m sweeps bo \
 
 ### 47.6 — Validation: synthetic + failure-mode regressions
 
-- [ ] **47.6a** Add `tests/test_bo.py::TestBranin` — synthetic `AugmentedBranin` validation. Use `botorch.test_functions.multi_fidelity.AugmentedBranin` (or hand-code the 2D Branin variant if not available). Run MF-BO with `n_init=8, budget_evals=30, seed=0`. Assert `best_objective < 0.5` (true global min `≈ 0.398`). Mark `@pytest.mark.slow`. Runtime budget: < 60s. This test validates the BO pipeline is correctly implemented BEFORE turning it on the real cascade.
+- [ ] **47.6a** **(blocked on 47.3f as of 2026-04-28)** Add `tests/test_bo.py::TestBranin` — synthetic `AugmentedBranin` validation. Use `botorch.test_functions.multi_fidelity.AugmentedBranin` (or hand-code the 2D Branin variant if not available). Run MF-BO with `n_init=8, budget_evals=30, seed=0`. Assert `best_objective < 0.5` (true global min `≈ 0.398`). Mark `@pytest.mark.slow`. Runtime budget: < 60s. This test validates the BO pipeline is correctly implemented BEFORE turning it on the real cascade.
+  - **Block reason:** the literal configuration `n_init=8, budget_evals=30, seed=0` triggers the 47.3d variance guard after only 10 evals (`stop_reason="variance"`) with `best_objective ≈ 3.5`. No `(n_init, hf_anchors, seed)` combination empirically reaches `< 0.5` in ≤ 60 s today; the closest is `n_init ∈ {16, 24}, seed=1 → best_obj ≈ 0.63`. See 47.3f for the data table and the proposed fix (combination of stronger variance-guard prerequisites + dimension-scaled `hf_anchors` default). 47.3f's acceptance criterion is exactly 47.6a's literal configuration reaching `< 0.5` in ≤ 60 s — once 47.3f lands, 47.6a should be straightforward.
+  - **DO NOT attempt 47.6a until 47.3f is done.** Either ralph or a human will land 47.3f first, then come back here.
   - File: `scripts/stencil_gen/tests/test_bo.py`
   - Test: `cd scripts/stencil_gen && uv run pytest tests/test_bo.py -x -q -k "TestBranin" --run-slow`
 
@@ -656,6 +682,8 @@ cd scripts/stencil_gen && SYMPY_CACHE_SIZE=50000 uv run python -m sweeps bo \
 47.4a → 47.4b → 47.4c → 47.4c.1 → 47.4d     # CLI + dispatch + persistence + int-key restore + tests
   ↓
 47.5a → 47.5b → 47.5b.1 → 47.5b.1.1 → 47.5b.2 → 47.5c   # validate-with-cpp + baseline + inner_gate fix + CLI-parity decision + persist-on-baseline-failure + tests
+  ↓
+47.3f                                       # variance-guard + cost-aware HF residual fix (Branin precondition; data collected 2026-04-28)
   ↓
 47.6a → 47.6b                               # synthetic Branin + failure-mode regressions
   ↓
