@@ -253,6 +253,98 @@ def main() -> int:
     sub_opt.add_argument("--update-known-values", action="store_true")
     sub_opt.add_argument("--json-output", type=str, default=None)
 
+    sub_bo = subparsers.add_parser(
+        "bo",
+        help="Multi-fidelity Bayesian optimization (BoTorch qMFKG)",
+    )
+    sub_bo.add_argument("--scheme", choices=["E2", "E4"], required=True)
+    sub_bo.add_argument(
+        "--kernel",
+        choices=["tension", "gaussian", "multiquadric", "classical"],
+        required=True,
+    )
+    sub_bo.add_argument(
+        "--objective",
+        required=True,
+        help='HF target as a dotted-path report field, e.g. "layer7.max_spectral_abscissa".',
+    )
+    sub_bo.add_argument(
+        "--cheap-fidelities",
+        type=int,
+        nargs="+",
+        required=True,
+        metavar="N",
+        help="External cascade layer indices to use as cheap surrogates (each < HF layer).",
+    )
+    sub_bo.add_argument(
+        "--fidelity-fields",
+        nargs="+",
+        default=None,
+        metavar="LAYER=FIELD",
+        help="Per-layer field overrides (e.g. '3=layer3.something_else').",
+    )
+    sub_bo.add_argument(
+        "--bounds",
+        type=float,
+        nargs="+",
+        default=None,
+        metavar="VAL",
+        help="Flat list of bound pairs (lo hi [lo hi ...]). Falls back to DEFAULT_BOUNDS if absent.",
+    )
+    bo_budget = sub_bo.add_mutually_exclusive_group(required=True)
+    bo_budget.add_argument(
+        "--budget-evals",
+        type=int,
+        default=None,
+        help="Total number of cascade evaluations (init + acquisition + final HF).",
+    )
+    bo_budget.add_argument(
+        "--budget-seconds",
+        type=float,
+        default=None,
+        help="Wall-time budget in seconds (mutually exclusive with --budget-evals).",
+    )
+    sub_bo.add_argument(
+        "--n-init",
+        type=int,
+        default=None,
+        help="Initial design size (default: 5*d + 3 per Loeppky et al. 2009).",
+    )
+    sub_bo.add_argument(
+        "--num-fantasies",
+        type=int,
+        default=64,
+        help="Number of fantasies for qMFKG (default: 64).",
+    )
+    sub_bo.add_argument("--seed", type=int, default=1)
+    sub_bo.add_argument(
+        "--cost-model",
+        choices=["constant", "empirical"],
+        default="constant",
+        help="'constant' uses the plan-46 calibrated DEFAULT_COST_TABLE.",
+    )
+    sub_bo.add_argument(
+        "--baseline",
+        choices=["none", "staged"],
+        default="none",
+        help="Run a comparator alongside MF-BO with the same seed (plan 47.5b).",
+    )
+    sub_bo.add_argument(
+        "--persist",
+        action="store_true",
+        help="Persist the BOResult as JSON under sweeps/bo_runs/ (plan 47.4c).",
+    )
+    sub_bo.add_argument(
+        "--validate-with-cpp",
+        action="store_true",
+        help="Re-run best_x at max_layer=8 via the C++ bridge (plan 47.5a).",
+    )
+    sub_bo.add_argument(
+        "--verbose",
+        action="store_true",
+        help="Forward to run_mfbo(verbose=True): one line per evaluation.",
+    )
+
     sub_all = subparsers.add_parser("all", help="Run all sweeps")
     sub_all.add_argument("--quick", action="store_true", help="Reduced resolution for quick verification")
 
@@ -429,6 +521,38 @@ def main() -> int:
         if args.json_output is not None:
             forwarded.extend(["--json-output", args.json_output])
         return optimize_main(forwarded)
+
+    if args.command == "bo":
+        from .bo import main as bo_main
+
+        forwarded: list[str] = [
+            "--scheme", args.scheme,
+            "--kernel", args.kernel,
+            "--objective", args.objective,
+            "--cheap-fidelities", *[str(v) for v in args.cheap_fidelities],
+            "--num-fantasies", str(args.num_fantasies),
+            "--seed", str(args.seed),
+            "--cost-model", args.cost_model,
+            "--baseline", args.baseline,
+        ]
+        if args.fidelity_fields is not None:
+            forwarded.extend(["--fidelity-fields", *args.fidelity_fields])
+        if args.bounds is not None:
+            forwarded.append("--bounds")
+            forwarded.extend(str(v) for v in args.bounds)
+        if args.budget_evals is not None:
+            forwarded.extend(["--budget-evals", str(args.budget_evals)])
+        if args.budget_seconds is not None:
+            forwarded.extend(["--budget-seconds", str(args.budget_seconds)])
+        if args.n_init is not None:
+            forwarded.extend(["--n-init", str(args.n_init)])
+        if args.persist:
+            forwarded.append("--persist")
+        if args.validate_with_cpp:
+            forwarded.append("--validate-with-cpp")
+        if args.verbose:
+            forwarded.append("--verbose")
+        return bo_main(forwarded)
 
     if args.command == "all":
         return _run_all(quick=args.quick)
