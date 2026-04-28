@@ -1030,6 +1030,7 @@ def run_mfbo(
     hf_anchors: int | None = None,
     min_acquisition_iterations: int | None = None,
     hf_explore_bias: float = 0.0,
+    hf_priority_warmup: int = 0,
     num_fantasies: int = 64,
     verbose: bool = False,
     objective: Callable[[np.ndarray, int], tuple[float, float, dict]] | None = None,
@@ -1128,6 +1129,24 @@ def run_mfbo(
         resolved without forcing more HF picks (Wu et al. 2020 §4 motivates
         a similar quota; the BoTorch tutorial does not, which is why the
         default is off).
+    hf_priority_warmup
+        Number of opening acquisition iterations forced to HF regardless of
+        cost-aware utility or :paramref:`hf_explore_bias` quota (47.3h).
+        Must be ``>= 0``; default ``0`` disables the mechanism and preserves
+        pre-47.3h behaviour bytewise.  When ``> 0``, the first
+        ``hf_priority_warmup`` acquisition steps after the initial design
+        restrict ``optimize_acqf_mixed``'s ``fidelity_choices`` to ``[HF]``
+        only — qMFKG picks the optimal ``x`` for HF specifically.  Once the
+        warmup is exhausted, control returns to the cost-aware utility
+        (which may then be further restricted by ``hf_explore_bias`` if
+        set).  Motivation: when the HF posterior is malleable (few HF
+        anchors in init, high-cost-ratio regime), the cost-aware utility
+        defers HF picks indefinitely and the GP cannot localise the basin.
+        Forcing the first K-1 (number-of-fidelities minus one) acquisition
+        picks to HF guarantees baseline HF coverage near the cheap-fidelity-
+        suggested optimum before the cost-aware utility takes over.
+        Composes with ``hf_explore_bias``: warmup runs first, quota runs
+        after.
     num_fantasies
         Forwarded to :func:`build_acquisition`.  Default 64.
     verbose
@@ -1176,6 +1195,10 @@ def run_mfbo(
     if not (0.0 <= hf_explore_bias <= 1.0):
         raise ValueError(
             f"hf_explore_bias must lie in [0, 1], got {hf_explore_bias}"
+        )
+    if hf_priority_warmup < 0:
+        raise ValueError(
+            f"hf_priority_warmup must be >= 0, got {hf_priority_warmup}"
         )
 
     torch.manual_seed(seed)
@@ -1460,6 +1483,13 @@ def run_mfbo(
                 target_fid_idx,
                 num_fantasies=num_fantasies,
             )
+            # 47.3h: HF priority warmup runs first.  When
+            # ``hf_priority_warmup > 0``, force the first that-many
+            # acquisition iterations to HF regardless of cost-aware
+            # utility or explore-bias quota.  Composes with the 47.3g
+            # quota: warmup wins for the first N picks, then quota
+            # kicks in (or both leave the choices unrestricted).
+            #
             # 47.3g: HF explore-bias quota.  When ``hf_explore_bias > 0``,
             # restrict the acquisition's ``fidelity_choices`` to ``[HF]``
             # only whenever the running HF fraction (among acquisition
@@ -1469,9 +1499,11 @@ def run_mfbo(
             # design's stratification is excluded from the fraction —
             # ``build_initial_design`` already governs that.
             fidelity_choices: list[int] = list(range(K))
-            if hf_explore_bias > 0.0:
+            n_acq_done = len(eval_history) - n_init_actual
+            if hf_priority_warmup > 0 and n_acq_done < hf_priority_warmup:
+                fidelity_choices = [target_fid_idx]
+            elif hf_explore_bias > 0.0:
                 acq_evals = eval_history[n_init_actual:]
-                n_acq_done = len(acq_evals)
                 n_acq_hf_done = sum(
                     1 for e in acq_evals if e.fidelity == hf_level
                 )

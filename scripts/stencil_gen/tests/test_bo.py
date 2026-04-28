@@ -1402,6 +1402,105 @@ class TestRunMFBO:
             f"bias=0.5 reduced HF fraction: on={frac_on:.2%} off={frac_off:.2%}"
         )
 
+    # --- 47.3h: HF priority warmup ------------------------------------------
+
+    def test_hf_priority_warmup_validates_range(self):
+        # 47.3h: must be >= 0.
+        bounds = [(-1.0, 1.0), (-1.0, 1.0)]
+        with pytest.raises(ValueError, match="hf_priority_warmup"):
+            run_mfbo(
+                scheme="E2",
+                kernel="classical",
+                report_fields_by_layer=self._hf_canonical_fields(),
+                bounds=bounds,
+                budget_evals=10,
+                n_init=8,
+                hf_anchors=3,
+                seed=0,
+                hf_priority_warmup=-1,
+                objective=lambda x, m: (0.0, 0.0, {}),
+            )
+
+    def test_hf_priority_warmup_default_off(self):
+        # 47.3h: the default (``hf_priority_warmup=0``) must reproduce the
+        # pre-47.3h behaviour exactly.  Compare a default run against an
+        # explicit ``hf_priority_warmup=0``.
+        bounds = [(-1.0, 1.0), (-1.0, 1.0)]
+        objective, _ = self._rough_objective()
+        common = dict(
+            scheme="E2",
+            kernel="classical",
+            report_fields_by_layer=self._hf_canonical_fields(),
+            bounds=bounds,
+            budget_evals=15,
+            n_init=8,
+            hf_anchors=3,
+            seed=0,
+            objective=objective,
+        )
+        r_default = run_mfbo(**common)
+        r_explicit_zero = run_mfbo(hf_priority_warmup=0, **common)
+        np.testing.assert_allclose(
+            r_default.best_x, r_explicit_zero.best_x, atol=1e-9
+        )
+        assert r_default.stop_reason == r_explicit_zero.stop_reason
+        assert (
+            r_default.n_evals_per_fidelity
+            == r_explicit_zero.n_evals_per_fidelity
+        )
+
+    def test_hf_priority_warmup_seeds_basin(self):
+        # 47.3h: when enabled, the first ``hf_priority_warmup`` acquisition
+        # picks must all land at HF, regardless of the cost-aware utility's
+        # preference.  Use a 100x cost ratio so the cost-aware utility
+        # would otherwise drive every pick to cheap.
+        bounds = [(-1.0, 1.0), (-1.0, 1.0)]
+        report_fields = {
+            1: "layer1.boundary_gv_err",
+            7: "layer7.max_spectral_abscissa",
+        }
+        cost_table = {1: 0.01, 7: 1.0}
+        x_star = np.array([0.3, -0.2])
+
+        def objective(x, m):
+            x = np.asarray(x, dtype=float)
+            biases = {1: 1000.0, 7: 0.0}
+            val = float(np.sum((x - x_star) ** 2)) + biases.get(m, 0.0)
+            return val, 0.001, {}
+
+        warmup = 3
+        common = dict(
+            scheme="E2",
+            kernel="classical",
+            report_fields_by_layer=report_fields,
+            bounds=bounds,
+            budget_evals=20,
+            n_init=8,
+            hf_anchors=3,
+            cost_table=cost_table,
+            seed=0,
+            objective=objective,
+        )
+        r = run_mfbo(hf_priority_warmup=warmup, **common)
+        n_init = 8
+        acq_evals = r.eval_history[n_init:]
+        # Need at least ``warmup`` acquisition iterations + the final HF
+        # re-eval to be present for the assertion to be meaningful.
+        assert len(acq_evals) >= warmup, (
+            f"only {len(acq_evals)} acquisition evals; need >= {warmup} "
+            f"(stop_reason={r.stop_reason!r})"
+        )
+        # Exclude the final HF re-eval at the incumbent — it always lands
+        # at HF and is not produced by the warmup mechanism.  The trailing
+        # eval is ``r.eval_history[-1]`` and lives at HF by construction.
+        loop_acq = acq_evals[:-1] if r.eval_history[-1].fidelity == 7 else acq_evals
+        first_warmup = loop_acq[:warmup]
+        assert len(first_warmup) == warmup
+        for i, ev in enumerate(first_warmup):
+            assert ev.fidelity == 7, (
+                f"warmup pick #{i} landed at fidelity {ev.fidelity}, expected 7"
+            )
+
 
 # ---------------------------------------------------------------------------
 # 47.3c: TestAcquisition — qMFKG construction + mixed-optimiser smoke tests
