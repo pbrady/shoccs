@@ -9,6 +9,14 @@ Covers:
   budget-mutex enforcement, cheap > HF rejection), dispatch through
   ``python -m sweeps bo --help``, and the ``--baseline staged`` stub
   acceptance (plan 47.4d).
+- :class:`TestValidateWithCpp` — branch coverage for
+  :func:`sweeps.bo._run_cpp_validation` (plan 47.5c): happy path, soft
+  failure, all skip paths, the L8-raises capture path, the unconditional
+  ``cpp_cutcell_violates_197_288`` recording for E4-classical, and the
+  end-to-end "validate runs before persist" lifecycle.
+- :class:`TestBaselineStaged` — failure-mode (47.5b.2) plus the remaining
+  47.5c contract: ``--baseline`` omitted ⇒ no ``extras["baseline"]``;
+  ``--baseline staged --persist`` ⇒ both winners on disk.
 
 The :class:`TestBOCLI` tests stub :func:`run_mfbo` via ``monkeypatch`` so
 no botorch / brady2d pipeline is entered — keeps the tests in the fast
@@ -18,15 +26,19 @@ suite.
 from __future__ import annotations
 
 import json
+import math
 import os
 import subprocess
 import sys
+import types
 from pathlib import Path
 
 import numpy as np
 import pytest
 
 from stencil_gen.bo import BOEval, BOResult, make_multi_fidelity_objective
+from stencil_gen.brady2d_stability import L8_FINAL_LINF_TOL
+from stencil_gen.optimizer import params_from_vector
 
 from sweeps import bo as bo_cli
 from sweeps._bo_io import (
@@ -727,3 +739,574 @@ class TestBaselineStaged:
         assert "BoTorch-qMFKG" in out
         # Failure breadcrumb visible.
         assert "synthetic boom for summary" in out
+
+
+# ---------------------------------------------------------------------------
+# Helpers shared by TestValidateWithCpp and TestBaselineStaged (plan 47.5c)
+# ---------------------------------------------------------------------------
+
+
+def _fake_layer8_report(*, stable: bool, final_linf: float, wall_time_s: float):
+    """Stub return value for a monkeypatched ``brady2d_stability_score``.
+
+    ``_run_cpp_validation`` only reads ``report.layer8`` (a dict) — return
+    a ``SimpleNamespace`` with that one field so the tests do not need to
+    construct a full :class:`StabilityReport`.
+    """
+    return types.SimpleNamespace(
+        layer8={
+            "stable": bool(stable),
+            "final_linf": float(final_linf),
+            "wall_time_s": float(wall_time_s),
+        }
+    )
+
+
+def _make_classical_result(
+    *,
+    scheme: str = "E4",
+    kernel: str = "classical",
+    best_x: np.ndarray | None = None,
+    best_objective: float = -1.0e-3,
+) -> BOResult:
+    """Build a synthetic ``BOResult`` with kernel-correct ``best_params``.
+
+    Uses :func:`params_from_vector` so the ``best_params`` shape matches
+    what :func:`run_mfbo` emits in production — the 47.5a Done note flagged
+    a smoke-test bug from passing the wrong shape.  Shape:
+
+    - ``classical``  : ``best_x = [α₀, α₁]``, ``best_params = {"alpha": [α₀, α₁]}``
+    - ``tension``    : ``best_x = [σ]``,      ``best_params = {"sigma": σ}``
+    """
+    from dataclasses import replace
+
+    if best_x is None:
+        best_x = (
+            np.array([-0.7733, 0.1624])
+            if kernel == "classical"
+            else np.array([10.0])
+        )
+    bounds = (
+        ((-2.0, 2.0), (0.05, 2.0))
+        if kernel == "classical"
+        else ((0.5, 20.0),)
+    )
+    base = _make_bo_result()
+    return replace(
+        base,
+        scheme=scheme,
+        kernel=kernel,
+        best_x=np.asarray(best_x, dtype=float),
+        best_params=params_from_vector(kernel, np.asarray(best_x, dtype=float)),
+        best_objective=best_objective,
+        bounds=bounds,
+    )
+
+
+# ---------------------------------------------------------------------------
+# TestValidateWithCpp — branch coverage for _run_cpp_validation (plan 47.5c)
+# ---------------------------------------------------------------------------
+
+
+class TestValidateWithCpp:
+    """Plan 47.5c: pin the branch surface of :func:`_run_cpp_validation`.
+
+    The 47.5a smoke tests covered only the skip paths and the L8-raises
+    path; three real branches were uncovered: the L8-PASS print, the
+    soft-failure (stable=True, final_linf > tol) print, and the
+    unconditional ``cpp_cutcell_violates_197_288`` record for
+    E4-classical.  All tests here patch ``sweeps.bo.brady2d_stability_score``
+    rather than the upstream symbol so the patch is module-local, and they
+    construct ``best_params`` via :func:`params_from_vector` so the
+    codified path matches what :func:`run_mfbo` actually produces.
+    """
+
+    def test_happy_path_records_full_schema(self, monkeypatch, capsys):
+        """L8 PASS branch: stable=True, final_linf below tolerance.
+
+        Schema for a non-classical kernel: exactly the three keys
+        ``{l8_stable, l8_final_linf, wall_time_s}``.  No ``l8_error`` (no
+        exception) and no ``cpp_cutcell_violates_197_288`` (kernel != classical
+        keeps :func:`_record_cpp_cutcell_diagnostic` from writing the flag).
+        """
+        monkeypatch.setattr(
+            bo_cli,
+            "brady2d_stability_score",
+            lambda *a, **kw: _fake_layer8_report(
+                stable=True, final_linf=0.001, wall_time_s=1.5
+            ),
+        )
+        result = _make_classical_result(
+            kernel="tension", best_x=np.array([10.0])
+        )
+        entry = bo_cli._run_cpp_validation(result)
+        assert entry is not None
+        assert set(entry.keys()) == {"l8_stable", "l8_final_linf", "wall_time_s"}
+        assert entry["l8_stable"] is True
+        assert entry["l8_final_linf"] == pytest.approx(0.001)
+        assert entry["wall_time_s"] == pytest.approx(1.5)
+        out = capsys.readouterr().out
+        assert "L8 PASS" in out
+
+    def test_soft_failure_branch_records_stable_true_but_warns(
+        self, monkeypatch, capsys
+    ):
+        """L8 soft-failure: ``stable=True`` but ``final_linf > L8_FINAL_LINF_TOL``.
+
+        The verdict ``stable=True`` is preserved verbatim (the C++ stack
+        signalled stable); the warning ``WARNING: L8 soft-failure`` fires
+        on a separate code path from the L8-PASS and L8-FAIL prints.
+        """
+        soft_linf = L8_FINAL_LINF_TOL + 0.5
+        monkeypatch.setattr(
+            bo_cli,
+            "brady2d_stability_score",
+            lambda *a, **kw: _fake_layer8_report(
+                stable=True, final_linf=soft_linf, wall_time_s=2.0
+            ),
+        )
+        result = _make_classical_result(
+            kernel="tension", best_x=np.array([10.0])
+        )
+        entry = bo_cli._run_cpp_validation(result)
+        assert entry is not None
+        assert entry["l8_stable"] is True
+        assert entry["l8_final_linf"] > L8_FINAL_LINF_TOL
+        out = capsys.readouterr().out
+        assert "WARNING: L8 soft-failure" in out
+
+    def test_validate_runs_before_persist(self, monkeypatch, capsys, tmp_path):
+        """End-to-end via ``main(...)``: ``--validate-with-cpp`` mutates
+        ``result.extras`` BEFORE ``--persist`` writes the JSON.
+
+        Pre-fix to plan 45.5a.1's lesson, swapping the order would persist
+        a stale snapshot that omits the L8 verdict.  This test pins the
+        order by reading the on-disk JSON: the ``cpp_validation`` payload
+        must land in the file, not just on the in-memory result.
+        """
+        from dataclasses import replace
+
+        def _fake_run_mfbo(**kwargs):
+            stub = _make_classical_result(
+                kernel="tension", best_x=np.array([10.0])
+            )
+            return replace(
+                stub,
+                fidelity_levels=(1, 3),
+                hf_level=3,
+                report_fields_by_layer={
+                    1: "layer1.boundary_gv_err",
+                    3: "layer3.max_stab_eig",
+                },
+                cost_model={1: 0.076, 3: 0.038},
+                n_evals_per_fidelity={1: 5, 3: 5},
+                wall_time_per_fidelity={1: 0.4, 3: 0.2},
+                extras={"n_sentinel_filtered": 0},
+            )
+
+        # Redirect persistence to ``tmp_path`` (default-binding caveat from
+        # 47.5b.2: wrap save_bo_run instead of patching BO_RUNS_DIR).
+        import sweeps._bo_io as bo_io_mod
+
+        original_save = bo_io_mod.save_bo_run
+
+        def _save_to_tmp(result, directory=tmp_path):
+            return original_save(result, directory=directory)
+
+        monkeypatch.setattr(bo_cli, "run_mfbo", _fake_run_mfbo)
+        monkeypatch.setattr(
+            bo_cli,
+            "brady2d_stability_score",
+            lambda *a, **kw: _fake_layer8_report(
+                stable=True, final_linf=0.002, wall_time_s=1.7
+            ),
+        )
+        # Default ``SHOCCS_BINARY`` may not exist in the test sandbox —
+        # patch ``.exists`` to True so the validate path runs.
+        monkeypatch.setattr(
+            bo_cli,
+            "SHOCCS_BINARY",
+            types.SimpleNamespace(exists=lambda: True),
+        )
+        monkeypatch.setattr(bo_io_mod, "save_bo_run", _save_to_tmp)
+
+        rc = bo_cli.main(
+            [
+                "--scheme", "E4",
+                "--kernel", "tension",
+                "--objective", "layer3.max_stab_eig",
+                "--cheap-fidelities", "1",
+                "--bounds", "0.5", "20",
+                "--budget-evals", "10",
+                "--seed", "1",
+                "--validate-with-cpp",
+                "--persist",
+            ]
+        )
+        assert rc == 0
+
+        persisted = tmp_path / "E4_tension_layer3_max_stab_eig_1.json"
+        assert persisted.exists(), (
+            f"expected persisted JSON at {persisted}; "
+            f"tmp_path contents: {list(tmp_path.iterdir())}"
+        )
+        payload = json.loads(persisted.read_text())
+        validation = payload["extras"]["cpp_validation"]
+        assert validation["l8_stable"] is True
+        assert validation["l8_final_linf"] == pytest.approx(0.002)
+        assert validation["wall_time_s"] == pytest.approx(1.7)
+        out = capsys.readouterr().out
+        assert "L8 PASS" in out
+
+    def test_skips_on_unsupported_kernel(self, capsys):
+        """``kernel=tension-penalty`` (not in ``_CPP_SUPPORTED_KERNELS``) ⇒
+        validation returns ``None`` and ``extras`` is left untouched."""
+        from dataclasses import replace
+
+        result = _make_classical_result(kernel="classical")
+        # Force an out-of-table kernel via dataclass-replace (BOResult does
+        # not validate the kernel string at construction time).
+        result = replace(result, kernel="tension-penalty")
+        original_extras = dict(result.extras)
+        entry = bo_cli._run_cpp_validation(result)
+        assert entry is None
+        assert dict(result.extras) == original_extras
+        out = capsys.readouterr().out
+        assert "is not C++-supported" in out
+
+    def test_skips_on_unsupported_scheme(self, capsys):
+        """``scheme=E2`` (no L8 bridge wired) ⇒ validation returns
+        ``None`` and prints the documented skip message."""
+        from dataclasses import replace
+
+        result = _make_classical_result(kernel="classical")
+        result = replace(result, scheme="E2")
+        entry = bo_cli._run_cpp_validation(result)
+        assert entry is None
+        out = capsys.readouterr().out
+        assert "no L8 bridge wired" in out
+
+    def test_skips_on_empty_best_params(self, capsys):
+        """``best_params = {}`` ⇒ skip; the kernel skip does not fire first
+        (the empty-params guard runs before the kernel check)."""
+        from dataclasses import replace
+
+        result = _make_classical_result(kernel="classical")
+        result = replace(result, best_params={})
+        entry = bo_cli._run_cpp_validation(result)
+        assert entry is None
+        out = capsys.readouterr().out
+        assert "best_params is empty" in out
+
+    def test_skips_on_nonfinite_best_objective(self, capsys):
+        """``best_objective = inf`` ⇒ skip with the "non-finite" message."""
+        from dataclasses import replace
+
+        result = _make_classical_result(kernel="classical")
+        result = replace(result, best_objective=float("inf"))
+        entry = bo_cli._run_cpp_validation(result)
+        assert entry is None
+        out = capsys.readouterr().out
+        assert "non-finite" in out
+
+    def test_skips_on_missing_shoccs_binary(self, monkeypatch, capsys):
+        """``SHOCCS_BINARY.exists() is False`` ⇒ skip with the build-hint
+        message.  Patches the binding rather than the underlying ``Path``
+        method so the patch reverts cleanly under ``monkeypatch``."""
+        monkeypatch.setattr(
+            bo_cli,
+            "SHOCCS_BINARY",
+            types.SimpleNamespace(exists=lambda: False),
+        )
+        result = _make_classical_result(kernel="classical")
+        entry = bo_cli._run_cpp_validation(result)
+        assert entry is None
+        out = capsys.readouterr().out
+        assert "shoccs binary not found" in out
+
+    def test_records_l8_failure_not_raises(self, monkeypatch, capsys):
+        """``brady2d_stability_score`` raising ⇒ ``_run_cpp_validation``
+        returns a sentinel dict, does NOT propagate the exception.
+
+        The 47.5a Done note pinned the schema: ``l8_stable=False``,
+        ``l8_final_linf`` is ``NaN``, ``wall_time_s=0.0``, plus
+        ``l8_error`` (NOT bare ``error``) carrying the typed message.
+        """
+        def _boom(*args, **kwargs):
+            raise RuntimeError("synthetic L8 boom")
+
+        monkeypatch.setattr(bo_cli, "brady2d_stability_score", _boom)
+        # Bypass the binary-not-found skip so the L8 call actually fires.
+        monkeypatch.setattr(
+            bo_cli,
+            "SHOCCS_BINARY",
+            types.SimpleNamespace(exists=lambda: True),
+        )
+        result = _make_classical_result(
+            kernel="tension", best_x=np.array([10.0])
+        )
+        entry = bo_cli._run_cpp_validation(result)
+        assert entry is not None
+        assert entry["l8_stable"] is False
+        assert math.isnan(entry["l8_final_linf"])
+        assert entry["wall_time_s"] == 0.0
+        assert entry["l8_error"] == "RuntimeError: synthetic L8 boom"
+        out = capsys.readouterr().out
+        assert "L8 raised" in out
+
+    @pytest.mark.parametrize(
+        "scheme,kernel,best_x,expected_flag",
+        [
+            # Below the cut-cell floor (197/288 ≈ 0.6840) ⇒ flag True.
+            ("E4", "classical", np.array([-0.7733, 0.1624]), True),
+            # Above the cut-cell floor ⇒ flag False (still recorded).
+            ("E4", "classical", np.array([-0.7733, 0.7]), False),
+            # Non-classical kernel ⇒ flag absent entirely (per 47.5a Done note).
+            ("E4", "tension", np.array([10.0]), None),
+        ],
+    )
+    def test_cpp_cutcell_flag_recorded_for_e4_classical(
+        self,
+        monkeypatch,
+        scheme,
+        kernel,
+        best_x,
+        expected_flag,
+    ):
+        """Plan 47.5a Done note: ``cpp_cutcell_violates_197_288`` is
+        recorded unconditionally for E4-classical (regardless of whether
+        L8 actually ran), and is absent for non-classical kernels."""
+        # Patch the L8 call to a benign return so the test does not actually
+        # invoke C++ — the cut-cell flag is set BEFORE the brady2d call so
+        # both paths exercise the unconditional record.
+        monkeypatch.setattr(
+            bo_cli,
+            "brady2d_stability_score",
+            lambda *a, **kw: _fake_layer8_report(
+                stable=True, final_linf=0.001, wall_time_s=1.5
+            ),
+        )
+        monkeypatch.setattr(
+            bo_cli,
+            "SHOCCS_BINARY",
+            types.SimpleNamespace(exists=lambda: True),
+        )
+        result = _make_classical_result(
+            scheme=scheme, kernel=kernel, best_x=best_x
+        )
+        entry = bo_cli._run_cpp_validation(result)
+        assert entry is not None
+        if expected_flag is None:
+            assert "cpp_cutcell_violates_197_288" not in entry
+        else:
+            assert entry["cpp_cutcell_violates_197_288"] is expected_flag
+
+    def test_cpp_cutcell_flag_present_when_l8_raises(
+        self, monkeypatch, capsys
+    ):
+        """Combine the L8-raises path with E4-classical at α₁ < 197/288:
+        the cut-cell flag must appear in the returned dict alongside the
+        ``l8_error`` breadcrumb (the flag is recorded BEFORE the L8 call,
+        so a raising L8 cannot suppress it)."""
+        def _boom(*args, **kwargs):
+            raise RuntimeError("synthetic L8 boom")
+
+        monkeypatch.setattr(bo_cli, "brady2d_stability_score", _boom)
+        monkeypatch.setattr(
+            bo_cli,
+            "SHOCCS_BINARY",
+            types.SimpleNamespace(exists=lambda: True),
+        )
+        result = _make_classical_result(
+            scheme="E4",
+            kernel="classical",
+            best_x=np.array([-0.7733, 0.1624]),
+        )
+        entry = bo_cli._run_cpp_validation(result)
+        assert entry is not None
+        assert entry["cpp_cutcell_violates_197_288"] is True
+        assert entry["l8_error"] == "RuntimeError: synthetic L8 boom"
+        assert entry["l8_stable"] is False
+        assert math.isnan(entry["l8_final_linf"])
+
+
+# ---------------------------------------------------------------------------
+# TestBaselineStaged remaining 47.5c contract (omitted; persisted-alongside)
+# ---------------------------------------------------------------------------
+#
+# The 47.5b.2 Done note records that ``test_runs_when_flag_set`` (originally
+# enumerated under 47.5c) is already covered by
+# ``TestBOCLI::test_baseline_staged_invokes_run_staged_optimize`` (and its
+# HF=L7 sibling); per that note we do NOT re-add it here.  The two
+# remaining 47.5c contracts are pinned below.
+
+
+class TestBaselineStagedOmitted:
+    """Plan 47.5c: ``--baseline`` not passed ⇒ no baseline ever recorded."""
+
+    def test_omitted_when_flag_unset(self, monkeypatch, capsys):
+        """Without ``--baseline``: ``run_staged_optimize`` is never called,
+        ``result.extras["baseline"]`` is absent, and the side-by-side
+        comparison block does not appear in the summary print.
+        """
+        from dataclasses import replace
+
+        captured: dict[str, BOResult | None] = {"result": None}
+
+        def _fake_run_mfbo(**kwargs):
+            stub = _make_bo_result()
+            ret = replace(
+                stub,
+                fidelity_levels=(1, 3),
+                hf_level=3,
+                report_fields_by_layer={
+                    1: "layer1.boundary_gv_err",
+                    3: "layer3.max_stab_eig",
+                },
+                cost_model={1: 0.076, 3: 0.038},
+                n_evals_per_fidelity={1: 5, 3: 5},
+                wall_time_per_fidelity={1: 0.4, 3: 0.2},
+                bounds=((0.5, 20.0),),
+                kernel="tension",
+                best_x=np.array([10.0]),
+                best_params={"sigma": 10.0},
+                best_objective=-1.0e-3,
+                extras={"n_sentinel_filtered": 0},
+            )
+            captured["result"] = ret
+            return ret
+
+        def _unexpected(**kwargs):
+            raise AssertionError(
+                "run_staged_optimize must not be invoked without --baseline staged"
+            )
+
+        monkeypatch.setattr(bo_cli, "run_mfbo", _fake_run_mfbo)
+        monkeypatch.setattr(bo_cli, "run_staged_optimize", _unexpected)
+
+        rc = bo_cli.main(
+            [
+                "--scheme", "E4",
+                "--kernel", "tension",
+                "--objective", "layer3.max_stab_eig",
+                "--cheap-fidelities", "1",
+                "--bounds", "0.5", "20",
+                "--budget-evals", "10",
+                "--seed", "1",
+            ]
+        )
+        assert rc == 0
+        assert captured["result"] is not None
+        # No "baseline" key landed under extras.
+        assert "baseline" not in captured["result"].extras
+        out = capsys.readouterr().out
+        # Side-by-side comparison only renders when a baseline is present;
+        # without it that block must be silent.
+        assert "comparison (side-by-side)" not in out
+        # And the standalone "baseline (staged):" header from _print_summary
+        # must not appear either.
+        assert "baseline (staged):" not in out
+
+
+class TestBaselineStagedPersisted:
+    """Plan 47.5c: ``--baseline staged --persist`` ⇒ both winners on disk."""
+
+    def test_persisted_alongside_bo_result(
+        self, monkeypatch, capsys, tmp_path
+    ):
+        """The persisted JSON contains both ``best_x`` (MF-BO winner) and
+        ``extras.baseline.best_x`` (staged winner), plus method tags."""
+        from dataclasses import replace
+
+        from stencil_gen.optimizer import OptimizeResult as _OR
+
+        def _fake_run_mfbo(**kwargs):
+            stub = _make_bo_result()
+            return replace(
+                stub,
+                fidelity_levels=(1, 3),
+                hf_level=3,
+                report_fields_by_layer={
+                    1: "layer1.boundary_gv_err",
+                    3: "layer3.max_stab_eig",
+                },
+                cost_model={1: 0.076, 3: 0.038},
+                n_evals_per_fidelity={1: 5, 3: 5},
+                wall_time_per_fidelity={1: 0.4, 3: 0.2},
+                bounds=((0.5, 20.0),),
+                kernel="tension",
+                best_x=np.array([10.0]),
+                best_params={"sigma": 10.0},
+                best_objective=-1.0e-3,
+                extras={"n_sentinel_filtered": 0},
+            )
+
+        def _fake_run_staged_optimize(**kwargs):
+            return _OR(
+                best_params={"sigma": 11.0},
+                best_x=np.array([11.0]),
+                best_objective=-2.0e-3,
+                best_report={"failed_layer": None},
+                method="staged",
+                converged=True,
+                n_evals=42,
+                compute_time=1.5,
+                history=[],
+                extras={
+                    "stage": "validated",
+                    "validator_ranking": [
+                        (np.array([11.0]), -2.0e-3),
+                        (np.array([12.0]), -1.5e-3),
+                    ],
+                },
+            )
+
+        # Redirect persist target to ``tmp_path`` (default-binding caveat:
+        # wrap save_bo_run instead of patching BO_RUNS_DIR — see 47.5b.2).
+        import sweeps._bo_io as bo_io_mod
+
+        original_save = bo_io_mod.save_bo_run
+
+        def _save_to_tmp(result, directory=tmp_path):
+            return original_save(result, directory=directory)
+
+        monkeypatch.setattr(bo_cli, "run_mfbo", _fake_run_mfbo)
+        monkeypatch.setattr(bo_cli, "run_staged_optimize", _fake_run_staged_optimize)
+        monkeypatch.setattr(bo_io_mod, "save_bo_run", _save_to_tmp)
+
+        rc = bo_cli.main(
+            [
+                "--scheme", "E4",
+                "--kernel", "tension",
+                "--objective", "layer3.max_stab_eig",
+                "--cheap-fidelities", "1",
+                "--bounds", "0.5", "20",
+                "--budget-evals", "10",
+                "--seed", "1",
+                "--baseline", "staged",
+                "--persist",
+            ]
+        )
+        assert rc == 0
+
+        persisted = tmp_path / "E4_tension_layer3_max_stab_eig_1.json"
+        assert persisted.exists(), (
+            f"expected persisted JSON at {persisted}; "
+            f"tmp_path contents: {list(tmp_path.iterdir())}"
+        )
+        payload = json.loads(persisted.read_text())
+
+        # MF-BO winner top-level.
+        assert payload["best_x"] == [10.0]
+        assert payload["best_objective"] == pytest.approx(-1.0e-3)
+        assert payload["method"] == "BoTorch-qMFKG"
+
+        # Staged winner under extras.baseline.
+        baseline = payload["extras"]["baseline"]
+        assert baseline["best_x"] == [11.0]
+        assert baseline["best_objective"] == pytest.approx(-2.0e-3)
+        assert baseline["method"] == "staged"
+        # n_evals_at_hf was derived from validator_ranking length.
+        assert baseline["n_evals_at_hf"] == 2
+        # No failure path was taken.
+        assert "error" not in baseline
