@@ -1,20 +1,37 @@
 """Unit tests for :mod:`sweeps._bo_io` and :mod:`sweeps.bo`.
 
-Currently covers only the int-key restoration fix from plan item 47.4c.1.
-The full :class:`TestBOCLI` (argparse / dispatch) and the rest of
-:class:`TestBOIO` (filename, sorting, complex round-trip, ...) are
-deliverables for plan item 47.4d, which adds them to this file.
+Covers:
+
+- :class:`TestBOIO` — int-key restoration (plan 47.4c.1), file creation,
+  filename-includes-seed, sorted iteration, and complex round-tripping
+  through ``extras`` (plan 47.4d).
+- :class:`TestBOCLI` — argparse surface (minimal accepting invocation,
+  budget-mutex enforcement, cheap > HF rejection), dispatch through
+  ``python -m sweeps bo --help``, and the ``--baseline staged`` stub
+  acceptance (plan 47.4d).
+
+The :class:`TestBOCLI` tests stub :func:`run_mfbo` via ``monkeypatch`` so
+no botorch / brady2d pipeline is entered — keeps the tests in the fast
+suite.
 """
 
 from __future__ import annotations
+
+import json
+import os
+import subprocess
+import sys
+from pathlib import Path
 
 import numpy as np
 import pytest
 
 from stencil_gen.bo import BOEval, BOResult, make_multi_fidelity_objective
 
+from sweeps import bo as bo_cli
 from sweeps._bo_io import (
     _INT_KEYED_TOP_LEVEL,
+    iter_bo_runs,
     load_bo_run,
     save_bo_run,
 )
@@ -123,3 +140,279 @@ class TestBOIO:
             loaded["report_fields_by_layer"],
         )
         assert callable(objective)
+
+    def test_save_bo_run_creates_file(self, tmp_path):
+        """``save_bo_run`` writes a JSON file at the documented filename."""
+        result = _make_bo_result()
+        path = save_bo_run(result, directory=tmp_path)
+        assert path.exists()
+        assert path.is_file()
+        # Filename schema: {scheme}_{kernel}_{mangled_HF_field}_{seed}.json.
+        # HF field is layer7.max_spectral_abscissa → layer7_max_spectral_abscissa.
+        assert path.name == "E4_classical_layer7_max_spectral_abscissa_1.json"
+        assert path.parent == tmp_path
+        # Payload is valid JSON with the documented top-level keys.
+        payload = json.loads(path.read_text())
+        for required in ("best_x", "best_objective", "scheme", "kernel",
+                         "fidelity_levels", "eval_history"):
+            assert required in payload, f"missing top-level key {required!r}"
+
+    def test_serializer_handles_complex(self, tmp_path):
+        """``_BOEncoder`` serialises ``complex`` values as ``[real, imag]``.
+
+        Any layer that surfaces a :class:`KreissResult` (``layer2`` if it
+        lands in fidelity_layers — see plan 46.2b) carries a ``witness_s``
+        complex through ``extras``.  Without the encoder branch
+        ``json.dump`` would raise ``TypeError``.
+        """
+        result = _make_bo_result()
+        # Inject a complex in extras and rebuild a frozen dataclass with it.
+        # ``BOResult`` is frozen, so we must build a fresh instance.
+        from dataclasses import replace
+
+        result_with_complex = replace(
+            result,
+            extras={"witness_s": 1.5 + 2.5j, "n_sentinel_filtered": 0},
+        )
+        path = save_bo_run(result_with_complex, directory=tmp_path)
+        payload = json.loads(path.read_text())
+        # Complex should round-trip as a 2-element list of floats.
+        assert payload["extras"]["witness_s"] == [1.5, 2.5]
+
+    def test_filename_includes_seed(self, tmp_path):
+        """Same (scheme, kernel, objective) but distinct seeds → distinct files."""
+        from dataclasses import replace
+
+        base = _make_bo_result()
+        r1 = replace(base, seed=1)
+        r2 = replace(base, seed=2)
+        p1 = save_bo_run(r1, directory=tmp_path)
+        p2 = save_bo_run(r2, directory=tmp_path)
+        assert p1 != p2
+        assert p1.name.endswith("_1.json")
+        assert p2.name.endswith("_2.json")
+        # Both files exist and are independent.
+        assert p1.exists() and p2.exists()
+        assert json.loads(p1.read_text())["seed"] == 1
+        assert json.loads(p2.read_text())["seed"] == 2
+
+    def test_iter_bo_runs_sorted(self, tmp_path):
+        """``iter_bo_runs`` yields ``*.json`` paths in sorted order."""
+        from dataclasses import replace
+
+        base = _make_bo_result()
+        # Save in deliberately non-sorted order to exercise the sort.
+        save_bo_run(replace(base, seed=3), directory=tmp_path)
+        save_bo_run(replace(base, seed=1), directory=tmp_path)
+        save_bo_run(replace(base, seed=2), directory=tmp_path)
+        # Drop a non-JSON file to confirm it is ignored.
+        (tmp_path / "ignore.txt").write_text("not json\n")
+
+        seen = list(iter_bo_runs(tmp_path))
+        assert all(p.suffix == ".json" for p in seen)
+        assert seen == sorted(seen)
+        assert [p.name for p in seen] == [
+            "E4_classical_layer7_max_spectral_abscissa_1.json",
+            "E4_classical_layer7_max_spectral_abscissa_2.json",
+            "E4_classical_layer7_max_spectral_abscissa_3.json",
+        ]
+
+
+# ---------------------------------------------------------------------------
+# TestBOCLI — sweeps.bo argparse + dispatch (plan 47.4d)
+# ---------------------------------------------------------------------------
+
+
+class TestBOCLI:
+    """Argparse surface and dispatch wiring for ``sweeps bo``."""
+
+    def test_argparse_minimal_invocation(self, monkeypatch, capsys):
+        """Minimal accepting invocation routes (parsed args) into run_mfbo."""
+        calls: list[dict] = []
+
+        def _fake_run_mfbo(**kwargs):
+            calls.append(kwargs)
+            # Return a stub BOResult shaped to match the (cheap=1, HF=3) call.
+            stub = _make_bo_result()
+            from dataclasses import replace
+            return replace(
+                stub,
+                fidelity_levels=(1, 3),
+                hf_level=3,
+                report_fields_by_layer={
+                    1: "layer1.boundary_gv_err",
+                    3: "layer3.max_stab_eig",
+                },
+                cost_model={1: 0.076, 3: 0.038},
+                n_evals_per_fidelity={1: 5, 3: 5},
+                wall_time_per_fidelity={1: 0.4, 3: 0.2},
+                bounds=((0.5, 20.0),),
+                kernel="tension",
+            )
+
+        monkeypatch.setattr(bo_cli, "run_mfbo", _fake_run_mfbo)
+
+        rc = bo_cli.main(
+            [
+                "--scheme", "E4",
+                "--kernel", "tension",
+                "--objective", "layer3.max_stab_eig",
+                "--cheap-fidelities", "1",
+                "--bounds", "0.5", "20",
+                "--budget-evals", "10",
+                "--seed", "1",
+            ]
+        )
+        assert rc == 0
+        assert len(calls) == 1
+        call = calls[0]
+        assert call["scheme"] == "E4"
+        assert call["kernel"] == "tension"
+        assert call["seed"] == 1
+        assert call["budget_evals"] == 10
+        assert call["budget_seconds"] is None
+        # report_fields_by_layer was assembled from --objective + --cheap-fidelities.
+        assert call["report_fields_by_layer"] == {
+            1: "layer1.boundary_gv_err",
+            3: "layer3.max_stab_eig",
+        }
+        # 1D bounds for the tension kernel.
+        assert list(call["bounds"]) == [(0.5, 20.0)]
+        out = capsys.readouterr().out
+        assert "BoTorch-qMFKG" in out
+        assert "layer3.max_stab_eig" in out
+
+    def test_argparse_rejects_no_budget(self):
+        """Neither --budget-evals nor --budget-seconds → SystemExit (mutex required)."""
+        with pytest.raises(SystemExit) as exc_info:
+            bo_cli.main(
+                [
+                    "--scheme", "E4",
+                    "--kernel", "tension",
+                    "--objective", "layer3.max_stab_eig",
+                    "--cheap-fidelities", "1",
+                    "--bounds", "0.5", "20",
+                ]
+            )
+        assert exc_info.value.code != 0
+
+    def test_argparse_rejects_both_budgets(self):
+        """Both --budget-evals and --budget-seconds → SystemExit (mutex)."""
+        with pytest.raises(SystemExit) as exc_info:
+            bo_cli.main(
+                [
+                    "--scheme", "E4",
+                    "--kernel", "tension",
+                    "--objective", "layer3.max_stab_eig",
+                    "--cheap-fidelities", "1",
+                    "--bounds", "0.5", "20",
+                    "--budget-evals", "10",
+                    "--budget-seconds", "5.0",
+                ]
+            )
+        assert exc_info.value.code != 0
+
+    def test_argparse_rejects_bad_field_layer(self, monkeypatch):
+        """A cheap fidelity ≥ HF layer → parser.error (cheap > HF)."""
+        # If the parser passes the bad spec through, run_mfbo would be
+        # called.  Sentinel here detects that case and surfaces it.
+        def _unexpected(**kwargs):
+            raise AssertionError(
+                "run_mfbo should not be invoked when cheap-fidelities >= HF"
+            )
+
+        monkeypatch.setattr(bo_cli, "run_mfbo", _unexpected)
+
+        with pytest.raises(SystemExit) as exc_info:
+            bo_cli.main(
+                [
+                    "--scheme", "E4",
+                    "--kernel", "classical",
+                    "--objective", "layer7.max_spectral_abscissa",
+                    "--cheap-fidelities", "8",  # > HF inferred from layer7.*
+                    "--budget-evals", "10",
+                ]
+            )
+        assert exc_info.value.code != 0
+
+    def test_dispatch_via_main(self):
+        """``python -m sweeps bo --help`` exits 0 and lists the BO flags."""
+        stencil_gen_dir = Path(__file__).resolve().parent.parent
+        env = os.environ.copy()
+        env.setdefault("SYMPY_CACHE_SIZE", "50000")
+        proc = subprocess.run(
+            [sys.executable, "-m", "sweeps", "bo", "--help"],
+            cwd=str(stencil_gen_dir),
+            env=env,
+            capture_output=True,
+            text=True,
+            timeout=120,
+        )
+        assert proc.returncode == 0, (
+            f"stdout:\n{proc.stdout}\n\nstderr:\n{proc.stderr}"
+        )
+        for needle in (
+            "--objective",
+            "--cheap-fidelities",
+            "--budget-evals",
+            "--budget-seconds",
+            "--baseline",
+            "--validate-with-cpp",
+            "--persist",
+        ):
+            assert needle in proc.stdout, (
+                f"missing {needle!r} in `python -m sweeps bo --help` output"
+            )
+
+    def test_baseline_staged_invokes_run_staged_optimize(self, monkeypatch, capsys):
+        """``--baseline staged`` is parsed and reaches the (currently stub) branch.
+
+        Plan 47.5b will replace the stub with an actual ``run_staged_optimize``
+        invocation; this test pins the contract that the flag is accepted and
+        the deferral message fires.  After 47.5b lands, this test should be
+        updated to monkeypatch ``run_staged_optimize`` in ``sweeps.bo`` and
+        assert it was called with the same seed as ``run_mfbo``.
+        """
+        calls: list[dict] = []
+
+        def _fake_run_mfbo(**kwargs):
+            calls.append(kwargs)
+            from dataclasses import replace
+            stub = _make_bo_result()
+            return replace(
+                stub,
+                fidelity_levels=(1, 3),
+                hf_level=3,
+                report_fields_by_layer={
+                    1: "layer1.boundary_gv_err",
+                    3: "layer3.max_stab_eig",
+                },
+                cost_model={1: 0.076, 3: 0.038},
+                n_evals_per_fidelity={1: 5, 3: 5},
+                wall_time_per_fidelity={1: 0.4, 3: 0.2},
+                bounds=((0.5, 20.0),),
+                kernel="tension",
+            )
+
+        monkeypatch.setattr(bo_cli, "run_mfbo", _fake_run_mfbo)
+
+        rc = bo_cli.main(
+            [
+                "--scheme", "E4",
+                "--kernel", "tension",
+                "--objective", "layer3.max_stab_eig",
+                "--cheap-fidelities", "1",
+                "--bounds", "0.5", "20",
+                "--budget-evals", "10",
+                "--seed", "7",
+                "--baseline", "staged",
+            ]
+        )
+        assert rc == 0
+        assert len(calls) == 1
+        # run_mfbo received the requested seed.
+        assert calls[0]["seed"] == 7
+        out = capsys.readouterr().out
+        # 47.4a stub message: deferred to plan 47.5b.
+        assert "--baseline staged" in out
+        assert "47.5b" in out
