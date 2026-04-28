@@ -365,19 +365,25 @@ class TestBOCLI:
             )
 
     def test_baseline_staged_invokes_run_staged_optimize(self, monkeypatch, capsys):
-        """``--baseline staged`` is parsed and reaches the (currently stub) branch.
+        """Plan 47.5b: ``--baseline staged`` actually runs ``run_staged_optimize``.
 
-        Plan 47.5b will replace the stub with an actual ``run_staged_optimize``
-        invocation; this test pins the contract that the flag is accepted and
-        the deferral message fires.  After 47.5b lands, this test should be
-        updated to monkeypatch ``run_staged_optimize`` in ``sweeps.bo`` and
-        assert it was called with the same seed as ``run_mfbo``.
+        Both ``run_mfbo`` and ``run_staged_optimize`` are monkeypatched so no
+        cascade is invoked.  The test pins (a) ``run_staged_optimize`` is called,
+        (b) the same seed flows into both methods (fairness), (c) the
+        ``best_objective`` HF objective field flows through verbatim, and (d) the
+        baseline record lands under ``result.extras["baseline"]`` and in the
+        side-by-side print.
+
+        Per the plan-46 lesson cited in 47.5a, ``--baseline staged`` must NOT
+        emit the legacy "deferred" message; that path is removed in 47.5b.
         """
-        calls: list[dict] = []
+        from dataclasses import replace
+
+        bo_calls: list[dict] = []
+        staged_calls: list[dict] = []
 
         def _fake_run_mfbo(**kwargs):
-            calls.append(kwargs)
-            from dataclasses import replace
+            bo_calls.append(kwargs)
             stub = _make_bo_result()
             return replace(
                 stub,
@@ -392,9 +398,34 @@ class TestBOCLI:
                 wall_time_per_fidelity={1: 0.4, 3: 0.2},
                 bounds=((0.5, 20.0),),
                 kernel="tension",
+                best_x=np.array([10.0]),
+                best_params={"sigma": 10.0},
+                best_objective=-1.0e-3,
+                extras={"n_sentinel_filtered": 0},
+            )
+
+        def _fake_run_staged_optimize(**kwargs):
+            staged_calls.append(kwargs)
+            from stencil_gen.optimizer import OptimizeResult as _OR
+
+            return _OR(
+                best_params={"sigma": 11.0},
+                best_x=np.array([11.0]),
+                best_objective=-2.0e-3,
+                best_report={"failed_layer": None},
+                method="staged",
+                converged=True,
+                n_evals=42,
+                compute_time=1.5,
+                history=[],
+                extras={
+                    "stage": "validated",
+                    "validator_ranking": [(np.array([11.0]), -2.0e-3), (np.array([12.0]), -1.5e-3)],
+                },
             )
 
         monkeypatch.setattr(bo_cli, "run_mfbo", _fake_run_mfbo)
+        monkeypatch.setattr(bo_cli, "run_staged_optimize", _fake_run_staged_optimize)
 
         rc = bo_cli.main(
             [
@@ -409,10 +440,20 @@ class TestBOCLI:
             ]
         )
         assert rc == 0
-        assert len(calls) == 1
-        # run_mfbo received the requested seed.
-        assert calls[0]["seed"] == 7
+        assert len(bo_calls) == 1
+        assert len(staged_calls) == 1
+        # Both runs share the seed.
+        assert bo_calls[0]["seed"] == 7
+        assert staged_calls[0]["seed"] == 7
+        # Staged reuses the HF objective field that MF-BO targeted.
+        assert staged_calls[0]["report_field"] == "layer3.max_stab_eig"
+        # Staged reuses the same bounds.
+        assert staged_calls[0]["bounds"] == [(0.5, 20.0)]
+        # Plan-body literal: n_restarts=10 for the baseline.
+        assert staged_calls[0]["n_restarts"] == 10
         out = capsys.readouterr().out
-        # 47.4a stub message: deferred to plan 47.5b.
-        assert "--baseline staged" in out
-        assert "47.5b" in out
+        # New behaviour: side-by-side comparison appears.
+        assert "comparison (side-by-side)" in out
+        assert "staged" in out
+        # Old stub message must NOT appear post-47.5b.
+        assert "deferred" not in out

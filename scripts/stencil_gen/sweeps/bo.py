@@ -29,9 +29,13 @@ from stencil_gen.bo import (
 from stencil_gen.cpp_bridge import SHOCCS_BINARY
 from stencil_gen.optimizer import (
     DEFAULT_BOUNDS,
+    OptimizeResult,
     _infer_max_layer,
     _record_cpp_cutcell_diagnostic,
+    run_staged_optimize,
 )
+
+from .optimize import _result_to_persist_dict
 
 
 _KERNEL_CHOICES = ("tension", "gaussian", "multiquadric", "classical")
@@ -240,21 +244,34 @@ def _print_summary(result: BOResult, *, baseline: dict | None = None) -> None:
     if baseline is not None:
         print(f"\n  baseline (staged):")
         print(f"    best_x         = {baseline.get('best_x')}")
+        print(f"    best_params    = {baseline.get('best_params')}")
         print(f"    best_objective = {baseline.get('best_objective')}")
         print(f"    n_evals        = {baseline.get('n_evals')}")
         print(f"    compute_time   = {baseline.get('compute_time')} s")
-        print(f"\n  comparison (mfbo vs staged):")
-        b_obj = baseline.get("best_objective", float("nan"))
-        b_t = baseline.get("compute_time", float("nan"))
+        print(f"    converged      = {baseline.get('converged')}")
+
+        # Side-by-side comparison: (method, best_objective, compute_time, n_evals_at_HF).
+        mf_n_hf = result.n_evals_per_fidelity.get(result.hf_level, 0)
+        sg_n_hf = baseline.get("n_evals_at_hf", 0)
+        sg_obj = baseline.get("best_objective", float("nan"))
+        sg_time = baseline.get("compute_time", float("nan"))
+        print(f"\n  comparison (side-by-side):")
         print(
-            f"    objective: mfbo={result.best_objective:.6e}  "
-            f"staged={b_obj}  delta={result.best_objective - b_obj:+.6e}"
-            if isinstance(b_obj, float) else
-            f"    objective: mfbo={result.best_objective:.6e}  staged={b_obj}"
+            f"    {'method':<16s}  {'best_objective':>16s}  "
+            f"{'compute_time (s)':>18s}  {'n_evals_at_HF':>14s}"
         )
         print(
-            f"    wall (s) : mfbo={result.total_compute_time:.3f}  "
-            f"staged={b_t}"
+            f"    {'-' * 16}  {'-' * 16}  {'-' * 18}  {'-' * 14}"
+        )
+        print(
+            f"    {result.method:<16s}  {result.best_objective:>16.6e}  "
+            f"{result.total_compute_time:>18.3f}  {mf_n_hf:>14d}"
+        )
+        sg_obj_str = f"{sg_obj:.6e}" if isinstance(sg_obj, (int, float)) else str(sg_obj)
+        sg_time_str = f"{sg_time:.3f}" if isinstance(sg_time, (int, float)) else str(sg_time)
+        print(
+            f"    {'staged':<16s}  {sg_obj_str:>16s}  "
+            f"{sg_time_str:>18s}  {int(sg_n_hf):>14d}"
         )
 
 
@@ -376,6 +393,70 @@ def _run_cpp_validation(
             "Analytical best_objective unchanged — L8 disagreement is diagnostic."
         )
     return entry
+
+
+def _run_staged_baseline(
+    result: BOResult,
+    *,
+    bounds: list[tuple[float, float]],
+    seed: int,
+    n_restarts: int = 10,
+) -> dict[str, Any]:
+    """Run ``run_staged_optimize`` against the same HF objective as MF-BO.
+
+    ``validator_max_layer`` is set to ``max(result.hf_level, 3)`` so the
+    staged baseline validates at the same depth MF-BO targeted (the floor
+    of 3 satisfies the staged constraint
+    ``validator_max_layer >= inner_max_layer`` with the default
+    ``inner_max_layer=3``).  Both runs share *seed* for fair comparison.
+
+    Returns the JSON-friendly serialisation produced by
+    :func:`sweeps.optimize._result_to_persist_dict`, with one extra key
+    ``n_evals_at_hf`` derived from
+    ``len(extras["validator_ranking"])`` so the side-by-side print can show
+    how many HF (validator) evaluations the staged baseline consumed.  The
+    persisted snapshot is what gets written under
+    ``result.extras["baseline"]`` and ultimately into the JSON file.
+    """
+    objective = result.report_fields_by_layer[result.hf_level]
+    validator_max_layer = max(int(result.hf_level), 3)
+    inner_max_layer = min(3, validator_max_layer)
+    inner_gate = max(inner_max_layer - 1, 0)
+
+    print(
+        f"\n[bo] --baseline staged: running run_staged_optimize "
+        f"(scheme={result.scheme}, kernel={result.kernel}, "
+        f"objective={objective}, validator_max_layer={validator_max_layer}, "
+        f"n_restarts={n_restarts}, seed={seed})..."
+    )
+    staged: OptimizeResult = run_staged_optimize(
+        scheme=result.scheme,
+        kernel=result.kernel,
+        report_field=objective,
+        bounds=bounds,
+        inner_gate=inner_gate,
+        inner_max_layer=inner_max_layer,
+        validator_max_layer=validator_max_layer,
+        n_restarts=n_restarts,
+        seed=seed,
+    )
+    record = _result_to_persist_dict(
+        staged,
+        scheme=result.scheme,
+        kernel=result.kernel,
+        objective=objective,
+        bounds=bounds,
+        gate_layer=inner_gate,
+        max_layer=inner_max_layer,
+        validator_max_layer=validator_max_layer,
+    )
+    # n_evals_at_hf for staged = number of validator-stage evaluations,
+    # which is the count of (x, f) entries in the validator ranking.
+    validator_ranking = staged.extras.get("validator_ranking") if staged.extras else None
+    record["n_evals_at_hf"] = (
+        len(validator_ranking) if validator_ranking is not None else 0
+    )
+    return record
 
 
 def _resolve_cost_table(
@@ -574,15 +655,12 @@ def main(argv: list[str] | None = None) -> int:
     # --- baseline (47.5b) ---------------------------------------------------
     baseline_record: dict | None = None
     if args.baseline == "staged":
-        # The full implementation lives in 47.5b: run run_staged_optimize at
-        # the same (scheme, kernel, objective, bounds, seed), serialise via
-        # _result_to_persist_dict, and store under result.extras["baseline"].
-        # For 47.4a we leave the wiring stub here so the flag parses today
-        # without changing the dispatch contract when 47.5b lands.
-        print(
-            "\n[bo] --baseline staged: deferred to plan 47.5b; flag accepted "
-            "but no baseline run executed yet."
+        baseline_record = _run_staged_baseline(
+            result,
+            bounds=bounds,
+            seed=args.seed,
         )
+        result.extras["baseline"] = baseline_record
 
     # --- C++ validation (47.5a) --------------------------------------------
     # Validation runs BEFORE --persist so the persisted JSON includes the
