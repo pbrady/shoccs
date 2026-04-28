@@ -1501,6 +1501,170 @@ class TestRunMFBO:
                 f"warmup pick #{i} landed at fidelity {ev.fidelity}, expected 7"
             )
 
+    # --- 47.3i: adaptive HF cost floor --------------------------------------
+
+    def test_adaptive_hf_floor_validates_range(self):
+        # 47.3i: must be ``None`` (disabled) or ``>= 1.0``.  Subunit, negative,
+        # and NaN values are all rejected.
+        bounds = [(-1.0, 1.0), (-1.0, 1.0)]
+        common = dict(
+            scheme="E2",
+            kernel="classical",
+            report_fields_by_layer=self._hf_canonical_fields(),
+            bounds=bounds,
+            budget_evals=10,
+            n_init=8,
+            hf_anchors=3,
+            seed=0,
+            objective=lambda x, m: (0.0, 0.0, {}),
+        )
+        for bad in [0.5, 0.0, -1.0, float("nan")]:
+            with pytest.raises(ValueError, match="adaptive_hf_floor"):
+                run_mfbo(adaptive_hf_floor=bad, **common)
+
+    def test_adaptive_hf_floor_default_off_preserves_cost_aware_contract(self):
+        # 47.3i: the default (``adaptive_hf_floor=None``) must reproduce the
+        # pre-47.3i behaviour exactly.  Compare two runs identical except for
+        # an explicit ``adaptive_hf_floor=None`` (which should be a no-op
+        # alias for the default).
+        bounds = [(-1.0, 1.0), (-1.0, 1.0)]
+        objective, _ = self._rough_objective()
+        common = dict(
+            scheme="E2",
+            kernel="classical",
+            report_fields_by_layer=self._hf_canonical_fields(),
+            bounds=bounds,
+            budget_evals=15,
+            n_init=8,
+            hf_anchors=3,
+            seed=0,
+            objective=objective,
+        )
+        r_default = run_mfbo(**common)
+        r_explicit_none = run_mfbo(adaptive_hf_floor=None, **common)
+        np.testing.assert_allclose(
+            r_default.best_x, r_explicit_none.best_x, atol=1e-9
+        )
+        assert r_default.stop_reason == r_explicit_none.stop_reason
+        assert (
+            r_default.n_evals_per_fidelity
+            == r_explicit_none.n_evals_per_fidelity
+        )
+
+    def test_adaptive_hf_floor_lifts_cost_when_uncertain(self):
+        # 47.3i: with the mechanism enabled at ``α=1.0`` (effective HF cost
+        # floored to the cheap cost), the cost-aware utility no longer
+        # strongly prefers cheap on a 2-fidelity 100x-cost-ratio synthetic.
+        # Without the floor, qMFKG's cost-weighted utility drives every
+        # acquisition pick to cheap (verified empirically: 0/11 HF picks
+        # under the matched off-run).  With the floor active, HF picks
+        # rise above zero — pin the directional contract.
+        bounds = [(-1.0, 1.0), (-1.0, 1.0)]
+        report_fields = {
+            1: "layer1.boundary_gv_err",
+            7: "layer7.max_spectral_abscissa",
+        }
+        cost_table = {1: 0.01, 7: 1.0}  # 100x cost ratio
+        x_star = np.array([0.3, -0.2])
+
+        def objective(x, m):
+            x = np.asarray(x, dtype=float)
+            biases = {1: 1000.0, 7: 0.0}
+            val = float(np.sum((x - x_star) ** 2)) + biases.get(m, 0.0)
+            return val, 0.001, {}
+
+        common = dict(
+            scheme="E2",
+            kernel="classical",
+            report_fields_by_layer=report_fields,
+            bounds=bounds,
+            budget_evals=20,
+            n_init=8,
+            hf_anchors=3,
+            cost_table=cost_table,
+            seed=0,
+            objective=objective,
+        )
+        n_init = 8
+
+        r_off = run_mfbo(**common)
+        acq_off = r_off.eval_history[n_init:-1]
+        hf_off = sum(1 for e in acq_off if e.fidelity == 7)
+
+        r_on = run_mfbo(adaptive_hf_floor=1.0, **common)
+        acq_on = r_on.eval_history[n_init:-1]
+        hf_on = sum(1 for e in acq_on if e.fidelity == 7)
+
+        assert len(acq_off) > 0 and len(acq_on) > 0, (
+            f"no acquisition iterations: off={len(acq_off)} on={len(acq_on)} "
+            f"(stop_reasons: off={r_off.stop_reason!r} on={r_on.stop_reason!r})"
+        )
+        # Directional contract: the floor must increase HF picks (or at
+        # worst leave them unchanged in a degenerate run).
+        assert hf_on >= hf_off, (
+            f"adaptive_hf_floor=1.0 reduced HF picks: on={hf_on} off={hf_off}"
+        )
+        # On this scenario the off-run picks 0 HF; the on-run must pick at
+        # least one — pinning that the mechanism actually has measurable
+        # effect (not a no-op).
+        assert hf_on > 0, (
+            f"adaptive_hf_floor=1.0 produced no HF picks "
+            f"(hf_on={hf_on}/{len(acq_on)}); mechanism inert"
+        )
+
+    def test_adaptive_hf_floor_reverts_when_cheap_predicate_fails(self):
+        # 47.3i: when the cheap surrogate is NOT well-fit (n_cheap_finite <
+        # max(2*d, K)), the mechanism is inactive and on-run reproduces the
+        # off-run behaviour.  Construct an init where the cheap row count
+        # falls short of the threshold throughout the (single) acquisition
+        # iteration: ``d=2, K=2 ⇒ threshold = max(2*d=4, K=2) = 4``.  With
+        # ``n_init=6, hf_anchors=3, mid_anchors=0`` (silently zeroed for
+        # K=2), n_cheap=3 < 4 in the init.  Setting ``budget_evals=7``
+        # leaves room for exactly the init + final HF re-eval — no
+        # acquisition iterations run, so the cost-table-affecting block
+        # is never reached.  The two runs must be bytewise identical.
+        bounds = [(-1.0, 1.0), (-1.0, 1.0)]
+        report_fields = {
+            1: "layer1.boundary_gv_err",
+            7: "layer7.max_spectral_abscissa",
+        }
+        cost_table = {1: 0.01, 7: 1.0}
+        x_star = np.array([0.3, -0.2])
+
+        def objective(x, m):
+            x = np.asarray(x, dtype=float)
+            biases = {1: 1000.0, 7: 0.0}
+            val = float(np.sum((x - x_star) ** 2)) + biases.get(m, 0.0)
+            return val, 0.001, {}
+
+        common = dict(
+            scheme="E2",
+            kernel="classical",
+            report_fields_by_layer=report_fields,
+            bounds=bounds,
+            budget_evals=7,
+            n_init=6,
+            hf_anchors=3,  # n_cheap = 6 - 3 - 0 = 3 < max(4, 2) = 4
+            cost_table=cost_table,
+            seed=0,
+            objective=objective,
+        )
+        r_off = run_mfbo(**common)
+        r_on = run_mfbo(adaptive_hf_floor=1.0, **common)
+
+        # When the cheap-well-fit predicate is never true, the mechanism
+        # produces exactly the same trajectory.
+        np.testing.assert_allclose(
+            r_off.best_x, r_on.best_x, atol=1e-9,
+            err_msg="adaptive floor changed best_x despite predicate failure",
+        )
+        assert r_off.stop_reason == r_on.stop_reason
+        assert r_off.n_evals_per_fidelity == r_on.n_evals_per_fidelity, (
+            f"adaptive floor changed eval counts despite predicate failure: "
+            f"off={dict(r_off.n_evals_per_fidelity)} "
+            f"on={dict(r_on.n_evals_per_fidelity)}"
+        )
+
 
 # ---------------------------------------------------------------------------
 # 47.3c: TestAcquisition — qMFKG construction + mixed-optimiser smoke tests

@@ -492,6 +492,17 @@ DEFAULT_COST_TABLE: dict[int, float] = {
 _DEFAULT_COST_FLOOR_RATIO: float = 0.05
 
 
+# 47.3i: adaptive HF cost floor — predicate threshold for the
+# "HF posterior uncertain" check.  ``var_hf_grid > τ * spread_hf**2`` fires
+# whenever the maximum posterior variance across a Sobol' grid at HF is at
+# least ``τ`` of the squared HF Y-range.  Distinct from (and orders of
+# magnitude looser than) the variance-guard threshold ``1e-6 * spread_hf**2``
+# at the same Y scale: the adaptive floor is meant to lift effective HF cost
+# during exploration, well before the variance guard would consider the
+# incumbent converged.
+_ADAPTIVE_HF_FLOOR_TAU: float = 0.01
+
+
 def apply_cost_floor(
     cost_table: dict[int, float],
     *,
@@ -1031,6 +1042,7 @@ def run_mfbo(
     min_acquisition_iterations: int | None = None,
     hf_explore_bias: float = 0.0,
     hf_priority_warmup: int = 0,
+    adaptive_hf_floor: float | None = None,
     num_fantasies: int = 64,
     verbose: bool = False,
     objective: Callable[[np.ndarray, int], tuple[float, float, dict]] | None = None,
@@ -1147,6 +1159,37 @@ def run_mfbo(
         suggested optimum before the cost-aware utility takes over.
         Composes with ``hf_explore_bias``: warmup runs first, quota runs
         after.
+    adaptive_hf_floor
+        Multiplier ``α`` controlling an adaptive floor on the cost-aware
+        utility's effective HF cost (47.3i).  When ``None`` (default), the
+        mechanism is disabled and the cost-aware utility sees the floored
+        ``cost_table`` unchanged across iterations.  When a float ``α >= 1``,
+        before each acquisition step we evaluate two predicates:
+
+        - "HF posterior uncertain": ``var_hf_grid > τ * spread_hf**2`` where
+          ``var_hf_grid`` is the maximum posterior variance over a 256-point
+          Sobol' grid at HF, ``spread_hf`` is the range of HF-only Y values,
+          and ``τ`` is :data:`_ADAPTIVE_HF_FLOOR_TAU` (``0.01``).
+        - "Cheap surrogate well-fit": ``n_cheap_finite >= max(2 * d, K)``
+          where ``n_cheap_finite`` is the count of finite Y_train rows at
+          cheap (non-HF) fidelities.
+
+        When both fire, the effective HF cost is lifted to
+        ``min(c(hf), α * min_cheap_cost)`` for that iteration only — i.e. the
+        cost-aware utility sees HF as "only ``α×`` more expensive than the
+        cheapest layer" rather than the true ratio (often 100×).  This biases
+        acquisition toward HF until the posterior tightens or the cheap
+        surrogate is no longer well-fit; the floor reverts automatically when
+        either predicate fails.  Composes with ``hf_priority_warmup``
+        (warmup wins for the first N picks) and ``hf_explore_bias`` (quota
+        further restricts choices when the running HF fraction is below
+        target).  Motivation: even with the warmup + quota, the cost-aware
+        utility's 100× ratio dominates once warmup expires and the basin
+        cannot be resolved within tight evaluation budgets (47.3h empirical
+        sweep on AugmentedBranin).  Lowering effective HF cost only when the
+        GP says HF is still informative *and* cheap data is sufficient
+        defends against the GP-starvation regime that pure-quota approaches
+        hit at high quotas.
     num_fantasies
         Forwarded to :func:`build_acquisition`.  Default 64.
     verbose
@@ -1200,6 +1243,16 @@ def run_mfbo(
         raise ValueError(
             f"hf_priority_warmup must be >= 0, got {hf_priority_warmup}"
         )
+    if adaptive_hf_floor is not None:
+        # NaN check via self-comparison (adaptive_hf_floor != adaptive_hf_floor
+        # is True for NaN); a strict ``< 1.0`` then catches negative and
+        # subunit values.  ``α = 1`` makes effective HF cost = cheap cost
+        # (pure exploration); larger ``α`` keeps a residual cost penalty.
+        if adaptive_hf_floor != adaptive_hf_floor or adaptive_hf_floor < 1.0:
+            raise ValueError(
+                "adaptive_hf_floor must be None or a float >= 1.0, "
+                f"got {adaptive_hf_floor}"
+            )
 
     torch.manual_seed(seed)
     np.random.seed(seed)
@@ -1474,9 +1527,74 @@ def run_mfbo(
             converged = True
             break
 
+        # 47.3i: adaptive HF cost floor.  When the HF posterior is still
+        # uncertain AND the cheap surrogate is well-fit, lift the effective
+        # HF cost toward the cheap cost so the cost-aware utility doesn't
+        # under-sample HF.  Composes with hf_priority_warmup (47.3h, runs
+        # first) and hf_explore_bias (47.3g, runs after — both jointly steer
+        # ``fidelity_choices`` once the cost model is built).  Best-effort:
+        # any failure in the predicate computation falls back to the static
+        # cost table so a numerical hiccup cannot abort the loop.
+        effective_cost_table = cost_table_resolved
+        if adaptive_hf_floor is not None:
+            try:
+                Y_hf_now = Y_train[X_train[:, d] == target_fid_idx]
+                if Y_hf_now.size >= 2:
+                    spread_hf_now = max(
+                        float(np.max(Y_hf_now)) - float(np.min(Y_hf_now)),
+                        1e-12,
+                    )
+                    grid_sobol = torch.quasirandom.SobolEngine(
+                        d, scramble=True, seed=seed
+                    )
+                    grid_raw = grid_sobol.draw(256).double()
+                    bounds_arr = torch.tensor(
+                        [list(b) for b in bounds_t], dtype=torch.float64
+                    )
+                    lo, hi = bounds_arr[:, 0], bounds_arr[:, 1]
+                    grid_X = lo + grid_raw * (hi - lo)
+                    grid_full = torch.cat(
+                        [
+                            grid_X,
+                            torch.full(
+                                (256, 1),
+                                float(target_fid_idx),
+                                dtype=torch.float64,
+                            ),
+                        ],
+                        dim=1,
+                    )
+                    with torch.no_grad():
+                        var_hf_grid = float(
+                            model.posterior(grid_full).variance.max().item()
+                        )
+                    n_cheap_finite = int(
+                        np.sum(X_train[:, d] != target_fid_idx)
+                    )
+                    hf_uncertain = (
+                        var_hf_grid
+                        > _ADAPTIVE_HF_FLOOR_TAU * spread_hf_now ** 2
+                    )
+                    cheap_well_fit = n_cheap_finite >= max(2 * d, K)
+                    if hf_uncertain and cheap_well_fit:
+                        cheap_costs = [
+                            cost_table_resolved[ext]
+                            for ext in fidelity_levels[:-1]
+                        ]
+                        if cheap_costs:
+                            cheap_min = min(cheap_costs)
+                            effective_hf_cost = min(
+                                cost_table_resolved[hf_level],
+                                adaptive_hf_floor * cheap_min,
+                            )
+                            effective_cost_table = dict(cost_table_resolved)
+                            effective_cost_table[hf_level] = effective_hf_cost
+            except Exception:
+                effective_cost_table = cost_table_resolved
+
         # Cost-aware acquisition + mixed continuous/discrete optimiser.
         try:
-            cost_util = build_cost_model(cost_table_resolved, fidelity_dim=d)
+            cost_util = build_cost_model(effective_cost_table, fidelity_dim=d)
             _, optimize = build_acquisition(
                 model,
                 cost_util,
