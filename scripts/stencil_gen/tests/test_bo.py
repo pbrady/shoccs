@@ -22,6 +22,7 @@ from stencil_gen.bo import (
     build_initial_design,
     build_mf_gp,
     make_multi_fidelity_objective,
+    run_mfbo,
 )
 from stencil_gen.brady2d_stability import StabilityReport
 
@@ -685,3 +686,93 @@ class TestDOE:
             [(-1.0, 1.0), (-1.0, 1.0)], (1, 3, 7), seed=0
         )
         assert fid.dtype == np.int64
+
+
+class TestRunMFBO:
+    """Plan 47.3b/47.3b.1: budget validation in :func:`run_mfbo`."""
+
+    def test_init_anchors_preserved_under_tight_budget(self):
+        # 47.3b.1: under the old code, ``budget_evals - 1 < n_init`` silently
+        # truncated ``X_init`` from the tail.  The init layout is
+        # ``[cheap | mid | hf]``, so truncation dropped HF anchors first,
+        # leaving the GP unable to identify the off-diagonal ICM entries the
+        # paired evaluations were specifically designed to anchor.  Fix
+        # branch (1): raise ``ValueError`` up front so the contract is loud.
+        # Here ``n_init=12`` (default for d=2 plus 1 → tighter than the
+        # 13-default but still asks for HF anchors), ``budget_evals=10`` ⇒
+        # would have truncated the last 3 rows under the old code (i.e.
+        # exactly the HF block).
+        bounds = [(-1.0, 1.0), (-1.0, 1.0)]
+        with pytest.raises(ValueError, match="too small for initial design"):
+            run_mfbo(
+                scheme="E2",
+                kernel="classical",
+                report_fields_by_layer={
+                    1: "layer1.boundary_gv_err",
+                    3: "layer3.max_stab_eig",
+                    7: "layer7.max_spectral_abscissa",
+                },
+                bounds=bounds,
+                budget_evals=10,
+                n_init=12,
+                seed=0,
+                # objective hook avoids invoking the cascade — validation
+                # must fire before the objective is ever built / called.
+                objective=lambda x, m: (0.0, 0.0, {}),
+            )
+
+    def test_budget_validation_uses_default_n_init(self):
+        # When ``n_init`` is None, the validation must use the same default
+        # ``5*d + 3`` that ``build_initial_design`` uses (Loeppky 2009).
+        # d=2 → default n_init=13, so budget_evals=13 (=> 13-1=12 < 13)
+        # must raise; budget_evals=14 must NOT raise on the budget check.
+        bounds = [(-1.0, 1.0), (-1.0, 1.0)]
+        kwargs = dict(
+            scheme="E2",
+            kernel="classical",
+            report_fields_by_layer={
+                1: "layer1.boundary_gv_err",
+                3: "layer3.max_stab_eig",
+                7: "layer7.max_spectral_abscissa",
+            },
+            bounds=bounds,
+            seed=0,
+            objective=lambda x, m: (0.0, 0.0, {}),
+        )
+        with pytest.raises(ValueError, match="too small for initial design"):
+            run_mfbo(budget_evals=13, **kwargs)
+        # budget_evals=14 leaves room for the full default init + final HF;
+        # the budget validation should not fire.  (The run itself may raise
+        # from the synthetic constant-objective stagnation path, but
+        # ``ValueError`` matching the budget message must NOT appear.)
+        try:
+            run_mfbo(budget_evals=14, **kwargs)
+        except ValueError as exc:
+            assert "too small for initial design" not in str(exc)
+        except Exception:
+            pass  # Any non-ValueError from the synthetic loop is fine here.
+
+    def test_budget_seconds_skips_init_size_check(self):
+        # The truncation bug is specific to ``budget_evals``; under
+        # ``budget_seconds`` truncation is a legitimate (and unavoidable)
+        # behaviour.  The init-size validation must NOT fire.
+        bounds = [(-1.0, 1.0), (-1.0, 1.0)]
+        try:
+            run_mfbo(
+                scheme="E2",
+                kernel="classical",
+                report_fields_by_layer={
+                    1: "layer1.boundary_gv_err",
+                    3: "layer3.max_stab_eig",
+                    7: "layer7.max_spectral_abscissa",
+                },
+                bounds=bounds,
+                budget_seconds=1e-9,  # tiny — init will be truncated
+                n_init=12,
+                seed=0,
+                objective=lambda x, m: (0.0, 0.0, {}),
+            )
+        except ValueError as exc:
+            assert "too small for initial design" not in str(exc)
+        except Exception:
+            pass  # Any other failure path is unrelated to the validation.

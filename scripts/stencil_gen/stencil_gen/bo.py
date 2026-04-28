@@ -1062,7 +1062,14 @@ def run_mfbo(
         If neither or both of *budget_evals* and *budget_seconds* are set; if
         *report_fields_by_layer* is empty; if *cost_table* is missing entries
         for layers in *report_fields_by_layer*; if *bounds* is empty; if
-        *budget_evals* is below 2.
+        *budget_evals* is below 2; or if *budget_evals* leaves no room for the
+        full initial design plus the final HF re-evaluation
+        (``budget_evals - 1 < resolved n_init``; the ``-1`` reserves the final
+        HF slot).  The init-design layout puts HF anchors last, so silent
+        truncation under a tight budget would drop exactly the paired
+        HF/cheap rows the ICM kernel needs to identify off-diagonal task
+        correlations (Wu et al. 2020 §3.1) — we surface the constraint up
+        front instead.
     """
     if (budget_evals is None) == (budget_seconds is None):
         raise ValueError(
@@ -1112,6 +1119,20 @@ def run_mfbo(
 
     bounds_t = tuple((float(lo), float(hi)) for lo, hi in bounds)
     d = len(bounds_t)
+
+    # Resolve n_init to the same default that build_initial_design uses
+    # (Loeppky et al. 2009: 5*d + 3) so we can validate the budget against
+    # the actual initial-design size.  The init layout is [cheap | mid | hf];
+    # the BO loop reserves one slot for the final HF re-eval; truncation
+    # would silently drop HF anchors first (47.3b.1).
+    resolved_n_init = n_init if n_init is not None else 5 * d + 3
+    if budget_evals is not None and budget_evals - 1 < resolved_n_init:
+        raise ValueError(
+            f"budget_evals={budget_evals} too small for initial design "
+            f"n_init={resolved_n_init}: need budget_evals >= n_init + 1 "
+            f"(one slot reserved for the final HF re-eval at the incumbent). "
+            f"Either raise budget_evals or pass a smaller n_init."
+        )
 
     X_init, fid_init = build_initial_design(
         bounds_t, fidelity_levels, n_init=n_init, seed=seed
