@@ -14,6 +14,7 @@ from botorch.acquisition.cost_aware import InverseCostWeightedUtility
 
 from stencil_gen.bo import (
     _BO_SENTINEL,
+    _stagnation_triggered,
     BOEval,
     BOResult,
     DEFAULT_COST_TABLE,
@@ -1289,3 +1290,120 @@ class TestAcquisition:
         # (We do not assert > 0 since cost-weighted utility can vanish for
         # smooth low-uncertainty surrogates.)
         assert acq_value >= 0.0
+
+
+# ---------------------------------------------------------------------------
+# 47.3e: TestStagnationGuard — pure-helper unit coverage for the
+# ``_stagnation_triggered`` check used by ``run_mfbo``'s while-loop.
+#
+# The helper extraction lets us pin the branch deterministically with hand-
+# built ``BOEval`` lists, rather than relying on a full BO loop to seed ≥ 11
+# HF rows under cost-aware utility (which is hard to force — see the
+# 47.3c::test_stagnation_stop_reason inline notes).
+# ---------------------------------------------------------------------------
+
+
+def _hf_eval(value: float) -> BOEval:
+    """Hand-built HF ``BOEval`` for stagnation tests (only ``value`` matters)."""
+    return BOEval(
+        x=np.zeros(2),
+        params={"alpha": [0.0, 0.0]},
+        fidelity=7,
+        value=value,
+        wall_time=0.001,
+        report={},
+    )
+
+
+class TestStagnationGuard:
+    """Plan 47.3e: pure-helper coverage for ``_stagnation_triggered``."""
+
+    def test_constant_y_triggers(self):
+        # Constant Y: argmin is index 0 (ties broken to earliest), and 0 is
+        # older than the trailing window for any list of length window+1+.
+        evals = [_hf_eval(1.0) for _ in range(11)]
+        assert _stagnation_triggered(evals) is True
+
+    def test_monotone_improving_does_not_trigger(self):
+        # Strictly decreasing Y: best is the most-recent eval, never older
+        # than the trailing window.
+        evals = [_hf_eval(1.0 - 0.01 * i) for i in range(15)]
+        assert _stagnation_triggered(evals) is False
+
+    def test_late_improvement_does_not_trigger(self):
+        # Best at the very end (index len-1): never satisfies
+        # best_idx <= len - (window + 1).
+        values = [1.0] * 14 + [0.5]
+        evals = [_hf_eval(v) for v in values]
+        assert _stagnation_triggered(evals) is False
+
+    def test_early_improvement_triggers_at_threshold(self):
+        # Best at index ``len - (window + 1)`` (the boundary case): exactly
+        # one window of non-improving evals follows ⇒ trigger.
+        values = [2.0, 2.0, 2.0, 2.0, 0.1, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0,
+                  1.0, 1.0, 1.0, 1.0]
+        # len=15, window=10 ⇒ require best_idx <= 15 - 11 = 4. Best is at
+        # index 4 (the 0.1).
+        evals = [_hf_eval(v) for v in values]
+        assert _stagnation_triggered(evals) is True
+
+    def test_just_past_threshold_does_not_trigger(self):
+        # Best one step *newer* than the trigger boundary: still inside the
+        # trailing window ⇒ no trigger.  Same setup as above but the 0.1
+        # moves to index 5 (best_idx=5 > 15-11=4).
+        values = [2.0, 2.0, 2.0, 2.0, 2.0, 0.1, 1.0, 1.0, 1.0, 1.0, 1.0,
+                  1.0, 1.0, 1.0, 1.0]
+        evals = [_hf_eval(v) for v in values]
+        assert _stagnation_triggered(evals) is False
+
+    def test_too_short_returns_false(self):
+        # Fewer than ``window + 1`` rows: helper is silent regardless of
+        # value pattern.  (run_mfbo's loop relies on this so the guard
+        # cannot fire before enough HF history accumulates.)
+        evals = [_hf_eval(1.0) for _ in range(10)]
+        assert _stagnation_triggered(evals) is False
+
+    def test_empty_returns_false(self):
+        assert _stagnation_triggered([]) is False
+
+    def test_custom_window(self):
+        # window=5: requires len >= 6, best_idx <= len - 6.
+        evals = [_hf_eval(0.1)] + [_hf_eval(1.0) for _ in range(5)]
+        # len=6, best at 0, threshold = 0 ⇒ triggers.
+        assert _stagnation_triggered(evals, window=5) is True
+
+        # window=5 with best at the end ⇒ does not trigger.
+        evals_late = [_hf_eval(1.0) for _ in range(5)] + [_hf_eval(0.1)]
+        assert _stagnation_triggered(evals_late, window=5) is False
+
+    def test_window_one_minimum(self):
+        # ``window=1`` is the smallest legal value.  Requires len >= 2 and
+        # the latest eval to not be the best.
+        # Best at the end ⇒ no trigger.
+        assert (
+            _stagnation_triggered([_hf_eval(1.0), _hf_eval(0.5)], window=1)
+            is False
+        )
+        # Best at index 0, one trailing non-improving eval ⇒ trigger.
+        assert (
+            _stagnation_triggered([_hf_eval(0.5), _hf_eval(1.0)], window=1)
+            is True
+        )
+
+    @pytest.mark.parametrize("window", [0, -1, -10])
+    def test_invalid_window_raises(self, window):
+        with pytest.raises(ValueError, match="window must be"):
+            _stagnation_triggered([_hf_eval(1.0)], window=window)
+
+    def test_ties_break_to_earliest(self):
+        # When two entries share the minimum value, ``min(range(...))`` with
+        # a key returns the earliest — the tie-breaking rule the helper
+        # inherits from Python's ``min``.  This makes the guard fire as soon
+        # as a tied minimum appears at an old enough index, even if a
+        # later (equally good) eval would otherwise look like fresh
+        # progress.  Pinning this so a future refactor cannot silently
+        # change tie-breaking semantics.
+        values = [0.5] + [1.0] * 9 + [0.5]  # len=11, ties at 0 and 10
+        evals = [_hf_eval(v) for v in values]
+        # best_idx = 0, threshold = 11 - 11 = 0 ⇒ 0 <= 0 ⇒ trigger.
+        assert _stagnation_triggered(evals) is True

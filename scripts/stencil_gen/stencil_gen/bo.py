@@ -943,6 +943,44 @@ def build_acquisition(
 # --- end-to-end BO driver ----------------------------------------------------
 
 
+def _stagnation_triggered(
+    hf_evals: Sequence[BOEval], window: int = 10
+) -> bool:
+    """Return True when the HF running minimum has not improved in the last *window* evals.
+
+    Pure check used by :func:`run_mfbo` to decide whether to short-circuit on
+    a stagnant HF trace.  Finds the index of the lowest-valued entry in
+    *hf_evals* (treated as chronological) and returns True only when that
+    best is older than the trailing *window* — i.e. at index
+    ``<= len(hf_evals) - (window + 1)``.
+
+    Returns False when *hf_evals* contains fewer than ``window + 1`` entries:
+    the guard cannot fire until at least one improvement-window has elapsed
+    after a candidate "best".
+
+    The caller is responsible for pre-filtering to finite (non-sentinel) HF
+    rows; this helper applies no filtering of its own.
+
+    Parameters
+    ----------
+    hf_evals : Sequence[BOEval]
+        HF evaluations in chronological (insertion) order.
+    window : int, default 10
+        Trailing-window size for the no-improvement check.  Must be ``>= 1``.
+
+    Raises
+    ------
+    ValueError
+        If *window* is non-positive.
+    """
+    if window < 1:
+        raise ValueError(f"window must be >= 1, got {window}")
+    if len(hf_evals) < window + 1:
+        return False
+    best_idx = min(range(len(hf_evals)), key=lambda i: hf_evals[i].value)
+    return best_idx <= len(hf_evals) - (window + 1)
+
+
 def _recommend_incumbent(
     model: MultiTaskGP,
     bounds: Sequence[tuple[float, float]],
@@ -1316,8 +1354,9 @@ def run_mfbo(
         except Exception:
             pass
 
-        # Stagnation guard: at least 10 finite HF evals + the running best is
-        # older than the last 10.
+        # Stagnation guard: at least ``window + 1`` finite HF evals + the
+        # running best is older than the last ``window``.  Logic factored
+        # into :func:`_stagnation_triggered` for unit-testability (47.3e).
         hf_finite = [
             e
             for e in eval_history
@@ -1325,14 +1364,10 @@ def run_mfbo(
             and np.isfinite(e.value)
             and e.value < _BO_SENTINEL / 2
         ]
-        if len(hf_finite) >= 10:
-            best_idx = min(
-                range(len(hf_finite)), key=lambda i: hf_finite[i].value
-            )
-            if best_idx <= len(hf_finite) - 11:
-                stop_reason = "stagnation"
-                converged = True
-                break
+        if _stagnation_triggered(hf_finite):
+            stop_reason = "stagnation"
+            converged = True
+            break
 
         # Cost-aware acquisition + mixed continuous/discrete optimiser.
         try:
