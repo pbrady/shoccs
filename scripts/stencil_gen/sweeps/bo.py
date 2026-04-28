@@ -404,11 +404,14 @@ def _run_staged_baseline(
 ) -> dict[str, Any]:
     """Run ``run_staged_optimize`` against the same HF objective as MF-BO.
 
-    ``validator_max_layer`` is set to ``max(result.hf_level, 3)`` so the
-    staged baseline validates at the same depth MF-BO targeted (the floor
-    of 3 satisfies the staged constraint
-    ``validator_max_layer >= inner_max_layer`` with the default
-    ``inner_max_layer=3``).  Both runs share *seed* for fair comparison.
+    Only ``validator_max_layer`` is overridden from the staged defaults: it
+    is set to ``max(result.hf_level, 3)`` so the baseline validates at the
+    same depth MF-BO targeted (the floor of 3 satisfies the staged
+    constraint ``validator_max_layer >= inner_max_layer`` with the default
+    ``inner_max_layer=3``).  ``inner_gate`` and ``inner_max_layer`` are NOT
+    passed — they fall through to ``run_staged_optimize``'s canonical
+    defaults (``inner_gate=3``, ``inner_max_layer=3``) so the baseline is
+    "vanilla staged" modulo only the fairness fix.  Both runs share *seed*.
 
     Returns the JSON-friendly serialisation produced by
     :func:`sweeps.optimize._result_to_persist_dict`, with one extra key
@@ -420,8 +423,6 @@ def _run_staged_baseline(
     """
     objective = result.report_fields_by_layer[result.hf_level]
     validator_max_layer = max(int(result.hf_level), 3)
-    inner_max_layer = min(3, validator_max_layer)
-    inner_gate = max(inner_max_layer - 1, 0)
 
     print(
         f"\n[bo] --baseline staged: running run_staged_optimize "
@@ -434,20 +435,22 @@ def _run_staged_baseline(
         kernel=result.kernel,
         report_field=objective,
         bounds=bounds,
-        inner_gate=inner_gate,
-        inner_max_layer=inner_max_layer,
         validator_max_layer=validator_max_layer,
         n_restarts=n_restarts,
         seed=seed,
     )
+    # gate_layer / max_layer mirror the staged defaults run_staged_optimize
+    # was invoked with (we drop the explicit kwargs so canonical defaults
+    # flow through; the persist helper still records them so consumers can
+    # rebuild make_objective at the exact configuration used).
     record = _result_to_persist_dict(
         staged,
         scheme=result.scheme,
         kernel=result.kernel,
         objective=objective,
         bounds=bounds,
-        gate_layer=inner_gate,
-        max_layer=inner_max_layer,
+        gate_layer=3,
+        max_layer=3,
         validator_max_layer=validator_max_layer,
     )
     # n_evals_at_hf for staged = number of validator-stage evaluations,

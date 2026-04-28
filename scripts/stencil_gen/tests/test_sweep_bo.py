@@ -451,9 +451,103 @@ class TestBOCLI:
         assert staged_calls[0]["bounds"] == [(0.5, 20.0)]
         # Plan-body literal: n_restarts=10 for the baseline.
         assert staged_calls[0]["n_restarts"] == 10
+        # Plan 47.5b.1 (fix branch 2): inner_gate / inner_max_layer must NOT
+        # be passed explicitly — staged's canonical defaults flow through so
+        # the baseline matches "vanilla run_staged_optimize" modulo only the
+        # validator-depth fairness fix.  HF=L3 here ⇒ validator_max_layer=3
+        # (max(hf_level, 3)).
+        assert "inner_gate" not in staged_calls[0]
+        assert "inner_max_layer" not in staged_calls[0]
+        assert staged_calls[0]["validator_max_layer"] == 3
         out = capsys.readouterr().out
         # New behaviour: side-by-side comparison appears.
         assert "comparison (side-by-side)" in out
         assert "staged" in out
         # Old stub message must NOT appear post-47.5b.
         assert "deferred" not in out
+
+    def test_baseline_staged_uses_canonical_inner_gate_at_hf_l7(
+        self, monkeypatch, capsys
+    ):
+        """Plan 47.5b.1: with HF=L7, validator_max_layer flows through as 7
+        and ``inner_gate`` / ``inner_max_layer`` stay at staged's canonical
+        defaults (not passed by the BO baseline shim).
+
+        This is the second half of the 47.5b.1 contract: fairness-fix raises
+        validator depth; canonical defaults preserve the inner-stage gate.
+        """
+        from dataclasses import replace
+
+        bo_calls: list[dict] = []
+        staged_calls: list[dict] = []
+
+        def _fake_run_mfbo(**kwargs):
+            bo_calls.append(kwargs)
+            stub = _make_bo_result()
+            return replace(
+                stub,
+                fidelity_levels=(1, 3, 5, 6, 7),
+                hf_level=7,
+                report_fields_by_layer={
+                    1: "layer1.boundary_gv_err",
+                    3: "layer3.max_stab_eig",
+                    5: "layer_bl42.max_spectral_abscissa",
+                    6: "layer6.transient_growth_bound",
+                    7: "layer7.max_spectral_abscissa",
+                },
+                cost_model={1: 0.076, 3: 0.038, 5: 0.486, 6: 0.846, 7: 1.434},
+                n_evals_per_fidelity={1: 5, 3: 3, 5: 1, 6: 1, 7: 2},
+                wall_time_per_fidelity={1: 0.4, 3: 0.1, 5: 0.5, 6: 0.8, 7: 2.9},
+                bounds=((-2.0, 2.0), (0.05, 2.0)),
+                kernel="classical",
+                best_x=np.array([-0.7733, 0.1624]),
+                best_params={"alpha": [-0.7733, 0.1624]},
+                best_objective=-1.0e-3,
+                extras={"n_sentinel_filtered": 0},
+            )
+
+        def _fake_run_staged_optimize(**kwargs):
+            staged_calls.append(kwargs)
+            from stencil_gen.optimizer import OptimizeResult as _OR
+
+            return _OR(
+                best_params={"alpha": [-0.7733, 0.1624]},
+                best_x=np.array([-0.7733, 0.1624]),
+                best_objective=-2.0e-3,
+                best_report={"failed_layer": None},
+                method="staged",
+                converged=True,
+                n_evals=42,
+                compute_time=1.5,
+                history=[],
+                extras={
+                    "stage": "validated",
+                    "validator_ranking": [
+                        (np.array([-0.7733, 0.1624]), -2.0e-3),
+                    ],
+                },
+            )
+
+        monkeypatch.setattr(bo_cli, "run_mfbo", _fake_run_mfbo)
+        monkeypatch.setattr(bo_cli, "run_staged_optimize", _fake_run_staged_optimize)
+
+        rc = bo_cli.main(
+            [
+                "--scheme", "E4",
+                "--kernel", "classical",
+                "--objective", "layer7.max_spectral_abscissa",
+                "--cheap-fidelities", "1", "3", "5", "6",
+                "--bounds", "-2", "2", "0.05", "2",
+                "--budget-evals", "12",
+                "--seed", "1",
+                "--baseline", "staged",
+            ]
+        )
+        assert rc == 0
+        assert len(staged_calls) == 1
+        # Fairness fix: validator depth tracks MF-BO's HF target.
+        assert staged_calls[0]["validator_max_layer"] == 7
+        # Canonical defaults preserved.
+        assert "inner_gate" not in staged_calls[0]
+        assert "inner_max_layer" not in staged_calls[0]
+        capsys.readouterr()
