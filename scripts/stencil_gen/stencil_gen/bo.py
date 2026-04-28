@@ -74,6 +74,16 @@ from stencil_gen.optimizer import (  # noqa: F401  # reused in subsequent items
 _BO_SENTINEL: float = 1e12
 
 
+class _SkipGuard(Exception):
+    """Internal control-flow sentinel: skip the variance guard for this iter.
+
+    Raised inside the guard's ``try`` block (e.g. when fewer than 2 HF
+    training observations exist, so HF-only spread is undefined) and caught
+    locally so the loop continues to acquisition.  Distinct from the bare
+    ``except Exception`` that catches *real* posterior() failures.
+    """
+
+
 @dataclass(frozen=True)
 class BOEval:
     """A single multi-fidelity evaluation record.
@@ -1225,7 +1235,38 @@ def run_mfbo(
 
         # Incumbent + variance guard.  The variance check is best-effort: a
         # numerical hiccup in posterior() should not abort the run.
+        #
+        # Scale: ``model.posterior()`` returns variance in the original Y
+        # scale (BoTorch's Standardize outcome_transform auto-untransforms).
+        # The absolute threshold uses ``spread_hf`` — the range of HF-only
+        # Y values — rather than the full-multi-fidelity ``spread``.  In
+        # MF-BO the GP posterior at the incumbent lives at the target
+        # fidelity, so the relevant signal scale is HF-only.  Using full-Y
+        # spread inflates the threshold whenever per-fidelity bias
+        # dominates Y_train (e.g. cheap layers offset by hundreds while HF
+        # lives near zero — a common pattern in the cascade), causing the
+        # guard to fire after the initial design before any acquisition
+        # iteration runs.
+        #
+        # The guard also requires a *relative* criterion: ``var_inc`` must
+        # be small compared to the maximum posterior variance over a Sobol'
+        # grid at HF.  This defends against the GP collapsing uniformly to
+        # the noise floor on synthetic noise-free data — where every point
+        # looks confident but no actual convergence has occurred (the
+        # marginal-likelihood optimiser drives the noise hyperparameter to
+        # the ``GreaterThan(1e-9)`` floor when there is no observable
+        # signal noise, so absolute-only criteria fire spuriously).  When
+        # the GP has genuine exploration uncertainty, ``max_var >> var_inc``
+        # and both conditions can fire; when the GP is uniformly
+        # overconfident, ``max_var ≈ var_inc`` and the relative condition
+        # blocks the exit.
+        #
+        # The guard is skipped while fewer than 2 finite HF observations
+        # exist; with 0–1 HF rows the GP cannot constrain HF-only spread.
         try:
+            Y_hf = Y_train[X_train[:, d] == target_fid_idx]
+            if Y_hf.size < 2:
+                raise _SkipGuard
             x_inc_loop = _recommend_incumbent(
                 model, bounds_t, target_fid_idx, d, seed
             )
@@ -1237,13 +1278,41 @@ def run_mfbo(
             ).unsqueeze(0)
             with torch.no_grad():
                 var_inc = float(model.posterior(X_inc_full).variance.item())
-            spread = max(
-                float(np.max(Y_train)) - float(np.min(Y_train)), 1e-12
+                # Sobol' grid at HF for the relative-variance criterion.
+                grid_sobol = torch.quasirandom.SobolEngine(
+                    d, scramble=True, seed=seed
+                )
+                grid_raw = grid_sobol.draw(256).double()
+                bounds_arr = torch.tensor(
+                    [list(b) for b in bounds_t], dtype=torch.float64
+                )
+                lo, hi = bounds_arr[:, 0], bounds_arr[:, 1]
+                grid_X = lo + grid_raw * (hi - lo)
+                grid_full = torch.cat(
+                    [
+                        grid_X,
+                        torch.full(
+                            (256, 1),
+                            float(target_fid_idx),
+                            dtype=torch.float64,
+                        ),
+                    ],
+                    dim=1,
+                )
+                max_var = float(
+                    model.posterior(grid_full).variance.max().item()
+                )
+            spread_hf = max(
+                float(np.max(Y_hf)) - float(np.min(Y_hf)), 1e-12
             )
-            if var_inc < 1e-6 * spread ** 2:
+            absolute_fired = var_inc < 1e-6 * spread_hf ** 2
+            relative_fired = var_inc < 1e-3 * max(max_var, 1e-30)
+            if absolute_fired and relative_fired:
                 stop_reason = "variance"
                 converged = True
                 break
+        except _SkipGuard:
+            pass
         except Exception:
             pass
 
