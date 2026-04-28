@@ -32,6 +32,36 @@ from stencil_gen.bo import BOResult
 BO_RUNS_DIR: Path = Path(__file__).parent / "bo_runs"
 
 
+_INT_KEYED_TOP_LEVEL: tuple[str, ...] = (
+    "report_fields_by_layer",
+    "cost_model",
+    "n_evals_per_fidelity",
+    "wall_time_per_fidelity",
+)
+"""Top-level :class:`BOResult` fields whose ``dict[int, ...]`` keys must be
+restored after :func:`json.load` downgrades them to ``str``.
+
+The factory :func:`stencil_gen.bo.make_multi_fidelity_objective` performs
+``inferred > layer`` against the layer keys, which raises ``TypeError`` if
+the keys are strings.  See plan item 47.4c.1 for the full motivation.
+"""
+
+
+def _restore_int_keys(data: dict) -> dict:
+    """Mutate ``data`` in place: restore int keys for the four whitelisted fields.
+
+    JSON serialises every object key as a string; this helper inverts that
+    for the four :class:`BOResult` fields whose schema is ``dict[int, ...]``.
+    Skips silently if a field is missing (older payloads or partial dicts)
+    so we do not break forward-compat.
+    """
+    for name in _INT_KEYED_TOP_LEVEL:
+        field = data.get(name)
+        if isinstance(field, dict):
+            data[name] = {int(k): v for k, v in field.items()}
+    return data
+
+
 def _mangle_objective(field: str) -> str:
     """Map a single dotted field path to a filename-safe token.
 
@@ -153,9 +183,17 @@ def load_bo_run(path: Path) -> dict:
     regression test in :class:`tests.test_phs.TestRegressionBOBenchmark`
     rebuilds a multi-fidelity objective from ``report_fields_by_layer`` and
     re-evaluates ``best_x`` at HF; it does not need dataclass round-tripping.
+
+    Int keys are restored on the four whitelisted top-level fields
+    (``report_fields_by_layer``, ``cost_model``, ``n_evals_per_fidelity``,
+    ``wall_time_per_fidelity``) — see :data:`_INT_KEYED_TOP_LEVEL` and plan
+    item 47.4c.1.  Without this, the loaded dict cannot be piped into
+    :func:`stencil_gen.bo.make_multi_fidelity_objective` (the factory's
+    field-vs-layer validation raises ``TypeError`` on string keys).
     """
     with open(Path(path)) as f:
-        return json.load(f)
+        data = json.load(f)
+    return _restore_int_keys(data)
 
 
 def iter_bo_runs(directory: Path = BO_RUNS_DIR) -> Iterator[Path]:
