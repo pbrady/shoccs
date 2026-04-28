@@ -441,7 +441,21 @@ cd scripts/stencil_gen && SYMPY_CACHE_SIZE=50000 uv run python -m sweeps bo \
     - **CLI `--persist` already wired (plan 47.4a deferral path):** `sweeps/bo.py` lines 471–481 attempt `from ._bo_io import save_bo_run` inside a try/except ImportError. With `_bo_io.py` now present, the success branch fires; the deferred-message branch is dead code. 47.4a's pre-existing comment "deferred to plan 47.4c" is technically stale but the runtime path is correct. Clean up in 47.4d if convenient (e.g. promote the import to module top).
     - **Test stub:** `tests/test_sweep_bo.py` is 47.4d's deliverable — the plan's `Test:` line above is forward-looking (same convention as 47.1a/b/2a/2b/2c/3a). Adjacent test suite (`tests/test_bo.py + test_pareto.py + test_optimizer.py` = 225 passed, 12 skipped) green at 6m03s; no regression.
 
-- [ ] **47.4d** Tests in `tests/test_sweep_bo.py` (new) — `TestBOCLI` (6) + `TestBOIO` (5):
+- [ ] **47.4c.1** Restore int keys for the four int-keyed `BOResult` fields in `load_bo_run`. JSON forces every object key to a string at write time, so a `save_bo_run` → `load_bo_run` round-trip silently downgrades `report_fields_by_layer`, `cost_model`, `n_evals_per_fidelity`, and `wall_time_per_fidelity` from `dict[int, ...]` to `dict[str, ...]`. Verified: a synthetic `BOResult` round-trip yields `{'1': ..., '7': ...}` for all four fields (string keys); `BOEval.fidelity` (a value, not a key) survives correctly because JSON typed numbers round-trip cleanly.
+  - **Why this blocks downstream items:**
+    - 47.7b's `test_each_run_best_x_recomputes_within_tolerance` plans to "rebuild `make_multi_fidelity_objective` from `report_fields_by_layer`, evaluate at `best_x` at HF". Passing the loaded string-keyed dict straight to `make_multi_fidelity_objective` raises `TypeError: '>' not supported between instances of 'int' and 'str'` at the factory's field-vs-layer validation step (`bo.py:290`) — verified by direct invocation. So today's `load_bo_run` cannot feed 47.7b's regression test without per-test type coercion.
+    - 47.4d's `test_roundtrip_preserves_eval_history` will see the type mismatch when comparing the loaded dict against the source `BOResult` (string vs int keys). Either the test silently asserts looser equality (and misses the bug), or the test does the coercion (and pushes the workaround into every consumer).
+    - The completion criterion line "every stored run's `best_x` recomputes within 1% of stored objective" (47.7b) presupposes a usable round-trip.
+  - **Pick one fix:**
+    1. **Centralised int-key restoration in `load_bo_run`.** Hardcode `_INT_KEYED_TOP_LEVEL = ("report_fields_by_layer", "cost_model", "n_evals_per_fidelity", "wall_time_per_fidelity")` at module scope; after `json.load`, walk that whitelist and rebuild each as `{int(k): v for k, v in data[name].items()}`. Cleanest: the schema's int-key contract is documented in one place and satisfied at the boundary, every consumer benefits, no repeated coercion. ~6 lines.
+    2. **`object_hook` heuristic.** Pass `object_hook=` to `json.load` that converts any digits-only key to int. Risky: `BOEval.params` and `BOResult.best_params` have free-form string keys (parameter names like `"sigma"`, `"alpha_0"`); the heuristic only fires on digit-only keys so collisions are unlikely in practice — but the contract leaks ("any future digit-only param name silently becomes int") and review burden is permanent.
+    3. **Document the limitation; require every consumer to coerce.** Add a one-paragraph caveat to the `load_bo_run` docstring naming the four affected fields and showing the one-liner. Pushes work into 47.7b and any future consumer; rejected unless (1) is impractical.
+  - Recommended: **(1)**. Add a tiny helper `_restore_int_keys(data: dict) -> dict` that mutates and returns `data`. Update the `load_bo_run` docstring to state that the four named fields are restored to int keys.
+  - **Test (in 47.4d):** add `TestBOIO::test_load_restores_int_keys` that asserts every key of the four restored fields is `isinstance(k, int)` after a `save_bo_run`/`load_bo_run` cycle. Also strengthen `test_roundtrip_preserves_eval_history` to additionally check `result.report_fields_by_layer == loaded["report_fields_by_layer"]` (would have failed today). Add `TestBOIO::test_make_objective_accepts_loaded_report_fields` — pipe `load_bo_run(path)["report_fields_by_layer"]` into `make_multi_fidelity_objective(scheme, kernel, ...)` and assert the factory does not raise.
+  - File: `scripts/stencil_gen/sweeps/_bo_io.py`, `scripts/stencil_gen/tests/test_sweep_bo.py` (the two new TestBOIO tests above)
+  - Test: `cd scripts/stencil_gen && uv run pytest tests/test_sweep_bo.py -x -q -k "TestBOIO and (test_load_restores_int_keys or test_make_objective_accepts_loaded_report_fields or test_roundtrip_preserves_eval_history)"`
+
+- [ ] **47.4d** Tests in `tests/test_sweep_bo.py` (new) — `TestBOCLI` (6) + `TestBOIO` (5 + the 2 added by 47.4c.1, plus a strengthened `test_roundtrip_preserves_eval_history`):
   - `TestBOCLI::test_argparse_minimal_invocation` — mock `run_mfbo`, verify CLI dispatch.
   - `test_argparse_rejects_no_budget` — passing neither `--budget-evals` nor `--budget-seconds` raises.
   - `test_argparse_rejects_both_budgets` — passing both raises.
@@ -549,7 +563,7 @@ cd scripts/stencil_gen && SYMPY_CACHE_SIZE=50000 uv run python -m sweeps bo \
   ↓
 47.3a → 47.3b → 47.3b.1 → 47.3c → 47.3d → 47.3e   # acquisition + BO loop + truncation fix + 47.3c tests + variance-guard tune + stagnation test
   ↓
-47.4a → 47.4b → 47.4c → 47.4d               # CLI + dispatch + persistence + tests
+47.4a → 47.4b → 47.4c → 47.4c.1 → 47.4d     # CLI + dispatch + persistence + int-key restore + tests
   ↓
 47.5a → 47.5b → 47.5c                       # validate-with-cpp + baseline + tests
   ↓
