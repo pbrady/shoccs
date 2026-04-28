@@ -1043,6 +1043,7 @@ def run_mfbo(
     hf_explore_bias: float = 0.0,
     hf_priority_warmup: int = 0,
     adaptive_hf_floor: float | None = None,
+    adaptive_hf_explore_bias: float | None = None,
     num_fantasies: int = 64,
     verbose: bool = False,
     objective: Callable[[np.ndarray, int], tuple[float, float, dict]] | None = None,
@@ -1190,6 +1191,31 @@ def run_mfbo(
         GP says HF is still informative *and* cheap data is sufficient
         defends against the GP-starvation regime that pure-quota approaches
         hit at high quotas.
+    adaptive_hf_explore_bias
+        Coefficient ``β`` controlling an adaptive schedule on top of the
+        static :paramref:`hf_explore_bias` quota (47.3j).  When ``None``
+        (default), the mechanism is disabled and the quota uses
+        :paramref:`hf_explore_bias` verbatim.  When a float in ``[0, 1]``,
+        before each acquisition step the effective quota is
+
+            ``effective_bias = max(hf_explore_bias,
+                                   β * var_hf_grid /
+                                   (var_hf_grid + spread_hf**2))``
+
+        where ``var_hf_grid`` is the maximum posterior variance over a
+        256-point Sobol' grid at HF (the same construction used by the
+        variance guard and the adaptive floor) and ``spread_hf`` is the
+        range of HF-only Y values.  When the HF posterior is uncertain
+        (``var_hf_grid >> spread_hf**2``) the second term tends toward
+        ``β`` and the quota lifts; when the posterior tightens it tends
+        toward zero and the quota reverts to the static value.  Composes
+        with :paramref:`hf_priority_warmup` (warmup wins for the first N
+        picks) and :paramref:`adaptive_hf_floor` (cost-table floor runs
+        on the same uncertainty signal but adjusts cost rather than
+        quota).  Continuous schedule rather than the binary on/off of
+        the cost-floor swap, so it composes more cleanly with qMFKG's
+        cost-utility on small budgets where cost-table swings can
+        destabilise the GP fit (47.3i empirical sweep).
     num_fantasies
         Forwarded to :func:`build_acquisition`.  Default 64.
     verbose
@@ -1252,6 +1278,20 @@ def run_mfbo(
             raise ValueError(
                 "adaptive_hf_floor must be None or a float >= 1.0, "
                 f"got {adaptive_hf_floor}"
+            )
+    if adaptive_hf_explore_bias is not None:
+        # NaN check via self-comparison; β must lie in [0, 1] to be
+        # interpretable as a quota target.  β = 0 collapses the formula
+        # back to the static ``hf_explore_bias`` (mechanism a no-op);
+        # β = 1 makes the upper bound on the adaptive lift equal to a
+        # full HF-only quota when the GP is maximally uncertain.
+        if (
+            adaptive_hf_explore_bias != adaptive_hf_explore_bias
+            or not (0.0 <= adaptive_hf_explore_bias <= 1.0)
+        ):
+            raise ValueError(
+                "adaptive_hf_explore_bias must be None or a float in [0, 1], "
+                f"got {adaptive_hf_explore_bias}"
             )
 
     torch.manual_seed(seed)
@@ -1616,11 +1656,78 @@ def run_mfbo(
             # an ``x_next`` chosen for a cheaper layer.  The initial
             # design's stratification is excluded from the fraction —
             # ``build_initial_design`` already governs that.
+            #
+            # 47.3j: when ``adaptive_hf_explore_bias`` is set, scale the
+            # static quota by HF posterior uncertainty.  ``effective_bias
+            # = max(hf_explore_bias, β * var_hf_grid / (var_hf_grid +
+            # spread_hf**2))``: the second term tends toward β when the
+            # GP says HF is still uncertain, toward 0 when it tightens.
+            # Best-effort: any failure in the predicate computation
+            # falls back to the static ``hf_explore_bias``.
             fidelity_choices: list[int] = list(range(K))
             n_acq_done = len(eval_history) - n_init_actual
+            effective_bias = hf_explore_bias
+            if adaptive_hf_explore_bias is not None:
+                try:
+                    Y_hf_bias = Y_train[X_train[:, d] == target_fid_idx]
+                    if Y_hf_bias.size >= 2:
+                        spread_hf_bias = max(
+                            float(np.max(Y_hf_bias))
+                            - float(np.min(Y_hf_bias)),
+                            1e-12,
+                        )
+                        grid_sobol = torch.quasirandom.SobolEngine(
+                            d, scramble=True, seed=seed
+                        )
+                        grid_raw = grid_sobol.draw(256).double()
+                        bounds_arr = torch.tensor(
+                            [list(b) for b in bounds_t],
+                            dtype=torch.float64,
+                        )
+                        lo, hi = bounds_arr[:, 0], bounds_arr[:, 1]
+                        grid_X = lo + grid_raw * (hi - lo)
+                        grid_full = torch.cat(
+                            [
+                                grid_X,
+                                torch.full(
+                                    (256, 1),
+                                    float(target_fid_idx),
+                                    dtype=torch.float64,
+                                ),
+                            ],
+                            dim=1,
+                        )
+                        with torch.no_grad():
+                            var_hf_bias = float(
+                                model.posterior(grid_full).variance.max().item()
+                            )
+                        denom = var_hf_bias + spread_hf_bias ** 2
+                        if denom > 0.0:
+                            adaptive_term = (
+                                adaptive_hf_explore_bias
+                                * var_hf_bias
+                                / denom
+                            )
+                            # Snap essentially-zero values to a clean 0
+                            # so the schedule reverts cleanly to the
+                            # static ``hf_explore_bias`` when the GP is
+                            # certain.  Without this, a finite-precision
+                            # ``var_hf_bias / spread_hf**2`` ratio of
+                            # ~1e-17 leaves ``effective_bias`` strictly
+                            # positive and ``effective_bias > 0.0``
+                            # would still trigger the quota check, with
+                            # ``projected_no_hf = 0 < ~1e-17`` forcing
+                            # HF on the first acquisition iteration.
+                            if adaptive_term < 1e-6:
+                                adaptive_term = 0.0
+                            effective_bias = max(
+                                hf_explore_bias, adaptive_term
+                            )
+                except Exception:
+                    effective_bias = hf_explore_bias
             if hf_priority_warmup > 0 and n_acq_done < hf_priority_warmup:
                 fidelity_choices = [target_fid_idx]
-            elif hf_explore_bias > 0.0:
+            elif effective_bias > 0.0:
                 acq_evals = eval_history[n_init_actual:]
                 n_acq_hf_done = sum(
                     1 for e in acq_evals if e.fidelity == hf_level
@@ -1631,7 +1738,7 @@ def run_mfbo(
                 # the target — i.e. when picking anything other than HF
                 # would leave the running fraction below quota.
                 projected_no_hf = n_acq_hf_done / (n_acq_done + 1)
-                if projected_no_hf < hf_explore_bias:
+                if projected_no_hf < effective_bias:
                     fidelity_choices = [target_fid_idx]
             x_next, fid_next, _ = optimize(bounds_t, fidelity_choices)
         except Exception:

@@ -1848,6 +1848,256 @@ class TestRunMFBO:
             f"on={dict(r_on.n_evals_per_fidelity)}"
         )
 
+    # --- 47.3j: adaptive HF explore-bias schedule ---------------------------
+
+    def test_adaptive_hf_explore_bias_validates_range(self):
+        # 47.3j: must be ``None`` (disabled) or a float in [0, 1].  NaN,
+        # negative, and >1 all rejected.
+        bounds = [(-1.0, 1.0), (-1.0, 1.0)]
+        common = dict(
+            scheme="E2",
+            kernel="classical",
+            report_fields_by_layer=self._hf_canonical_fields(),
+            bounds=bounds,
+            budget_evals=10,
+            n_init=8,
+            hf_anchors=3,
+            seed=0,
+            objective=lambda x, m: (0.0, 0.0, {}),
+        )
+        for bad in [-0.1, 1.1, float("nan")]:
+            with pytest.raises(ValueError, match="adaptive_hf_explore_bias"):
+                run_mfbo(adaptive_hf_explore_bias=bad, **common)
+
+    def test_adaptive_hf_explore_bias_default_off_preserves_cost_aware_contract(
+        self,
+    ):
+        # 47.3j: the default (``adaptive_hf_explore_bias=None``) must
+        # reproduce the pre-47.3j behaviour exactly.  Compare a default
+        # run against an explicit ``adaptive_hf_explore_bias=None``.
+        bounds = [(-1.0, 1.0), (-1.0, 1.0)]
+        objective, _ = self._rough_objective()
+        common = dict(
+            scheme="E2",
+            kernel="classical",
+            report_fields_by_layer=self._hf_canonical_fields(),
+            bounds=bounds,
+            budget_evals=15,
+            n_init=8,
+            hf_anchors=3,
+            seed=0,
+            objective=objective,
+        )
+        r_default = run_mfbo(**common)
+        r_explicit_none = run_mfbo(adaptive_hf_explore_bias=None, **common)
+        np.testing.assert_allclose(
+            r_default.best_x, r_explicit_none.best_x, atol=1e-9
+        )
+        assert r_default.stop_reason == r_explicit_none.stop_reason
+        assert (
+            r_default.n_evals_per_fidelity
+            == r_explicit_none.n_evals_per_fidelity
+        )
+
+    def test_adaptive_hf_explore_bias_lifts_quota_when_uncertain(self):
+        # 47.3j: with the schedule enabled and the static
+        # ``hf_explore_bias=0.0`` (no static floor), the adaptive lift
+        # should raise the running HF fraction above what static-zero
+        # would force.  Use a 2-fidelity 100x-cost-ratio synthetic so
+        # the cost-aware utility otherwise drives every acquisition pick
+        # to cheap.  HF posterior uncertainty stays elevated across the
+        # short budget because the 2D synthetic objective varies enough
+        # that 8 init points + a few acquisition picks cannot saturate
+        # the GP.
+        bounds = [(-1.0, 1.0), (-1.0, 1.0)]
+        report_fields = {
+            1: "layer1.boundary_gv_err",
+            7: "layer7.max_spectral_abscissa",
+        }
+        cost_table = {1: 0.01, 7: 1.0}  # 100x cost ratio
+        x_star = np.array([0.3, -0.2])
+
+        def objective(x, m):
+            x = np.asarray(x, dtype=float)
+            biases = {1: 1000.0, 7: 0.0}
+            val = float(np.sum((x - x_star) ** 2)) + biases.get(m, 0.0)
+            return val, 0.001, {}
+
+        common = dict(
+            scheme="E2",
+            kernel="classical",
+            report_fields_by_layer=report_fields,
+            bounds=bounds,
+            budget_evals=20,
+            n_init=8,
+            hf_anchors=3,
+            cost_table=cost_table,
+            seed=0,
+            objective=objective,
+        )
+        n_init = 8
+
+        # Off-run: no adaptive schedule, no static floor — pure
+        # cost-aware utility.  Expected to pick few/no HF on a 100x
+        # cost ratio.
+        r_off = run_mfbo(**common)
+        acq_off = r_off.eval_history[n_init:-1]
+        hf_off = sum(1 for e in acq_off if e.fidelity == 7)
+
+        # On-run: β=0.5 (the schedule's max effective lift) with
+        # ``hf_explore_bias=0.0`` (no static contribution).  When HF is
+        # uncertain, the formula yields effective_bias near β/2 to β,
+        # forcing HF picks.
+        r_on = run_mfbo(adaptive_hf_explore_bias=0.5, **common)
+        acq_on = r_on.eval_history[n_init:-1]
+        hf_on = sum(1 for e in acq_on if e.fidelity == 7)
+
+        assert len(acq_off) > 0 and len(acq_on) > 0, (
+            f"no acquisition iterations: off={len(acq_off)} "
+            f"on={len(acq_on)} (stop_reasons: off={r_off.stop_reason!r} "
+            f"on={r_on.stop_reason!r})"
+        )
+        # Directional contract: the schedule must increase HF picks (or
+        # at worst leave them unchanged in a degenerate run where the
+        # adaptive term collapses to 0).
+        assert hf_on >= hf_off, (
+            f"adaptive_hf_explore_bias=0.5 reduced HF picks: "
+            f"on={hf_on} off={hf_off}"
+        )
+        # On this scenario the off-run picks 0 HF; the on-run must pick
+        # at least one — pinning that the mechanism actually has
+        # measurable effect (not a no-op).
+        assert hf_on > 0, (
+            f"adaptive_hf_explore_bias=0.5 produced no HF picks "
+            f"(hf_on={hf_on}/{len(acq_on)}); mechanism inert"
+        )
+
+    def test_adaptive_hf_explore_bias_reverts_when_certain(self, monkeypatch):
+        # 47.3j: when the HF posterior is "certain" (var_hf_grid ≪
+        # spread_hf**2), the adaptive term collapses to ~0 and
+        # ``effective_bias`` reverts to the static ``hf_explore_bias``.
+        # Mechanism: monkeypatch ``model.posterior`` to return a tiny
+        # variance regardless of input, so the adaptive term in the
+        # formula ``β * var_hf_grid / (var_hf_grid + spread_hf**2)``
+        # stays near 0 and the on-run trajectory matches the off-run
+        # bytewise.
+        #
+        # We patch the *class* method ``model.posterior`` indirectly by
+        # patching ``MultiTaskGP.posterior`` to a wrapped version that
+        # forces ``variance`` to a tiny constant tensor.  The mean is
+        # passed through unchanged so the qMFKG fantasy machinery and
+        # the variance-guard's ``var_inc`` / ``max_var`` ratios still
+        # behave coherently — only the absolute scale of variance is
+        # lowered.
+        bounds = [(-1.0, 1.0), (-1.0, 1.0)]
+        report_fields = {
+            1: "layer1.boundary_gv_err",
+            7: "layer7.max_spectral_abscissa",
+        }
+        cost_table = {1: 0.01, 7: 1.0}
+        x_star = np.array([0.3, -0.2])
+
+        def objective(x, m):
+            x = np.asarray(x, dtype=float)
+            biases = {1: 1000.0, 7: 0.0}
+            val = float(np.sum((x - x_star) ** 2)) + biases.get(m, 0.0)
+            return val, 0.001, {}
+
+        common = dict(
+            scheme="E2",
+            kernel="classical",
+            report_fields_by_layer=report_fields,
+            bounds=bounds,
+            budget_evals=12,
+            n_init=8,
+            hf_anchors=3,
+            cost_table=cost_table,
+            seed=0,
+            objective=objective,
+        )
+
+        # Spy on bo.optimize_acqf_mixed via the wrapped optimize callable
+        # returned by build_acquisition: record every fidelity_choices
+        # the loop passed in.  The static ``hf_explore_bias=0.0`` and
+        # certain GP combine so effective_bias stays at 0 — no quota
+        # restriction fires, so every recorded ``fidelity_choices``
+        # should be the unrestricted ``[0, 1]`` (full range), never
+        # ``[1]`` (HF-only).
+        import stencil_gen.bo as bo_mod
+        real_build_acq = bo_mod.build_acquisition
+        recorded_choices: list[list[int]] = []
+
+        def spy_build_acquisition(model, cost_util, target_fid_idx, **kw):
+            acq, real_optimize = real_build_acq(
+                model, cost_util, target_fid_idx, **kw
+            )
+
+            def spy_optimize(bounds_in, fidelity_choices, **opt_kw):
+                recorded_choices.append(list(fidelity_choices))
+                return real_optimize(bounds_in, fidelity_choices, **opt_kw)
+
+            return acq, spy_optimize
+
+        monkeypatch.setattr(
+            bo_mod, "build_acquisition", spy_build_acquisition
+        )
+
+        # Patch MultiTaskGP.posterior to clamp variance to a tiny
+        # constant.  The wrapper preserves the posterior object's
+        # ``mean`` attribute and only swaps ``variance`` so qMFKG and
+        # the variance-guard's argmin / max work coherently.
+        from botorch.models.multitask import MultiTaskGP
+        real_posterior = MultiTaskGP.posterior
+
+        class _TinyVarPosterior:
+            __slots__ = ("_inner",)
+
+            def __init__(self, inner):
+                self._inner = inner
+
+            @property
+            def mean(self):
+                return self._inner.mean
+
+            @property
+            def variance(self):
+                return torch.full_like(self._inner.variance, 1e-12)
+
+            def __getattr__(self, name):
+                return getattr(self._inner, name)
+
+        def tiny_var_posterior(self, X, *args, **kwargs):
+            inner = real_posterior(self, X, *args, **kwargs)
+            return _TinyVarPosterior(inner)
+
+        monkeypatch.setattr(MultiTaskGP, "posterior", tiny_var_posterior)
+
+        run_mfbo(adaptive_hf_explore_bias=0.5, **common)
+
+        # The acquisition loop must have run at least once (so the
+        # adaptive-bias block at the quota was entered).
+        assert len(recorded_choices) >= 1, (
+            f"acquisition loop never ran (recorded={len(recorded_choices)});"
+            " the adaptive-bias block was never entered."
+        )
+
+        # Every recorded fidelity_choices must be the unrestricted
+        # ``[0, 1]`` — when the GP is certain, adaptive_term ≈ 0 and
+        # ``effective_bias = max(hf_explore_bias=0.0, ~0) = 0`` so the
+        # quota check at ``elif effective_bias > 0.0`` does NOT fire.
+        # If the formula or the gate were broken (e.g. ignoring
+        # variance, or using ``>=`` instead of ``>``), the choices
+        # would collapse to ``[1]`` (HF-only).
+        unrestricted = [0, 1]
+        for i, choices in enumerate(recorded_choices):
+            assert choices == unrestricted, (
+                f"call #{i} fidelity_choices {choices} differs from "
+                f"unrestricted {unrestricted}: the adaptive bias lifted "
+                f"the quota despite var_hf_grid being clamped to 1e-12. "
+                f"The formula or the gate at "
+                f"``elif effective_bias > 0.0`` is broken."
+            )
+
 
 # ---------------------------------------------------------------------------
 # 47.3c: TestAcquisition — qMFKG construction + mixed-optimiser smoke tests
