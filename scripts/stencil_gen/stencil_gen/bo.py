@@ -1027,6 +1027,8 @@ def run_mfbo(
     cost_table: dict[int, float] | None = None,
     seed: int = 0,
     n_init: int | None = None,
+    hf_anchors: int | None = None,
+    min_acquisition_iterations: int | None = None,
     num_fantasies: int = 64,
     verbose: bool = False,
     objective: Callable[[np.ndarray, int], tuple[float, float, dict]] | None = None,
@@ -1087,6 +1089,25 @@ def run_mfbo(
         same :attr:`BOResult.best_x` to within ``1e-6``.
     n_init
         Initial design size; defaults to ``5*d + 3`` (Loeppky et al. 2009).
+    hf_anchors
+        Number of HF anchor points in the initial design (47.3f).  When
+        ``None``, defaults to ``max(3, d + 2)`` so that higher-dimensional
+        problems get more HF coverage; the ``d + 2`` term scales the effective
+        HF anchor count with problem dimension while keeping ``3`` as a floor
+        for the historical d=1/d=2 small-problem behaviour.  Forwarded to
+        :func:`build_initial_design` (whose own default remains ``3`` so direct
+        callers and existing fixtures keep working).
+    min_acquisition_iterations
+        Minimum number of acquisition iterations that must run after the
+        initial design before the variance early-exit guard can fire (47.3f).
+        When ``None``, defaults to ``max(K, 5)`` where ``K`` is the number of
+        fidelity levels.  Defends against the GP collapsing uniformly to its
+        noise floor on smooth synthetic objectives — the 47.3d combined
+        absolute+relative criterion is necessary but not sufficient when the
+        initial design alone seeds enough HF data to satisfy both halves; this
+        delay forces the loop to consume some acquisition budget so that the
+        incumbent recommendation reflects post-GP-fit evidence rather than
+        the DOE alone.
     num_fantasies
         Forwarded to :func:`build_acquisition`.  Default 64.
     verbose
@@ -1168,6 +1189,28 @@ def run_mfbo(
     bounds_t = tuple((float(lo), float(hi)) for lo, hi in bounds)
     d = len(bounds_t)
 
+    # 47.3f: dimension-scaled HF anchor default.  The historical default of
+    # ``3`` under-resolves higher-dimensional problems (e.g. 2D Branin needed
+    # 4–7 HF anchors empirically to reach the basin floor); ``max(3, d + 2)``
+    # scales with ``d`` while preserving the ``3`` floor for existing 1D/2D
+    # callers.  Resolved at the run_mfbo layer (not in build_initial_design)
+    # so direct callers of build_initial_design and existing TestDOE fixtures
+    # keep working unchanged.
+    hf_anchors_resolved = (
+        hf_anchors if hf_anchors is not None else max(3, d + 2)
+    )
+
+    # 47.3f: minimum acquisition iterations before the variance guard can
+    # fire.  Default ``max(K, 5)``: at least ``K`` so every fidelity gets a
+    # chance to be picked under cost-aware acquisition before we declare
+    # convergence, and at least ``5`` so the GP's posterior at the incumbent
+    # has time to become non-uniform after the DOE.
+    min_acq_iters = (
+        min_acquisition_iterations
+        if min_acquisition_iterations is not None
+        else max(K, 5)
+    )
+
     # Resolve n_init to the same default that build_initial_design uses
     # (Loeppky et al. 2009: 5*d + 3) so we can validate the budget against
     # the actual initial-design size.  The init layout is [cheap | mid | hf];
@@ -1183,7 +1226,11 @@ def run_mfbo(
         )
 
     X_init, fid_init = build_initial_design(
-        bounds_t, fidelity_levels, n_init=n_init, seed=seed
+        bounds_t,
+        fidelity_levels,
+        n_init=n_init,
+        hf_anchors=hf_anchors_resolved,
+        seed=seed,
     )
 
     eval_history: list[BOEval] = []
@@ -1234,6 +1281,9 @@ def run_mfbo(
         if acq_budget_exhausted():
             break
         evaluate(x_i, int(m_i))
+    # 47.3f: post-init checkpoint so the variance guard can short-circuit
+    # until ``min_acq_iters`` acquisition iterations have completed.
+    n_init_actual = len(eval_history)
 
     stop_reason = "budget"
     converged = False
@@ -1302,6 +1352,14 @@ def run_mfbo(
         # The guard is skipped while fewer than 2 finite HF observations
         # exist; with 0–1 HF rows the GP cannot constrain HF-only spread.
         try:
+            # 47.3f: short-circuit guard until enough acquisition iterations
+            # have run.  Defends against the GP collapsing uniformly to its
+            # noise floor on smooth synthetic objectives where the absolute
+            # + relative variance criterion can fire after just the initial
+            # design.  Counts only acquisition iterations, NOT init evals.
+            n_acq_iters_done = len(eval_history) - n_init_actual
+            if n_acq_iters_done < min_acq_iters:
+                raise _SkipGuard
             Y_hf = Y_train[X_train[:, d] == target_fid_idx]
             if Y_hf.size < 2:
                 raise _SkipGuard

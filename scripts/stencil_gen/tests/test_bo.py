@@ -861,6 +861,7 @@ class TestRunMFBO:
             bounds=bounds,
             budget_evals=15,
             n_init=8,
+            hf_anchors=3,  # 47.3f: pin pre-fix default for n_init=8 / d=2 fit
             seed=42,
             objective=objective,
         )
@@ -887,6 +888,7 @@ class TestRunMFBO:
             bounds=bounds,
             budget_evals=20,
             n_init=8,
+            hf_anchors=3,  # 47.3f
             seed=0,
             objective=objective,
         )
@@ -921,6 +923,7 @@ class TestRunMFBO:
             bounds=bounds,
             budget_evals=budget_evals,
             n_init=n_init,
+            hf_anchors=3,  # 47.3f
             seed=0,
             objective=objective,
         )
@@ -953,6 +956,7 @@ class TestRunMFBO:
             bounds=bounds,
             budget_seconds=2.0,
             n_init=8,
+            hf_anchors=3,  # 47.3f
             seed=0,
             objective=slow,
         )
@@ -992,6 +996,7 @@ class TestRunMFBO:
             bounds=bounds,
             budget_evals=15,
             n_init=8,
+            hf_anchors=3,  # 47.3f
             seed=0,
             objective=objective,
         )
@@ -1021,6 +1026,7 @@ class TestRunMFBO:
             bounds=bounds,
             budget_evals=24,
             n_init=22,
+            hf_anchors=3,  # 47.3f: pin pre-fix default
             seed=0,
             objective=const,
         )
@@ -1061,6 +1067,7 @@ class TestRunMFBO:
             bounds=bounds,
             budget_evals=14,
             n_init=8,
+            hf_anchors=3,  # 47.3f
             seed=0,
             objective=half_sentinel,
         )
@@ -1091,6 +1098,7 @@ class TestRunMFBO:
             bounds=bounds,
             budget_evals=20,
             n_init=8,
+            hf_anchors=3,  # 47.3f
             seed=0,
             objective=objective,
         )
@@ -1141,6 +1149,7 @@ class TestRunMFBO:
             bounds=bounds,
             budget_evals=12,
             n_init=8,
+            hf_anchors=3,  # 47.3f
             seed=0,
             objective=counting_objective,
         )
@@ -1176,6 +1185,7 @@ class TestRunMFBO:
             bounds=bounds,
             budget_evals=20,
             n_init=8,
+            hf_anchors=3,  # 47.3f
             seed=0,
             objective=objective,
         )
@@ -1192,6 +1202,81 @@ class TestRunMFBO:
             f"cheap fraction {cheap_evals / total_evals:.2%} below 30 % — "
             "cost-aware utility / DOE may be mis-weighted"
         )
+
+    # --- 47.3f: variance-guard prerequisite + dimension-scaled HF anchors --
+
+    def test_variance_guard_respects_min_acquisition_iterations(self):
+        # 47.3f: with explicit ``min_acquisition_iterations=5`` and a smooth
+        # quadratic objective that would otherwise fire the variance guard
+        # very quickly under the 47.3d combined absolute+relative criterion,
+        # the guard must not fire until at least 5 acquisition iterations
+        # have run after init.  When the guard does eventually fire, the
+        # total eval count must be at least ``n_init + 5 + 1`` (init + the
+        # five required acquisition iters + the mandatory final HF re-eval).
+        bounds = [(-1.0, 1.0), (-1.0, 1.0)]
+        objective, _ = self._quadratic_objective()
+        n_init = 8
+        min_acq = 5
+        budget_evals = n_init + min_acq + 4  # init + 5 required + headroom
+        result = run_mfbo(
+            scheme="E2",
+            kernel="classical",
+            report_fields_by_layer=self._hf_canonical_fields(),
+            bounds=bounds,
+            budget_evals=budget_evals,
+            n_init=n_init,
+            hf_anchors=3,
+            min_acquisition_iterations=min_acq,
+            seed=0,
+            objective=objective,
+        )
+        n_evals_total = sum(result.n_evals_per_fidelity.values())
+        # Whatever exit fires, the acquisition loop must have run for at
+        # least ``min_acq`` iterations OR have exhausted the budget — never
+        # bail out via ``variance`` before the prerequisite is satisfied.
+        if result.stop_reason == "variance":
+            # +1 for the mandatory final HF re-eval.
+            assert n_evals_total >= n_init + min_acq + 1, (
+                f"variance guard fired early: {n_evals_total} evals "
+                f"(expected >= {n_init + min_acq + 1}); "
+                f"stop_reason={result.stop_reason!r}"
+            )
+
+    def test_hf_anchors_autoscaled_with_dimension(self):
+        # 47.3f: when ``hf_anchors`` is None, ``run_mfbo`` resolves it to
+        # ``max(3, d + 2)``.  Verify by counting HF rows in the first
+        # ``n_init`` slots of ``eval_history`` (HF anchors live at the tail
+        # of the init design per 47.3b.1's layout note, but they are still
+        # within the first ``n_init`` evaluations).
+        def objective(x, m):
+            return 0.5, 0.001, {}
+
+        for d, expected_hf in [(1, 3), (2, 4), (3, 5)]:
+            bounds = [(-1.0, 1.0)] * d
+            # n_init must accommodate hf_anchors + mid_anchors=2 + at least
+            # hf_anchors cheap rows: n_init >= 2 * expected_hf + 2.
+            n_init = 2 * expected_hf + 2
+            result = run_mfbo(
+                scheme="E2",
+                kernel="classical",
+                report_fields_by_layer=self._hf_canonical_fields(),
+                bounds=bounds,
+                # init + final HF re-eval only — keeps the test fast and
+                # avoids GP-fit instability on the constant objective.
+                budget_evals=n_init + 1,
+                n_init=n_init,
+                seed=0,
+                objective=objective,
+            )
+            init_evals = result.eval_history[:n_init]
+            hf_layer = max(self._hf_canonical_fields())
+            n_hf_in_init = sum(
+                1 for e in init_evals if e.fidelity == hf_layer
+            )
+            assert n_hf_in_init == expected_hf, (
+                f"d={d}: expected {expected_hf} HF anchors in init, "
+                f"got {n_hf_in_init} (n_init={n_init})"
+            )
 
 
 # ---------------------------------------------------------------------------
