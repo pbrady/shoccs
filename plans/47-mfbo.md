@@ -336,6 +336,30 @@ cd scripts/stencil_gen && SYMPY_CACHE_SIZE=50000 uv run python -m sweeps bo \
     - **`test_synthetic_quadratic_2d` (slow) drops the tight `best_x ≈ x_star within 1e-2` convergence check.** Under the variance guard + 3-HF-anchor init, the loop bails out after just the initial design, and `best_x` is the argmin of the GP posterior mean over a 1024-pt Sobol' grid given only 3 HF anchors — Standardise-transformed posterior may extrapolate downward toward the boundary. The test instead pins (i) structural integrity (in-bounds incumbent, finite objective) and (ii) the cost-aware contract (cheap fraction ≥ 30 %). Tight convergence checks defer to the 47.6 failure-mode regressions which use targeted multi-modal / bias-misspec fixtures with proper budget headroom.
     - **`test_stagnation_stop_reason` accepts `{"stagnation", "budget", "variance"}` as valid stop reasons** (not strictly `"stagnation"`). With default `hf_anchors=3`, the initial design only seeds 3 HF evals, so triggering ≥ 11 HF evals to fire stagnation requires either (a) `hf_anchors=11` plus matching `n_cheap`, which makes `n_init=22` and demands `budget_evals ≥ 23`, or (b) a long acquisition loop where qMFKG happens to pick HF many times. Path (b) is unreliable under cost-aware utility (cheap fidelity dominates EIG/cost when expected gain is uniform). The test pins what's actually verifiable: constant Y is not mis-classified into a successful "converged" path, and falls into one of the documented exits.
 
+- [ ] **47.3d** Tune the variance guard so it does not fire on the initial design — required before 47.6 / 47.7 can validate convergence:
+  - **Symptom (per the 47.3c "Done" note):** the guard `var_inc < 1e-6 * spread^2` (currently `bo.py:1243`) fires after the initial design on every synthetic objective tried (smooth quadratic, high-freq sin/cos at f∈{15, 30}, white-noise lookup, true-randn-noise). After `Standardize(m=1)` the GP posterior variance at the incumbent collapses to ~ noise floor (~1e-9 in standardized scale, ~1e-10 in original scale), well below the threshold even for small `Y_train` spread. The marginal-likelihood optimiser does NOT raise the noise hyperparameter to match injected input noise on synthetic data (verified: `noise → 1.7e-7` even with unit-std randn injected), so increasing observed noise does not defeat the guard.
+  - **Why this blocks downstream items:**
+    - 47.6a (`TestBranin::test_…`) asserts `best_objective < 0.5` in ≤ 30 evals — unreachable if BO exits after init (8 points cannot resolve Branin's basin near 0.398).
+    - 47.6b (`TestBiasMisspec` finds `x ≈ 0.7` within 0.1; `TestMultiModal` finds a known basin in ≥ 4/5 seeds; `TestCostMisspec` ≤ 2× degraded baseline) all require several acquisition iterations after init.
+    - 47.7a benchmark target ("MF-BO ≤ 50% wall-time of staged" or "≥ 1% better best_objective at equal time") requires the BO loop to actually consume a budget that a staged baseline can be compared against.
+    - The completion criterion `n_evals_per_fidelity summing to budget_evals` is empirically unachievable today (the 47.3c `test_budget_evals_respected` was relaxed to `<=` for this reason).
+  - **Suspected root cause:** scale mismatch — `var_inc` is read from a `Standardize`-transformed posterior, but `spread` is computed from the raw (un-standardised) `Y_train`. After Standardise, the standardised-scale variance is bounded by the noise-floor constraint (`GreaterThan(1e-9)`), while `1e-6 * spread^2` uses original-scale spread; the comparison is not dimensionally consistent.
+  - **Pick one fix:**
+    1. **Scale-consistent comparison.** Compute `var_inc` and `spread` in the same scale (either both standardised or both original-Y). Cleanest, addresses the root cause. Likely two lines: read the un-transformed posterior via `model.posterior(X_inc_full, observation_noise=False).mean/variance` after the outcome-transform inverse, or compute `spread` after standardising `Y_train`.
+    2. **Minimum-iterations guard.** Require ≥ `K` (or `2*K`) finite *acquisition* evaluations after init before the variance guard can fire. Pragmatic; doesn't address the standardised-scale mismatch but prevents premature exit.
+    3. **Threshold-vs-noise-floor.** `var_inc < max(1e-6 * spread^2, 100 * noise_floor)` so the guard cannot fire below the GP's own noise floor.
+  - Recommended: **(1)** as the principled fix; if (1) proves harder than expected, ship (1)+(2) together. The 47.3c "Done" note's `1e-3 * spread^2` suggestion is a band-aid that does not address the scale mismatch.
+  - After the fix, restore `test_budget_evals_respected` to the original plan-body assertion `sum(n_evals_per_fidelity.values()) == budget_evals` on a rough/noisy synthetic objective. Add a regression test `test_variance_guard_does_not_fire_before_acquisition` that pins: with a rough objective and `budget_evals = n_init + 5`, at least one acquisition iteration runs (i.e., `len(eval_history) > n_init + 1`) before any guard or budget exits.
+  - File: `scripts/stencil_gen/stencil_gen/bo.py`, `scripts/stencil_gen/tests/test_bo.py`
+  - Test: `cd scripts/stencil_gen && uv run pytest tests/test_bo.py -x -q -k "TestRunMFBO"`
+
+- [ ] **47.3e** Add a test that actually exercises the stagnation guard. The 47.3c `test_stagnation_stop_reason` accepts `{"stagnation", "budget", "variance"}` as valid outcomes — its inline comment admits "we will not actually accumulate 11 HF evals from a default DOE here." So the `if best_idx <= len(hf_finite) - 11` branch in `run_mfbo` (currently `bo.py:1263`) has zero coverage. Two viable approaches:
+  1. **Helper extraction + unit test.** Extract the stagnation check into a small pure helper `_stagnation_triggered(hf_evals: list[BOEval], window: int = 10) -> bool` and unit-test the helper directly with hand-built `BOEval` lists: (a) constant Y → triggers, (b) monotone-improving Y → does not trigger, (c) late-improvement Y at index `len-1` → does not trigger, (d) early-improvement Y at index `len-window-1` → triggers.
+  2. **Loop-driven test.** Make HF the cheapest fidelity in the synthetic cost table so the cost-aware utility prefers HF, then run `run_mfbo` with a constant-Y objective and budget large enough to seed ≥ 11 HF evals (init + acquisition); assert `stop_reason == "stagnation"` strictly (not `in {...}`).
+  Recommended: **(1)** — the helper-extraction pattern. It removes the branch-coverage gap deterministically and also makes 47.3d's variance-guard fix testable in isolation if the same extraction pattern is applied there.
+  - File: `scripts/stencil_gen/stencil_gen/bo.py`, `scripts/stencil_gen/tests/test_bo.py`
+  - Test: `cd scripts/stencil_gen && uv run pytest tests/test_bo.py -x -q -k "test_stagnation"`
+
 ### 47.4 — CLI + persistence
 
 - [ ] **47.4a** Create `scripts/stencil_gen/sweeps/bo.py` CLI module mirroring `sweeps/pareto.py`:
@@ -479,7 +503,7 @@ cd scripts/stencil_gen && SYMPY_CACHE_SIZE=50000 uv run python -m sweeps bo \
   ↓
 47.2a → 47.2b → 47.2c → 47.2d               # GP + cost + DOE + tests
   ↓
-47.3a → 47.3b → 47.3b.1 → 47.3c             # acquisition + BO loop + truncation fix + tests
+47.3a → 47.3b → 47.3b.1 → 47.3c → 47.3d → 47.3e   # acquisition + BO loop + truncation fix + 47.3c tests + variance-guard tune + stagnation test
   ↓
 47.4a → 47.4b → 47.4c → 47.4d               # CLI + dispatch + persistence + tests
   ↓
@@ -503,7 +527,7 @@ Strictly sequential. 47.5 (validate + baseline) can run before 47.4d's tests if 
 - `uv sync` succeeds on aarch64 with `botorch>=0.17,<0.18` + `torch>=2.2,<3` + `gpytorch>=1.15,<2`. CPU-only PyTorch wheel (~140 MB) installed; no NVIDIA stack pulled.
 - `import botorch; from botorch.acquisition.knowledge_gradient import qMultiFidelityKnowledgeGradient; from botorch.models import SingleTaskMultiFidelityGP` runs without error.
 - `make_multi_fidelity_objective("E4", "classical", {1: "layer1.boundary_gv_err", 3: "layer3.max_stab_eig", 7: "layer7.max_spectral_abscissa"})` returns a closure; calling it at BL's published α returns 3-tuples `(value, wall_time, report)` for `m ∈ {1, 3, 7}`.
-- `run_mfbo` returns a `BOResult` with `len(eval_history) == budget_evals`, `seed`-reproducible across two consecutive runs, `gp_hyperparameters` populated, `n_evals_per_fidelity` summing to `budget_evals`.
+- `run_mfbo` returns a `BOResult` with `len(eval_history) <= budget_evals` (`==` once 47.3d fixes the variance-guard scale mismatch on rough objectives; `<=` always, with `stop_reason ∈ {"budget", "variance", "stagnation", "error"}`), `seed`-reproducible across two consecutive runs, `gp_hyperparameters` populated whenever ≥ 1 acquisition iteration ran (per 47.3b.1's init-truncation guard), `n_evals_per_fidelity` summing to `len(eval_history)`.
 - `python -m sweeps bo --help` lists all flags including `--cheap-fidelities`, `--budget-evals`/`--budget-seconds`, `--baseline`, `--validate-with-cpp`, `--persist`.
 - `sweeps/bo_runs/` directory exists (committed via `.gitkeep`); contains the calibration JSON from 47.7a with both `best_x` and `extras.baseline.best_x` populated.
 - `TestRegressionBOBenchmark` passes (slow): every stored run's `best_x` recomputes within 1% of stored objective.
