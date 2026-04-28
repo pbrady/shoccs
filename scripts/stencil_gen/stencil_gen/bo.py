@@ -1027,6 +1027,95 @@ def _recommend_incumbent(
     return X[idx].detach().cpu().numpy()
 
 
+def _compute_hf_uncertainty_signal(
+    model: MultiTaskGP,
+    X_train: np.ndarray,
+    Y_train: np.ndarray,
+    target_fid_idx: int,
+    d: int,
+    bounds_t: Sequence[tuple[float, float]],
+    seed: int,
+    *,
+    n_grid: int = 256,
+) -> tuple[float, float] | None:
+    """Return ``(var_hf_grid, spread_hf)`` for the adaptive HF mechanisms.
+
+    Shared signal consumed by both :paramref:`run_mfbo.adaptive_hf_floor`
+    (47.3i) and :paramref:`run_mfbo.adaptive_hf_explore_bias` (47.3j).  Both
+    mechanisms previously inlined the same ``n_grid``-point Sobol' grid +
+    posterior-variance-max + HF-only spread computation; factoring into a
+    single helper guarantees the two predicates cannot diverge under future
+    edits (47.3j.1 Gap 3).
+
+    Best-effort: returns ``None`` on any internal failure (insufficient HF
+    rows, posterior call raises) so callers fall back to the static branch
+    without aborting the BO loop.
+
+    Parameters
+    ----------
+    model : MultiTaskGP
+        Fitted GP whose posterior is queried at HF.
+    X_train, Y_train
+        Current training tensors as numpy arrays; the helper filters to HF
+        rows via the fidelity column at index ``d``.
+    target_fid_idx : int
+        Internal fidelity index (0..K-1) the BO module uses to address HF on
+        the GP's task axis.
+    d : int
+        Design dimension (number of non-fidelity columns in ``X_train``).
+    bounds_t : Sequence[tuple[float, float]]
+        Per-design-axis ``(lo, hi)`` pairs.  Used to scale the Sobol' grid
+        from the unit hypercube into the design domain.
+    seed : int
+        Sobol' engine seed.  Reproducible across calls with the same seed.
+    n_grid : int, default 256
+        Sobol' grid size for the variance-max query.  256 is the size used
+        by the in-loop adaptive blocks before factoring; the variance-guard
+        block (which has additional incumbent-variance machinery) keeps its
+        own grid construction.
+
+    Returns
+    -------
+    tuple[float, float] or None
+        ``(var_hf_grid, spread_hf)`` where ``spread_hf`` is floored at
+        ``1e-12`` so callers can use it in a denominator without further
+        guarding.  ``None`` indicates the signal is unavailable for this
+        iteration; callers must treat that as "skip the adaptive branch".
+    """
+    try:
+        Y_hf = Y_train[X_train[:, d] == target_fid_idx]
+        if Y_hf.size < 2:
+            return None
+        spread_hf = max(
+            float(np.max(Y_hf)) - float(np.min(Y_hf)), 1e-12
+        )
+        sobol = torch.quasirandom.SobolEngine(d, scramble=True, seed=seed)
+        raw = sobol.draw(n_grid).double()
+        bounds_arr = torch.tensor(
+            [list(b) for b in bounds_t], dtype=torch.float64
+        )
+        lo, hi = bounds_arr[:, 0], bounds_arr[:, 1]
+        grid_X = lo + raw * (hi - lo)
+        grid_full = torch.cat(
+            [
+                grid_X,
+                torch.full(
+                    (n_grid, 1),
+                    float(target_fid_idx),
+                    dtype=torch.float64,
+                ),
+            ],
+            dim=1,
+        )
+        with torch.no_grad():
+            var_hf_grid = float(
+                model.posterior(grid_full).variance.max().item()
+            )
+        return var_hf_grid, spread_hf
+    except Exception:
+        return None
+
+
 def run_mfbo(
     scheme: str,
     kernel: str,
@@ -1575,60 +1664,44 @@ def run_mfbo(
         # ``fidelity_choices`` once the cost model is built).  Best-effort:
         # any failure in the predicate computation falls back to the static
         # cost table so a numerical hiccup cannot abort the loop.
+        # Shared HF uncertainty signal (47.3j.1 Gap 3): both adaptive
+        # mechanisms below consume the same ``(var_hf_grid, spread_hf)``
+        # pair, computed once via :func:`_compute_hf_uncertainty_signal`.
+        # ``None`` indicates the signal is unavailable (insufficient HF
+        # rows or a numerical hiccup) — both mechanisms then fall back to
+        # their static branches.
+        if adaptive_hf_floor is not None or adaptive_hf_explore_bias is not None:
+            hf_uncertainty_signal = _compute_hf_uncertainty_signal(
+                model, X_train, Y_train, target_fid_idx, d, bounds_t, seed
+            )
+        else:
+            hf_uncertainty_signal = None
+
         effective_cost_table = cost_table_resolved
-        if adaptive_hf_floor is not None:
+        if adaptive_hf_floor is not None and hf_uncertainty_signal is not None:
             try:
-                Y_hf_now = Y_train[X_train[:, d] == target_fid_idx]
-                if Y_hf_now.size >= 2:
-                    spread_hf_now = max(
-                        float(np.max(Y_hf_now)) - float(np.min(Y_hf_now)),
-                        1e-12,
-                    )
-                    grid_sobol = torch.quasirandom.SobolEngine(
-                        d, scramble=True, seed=seed
-                    )
-                    grid_raw = grid_sobol.draw(256).double()
-                    bounds_arr = torch.tensor(
-                        [list(b) for b in bounds_t], dtype=torch.float64
-                    )
-                    lo, hi = bounds_arr[:, 0], bounds_arr[:, 1]
-                    grid_X = lo + grid_raw * (hi - lo)
-                    grid_full = torch.cat(
-                        [
-                            grid_X,
-                            torch.full(
-                                (256, 1),
-                                float(target_fid_idx),
-                                dtype=torch.float64,
-                            ),
-                        ],
-                        dim=1,
-                    )
-                    with torch.no_grad():
-                        var_hf_grid = float(
-                            model.posterior(grid_full).variance.max().item()
+                var_hf_grid, spread_hf_now = hf_uncertainty_signal
+                n_cheap_finite = int(
+                    np.sum(X_train[:, d] != target_fid_idx)
+                )
+                hf_uncertain = (
+                    var_hf_grid
+                    > _ADAPTIVE_HF_FLOOR_TAU * spread_hf_now ** 2
+                )
+                cheap_well_fit = n_cheap_finite >= max(2 * d, K)
+                if hf_uncertain and cheap_well_fit:
+                    cheap_costs = [
+                        cost_table_resolved[ext]
+                        for ext in fidelity_levels[:-1]
+                    ]
+                    if cheap_costs:
+                        cheap_min = min(cheap_costs)
+                        effective_hf_cost = min(
+                            cost_table_resolved[hf_level],
+                            adaptive_hf_floor * cheap_min,
                         )
-                    n_cheap_finite = int(
-                        np.sum(X_train[:, d] != target_fid_idx)
-                    )
-                    hf_uncertain = (
-                        var_hf_grid
-                        > _ADAPTIVE_HF_FLOOR_TAU * spread_hf_now ** 2
-                    )
-                    cheap_well_fit = n_cheap_finite >= max(2 * d, K)
-                    if hf_uncertain and cheap_well_fit:
-                        cheap_costs = [
-                            cost_table_resolved[ext]
-                            for ext in fidelity_levels[:-1]
-                        ]
-                        if cheap_costs:
-                            cheap_min = min(cheap_costs)
-                            effective_hf_cost = min(
-                                cost_table_resolved[hf_level],
-                                adaptive_hf_floor * cheap_min,
-                            )
-                            effective_cost_table = dict(cost_table_resolved)
-                            effective_cost_table[hf_level] = effective_hf_cost
+                        effective_cost_table = dict(cost_table_resolved)
+                        effective_cost_table[hf_level] = effective_hf_cost
             except Exception:
                 effective_cost_table = cost_table_resolved
 
@@ -1667,62 +1740,34 @@ def run_mfbo(
             fidelity_choices: list[int] = list(range(K))
             n_acq_done = len(eval_history) - n_init_actual
             effective_bias = hf_explore_bias
-            if adaptive_hf_explore_bias is not None:
+            if (
+                adaptive_hf_explore_bias is not None
+                and hf_uncertainty_signal is not None
+            ):
                 try:
-                    Y_hf_bias = Y_train[X_train[:, d] == target_fid_idx]
-                    if Y_hf_bias.size >= 2:
-                        spread_hf_bias = max(
-                            float(np.max(Y_hf_bias))
-                            - float(np.min(Y_hf_bias)),
-                            1e-12,
+                    var_hf_bias, spread_hf_bias = hf_uncertainty_signal
+                    denom = var_hf_bias + spread_hf_bias ** 2
+                    if denom > 0.0:
+                        adaptive_term = (
+                            adaptive_hf_explore_bias
+                            * var_hf_bias
+                            / denom
                         )
-                        grid_sobol = torch.quasirandom.SobolEngine(
-                            d, scramble=True, seed=seed
+                        # Snap essentially-zero values to a clean 0
+                        # so the schedule reverts cleanly to the
+                        # static ``hf_explore_bias`` when the GP is
+                        # certain.  Without this, a finite-precision
+                        # ``var_hf_bias / spread_hf**2`` ratio of
+                        # ~1e-17 leaves ``effective_bias`` strictly
+                        # positive and ``effective_bias > 0.0``
+                        # would still trigger the quota check, with
+                        # ``projected_no_hf = 0 < ~1e-17`` forcing
+                        # HF on the first acquisition iteration.
+                        if adaptive_term < 1e-6:
+                            adaptive_term = 0.0
+                        effective_bias = max(
+                            hf_explore_bias, adaptive_term
                         )
-                        grid_raw = grid_sobol.draw(256).double()
-                        bounds_arr = torch.tensor(
-                            [list(b) for b in bounds_t],
-                            dtype=torch.float64,
-                        )
-                        lo, hi = bounds_arr[:, 0], bounds_arr[:, 1]
-                        grid_X = lo + grid_raw * (hi - lo)
-                        grid_full = torch.cat(
-                            [
-                                grid_X,
-                                torch.full(
-                                    (256, 1),
-                                    float(target_fid_idx),
-                                    dtype=torch.float64,
-                                ),
-                            ],
-                            dim=1,
-                        )
-                        with torch.no_grad():
-                            var_hf_bias = float(
-                                model.posterior(grid_full).variance.max().item()
-                            )
-                        denom = var_hf_bias + spread_hf_bias ** 2
-                        if denom > 0.0:
-                            adaptive_term = (
-                                adaptive_hf_explore_bias
-                                * var_hf_bias
-                                / denom
-                            )
-                            # Snap essentially-zero values to a clean 0
-                            # so the schedule reverts cleanly to the
-                            # static ``hf_explore_bias`` when the GP is
-                            # certain.  Without this, a finite-precision
-                            # ``var_hf_bias / spread_hf**2`` ratio of
-                            # ~1e-17 leaves ``effective_bias`` strictly
-                            # positive and ``effective_bias > 0.0``
-                            # would still trigger the quota check, with
-                            # ``projected_no_hf = 0 < ~1e-17`` forcing
-                            # HF on the first acquisition iteration.
-                            if adaptive_term < 1e-6:
-                                adaptive_term = 0.0
-                            effective_bias = max(
-                                hf_explore_bias, adaptive_term
-                            )
                 except Exception:
                     effective_bias = hf_explore_bias
             if hf_priority_warmup > 0 and n_acq_done < hf_priority_warmup:

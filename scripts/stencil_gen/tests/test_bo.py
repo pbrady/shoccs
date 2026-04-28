@@ -1872,9 +1872,24 @@ class TestRunMFBO:
     def test_adaptive_hf_explore_bias_default_off_preserves_cost_aware_contract(
         self,
     ):
-        # 47.3j: the default (``adaptive_hf_explore_bias=None``) must
-        # reproduce the pre-47.3j behaviour exactly.  Compare a default
-        # run against an explicit ``adaptive_hf_explore_bias=None``.
+        # 47.3j.1 Gap 1 (preferred fix: β=0.0 collapse equivalence).
+        #
+        # The pre-47.3j.1 form of this test compared two ``None``-equivalent
+        # invocations, which both short-circuit on
+        # ``if adaptive_hf_explore_bias is not None`` and never enter the
+        # new code; it pinned determinism, not the contract its name claims.
+        #
+        # The fix here pins the no-op contract by exercising the new code:
+        # set ``hf_explore_bias=0.3`` so the static quota gate is live, then
+        # compare ``adaptive_hf_explore_bias=None`` (default) against
+        # ``adaptive_hf_explore_bias=0.0`` (explicit β=0).  The β=0 path
+        # traverses the new code (try/except, helper call, formula
+        # evaluation) and the formula collapses to ``0 * fraction = 0``,
+        # which after ``max(hf_explore_bias, 0) = hf_explore_bias`` should
+        # yield bytewise-identical trajectories to the ``None`` path.  This
+        # catches mutations that break the formula's collapse property
+        # (e.g. ``effective_bias = max(hf_explore_bias, β + adaptive_term)``
+        # additive instead of multiplicative).
         bounds = [(-1.0, 1.0), (-1.0, 1.0)]
         objective, _ = self._rough_objective()
         common = dict(
@@ -1885,18 +1900,19 @@ class TestRunMFBO:
             budget_evals=15,
             n_init=8,
             hf_anchors=3,
+            hf_explore_bias=0.3,
             seed=0,
             objective=objective,
         )
         r_default = run_mfbo(**common)
-        r_explicit_none = run_mfbo(adaptive_hf_explore_bias=None, **common)
+        r_explicit_zero = run_mfbo(adaptive_hf_explore_bias=0.0, **common)
         np.testing.assert_allclose(
-            r_default.best_x, r_explicit_none.best_x, atol=1e-9
+            r_default.best_x, r_explicit_zero.best_x, atol=1e-9
         )
-        assert r_default.stop_reason == r_explicit_none.stop_reason
+        assert r_default.stop_reason == r_explicit_zero.stop_reason
         assert (
             r_default.n_evals_per_fidelity
-            == r_explicit_none.n_evals_per_fidelity
+            == r_explicit_zero.n_evals_per_fidelity
         )
 
     def test_adaptive_hf_explore_bias_lifts_quota_when_uncertain(self):
@@ -2097,6 +2113,89 @@ class TestRunMFBO:
                 f"The formula or the gate at "
                 f"``elif effective_bias > 0.0`` is broken."
             )
+
+    def test_adaptive_hf_floor_and_explore_bias_compose(self):
+        # 47.3j.1 Gap 2: with both 47.3i (cost-floor swap) and 47.3j
+        # (adaptive explore-bias schedule) enabled simultaneously, the
+        # loop must complete without ``stop_reason="error"`` and the
+        # union should not REDUCE HF picks below either individual
+        # mechanism alone.  Pins composition: a future refactor that
+        # breaks the iteration order or the helper-shared signal cannot
+        # silently regress the dual-on path.
+        bounds = [(-1.0, 1.0), (-1.0, 1.0)]
+        report_fields = {
+            1: "layer1.boundary_gv_err",
+            7: "layer7.max_spectral_abscissa",
+        }
+        cost_table = {1: 0.01, 7: 1.0}  # 100x cost ratio
+        x_star = np.array([0.3, -0.2])
+
+        def objective(x, m):
+            x = np.asarray(x, dtype=float)
+            biases = {1: 1000.0, 7: 0.0}
+            val = float(np.sum((x - x_star) ** 2)) + biases.get(m, 0.0)
+            return val, 0.001, {}
+
+        common = dict(
+            scheme="E2",
+            kernel="classical",
+            report_fields_by_layer=report_fields,
+            bounds=bounds,
+            budget_evals=20,
+            n_init=8,
+            hf_anchors=3,
+            cost_table=cost_table,
+            seed=0,
+            objective=objective,
+        )
+        n_init = 8
+
+        # (a) cost-floor alone (47.3i) — α=2.0 per plan body 47.3j.1 Gap 2
+        # (mild floor so the two mechanisms don't aggressively contend
+        # for the same HF picks).
+        r_floor = run_mfbo(adaptive_hf_floor=2.0, **common)
+        # (b) explore-bias schedule alone (47.3j)
+        r_bias = run_mfbo(adaptive_hf_explore_bias=0.5, **common)
+        # (c) both enabled
+        r_both = run_mfbo(
+            adaptive_hf_floor=2.0,
+            adaptive_hf_explore_bias=0.5,
+            **common,
+        )
+
+        # Loop must complete cleanly on all three configurations: a
+        # ``stop_reason="error"`` would indicate a try/except swallowed
+        # an exception inside the acquisition loop (e.g. the dual-on
+        # path tripping a bug the helper introduced).
+        good_reasons = {"budget", "variance", "stagnation"}
+        for label, r in (("floor", r_floor), ("bias", r_bias), ("both", r_both)):
+            assert r.stop_reason in good_reasons, (
+                f"{label}-only run hit error stop_reason={r.stop_reason!r}"
+            )
+
+        # Count HF acquisition picks (exclude the trailing final-HF
+        # re-eval at index ``-1``, exclude init at ``[:n_init]``).
+        def _hf_acq_count(result):
+            acq = result.eval_history[n_init:-1]
+            return sum(1 for e in acq if e.fidelity == 7)
+
+        hf_floor = _hf_acq_count(r_floor)
+        hf_bias = _hf_acq_count(r_bias)
+        hf_both = _hf_acq_count(r_both)
+
+        # Directional contract: union should not REDUCE HF picks below
+        # either individual mechanism.  The two mechanisms steer
+        # different machinery (quota vs cost table); neither dominates,
+        # but enabling both should give at least as many HF picks as
+        # the better of the two.
+        assert hf_both >= hf_floor, (
+            f"compose regressed below floor-alone: "
+            f"both={hf_both} floor={hf_floor}"
+        )
+        assert hf_both >= hf_bias, (
+            f"compose regressed below bias-alone: "
+            f"both={hf_both} bias={hf_bias}"
+        )
 
 
 # ---------------------------------------------------------------------------
