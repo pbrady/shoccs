@@ -266,7 +266,7 @@ cd scripts/stencil_gen && SYMPY_CACHE_SIZE=50000 uv run python -m sweeps bo \
     - **Bounds tensor assembly is task-feature-position-agnostic:** the `optimize` closure walks all `d_total` columns of the GP input and inserts `[min(fidelity_choices), max(fidelity_choices)]` at `fidelity_dim` and the user's `bounds` pairs at all other positions. With our convention (fidelity is the *last* column, set by `build_initial_design`/`run_mfbo`), this collapses to a simple `[design_lo, fidelity_min] | [design_hi, fidelity_max]` stack — but the implementation is robust to any task-feature index. Important for 47.3c's `test_optimize_acqf_mixed_returns_valid_point`: it should assert `x_next` shape is `(d,)` (NOT `(d+1,)`) because the closure strips the fidelity column from the candidate before returning.
     - `TestAcquisition` tests live in 47.3c — the plan's `Test:` line is forward-looking (same convention as 47.1a/b/2a/2b/2c). Existing `tests/test_bo.py` (43 tests) green at 5.07 s; no regression from the new acquisition surface.
 
-- [x] **47.3b** Add `run_mfbo(scheme, kernel, report_fields_by_layer, bounds, *, budget_evals=None, budget_seconds=None, cost_table=None, seed=0, n_init=None, num_fantasies=64, verbose=False) -> BOResult`:
+- [x] **47.3b** Add `run_mfbo(scheme, kernel, report_fields_by_layer, bounds, *, budget_evals=None, budget_seconds=None, cost_table=None, seed=0, n_init=None, num_fantasies=64, verbose=False, objective=None) -> BOResult`:
   - Build the multi-fidelity objective via 47.1b's factory.
   - Build initial design via 47.2c, evaluate every `(x_i, m_i)` pair at the real objective, assemble training tensors.
   - Filter sentinel rows from training data (don't fit GP on `_BO_SENTINEL` values).
@@ -295,16 +295,33 @@ cd scripts/stencil_gen && SYMPY_CACHE_SIZE=50000 uv run python -m sweeps bo \
     - **`extras["n_sentinel_filtered"]` is the count of *all* sentinel-valued rows in the eval_history** (initial design + acquisition + final, if any). Use this name in 47.3c tests.
     - **GP rebuilt every iteration** (fresh `MultiTaskGP` from training data each loop step) so the `build_acquisition` side effect on `_output_tasks`/`_num_outputs` (47.3a Notes) is well-contained.
     - Adjacent regression suite (`tests/test_pareto.py + test_optimizer.py + test_brady2d_stability.py + test_bo.py` = 290 passed, 23 skipped) green at 4m28s. Existing `tests/test_bo.py` (43 tests) green at 4.8s. Formal `TestRunMFBO` test class is 47.3c — `Test:` line above is forward-looking (same convention as 47.1a/b/2a/2b/2c/3a).
+    - **Signature deviation:** an `objective: Callable | None = None` test-injection kwarg was added beyond the plan-body signature so the synthetic-objective tests in 47.3c can bypass the cascade. Plan-body signature is updated above to match the implementation.
 
-- [ ] **47.3c** Tests in `tests/test_bo.py` — `TestAcquisition` (3) + `TestRunMFBO` (5):
+- [ ] **47.3b.1** Fix init-design truncation that silently drops HF anchors and leaves `gp_hyperparameters` empty:
+  - **Bug:** when `n_init + 1 > budget_evals` (init plus the reserved final HF re-eval slot), the init loop truncates `X_init` from the tail. Because `build_initial_design` constructs `X_init = np.vstack([X_cheap, X_mid, X_hf])` (HF anchors at the end — `bo.py:732`), truncation drops *all* HF anchors first. With no HF observation in the loop, the while-loop's `acq_budget_exhausted()` check is immediately true after init, the GP never fits, and `BOResult.gp_hyperparameters == {}` despite the completion-criterion line "`run_mfbo` returns a `BOResult` with ... `gp_hyperparameters` populated." Tight-budget runs also lose the paired HF/cheap evaluations that the ICM kernel needs to identify the off-diagonal `B` entries (Wu et al. 2020 §3.1; the "Agent 2 pitfall #1" the DOE was specifically designed to avoid).
+  - **Pick one fix:**
+    1. **Validate up front:** raise `ValueError` when `budget_evals - 1 < resolved_n_init`, requiring the caller to size the budget for at least the full initial design plus the final HF re-eval. Cleanest contract; surfaces the "you can't run MF-BO with fewer evals than the DOE asks for" constraint loudly.
+    2. **Reorder X_init to put HF anchors first** (move the `np.vstack` from `[cheap, mid, hf]` to `[hf, cheap, mid]` in `build_initial_design` and re-derive `fid_indices` to match). Truncation then drops cheap rows last — preserving the paired HF/cheap structure the GP needs. Requires updating `TestDOE::test_hf_anchor_paired_with_cheap` if it asserts on row order, plus a re-check that `X_hf = X_cheap[:hf_anchors].copy()` still pairs correctly under the new layout (the pairing is by *value*, not position, so the copy step still works).
+    3. **Fall back to a final GP fit** after the loop exits when `final_model is None` and there are at least `max(2, K)` finite rows. Populates `gp_hyperparameters` even on truncation; does *not* fix the lost-HF-anchor identifiability problem, so weaker than (1)/(2).
+  - Recommended: **(1) for the safer contract**. (2) is also acceptable and avoids needing to enlarge budgets in test code; if (2) is taken, also update the `build_initial_design` docstring's "rows are…" description and the `TestDOE` row-order assertions.
+  - File: `scripts/stencil_gen/stencil_gen/bo.py` (and `tests/test_bo.py` if (2) is taken)
+  - Test: `cd scripts/stencil_gen && uv run pytest tests/test_bo.py -x -q -k "TestRunMFBO and (test_gp_hyperparameters_populated or test_init_anchors_preserved_under_tight_budget)"`
+
+- [ ] **47.3c** Tests in `tests/test_bo.py` — `TestAcquisition` (3) + `TestRunMFBO` (10):
   - `TestAcquisition::test_qmfkg_constructor` — instantiate without errors on a fitted GP.
   - `test_optimize_acqf_mixed_returns_valid_point` — returned `x_next` within bounds, `fid_next` in fidelity choices.
   - `test_acquisition_value_finite` — for a non-degenerate GP, returned acq value is finite + non-zero.
+  - All `TestRunMFBO` tests should use the `objective=` injection kwarg (47.3b deviation) with synthetic noiseless quadratics so the cascade is never invoked from the fast suite. Use a counter mock to record `(x, m)` calls.
   - `TestRunMFBO::test_seed_determinism` — same seed, same `best_x` to within 1e-6.
-  - `test_budget_evals_respected` — `budget_evals=20` ⇒ `sum(n_evals_per_fidelity.values()) == 20`.
-  - `test_stop_reason_recorded` — synthetic objective that converges fast triggers `stop_reason="variance"`.
+  - `test_budget_evals_respected` — `budget_evals=20` with a sufficiently rough/noisy objective so the variance guard does not pre-empt the budget cap (per 47.3b deviation note: smooth quadratics trigger `stop_reason="variance"` after a few iterations; size `n_init=8` so init alone consumes 8 evals and the remaining 11 acquisition + final fit under 20). Assert `sum(n_evals_per_fidelity.values()) == 20`.
+  - `test_budget_seconds_respected` — `budget_seconds=2.0` terminates with `stop_reason="budget"`; total wall time ≤ `2.0 + ε_final_eval` (allow 1 s slack for the post-budget final HF re-eval, since it is mandatory regardless of wall-time budget).
+  - `test_stop_reason_recorded` — synthetic objective that converges fast triggers `stop_reason="variance"` and `converged=True`.
+  - `test_stagnation_stop_reason` — synthetic constant-value objective forces ≥10 finite HF evals with no improvement; assert `stop_reason="stagnation"` and `converged=True`. Set `n_init` and `budget_evals` so at least 11 HF evals run before the budget exits.
   - `test_sentinel_rows_filtered_from_gp` — objective returns sentinel for half the initial design; verify GP only fits on finite-value rows; `BOResult.extras["n_sentinel_filtered"]` ≥ 1.
-  - `@pytest.mark.slow def test_synthetic_quadratic_2d` — 2D quadratic `f(x, m) = (x-x*)^T(x-x*) + bias(m)`; assert MF-BO converges to `x*` within 1e-2 in ≤20 evals; verify ≥ 30% of evals at cheap fidelity (cost-aware working).
+  - `test_gp_hyperparameters_populated` — for a budget that allows ≥1 successful while-loop iteration, assert `BOResult.gp_hyperparameters` keys are exactly `{"lengthscale", "icm_W", "icm_var", "noise"}`, that `lengthscale` and `icm_var` are non-empty lists of finite floats, that `icm_W` is a 2D list of finite floats with row count == `len(fidelity_levels)`, and that `noise >= 1e-9` (matches the 47.2a constraint floor).
+  - `test_init_anchors_preserved_under_tight_budget` — verifies the 47.3b.1 fix is in place. With `n_init=8, budget_evals=10, fidelity_levels=(1, 3, 7)` (would have truncated under the old code), assert per the chosen fix branch: (1) `ValueError` raised at the budget validation; OR (2) HF anchors appear in `eval_history` and `BOResult.gp_hyperparameters` is non-empty.
+  - `test_objective_injection_hook` — pass a custom callable with a call counter as `objective=...`; verify `brady2d_stability_score` is never invoked (monkeypatch it to raise `AssertionError` if called) and that `BOResult.eval_history` reflects the hook's outputs.
+  - `@pytest.mark.slow def test_synthetic_quadratic_2d` — 2D quadratic `f(x, m) = (x-x*)^T(x-x*) + bias(m)` injected via `objective=`; assert MF-BO converges to `x*` within 1e-2 in ≤20 evals; verify ≥ 30% of evals at cheap fidelity (cost-aware working). Use enough noise/bias-spread to defeat the variance guard so the full budget is consumed.
   - File: `scripts/stencil_gen/tests/test_bo.py`
   - Test: `cd scripts/stencil_gen && uv run pytest tests/test_bo.py -x -q -k "TestAcquisition or TestRunMFBO"`
 
@@ -451,7 +468,7 @@ cd scripts/stencil_gen && SYMPY_CACHE_SIZE=50000 uv run python -m sweeps bo \
   ↓
 47.2a → 47.2b → 47.2c → 47.2d               # GP + cost + DOE + tests
   ↓
-47.3a → 47.3b → 47.3c                       # acquisition + BO loop + tests
+47.3a → 47.3b → 47.3b.1 → 47.3c             # acquisition + BO loop + truncation fix + tests
   ↓
 47.4a → 47.4b → 47.4c → 47.4d               # CLI + dispatch + persistence + tests
   ↓
