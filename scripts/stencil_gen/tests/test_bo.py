@@ -1523,10 +1523,25 @@ class TestRunMFBO:
                 run_mfbo(adaptive_hf_floor=bad, **common)
 
     def test_adaptive_hf_floor_default_off_preserves_cost_aware_contract(self):
-        # 47.3i: the default (``adaptive_hf_floor=None``) must reproduce the
-        # pre-47.3i behaviour exactly.  Compare two runs identical except for
-        # an explicit ``adaptive_hf_floor=None`` (which should be a no-op
-        # alias for the default).
+        # 47.3j.2: ``α=∞`` collapse equivalence — analog of the 47.3j.1
+        # ``β=0.0`` fix for the parallel ``adaptive_hf_explore_bias`` test.
+        # Compare ``adaptive_hf_floor=None`` (default short-circuit) against
+        # ``adaptive_hf_floor=1e6``.  At α=1e6:
+        #
+        #     effective_hf_cost = min(c(hf), 1e6 * cheap_min) = c(hf)
+        #
+        # because ``1e6 * cheap_min`` >> any plausible ``c(hf)``.  The α=∞
+        # path traverses the new code (helper call, ``hf_uncertain`` /
+        # ``cheap_well_fit`` predicates, ``min(...)`` clamp, ``dict(...)``
+        # copy, ``build_cost_model`` on the copy), and bytewise-identical
+        # trajectories prove the no-op contract holds end-to-end.
+        #
+        # Catches mutations that break the no-op-at-α=∞ property of the
+        # ``min(...)`` clamp — e.g. ``effective_hf_cost = adaptive_hf_floor *
+        # cheap_min`` (clamp removed) would balloon HF cost to ``1e6 *
+        # cheap_min`` and diverge the trajectory immediately.  An explicit
+        # ``cost_table`` is supplied so ``cheap_min`` is well-defined and the
+        # mutation surface is visible.
         bounds = [(-1.0, 1.0), (-1.0, 1.0)]
         objective, _ = self._rough_objective()
         common = dict(
@@ -1537,18 +1552,19 @@ class TestRunMFBO:
             budget_evals=15,
             n_init=8,
             hf_anchors=3,
+            cost_table={1: 0.01, 3: 0.005, 7: 1.0},
             seed=0,
             objective=objective,
         )
         r_default = run_mfbo(**common)
-        r_explicit_none = run_mfbo(adaptive_hf_floor=None, **common)
+        r_alpha_inf = run_mfbo(adaptive_hf_floor=1e6, **common)
         np.testing.assert_allclose(
-            r_default.best_x, r_explicit_none.best_x, atol=1e-9
+            r_default.best_x, r_alpha_inf.best_x, atol=1e-9
         )
-        assert r_default.stop_reason == r_explicit_none.stop_reason
+        assert r_default.stop_reason == r_alpha_inf.stop_reason
         assert (
             r_default.n_evals_per_fidelity
-            == r_explicit_none.n_evals_per_fidelity
+            == r_alpha_inf.n_evals_per_fidelity
         )
 
     def test_adaptive_hf_floor_lifts_cost_when_uncertain(self):
