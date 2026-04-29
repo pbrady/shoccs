@@ -1205,6 +1205,7 @@ def _recommend_incumbent(
     strategy: str = "mean",
     sentinel_x: np.ndarray | None = None,
     voronoi_radius: float = 0.1,
+    ucb_beta: float = 2.0,
     info_out: dict | None = None,
 ) -> np.ndarray:
     """Return the recommended incumbent on a Sobol' grid of *n_grid* points.
@@ -1228,8 +1229,17 @@ def _recommend_incumbent(
     the helper falls back to the unmasked argmin and signals the fallback
     via ``info_out["voronoi_fallback"] = True`` if *info_out* was supplied.
 
-    The ``"ucb"`` strategy is reserved for plan item 47.6b.3.2c.3 and
-    currently raises :class:`NotImplementedError`.
+    The ``"ucb"`` strategy (47.6b.3.2c.3) replaces the posterior-mean ranking
+    with the upper-confidence bound on the minimization target,
+    ``score = mean + ucb_beta * sigma``.  This is the pessimistic estimate:
+    lower mean wins, lower sigma wins — high-variance regions (where the
+    clamped GP is least confident, typically near sentinel boundaries that
+    survive the Voronoi mask) are penalised.  The sign convention follows
+    Auer et al. 2002 with the formula adjusted for minimization (for
+    maximisation the standard UCB acquisition is ``mean + beta * sigma`` where
+    higher score wins; here, lower score wins so the same formula expresses
+    the upper bound).  When ``ucb_beta == 0``, the score collapses to mean
+    and the result is bytewise-identical to the ``"mean"`` strategy.
 
     Parameters
     ----------
@@ -1245,17 +1255,18 @@ def _recommend_incumbent(
         ``> 0`` and finite when used; the caller (``run_mfbo``) validates this
         on its kwarg surface so callers of this helper directly are responsible
         for passing a sensible value.
+    ucb_beta
+        Exploration penalty for the ``"ucb"`` strategy.  Must be ``>= 0`` and
+        finite when used; the caller (``run_mfbo``) validates this on its
+        kwarg surface.  ``0`` collapses UCB to the mean ranking.  Default
+        ``2.0`` per Auer et al. 2002.
     info_out
         Optional mutable dict.  When supplied and the ``"voronoi"`` fallback
         fires (all grid points masked → unmasked argmin), the helper sets
         ``info_out["voronoi_fallback"] = True`` so the caller can record the
         flag in :attr:`BOResult.extras`.
     """
-    if strategy == "ucb":
-        raise NotImplementedError(
-            "recommendation_strategy='ucb' lands in 47.6b.3.2c.3"
-        )
-    if strategy not in ("mean", "voronoi"):
+    if strategy not in ("mean", "voronoi", "ucb"):
         raise ValueError(
             "_recommend_incumbent strategy must be one of "
             f"{{'mean', 'voronoi', 'ucb'}}, got {strategy!r}"
@@ -1274,7 +1285,19 @@ def _recommend_incumbent(
     X_full = torch.cat([X, fid_col], dim=1)
     model.eval()
     with torch.no_grad():
-        mean = model.posterior(X_full).mean.squeeze(-1)
+        posterior = model.posterior(X_full)
+        mean = posterior.mean.squeeze(-1)
+        if strategy == "ucb":
+            # 47.6b.3.2c.3: upper-confidence bound on the minimization
+            # target.  ``variance.clamp(min=0.0)`` defends against tiny
+            # negative variances from numerical roundoff in BoTorch's
+            # posterior chain (the Cholesky-derived variance can dip
+            # slightly below zero on near-singular kernels).
+            variance = posterior.variance.squeeze(-1).clamp(min=0.0)
+            sigma = torch.sqrt(variance)
+            score = mean + ucb_beta * sigma
+        else:
+            score = mean
 
     # 47.6b.3.2c.2: voronoi mask gates grid points by minimum L2 distance to
     # any recorded sentinel x.  When no sentinels exist (or strategy="mean"),
@@ -1293,18 +1316,18 @@ def _recommend_incumbent(
         min_dist = dist.min(dim=-1).values
         feasible_mask = min_dist >= voronoi_radius
         if int(feasible_mask.sum().item()) > 0:
-            inf_t = torch.tensor(float("inf"), dtype=mean.dtype)
-            masked_mean = torch.where(feasible_mask, mean, inf_t)
-            idx = int(torch.argmin(masked_mean).item())
+            inf_t = torch.tensor(float("inf"), dtype=score.dtype)
+            masked_score = torch.where(feasible_mask, score, inf_t)
+            idx = int(torch.argmin(masked_score).item())
         else:
             # Degenerate: every grid point is within voronoi_radius of some
             # sentinel.  Fall back to the unmasked argmin and signal the
             # fallback so the caller can record it in BOResult.extras.
-            idx = int(torch.argmin(mean).item())
+            idx = int(torch.argmin(score).item())
             if info_out is not None:
                 info_out["voronoi_fallback"] = True
     else:
-        idx = int(torch.argmin(mean).item())
+        idx = int(torch.argmin(score).item())
     return X[idx].detach().cpu().numpy()
 
 
@@ -1419,6 +1442,7 @@ def run_mfbo(
     clamp_sentinel_rows: bool = True,
     recommendation_strategy: str = "mean",
     voronoi_radius: float = 0.1,
+    ucb_beta: float = 2.0,
     num_fantasies: int = 64,
     verbose: bool = False,
     objective: Callable[[np.ndarray, int], tuple[float, float, dict]] | None = None,
@@ -1681,8 +1705,14 @@ KnowledgeGradient` subclass that adds ``α * mean_q(hf_mask)`` to
         fully eliminate.  When all grid points fall inside the union of
         Voronoi cells, the helper falls back to the unmasked argmin and
         sets :attr:`BOResult.extras["voronoi_fallback"] = True`.  ``"ucb"``
-        is reserved for plan item 47.6b.3.2c.3 and still raises
-        :class:`NotImplementedError`.
+        (47.6b.3.2c.3) replaces the posterior-mean ranking with the
+        upper-confidence bound on the minimization target, ``score = mean +
+        ucb_beta * sigma``: lower mean wins, lower sigma wins, so
+        high-variance regions (where the clamped GP is least confident,
+        typically near sentinel boundaries that survive the Voronoi mask)
+        are penalised.  When ``ucb_beta == 0``, the UCB ranking collapses
+        to the mean ranking and the result is bytewise-identical to
+        ``"mean"``.
     voronoi_radius
         L2 mask radius for the ``"voronoi"`` strategy (47.6b.3.2c.2).  Must
         be a strictly positive finite float.  Validated unconditionally on
@@ -1691,6 +1721,13 @@ KnowledgeGradient` subclass that adds ``α * mean_q(hf_mask)`` to
         ignore it.  Default ``0.1`` is sized for designs scaled to
         ``[-1, 1]^d`` or ``[0, 1]^d``; callers using larger bounds should
         pass a proportionally larger radius.
+    ucb_beta
+        Exploration penalty for the ``"ucb"`` strategy (47.6b.3.2c.3).
+        Must be ``>= 0`` and finite.  Validated unconditionally on the
+        kwarg surface; the ``"mean"`` and ``"voronoi"`` branches ignore it.
+        Default ``2.0`` per Auer et al. 2002 with the sign convention
+        adjusted for minimization.  ``0.0`` collapses UCB to mean-only
+        (no-op contract for the default-off equivalence test).
     num_fantasies
         Forwarded to :func:`build_acquisition`.  Default 64.
     verbose
@@ -1813,10 +1850,6 @@ KnowledgeGradient` subclass that adds ``α * mean_q(hf_mask)`` to
             "recommendation_strategy must be one of "
             f"{{'mean', 'voronoi', 'ucb'}}, got {recommendation_strategy!r}"
         )
-    if recommendation_strategy == "ucb":
-        raise NotImplementedError(
-            "recommendation_strategy='ucb' lands in 47.6b.3.2c.3"
-        )
     # 47.6b.3.2c.2: ``voronoi_radius`` validation.  Strict ``> 0`` (a zero
     # radius would mask nothing — defeats the mechanism).  NaN check via
     # self-comparison; finiteness rejects ``inf``/``-inf``.  Validated
@@ -1830,6 +1863,20 @@ KnowledgeGradient` subclass that adds ``α * mean_q(hf_mask)`` to
         raise ValueError(
             "voronoi_radius must be a strictly positive finite float, "
             f"got {voronoi_radius}"
+        )
+    # 47.6b.3.2c.3: ``ucb_beta`` validation.  ``>= 0`` and finite; ``0``
+    # collapses the UCB ranking to mean-only (no-op contract for the
+    # default-off equivalence test).  NaN check via self-comparison;
+    # finiteness rejects ``inf``/``-inf``.  Validated unconditionally so
+    # the kwarg surface is sound regardless of strategy (catches mutations
+    # that defer the check to the strategy branch).
+    if (
+        ucb_beta != ucb_beta
+        or ucb_beta < 0.0
+        or not np.isfinite(ucb_beta)
+    ):
+        raise ValueError(
+            f"ucb_beta must be a non-negative finite float, got {ucb_beta}"
         )
 
     torch.manual_seed(seed)
@@ -2123,6 +2170,7 @@ KnowledgeGradient` subclass that adds ``α * mean_q(hf_mask)`` to
                 strategy=recommendation_strategy,
                 sentinel_x=sentinel_x_loop,
                 voronoi_radius=voronoi_radius,
+                ucb_beta=ucb_beta,
             )
             X_inc_full = torch.cat(
                 [
@@ -2340,6 +2388,7 @@ KnowledgeGradient` subclass that adds ``α * mean_q(hf_mask)`` to
                 strategy=recommendation_strategy,
                 sentinel_x=sentinel_x_final,
                 voronoi_radius=voronoi_radius,
+                ucb_beta=ucb_beta,
                 info_out=final_recommend_info,
             )
         except Exception:

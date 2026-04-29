@@ -3251,13 +3251,140 @@ class TestRunMFBO:
         assert np.all(result.best_x >= -1.0)
         assert np.all(result.best_x <= 1.0)
 
-    def test_recommendation_strategy_ucb_raises_not_implemented(self):
-        # 47.6b.3.2c.1: pin the ``"ucb"`` stub.  Deleted when 47.6b.3.2c.3
-        # lands.  Same shape as the voronoi counterpart; the match pattern
-        # pins the plan-item reference so a mutation that swaps the two
-        # stub messages would be caught.
+    # -----------------------------------------------------------------
+    # 47.6b.3.2c.3 — UCB recommendation mechanism
+    # -----------------------------------------------------------------
+
+    def test_ucb_recommendation_default_off_preserves_recommendation(
+        self,
+    ):
+        # 47.6b.3.2c.3: collapse-equivalence template.  The UCB ranking
+        # ``mean + ucb_beta * sigma`` collapses to mean-only when
+        # ``ucb_beta == 0``, so ``recommendation_strategy="ucb",
+        # ucb_beta=0.0`` must produce bytewise-identical output to the
+        # ``"mean"`` strategy.  Mirrors the 47.3j.1 / 47.3j.2 / 47.3k.3
+        # default-off equivalence pattern.  Catches mutations that change
+        # the UCB formula (e.g. ``mean + ucb_beta * sigma + epsilon`` or
+        # ``mean - ucb_beta * sigma`` — the latter would still produce
+        # bytewise-identical results at ``beta=0`` so this test alone does
+        # NOT catch the sign mutation, see ``_penalises_high_variance``
+        # below for that contract).
         objective, _ = self._rough_objective()
-        with pytest.raises(NotImplementedError, match="47.6b.3.2c.3"):
+        common = dict(
+            scheme="E2",
+            kernel="classical",
+            report_fields_by_layer=self._hf_canonical_fields(),
+            bounds=[(-1.0, 1.0), (-1.0, 1.0)],
+            budget_evals=15,
+            n_init=8,
+            hf_anchors=3,
+            seed=0,
+            objective=objective,
+        )
+        r_mean = run_mfbo(recommendation_strategy="mean", **common)
+        r_ucb = run_mfbo(
+            recommendation_strategy="ucb", ucb_beta=0.0, **common
+        )
+        np.testing.assert_allclose(r_mean.best_x, r_ucb.best_x, atol=1e-9)
+        assert r_mean.best_objective == r_ucb.best_objective
+        assert r_mean.stop_reason == r_ucb.stop_reason
+        assert r_mean.n_evals_per_fidelity == r_ucb.n_evals_per_fidelity
+
+    def test_ucb_recommendation_penalises_high_variance(self):
+        # 47.6b.3.2c.3 sign-convention mutation-catcher.  Construct a
+        # synthetic where two regions of the bounded box have similar
+        # posterior means but very different posterior variances.  Method:
+        # build a fake objective that returns a nearly-flat function for
+        # m=7 (well-explored region near the origin will look low-variance
+        # to the GP after enough HF picks) and let the corner regions have
+        # high posterior variance because the GP has fewer data there.
+        # With a strong UCB penalty (``ucb_beta=5.0``), the recommendation
+        # must avoid the high-variance corner regions and land near the
+        # well-explored centre.  This test must FAIL under the mutation
+        # ``score = mean - beta * sigma`` (which would prefer the
+        # high-variance corner — the LCB exploration acquisition the
+        # parent 47.6b.3.2.0 explicitly rejected).  Pins the sign
+        # convention from the production code, not just from the docstring.
+        #
+        # We check this by directly invoking ``_recommend_incumbent`` on a
+        # fitted GP rather than running the full ``run_mfbo`` loop —
+        # cleaner contract, no synthetic-fit fragility.
+        from stencil_gen.bo import _recommend_incumbent, build_mf_gp
+
+        rng = np.random.default_rng(0)
+        # 30 points clustered near origin (well-explored, low GP variance),
+        # at fidelity 0 (cheap) and 1 (HF).  Y is essentially flat so the
+        # mean is unimodal but the variance is bowl-shaped.
+        X_centre_d = 0.05 * rng.normal(size=(15, 2))
+        X_train = np.vstack(
+            [
+                np.hstack([X_centre_d, np.zeros((15, 1))]),  # cheap
+                np.hstack([X_centre_d, np.ones((15, 1))]),  # HF
+            ]
+        )
+        Y_train = np.zeros((30, 1)) + 1e-3 * rng.normal(size=(30, 1))
+        torch.manual_seed(0)
+        model = build_mf_gp(
+            X_train, Y_train, fidelity_dim=2, num_fidelities=2, rank=1
+        )
+
+        # Mean ranking: argmin probably lands somewhere in the bounds —
+        # mean is essentially flat so this is dominated by Sobol' grid
+        # noise, but well-defined.
+        x_mean = _recommend_incumbent(
+            model,
+            [(-1.0, 1.0), (-1.0, 1.0)],
+            target_fidelity_index=1,
+            d=2,
+            seed=0,
+            strategy="mean",
+        )
+        # UCB with strong penalty: argmin must avoid high-variance corners.
+        x_ucb = _recommend_incumbent(
+            model,
+            [(-1.0, 1.0), (-1.0, 1.0)],
+            target_fidelity_index=1,
+            d=2,
+            seed=0,
+            strategy="ucb",
+            ucb_beta=5.0,
+        )
+        # The UCB recommendation should land closer to the data centre
+        # (origin) than to the high-variance corners.  Pin: ||x_ucb|| <
+        # ||corner|| = sqrt(2).  More aggressively, ||x_ucb|| should be
+        # well inside the bounded box because the GP variance grows toward
+        # the corners.
+        norm_ucb = float(np.linalg.norm(x_ucb))
+        # Corner distance in the bounded box is ~sqrt(2) ≈ 1.41.  Under
+        # the WRONG sign mutation (``score = mean - beta * sigma``), the
+        # argmin would prefer high-variance regions and ``norm_ucb``
+        # would tend toward the box's diagonal corners (≈ 1.41).  Under
+        # the correct sign, ``norm_ucb`` stays close to the data centre.
+        # Pin a threshold that the wrong-sign mutation reliably violates
+        # but the correct sign satisfies with margin.
+        assert norm_ucb < 1.0, (
+            f"UCB recommendation drifted to high-variance region "
+            f"(norm={norm_ucb:.4f}); expected to penalise high variance "
+            f"and stay near data centre.  Sign-convention mutation "
+            f"(score = mean - beta * sigma) would put norm near sqrt(2)."
+        )
+        # x_mean is unconstrained by variance so the test is silent on it
+        # — its only job here is to prove the mean strategy still works on
+        # the same model.
+        assert np.all(np.isfinite(x_mean))
+
+    @pytest.mark.parametrize(
+        "bad",
+        [-0.1, float("nan"), float("inf"), float("-inf")],
+    )
+    def test_ucb_beta_validates_range(self, bad):
+        # 47.6b.3.2c.3: ``>= 0`` and finite.  ``0.0`` is accepted (no-op
+        # contract); negatives are rejected (would make UCB into LCB
+        # exploration acquisition); NaN/inf are rejected.  Validation is
+        # unconditional so the kwarg surface is sound regardless of which
+        # strategy is selected.
+        objective, _ = self._rough_objective()
+        with pytest.raises(ValueError, match="ucb_beta"):
             run_mfbo(
                 scheme="E2",
                 kernel="classical",
@@ -3269,6 +3396,7 @@ class TestRunMFBO:
                 seed=0,
                 objective=objective,
                 recommendation_strategy="ucb",
+                ucb_beta=bad,
             )
 
 
