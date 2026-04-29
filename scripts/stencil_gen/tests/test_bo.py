@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import dataclasses
+import inspect
 import time
 from dataclasses import FrozenInstanceError
 
@@ -1395,6 +1396,95 @@ class TestRunMFBO:
                 f"(expected >= {n_init + explicit_min_acq + 1}); "
                 f"stop_reason={result.stop_reason!r}"
             )
+
+    # --- 47.3k.2: variance-guard relative-threshold kwarg ------------------
+
+    def test_variance_guard_relative_threshold_kwarg(self):
+        # 47.3k.2: ``variance_guard_relative_threshold`` exposes the
+        # previously-hardcoded ``1e-3`` relative criterion as a kwarg with
+        # default ``1e-5`` (tightened to block the spurious early-exit
+        # failure mode the 47.3d Done-note documented on smooth synthetic
+        # objectives).  Two-part contract:
+        #   Part 1: assert default value is ``1e-5`` via signature
+        #     introspection — pins the constant directly so a future
+        #     tuning change in 47.3k.4 must update this test.
+        #   Part 2: tightening the threshold to ``1e-30`` (essentially
+        #     disabled) extends the run vs. the loose pre-fix ``1e-3``;
+        #     the tight run also never exits via variance.  Use
+        #     ``min_acquisition_iterations=1`` to bypass the 47.3k.1
+        #     floor so the variance guard is reachable inside the
+        #     budget window — this isolates the threshold's effect.
+        # Part 1 — default value.
+        sig = inspect.signature(run_mfbo)
+        assert (
+            sig.parameters["variance_guard_relative_threshold"].default
+            == 1e-5
+        )
+
+        # Part 2 — directional contract.
+        bounds = [(-1.0, 1.0), (-1.0, 1.0)]
+        objective, _ = self._quadratic_objective()
+        common = dict(
+            scheme="E2",
+            kernel="classical",
+            report_fields_by_layer=self._hf_canonical_fields(),
+            bounds=bounds,
+            budget_evals=15,
+            n_init=8,
+            hf_anchors=3,
+            min_acquisition_iterations=1,
+            seed=0,
+            objective=objective,
+        )
+        r_loose = run_mfbo(
+            variance_guard_relative_threshold=1e-3, **common
+        )
+        r_tight = run_mfbo(
+            variance_guard_relative_threshold=1e-30, **common
+        )
+        n_loose = sum(r_loose.n_evals_per_fidelity.values())
+        n_tight = sum(r_tight.n_evals_per_fidelity.values())
+        # Tighter threshold runs at least as long as looser threshold:
+        # the relative criterion blocks more spurious exits, so the
+        # loop runs further before any guard / budget cap fires.  The
+        # ``>=`` admits the case where neither threshold fires variance
+        # (both runs reach budget); strict ``>`` would be brittle on
+        # smooth-quadratic GP fits.
+        assert n_tight >= n_loose, (
+            f"tight threshold did not extend run: loose={n_loose}, "
+            f"tight={n_tight}; stop_reasons "
+            f"loose={r_loose.stop_reason!r}, tight={r_tight.stop_reason!r}"
+        )
+        # And the tight run never exits via the variance guard — the
+        # threshold ``1e-30`` makes the relative criterion essentially
+        # unreachable (``var_inc < 1e-30 * max_var_grid`` requires
+        # var_inc to be ~30 orders of magnitude below max_var_grid).
+        assert r_tight.stop_reason != "variance", (
+            f"variance guard fired with threshold 1e-30: "
+            f"stop_reason={r_tight.stop_reason!r}"
+        )
+
+    def test_variance_guard_relative_threshold_validates_range(self):
+        # 47.3k.2: must be strictly positive and finite.  ``<= 0`` would
+        # disable the guard's relative criterion (always-fire); NaN/inf
+        # would make the comparison ill-defined.
+        bounds = [(-1.0, 1.0), (-1.0, 1.0)]
+        common = dict(
+            scheme="E2",
+            kernel="classical",
+            report_fields_by_layer=self._hf_canonical_fields(),
+            bounds=bounds,
+            budget_evals=10,
+            n_init=8,
+            hf_anchors=3,
+            seed=0,
+            objective=lambda x, m: (0.0, 0.0, {}),
+        )
+        for bad in [0.0, -1e-5, float("nan"), float("inf"), -float("inf")]:
+            with pytest.raises(
+                ValueError, match="variance_guard_relative_threshold"
+            ):
+                run_mfbo(variance_guard_relative_threshold=bad, **common)
 
     # --- 47.3g: HF explore-bias floor on the cost-aware acquisition --------
 

@@ -1186,6 +1186,7 @@ def run_mfbo(
     hf_priority_warmup: int = 0,
     adaptive_hf_floor: float | None = None,
     adaptive_hf_explore_bias: float | None = None,
+    variance_guard_relative_threshold: float = 1e-5,
     num_fantasies: int = 64,
     verbose: bool = False,
     objective: Callable[[np.ndarray, int], tuple[float, float, dict]] | None = None,
@@ -1360,6 +1361,24 @@ def run_mfbo(
         the cost-floor swap, so it composes more cleanly with qMFKG's
         cost-utility on small budgets where cost-table swings can
         destabilise the GP fit (47.3i empirical sweep).
+    variance_guard_relative_threshold
+        Relative-variance threshold used by the variance early-exit guard
+        (47.3k.2).  The guard fires only when *both* the absolute criterion
+        ``var_inc < 1e-6 * spread_hf**2`` *and* the relative criterion
+        ``var_inc < variance_guard_relative_threshold * max_var_grid`` hold,
+        where ``var_inc`` is the GP posterior variance at the recommended
+        incumbent and ``max_var_grid`` is the maximum posterior variance
+        over a 256-point Sobol' grid at HF.  Default ``1e-5`` (tightened
+        from the pre-47.3k.2 hardcoded ``1e-3``); empirically the
+        ``1e-3`` floor fires aggressively on smooth synthetic objectives
+        where the GP collapses uniformly to its noise floor and
+        ``var_inc / max_var_grid ≈ 1`` even when the basin is far from
+        localised.  Tightening to ``1e-5`` blocks the spurious exits
+        without affecting genuinely-converged runs.  Must be strictly
+        positive and finite; reject ``<= 0`` and NaN with ``ValueError``.
+        Composes orthogonally with :paramref:`min_acquisition_iterations`
+        (which delays *when* the guard can fire) and the static absolute
+        threshold (which is unchanged at ``1e-6 * spread_hf**2``).
     num_fantasies
         Forwarded to :func:`build_acquisition`.  Default 64.
     verbose
@@ -1437,6 +1456,20 @@ def run_mfbo(
                 "adaptive_hf_explore_bias must be None or a float in [0, 1], "
                 f"got {adaptive_hf_explore_bias}"
             )
+    # 47.3k.2: NaN check via self-comparison + strict positivity + finite.
+    # The threshold scales the relative-variance criterion; ``<= 0`` would
+    # disable the guard entirely (always-fire), and NaN/inf would make the
+    # comparison ill-defined.
+    if (
+        variance_guard_relative_threshold
+        != variance_guard_relative_threshold
+        or variance_guard_relative_threshold <= 0.0
+        or not np.isfinite(variance_guard_relative_threshold)
+    ):
+        raise ValueError(
+            "variance_guard_relative_threshold must be a strictly positive "
+            f"finite float, got {variance_guard_relative_threshold}"
+        )
 
     torch.manual_seed(seed)
     np.random.seed(seed)
@@ -1691,7 +1724,9 @@ def run_mfbo(
                 float(np.max(Y_hf)) - float(np.min(Y_hf)), 1e-12
             )
             absolute_fired = var_inc < 1e-6 * spread_hf ** 2
-            relative_fired = var_inc < 1e-3 * max(max_var, 1e-30)
+            relative_fired = var_inc < (
+                variance_guard_relative_threshold * max(max_var, 1e-30)
+            )
             if absolute_fired and relative_fired:
                 stop_reason = "variance"
                 converged = True
