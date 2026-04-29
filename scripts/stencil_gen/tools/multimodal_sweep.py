@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""E4-classical α multi-modal sweep harness for plan 47.6b.3.2a.
+"""E4-classical α multi-modal sweep harness for plan 47.6b.3.2a / 47.6b.3.2c.4.
 
 Runs ``run_mfbo`` against the real cascade objective on E4-classical α
 (``brady2d_stability_score(scheme="E4", kernel="classical", ..., max_layer=3)``)
@@ -19,12 +19,21 @@ verbatim except for ``budget_evals``, which is exposed as a CLI argument
 so 47.6b.3.2a can sweep ``budget_evals=60`` (path (a) from the
 47.6b.3.1 empirical-fallback list) for the basin-proximity gap closure.
 
+Per 47.6b.3.2c.4a, three additional flags forward
+``recommendation_strategy`` / ``voronoi_radius`` / ``ucb_beta`` through to
+``run_mfbo`` so 47.6b.3.2c.4b/c can sweep the ``"voronoi"`` and ``"ucb"``
+feasibility-aware recommendation strategies under the same harness.
+
 Usage
 -----
 ::
 
     python tools/multimodal_sweep.py --seeds 0 1 2 --budget-evals 60
     python tools/multimodal_sweep.py --seeds 3 4 --budget-evals 60
+    python tools/multimodal_sweep.py --seeds 0 1 2 --budget-evals 60 \\
+        --recommendation-strategy voronoi --voronoi-radius 0.1
+    python tools/multimodal_sweep.py --seeds 0 1 2 --budget-evals 60 \\
+        --recommendation-strategy ucb --ucb-beta 2.0
 """
 
 from __future__ import annotations
@@ -61,7 +70,13 @@ def _count_hf_evals(result: BOResult) -> int:
     return sum(1 for ev in result.eval_history if ev.fidelity == _HF_LEVEL)
 
 
-def _run_one_seed(seed: int, budget_evals: int) -> dict[str, Any]:
+def _run_one_seed(
+    seed: int,
+    budget_evals: int,
+    recommendation_strategy: str,
+    voronoi_radius: float,
+    ucb_beta: float,
+) -> dict[str, Any]:
     """Execute one ``run_mfbo`` call; return a dict with the per-row fields.
 
     On any exception, returns ``{"seed": seed, "error": "<type>: <msg>"}``
@@ -89,6 +104,9 @@ def _run_one_seed(seed: int, budget_evals: int) -> dict[str, Any]:
             adaptive_hf_explore_bias=_BETA,
             hf_explore_bias=_STATIC_BIAS,
             hf_acquisition_bonus=_BONUS,
+            recommendation_strategy=recommendation_strategy,
+            voronoi_radius=voronoi_radius,
+            ucb_beta=ucb_beta,
         )
         elapsed = time.perf_counter() - t0
 
@@ -135,7 +153,7 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(
         description=(
             "E4-classical α multi-modal sweep harness for plan 47.6b.3.2a"
-            " empirical measurement."
+            " / 47.6b.3.2c.4 empirical measurement."
         )
     )
     parser.add_argument(
@@ -154,6 +172,35 @@ def main(argv: list[str] | None = None) -> int:
             " 30 reproduces the 47.6b.3.1 baseline)."
         ),
     )
+    parser.add_argument(
+        "--recommendation-strategy",
+        choices=["mean", "voronoi", "ucb"],
+        default="mean",
+        help=(
+            "run_mfbo recommendation_strategy override (default 'mean'"
+            " reproduces the pre-47.6b.3.2c behaviour; 'voronoi' /"
+            " 'ucb' enable the feasibility-aware recommendations from"
+            " 47.6b.3.2c.2 / 47.6b.3.2c.3)."
+        ),
+    )
+    parser.add_argument(
+        "--voronoi-radius",
+        type=float,
+        default=0.1,
+        help=(
+            "L2 mask radius for the 'voronoi' strategy (default 0.1"
+            " matches run_mfbo's default; ignored when strategy != 'voronoi')."
+        ),
+    )
+    parser.add_argument(
+        "--ucb-beta",
+        type=float,
+        default=2.0,
+        help=(
+            "UCB confidence multiplier for the 'ucb' strategy (default 2.0"
+            " matches run_mfbo's default; ignored when strategy != 'ucb')."
+        ),
+    )
     args = parser.parse_args(argv)
 
     print(
@@ -165,7 +212,13 @@ def main(argv: list[str] | None = None) -> int:
         ":-----------:|-----:|----------:|"
     )
     for seed in args.seeds:
-        row = _run_one_seed(seed, args.budget_evals)
+        row = _run_one_seed(
+            seed,
+            args.budget_evals,
+            args.recommendation_strategy,
+            args.voronoi_radius,
+            args.ucb_beta,
+        )
         print(_format_row(row), flush=True)
 
     return 0
