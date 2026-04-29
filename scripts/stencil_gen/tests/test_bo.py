@@ -2481,14 +2481,28 @@ class TestRunMFBO:
         )
 
     def test_hf_acquisition_bonus_steers_toward_hf(self):
-        # 47.3k.3: with the bonus enabled at a magnitude comparable to the
-        # cost-utility's HF/cheap KG ratio, the running HF fraction among
-        # acquisition picks must rise (or at least not fall) vs the
-        # default-off run.  Use a 100x cost ratio so the cost-aware utility
-        # otherwise drives most picks to cheap.  The bonus directly lifts
-        # qMFKG's HF acquisition value, so a large bonus is needed to
-        # measurably tip ``EIG/cost(cheap)`` (~100x) vs ``EIG/cost(HF) + α``;
-        # use ``α = 50`` so the lift is comparable in magnitude.
+        # 47.3k.3 + 47.3k.3.1: with the bonus enabled, the HF fraction among
+        # acquisition picks must rise vs. the default-off run.  Use a 100x
+        # cost ratio so the cost-aware utility otherwise drives most picks to
+        # cheap.
+        #
+        # Bonus magnitude (47.3k.3.1).  The plan-body 47.3k.3 estimate of
+        # ``α = 50`` was sized against the *diluted* formula ``bonus =
+        # α * mean(hf_mask)`` over ``q + num_fantasies`` (= 65 for q=1,
+        # default num_fantasies=64) — each q-candidate's HF contribution was
+        # ``α/65``.  47.3k.3.1's gap-1 fix slices ``X_actual`` to the q
+        # candidates only, so each candidate's contribution is ``α`` (a 65×
+        # un-dilution).  Re-tuning: steers uses ``α = 1.0`` (50× reduction
+        # from 50.0), the smallest round value above the ~0.77 nominal target
+        # that empirically produces a strict ``hf_on > hf_off`` lift here.
+        # Compose test (sibling) uses the same 50× reduction (5.0 → 0.1).
+        #
+        # Slicing (47.3k.3.1 gap-2).  Both ``acq_off`` and ``acq_on`` slice
+        # ``[n_init:-1]`` (NOT ``[n_init:]``).  The trailing ``-1`` excludes
+        # the post-loop final HF re-eval at ``x_inc`` that ``run_mfbo``
+        # always appends to ``eval_history`` — that entry is unconditionally
+        # at HF and would silently satisfy ``hf_on > 0`` even on a no-effect
+        # mutation.  Mirrors the compose test's ``_hf_acq_count`` helper.
         bounds = [(-1.0, 1.0), (-1.0, 1.0)]
         report_fields = {
             1: "layer1.boundary_gv_err",
@@ -2518,34 +2532,33 @@ class TestRunMFBO:
         n_init = 8
 
         r_off = run_mfbo(**common)
-        acq_off = r_off.eval_history[n_init:]
+        acq_off = r_off.eval_history[n_init:-1]
         hf_off = sum(1 for e in acq_off if e.fidelity == 7)
 
-        r_on = run_mfbo(hf_acquisition_bonus=50.0, **common)
-        acq_on = r_on.eval_history[n_init:]
+        r_on = run_mfbo(hf_acquisition_bonus=1.0, **common)
+        acq_on = r_on.eval_history[n_init:-1]
         hf_on = sum(1 for e in acq_on if e.fidelity == 7)
 
         assert len(acq_off) > 0 and len(acq_on) > 0, (
             f"no acquisition iterations: off={len(acq_off)} on={len(acq_on)} "
             f"(stop_reasons: off={r_off.stop_reason!r} on={r_on.stop_reason!r})"
         )
-        # Bonus must increase or maintain HF fraction.  We assert ``hf_on >
-        # 0`` to confirm the wrapper actually steered at least one pick to
-        # HF (ruling out a no-effect mutation).  The ``hf_on >= hf_off``
-        # directional contract follows the same pattern as 47.3g
-        # ``test_hf_explore_bias_increases_hf_fraction``.
+        # Strict ``hf_on > hf_off`` (tightened from ``>=`` per 47.3k.3.1
+        # gap-2): catches the "bonus is identically zero" mutation that the
+        # weaker ``>=`` would silently admit when off and on both produce
+        # zero HF picks.
+        assert hf_on > hf_off, (
+            f"hf_acquisition_bonus=1.0 did not lift HF picks strictly: "
+            f"on={hf_on}/{len(acq_on)} off={hf_off}/{len(acq_off)}"
+        )
         assert hf_on > 0, (
-            f"hf_acquisition_bonus=50.0 produced 0 HF acquisition picks "
+            f"hf_acquisition_bonus=1.0 produced 0 HF acquisition picks "
             f"(acq_on={len(acq_on)}, stop_reason={r_on.stop_reason!r}); "
             f"the wrapper is not steering toward HF"
         )
-        assert hf_on >= hf_off, (
-            f"hf_acquisition_bonus reduced HF picks: "
-            f"on={hf_on}/{len(acq_on)} off={hf_off}/{len(acq_off)}"
-        )
 
     def test_hf_acquisition_bonus_composes_with_adaptive_mechanisms(self):
-        # 47.3k.3 — composition test (mirrors 47.3j.1 Gap-2's
+        # 47.3k.3 + 47.3k.3.1 — composition test (mirrors 47.3j.1 Gap-2's
         # ``test_adaptive_hf_floor_and_explore_bias_compose``).  Verify that
         # the new bonus mechanism composes cleanly with the 47.3i
         # cost-floor swap and the 47.3j adaptive explore-bias schedule.
@@ -2557,8 +2570,9 @@ class TestRunMFBO:
         # triple-on configuration produces at least one HF acquisition
         # pick (the wrapper is not silently elided in the triple-on
         # regime).  Use ``α=2.0, β=0.3`` (mild per 47.3j.1 Gap-2 plan body)
-        # plus ``bonus=5.0`` (chosen to make the bonus visible against the
-        # 100x cost penalty without destabilising the GP fit).
+        # plus ``bonus=0.1`` (47.3k.3.1: 50x reduction from the diluted-scale
+        # 5.0; matches the ``50.0 → 1.0`` re-tune in the steers test under
+        # the same un-dilution factor).
         #
         # The plan-body's strict ``hf_d >= max(hf_a, hf_b, hf_c)``
         # directional contract was attempted but is empirically fragile
@@ -2598,22 +2612,23 @@ class TestRunMFBO:
             objective=objective,
         )
         n_init = 8
+        bonus = 0.1
 
         # (a) bonus alone
-        r_a = run_mfbo(hf_acquisition_bonus=5.0, **common)
+        r_a = run_mfbo(hf_acquisition_bonus=bonus, **common)
         # (b) bonus + cost-floor (47.3i, α=2.0 mild per plan body)
         r_b = run_mfbo(
-            hf_acquisition_bonus=5.0, adaptive_hf_floor=2.0, **common
+            hf_acquisition_bonus=bonus, adaptive_hf_floor=2.0, **common
         )
         # (c) bonus + adaptive explore-bias (47.3j, β=0.3 mild)
         r_c = run_mfbo(
-            hf_acquisition_bonus=5.0,
+            hf_acquisition_bonus=bonus,
             adaptive_hf_explore_bias=0.3,
             **common,
         )
         # (d) all three enabled
         r_d = run_mfbo(
-            hf_acquisition_bonus=5.0,
+            hf_acquisition_bonus=bonus,
             adaptive_hf_floor=2.0,
             adaptive_hf_explore_bias=0.3,
             **common,
@@ -2699,6 +2714,27 @@ class TestAcquisition:
         # The acquisition stores the constructor-time current_value for
         # diagnostics.  It must be finite.
         assert np.isfinite(float(acq.current_value.item()))
+        assert acq.num_fantasies == 64
+
+    def test_hf_bonus_acquisition_inherits_num_fantasies(self):
+        # 47.3k.3.1 (gap-1 supporting pin): the ``_HFBonusAcquisition``
+        # subclass's ``forward`` slices ``X[..., :-self.num_fantasies, :]``
+        # to gate the bonus on the q candidate points only (excluding the
+        # KG inner-argmax fantasy points).  This pin confirms that
+        # ``num_fantasies`` is inherited from ``qKnowledgeGradient.__init__``
+        # at construction time (not hardcoded inside ``forward`` or stale-
+        # captured), so the slice always uses the right value.  Catches a
+        # refactor that re-introduces the dilution by either dropping
+        # ``self.num_fantasies`` or hardcoding a different value.
+        from stencil_gen.bo import _HFBonusAcquisition
+        gp = _fitted_mf_gp_for_acq()
+        cost = _cost_utility_for_acq()
+        acq, _ = build_acquisition(
+            gp, cost, target_fidelity_index=2, hf_acquisition_bonus=1.0
+        )
+        assert isinstance(acq, _HFBonusAcquisition)
+        # Default ``num_fantasies`` is 64; the wrapper inherits the value
+        # set by ``qKnowledgeGradient.__init__``.
         assert acq.num_fantasies == 64
 
     def test_optimize_acqf_mixed_returns_valid_point(self):

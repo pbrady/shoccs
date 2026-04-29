@@ -810,24 +810,25 @@ class _HFBonusAcquisition(qMultiFidelityKnowledgeGradient):
         **kwargs,
     ):
         super().__init__(**kwargs)
-        # Use object.__setattr__ for the auxiliary fields because nn.Module's
-        # ``__setattr__`` registers tensor / submodule attributes; plain
-        # Python ints/floats are fine but we keep explicit assignment.
         self._hf_bonus = float(hf_acquisition_bonus)
         self._hf_bonus_fidelity_dim = int(fidelity_dim)
         self._hf_bonus_target = int(target_fidelity_index)
 
     def forward(self, X: torch.Tensor) -> torch.Tensor:
         base = super().forward(X)
-        # X has shape (..., q, d_total); the fidelity column lives at
-        # ``self._hf_bonus_fidelity_dim``.  ``base`` collapses the q and
-        # d_total dims.  Round defends against floating-point drift in the
-        # fidelity column produced by ``optimize_acqf_mixed``'s candidate
-        # generation.
+        # X layout per ``qKnowledgeGradient.forward``: ``b x (q + num_fantasies)
+        # x d_total``.  ``X[..., :-num_fantasies, :]`` is the q sampling-decision
+        # points (the candidates whose fidelity column the cost-aware utility
+        # consumes); ``X[..., -num_fantasies:, :]`` is the inner-argmax fantasy
+        # points whose fidelity column is incidental KG state.  Gate the bonus
+        # on the q candidates only.  Round defends against floating-point drift
+        # in the fidelity column produced by ``optimize_acqf_mixed``.
+        X_actual = X[..., : -self.num_fantasies, :]
         hf_mask = (
-            X[..., self._hf_bonus_fidelity_dim].round() == self._hf_bonus_target
+            X_actual[..., self._hf_bonus_fidelity_dim].round()
+            == self._hf_bonus_target
         ).to(base.dtype)
-        # Mean over the q dimension so bonus shape matches base shape.
+        # Mean over the q candidate points so bonus shape matches base shape.
         bonus = self._hf_bonus * hf_mask.mean(dim=-1)
         return base + bonus
 
