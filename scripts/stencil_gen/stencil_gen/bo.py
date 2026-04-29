@@ -1312,6 +1312,7 @@ def run_mfbo(
     adaptive_hf_explore_bias: float | None = None,
     variance_guard_relative_threshold: float = 1e-5,
     hf_acquisition_bonus: float | None = None,
+    clamp_sentinel_rows: bool = True,
     num_fantasies: int = 64,
     verbose: bool = False,
     objective: Callable[[np.ndarray, int], tuple[float, float, dict]] | None = None,
@@ -1529,6 +1530,34 @@ KnowledgeGradient` subclass that adds ``α * mean_q(hf_mask)`` to
         finite; reject negative and NaN with ``ValueError``.  Explicit
         ``0.0`` traverses the wrapper code with bonus term ``+0`` per HF
         candidate (no-op contract: bytewise-identical to ``None``).
+    clamp_sentinel_rows
+        Sentinel-row treatment for the GP fit (47.6b.3.1).  When ``True``
+        (default), per-fidelity sentinel rows in ``Y_train`` (rows where
+        the cascade returned :data:`_BO_SENTINEL` because the candidate
+        tripped a feasibility gate or the per-eval objective raised) are
+        replaced with ``max(Y_m_finite) + 3 * std(Y_m_finite)`` before the
+        GP fit, separately for each fidelity ``m``.  Per-fidelity
+        clamping is essential because Y scales differ across fidelities
+        (e.g. ``layer1.boundary_gv_err`` ~ 0.02 vs ``layer3.max_stab_eig``
+        ~ -1e-4); a global clamp would inflate one fidelity's residuals
+        relative to the other and destabilise the ICM kernel's
+        identification of off-diagonal correlations.  When ``False``,
+        sentinel rows are filtered out (pre-47.6b.3.1 contract preserved
+        bytewise).  Motivation: when the cascade objective has many
+        infeasible regions (~50% at HF in 47.6b.3's E4-classical α
+        sweep), pure filtering means the GP cannot learn that those
+        regions are bad; the ``_recommend_incumbent`` posterior-minimum
+        scan then extrapolates into the un-trained sentinel regions and
+        lands at a phantom-low-mean corner (final HF re-eval there
+        returns sentinel, ``best_objective = 1e12``).  Clamping at
+        ``mean + 3 * std`` is the standard "constrained BO via
+        one-sided log-barrier" pattern in the BoTorch literature: the
+        GP's posterior at infeasible regions reports a high mean,
+        ``_recommend_incumbent``'s minimum-search avoids them naturally,
+        and ``optimize_acqf_mixed`` similarly under-prioritises them.
+        Fallback: when a fidelity has fewer than 2 finite rows, that
+        fidelity's sentinels are filtered (insufficient data to compute
+        a meaningful clamp).
     num_fantasies
         Forwarded to :func:`build_acquisition`.  Default 64.
     verbose
@@ -1791,14 +1820,75 @@ KnowledgeGradient` subclass that adds ``α * mean_q(hf_mask)`` to
             stop_reason = "error"
             break
 
-        finite_evals = [e for e, m in zip(eval_history, finite_mask) if m]
-        X_train = np.array(
-            [
-                np.concatenate([e.x, [float(ext_to_int[e.fidelity])]])
-                for e in finite_evals
-            ]
-        )
-        Y_train = np.array([e.value for e in finite_evals])
+        # 47.6b.3.1: include sentinel rows in the GP fit at a per-fidelity
+        # clamped value when ``clamp_sentinel_rows=True`` (default).  See
+        # ``run_mfbo``'s ``clamp_sentinel_rows`` docstring entry for the
+        # motivation.  Per-fidelity is essential because Y scales differ
+        # across fidelities (e.g. layer1.boundary_gv_err ~ 0.02 vs
+        # layer3.max_stab_eig ~ -1e-4); a global clamp would destabilise
+        # the ICM kernel.  When a fidelity has fewer than 2 finite rows,
+        # that fidelity's sentinels are filtered (insufficient data to
+        # compute a meaningful clamp).  Row order in Y_train is preserved
+        # from eval_history so the GP fit is bytewise-equivalent to the
+        # pre-fix filter path when no sentinels exist (mutation guard:
+        # changing row order can alter the marginal-likelihood optimiser's
+        # convergence path on smooth synthetic objectives).
+        if clamp_sentinel_rows:
+            # Per-fidelity clamp values + which fidelities have ≥ 2 finite
+            # rows (the others fall back to filter).
+            clamp_vals: dict[int, float] = {}
+            clamp_eligible: dict[int, bool] = {}
+            for fid_int in range(K):
+                fid_ext = int_to_ext[fid_int]
+                fin_vals = np.array(
+                    [
+                        e.value
+                        for e in eval_history
+                        if e.fidelity == fid_ext
+                        and np.isfinite(e.value)
+                        and e.value < _BO_SENTINEL / 2
+                    ]
+                )
+                if fin_vals.size >= 2:
+                    clamp_vals[fid_ext] = float(fin_vals.max()) + 3.0 * float(
+                        fin_vals.std(ddof=0)
+                    )
+                    clamp_eligible[fid_ext] = True
+                else:
+                    clamp_eligible[fid_ext] = False
+
+            kept_evals: list[BOEval] = []
+            kept_values: list[float] = []
+            for e in eval_history:
+                is_finite = (
+                    np.isfinite(e.value) and e.value < _BO_SENTINEL / 2
+                )
+                if is_finite:
+                    kept_evals.append(e)
+                    kept_values.append(float(e.value))
+                elif clamp_eligible.get(e.fidelity, False):
+                    kept_evals.append(e)
+                    kept_values.append(clamp_vals[e.fidelity])
+                # else: fall back to filter (drop this row from the GP fit).
+            if len(kept_evals) < max(2, K):
+                stop_reason = "error"
+                break
+            X_train = np.array(
+                [
+                    np.concatenate([e.x, [float(ext_to_int[e.fidelity])]])
+                    for e in kept_evals
+                ]
+            )
+            Y_train = np.array(kept_values)
+        else:
+            finite_evals = [e for e, m in zip(eval_history, finite_mask) if m]
+            X_train = np.array(
+                [
+                    np.concatenate([e.x, [float(ext_to_int[e.fidelity])]])
+                    for e in finite_evals
+                ]
+            )
+            Y_train = np.array([e.value for e in finite_evals])
 
         try:
             model = build_mf_gp(
@@ -2100,11 +2190,24 @@ KnowledgeGradient` subclass that adds ``α * mean_q(hf_mask)`` to
     else:
         gp_hyp = {}
 
-    n_sentinel_filtered = sum(
+    sentinel_count = sum(
         1
         for e in eval_history
         if not (np.isfinite(e.value) and e.value < _BO_SENTINEL / 2)
     )
+    if clamp_sentinel_rows:
+        # 47.6b.3.1: per-fidelity counts so a downstream analyst can see how
+        # many rows were clamped at each fidelity (vs the global tally that
+        # ``n_sentinel_filtered`` recorded under the pre-47.6b.3.1 contract).
+        clamped_per_fid: dict[int, int] = {f: 0 for f in fidelity_levels}
+        for e in eval_history:
+            if not (np.isfinite(e.value) and e.value < _BO_SENTINEL / 2):
+                clamped_per_fid[e.fidelity] += 1
+        extras_payload = {
+            "n_sentinel_clamped_per_fidelity": clamped_per_fid,
+        }
+    else:
+        extras_payload = {"n_sentinel_filtered": sentinel_count}
 
     return BOResult(
         best_x=np.asarray(x_inc, dtype=float).copy(),
@@ -2128,7 +2231,7 @@ KnowledgeGradient` subclass that adds ``α * mean_q(hf_mask)`` to
         seed=seed,
         converged=converged,
         stop_reason=stop_reason,
-        extras={"n_sentinel_filtered": n_sentinel_filtered},
+        extras=extras_payload,
     )
 
 

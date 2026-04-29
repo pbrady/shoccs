@@ -1058,9 +1058,12 @@ class TestRunMFBO:
             assert result.converged is True
 
     def test_sentinel_rows_filtered_from_gp(self):
-        # Half of the initial design returns the finite sentinel; the GP
-        # must fit only on the finite-value rows and ``extras`` records
-        # how many sentinel rows were filtered out.
+        # 47.6b.3.1 update: the default now clamps sentinels into the GP
+        # fit (``clamp_sentinel_rows=True``); this test pins the pre-47.6b.3.1
+        # *filter* contract by passing ``clamp_sentinel_rows=False``.  Half
+        # of the initial design returns the finite sentinel; the GP must
+        # fit only on the finite-value rows and ``extras`` records how
+        # many sentinel rows were filtered out.
         bounds = [(-1.0, 1.0), (-1.0, 1.0)]
         objective_real, _ = self._quadratic_objective()
         # Deterministic alternating sentinel pattern keyed on the rounded
@@ -1081,6 +1084,7 @@ class TestRunMFBO:
             n_init=8,
             hf_anchors=3,  # 47.3f
             seed=0,
+            clamp_sentinel_rows=False,  # 47.6b.3.1: pre-fix contract
             objective=half_sentinel,
         )
         n_filtered = result.extras["n_sentinel_filtered"]
@@ -2665,6 +2669,296 @@ class TestRunMFBO:
             f"regime"
         )
 
+    # ------------------------------------------------------------------
+    # 47.6b.3.1: clamp_sentinel_rows mechanism
+    # ------------------------------------------------------------------
+
+    def test_clamp_sentinel_rows_default_true_on(self):
+        # 47.6b.3.1: ``clamp_sentinel_rows`` defaults to ``True``; when
+        # sentinel rows exist, ``extras["n_sentinel_clamped_per_fidelity"]``
+        # is populated (the new key replaces the pre-47.6b.3.1
+        # ``n_sentinel_filtered`` global tally).  Pin both halves of the
+        # contract: signature default + extras key presence.
+        assert (
+            inspect.signature(run_mfbo)
+            .parameters["clamp_sentinel_rows"]
+            .default
+            is True
+        ), "clamp_sentinel_rows default must be True"
+
+        bounds = [(-1.0, 1.0), (-1.0, 1.0)]
+        report_fields = {
+            1: "layer1.boundary_gv_err",
+            7: "layer7.max_spectral_abscissa",
+        }
+        cost_table = {1: 0.01, 7: 1.0}
+        x_star = np.array([0.3, -0.2])
+
+        def objective(x, m):
+            x = np.asarray(x, dtype=float)
+            # Mark candidates near the bounds at HF as infeasible (sentinel)
+            # so the clamp mechanism has rows to clamp.  Use a soft mask:
+            # ~30 % of HF queries return sentinel.
+            if m == 7 and float(np.linalg.norm(x)) > 0.7:
+                return _BO_SENTINEL, 0.001, {"error": "infeasible"}
+            biases = {1: 100.0, 7: 0.0}
+            val = float(np.sum((x - x_star) ** 2)) + biases.get(m, 0.0)
+            return val, 0.001, {}
+
+        result = run_mfbo(
+            scheme="E2",
+            kernel="classical",
+            report_fields_by_layer=report_fields,
+            bounds=bounds,
+            budget_evals=15,
+            n_init=8,
+            hf_anchors=3,
+            cost_table=cost_table,
+            seed=0,
+            min_acquisition_iterations=1,
+            objective=objective,
+        )
+
+        assert "n_sentinel_clamped_per_fidelity" in result.extras
+        assert "n_sentinel_filtered" not in result.extras
+        clamped = result.extras["n_sentinel_clamped_per_fidelity"]
+        # Per-fidelity dict; layers in ``report_fields_by_layer`` are keys.
+        assert set(clamped.keys()) == {1, 7}
+        # The objective returns sentinels at HF, so at least one HF row
+        # must be recorded as clamped.
+        assert clamped[7] >= 1, (
+            f"expected ≥ 1 HF sentinel clamp, got {clamped}"
+        )
+
+    def test_clamp_sentinel_rows_false_preserves_filter_contract(self):
+        # 47.6b.3.1: explicit ``clamp_sentinel_rows=False`` reverts to the
+        # pre-47.6b.3.1 sentinel-filter contract — extras key reverts to
+        # ``n_sentinel_filtered`` (global tally), and the GP fit only sees
+        # finite rows.  Mirrors the 47.3j.1 / 47.3j.2 default-off
+        # equivalence template: the off-path is bytewise-comparable to
+        # the pre-fix behaviour.
+        bounds = [(-1.0, 1.0), (-1.0, 1.0)]
+        report_fields = {
+            1: "layer1.boundary_gv_err",
+            7: "layer7.max_spectral_abscissa",
+        }
+        cost_table = {1: 0.01, 7: 1.0}
+        x_star = np.array([0.3, -0.2])
+
+        def objective(x, m):
+            x = np.asarray(x, dtype=float)
+            if m == 7 and float(np.linalg.norm(x)) > 0.7:
+                return _BO_SENTINEL, 0.001, {"error": "infeasible"}
+            biases = {1: 100.0, 7: 0.0}
+            val = float(np.sum((x - x_star) ** 2)) + biases.get(m, 0.0)
+            return val, 0.001, {}
+
+        result = run_mfbo(
+            scheme="E2",
+            kernel="classical",
+            report_fields_by_layer=report_fields,
+            bounds=bounds,
+            budget_evals=15,
+            n_init=8,
+            hf_anchors=3,
+            cost_table=cost_table,
+            seed=0,
+            min_acquisition_iterations=1,
+            clamp_sentinel_rows=False,
+            objective=objective,
+        )
+
+        assert "n_sentinel_filtered" in result.extras
+        assert "n_sentinel_clamped_per_fidelity" not in result.extras
+        # Sentinel rows existed (HF objective returned sentinel for
+        # ``norm(x) > 0.7`` candidates) so the count is positive.
+        assert result.extras["n_sentinel_filtered"] >= 1
+
+    def test_clamp_sentinel_rows_uses_per_fidelity_clamp(self):
+        # 47.6b.3.1: when Y scales differ widely across fidelities (the
+        # canonical cascade scenario — e.g. ``layer1.boundary_gv_err`` ~
+        # 0.01 vs ``layer3.max_stab_eig`` ~ 1e-4), the per-fidelity clamp
+        # must use each fidelity's own stats — NOT the global Y stats —
+        # otherwise one fidelity's residuals dominate the ICM kernel's
+        # identification of off-diagonal correlations.
+        #
+        # Construction: a 2-fidelity synthetic where L1 lives near 0.01
+        # (quadratic + small bias) and L7 lives near 1e-4.  Sentinels are
+        # injected at known x's at both fidelities.  The clamp values
+        # should be approximately ``L1.max + 3*L1.std`` (~ 0.01 scale) and
+        # ``L7.max + 3*L7.std`` (~ 1e-4 scale) respectively, NOT a global
+        # ``Y.max + 3*Y.std`` value (which would be dominated by L1's
+        # range and inflate L7's residuals by ~ 100x).
+        #
+        # Verification: monkeypatch ``build_mf_gp`` to record the Y_train
+        # array on each call, and assert the sentinel rows at L1 and L7
+        # are clamped to values consistent with the per-fidelity stats.
+        bounds = [(-1.0, 1.0), (-1.0, 1.0)]
+        report_fields = {
+            1: "layer1.boundary_gv_err",
+            7: "layer7.max_spectral_abscissa",
+        }
+        cost_table = {1: 0.01, 7: 1.0}
+
+        def objective(x, m):
+            x = np.asarray(x, dtype=float)
+            # L1: small positive values around 0.01; L7: small near zero.
+            # Inject sentinels for x[0] > 0.5 (deterministic infeasibility
+            # band).
+            if x[0] > 0.5:
+                return _BO_SENTINEL, 0.001, {"error": "infeasible"}
+            if m == 1:
+                return 0.01 + 0.005 * x[1], 0.001, {}
+            else:
+                return 1e-4 * (x[0] + x[1]), 0.001, {}
+
+        recorded_Y: list[np.ndarray] = []
+        recorded_X: list[np.ndarray] = []
+        from stencil_gen import bo as _bo_mod
+
+        original_build = _bo_mod.build_mf_gp
+
+        def spy_build(X_train, Y_train, *, fidelity_dim, num_fidelities, **kw):
+            recorded_X.append(np.array(X_train))
+            recorded_Y.append(np.array(Y_train))
+            return original_build(
+                X_train,
+                Y_train,
+                fidelity_dim=fidelity_dim,
+                num_fidelities=num_fidelities,
+                **kw,
+            )
+
+        # Patch via direct attribute assignment so the BO loop's local
+        # ``build_mf_gp`` reference picks it up.
+        _bo_mod.build_mf_gp = spy_build
+        try:
+            run_mfbo(
+                scheme="E2",
+                kernel="classical",
+                report_fields_by_layer=report_fields,
+                bounds=bounds,
+                budget_evals=14,
+                n_init=8,
+                hf_anchors=3,
+                cost_table=cost_table,
+                seed=0,
+                min_acquisition_iterations=1,
+                objective=objective,
+            )
+        finally:
+            _bo_mod.build_mf_gp = original_build
+
+        # The loop must have fit the GP at least once.
+        assert len(recorded_Y) >= 1, (
+            "build_mf_gp was never called; loop did not run"
+        )
+
+        # On the first GP fit, isolate per-fidelity Y values and verify
+        # the per-fidelity clamp scale.  ``X_train``'s last column is
+        # the internal fidelity index (0=cheap, 1=HF for K=2).
+        X = recorded_X[0]
+        Y = recorded_Y[0]
+        fid_col = X[:, -1]
+        Y_l1 = Y[fid_col == 0]
+        Y_l7 = Y[fid_col == 1]
+
+        # Sentinel rows are clamped, so the maximum at each fidelity
+        # equals the clamp value, not _BO_SENTINEL.
+        assert Y_l1.max() < _BO_SENTINEL / 2, (
+            f"L1 has un-clamped sentinel: max={Y_l1.max()}"
+        )
+        assert Y_l7.max() < _BO_SENTINEL / 2, (
+            f"L7 has un-clamped sentinel: max={Y_l7.max()}"
+        )
+        # Per-fidelity clamp: L1's max should be on the L1 scale (~0.01),
+        # not the global scale that would result from a global clamp.
+        # Empirically, with finite L1 values around 0.005-0.015 and std
+        # ~ 0.003, the clamp is around 0.02; well below 0.1.
+        assert Y_l1.max() < 0.1, (
+            f"L1 clamp inflated above L1 scale: max={Y_l1.max()}; "
+            f"likely a global clamp (would be at L1 max + 3*global_std)"
+        )
+        # L7 clamp must NOT be on the L1 scale — if a global clamp
+        # were used, L7's max would inflate to ~ L1.max + 3*global_std
+        # ≈ 0.02, but the per-fidelity clamp keeps L7 on its own scale.
+        assert Y_l7.max() < 0.01, (
+            f"L7 clamp inflated to L1 scale: max={Y_l7.max()}; "
+            f"per-fidelity clamp violated"
+        )
+
+    def test_clamp_sentinel_rows_fallback_to_filter_when_insufficient(self):
+        # 47.6b.3.1: when a fidelity has fewer than 2 finite rows, the
+        # clamp formula ``max + 3*std`` is undefined; the fallback is to
+        # filter (drop) those rows from the GP fit rather than clamp at
+        # an arbitrary value.  Construct a scenario where the cheap
+        # fidelity has 0–1 finite rows: every cheap eval returns
+        # sentinel.  The HF fidelity should still get its clamp; the
+        # cheap rows simply do not appear in the GP's training data.
+        bounds = [(-1.0, 1.0), (-1.0, 1.0)]
+        report_fields = {
+            1: "layer1.boundary_gv_err",
+            7: "layer7.max_spectral_abscissa",
+        }
+        cost_table = {1: 0.01, 7: 1.0}
+        x_star = np.array([0.3, -0.2])
+
+        def objective(x, m):
+            x = np.asarray(x, dtype=float)
+            # All L1 evals return sentinel (zero finite rows at L1).
+            if m == 1:
+                return _BO_SENTINEL, 0.001, {"error": "all-cheap-infeasible"}
+            return float(np.sum((np.asarray(x) - x_star) ** 2)), 0.001, {}
+
+        recorded_X: list[np.ndarray] = []
+        recorded_Y: list[np.ndarray] = []
+        from stencil_gen import bo as _bo_mod
+
+        original_build = _bo_mod.build_mf_gp
+
+        def spy_build(X_train, Y_train, *, fidelity_dim, num_fidelities, **kw):
+            recorded_X.append(np.array(X_train))
+            recorded_Y.append(np.array(Y_train))
+            return original_build(
+                X_train,
+                Y_train,
+                fidelity_dim=fidelity_dim,
+                num_fidelities=num_fidelities,
+                **kw,
+            )
+
+        _bo_mod.build_mf_gp = spy_build
+        try:
+            run_mfbo(
+                scheme="E2",
+                kernel="classical",
+                report_fields_by_layer=report_fields,
+                bounds=bounds,
+                budget_evals=14,
+                n_init=8,
+                hf_anchors=3,
+                cost_table=cost_table,
+                seed=0,
+                min_acquisition_iterations=1,
+                objective=objective,
+            )
+        finally:
+            _bo_mod.build_mf_gp = original_build
+
+        assert len(recorded_Y) >= 1, "GP was never fit"
+        # On the first GP fit: L1 had < 2 finite rows so the fallback
+        # filtered all L1 sentinel rows.  Y_train must contain only HF
+        # rows (no cheap rows).
+        X = recorded_X[0]
+        fid_col = X[:, -1]
+        # Internal index 0 = cheap; the fallback should have dropped
+        # them.  Internal index 1 = HF; should be present.
+        assert (fid_col == 1).any(), "no HF rows in GP training data"
+        assert not (fid_col == 0).any(), (
+            f"cheap rows present despite < 2 finite cheap rows; "
+            f"clamp fallback did not filter: fid_col={fid_col.tolist()}"
+        )
+
 
 # ---------------------------------------------------------------------------
 # 47.3c: TestAcquisition — qMFKG construction + mixed-optimiser smoke tests
@@ -3432,15 +3726,18 @@ class TestMultiModal:
     @pytest.mark.slow
     @pytest.mark.xfail(
         reason=(
-            "47.6b.3 empirical fallback: ~50% of HF evals on E4-classical "
-            "L3 return _BO_SENTINEL (infeasible regions where max_stab_eig "
-            "is undefined); sentinel rows are filtered before GP fit so the "
-            "GP cannot learn that those regions are bad, and "
-            "_recommend_incumbent's posterior-minimum-on-Sobol-grid "
-            "extrapolates into the sentinel regions, producing best_obj "
-            "= 1e12 at corners.  Path (a) (budget=60) measured but does "
-            "not fix the structural issue.  See 47.6b.3.1 for the "
-            "feasibility-aware GP / recommendation fix."
+            "47.6b.3.1 partial fix: ``clamp_sentinel_rows=True`` (default) "
+            "now clamps sentinel rows into the GP fit per-fidelity, so "
+            "_recommend_incumbent no longer extrapolates into infeasible "
+            "regions and best_objective is finite for 4/5 seeds (vs 0/5 "
+            "pre-fix) — but the basin-proximity contract ``min(d_BL, d_DE) "
+            "< 0.1`` still misses (closest seed=3 at d_BL=0.30, "
+            "best_obj=0.15).  The clamp keeps the GP from chasing phantom "
+            "minima in sentinel regions but the 30-eval budget is not "
+            "enough HF coverage to localise BL or DE within 0.1 in L2.  "
+            "See 47.6b.3.2 for the basin-proximity follow-up (path (a) "
+            "bump budget_evals=60, path (b) Voronoi/UCB recommendation, "
+            "path (c) revise threshold to 0.4)."
         ),
         strict=False,
     )
