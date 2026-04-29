@@ -2674,11 +2674,15 @@ class TestRunMFBO:
     # ------------------------------------------------------------------
 
     def test_clamp_sentinel_rows_default_true_on(self):
-        # 47.6b.3.1: ``clamp_sentinel_rows`` defaults to ``True``; when
-        # sentinel rows exist, ``extras["n_sentinel_clamped_per_fidelity"]``
-        # is populated (the new key replaces the pre-47.6b.3.1
-        # ``n_sentinel_filtered`` global tally).  Pin both halves of the
-        # contract: signature default + extras key presence.
+        # 47.6b.3.1 / 47.6b.3.1.1: ``clamp_sentinel_rows`` defaults to
+        # ``True``; when sentinel rows exist,
+        # ``extras["n_sentinel_per_fidelity"]`` is populated (the new key
+        # replaces the pre-47.6b.3.1 ``n_sentinel_filtered`` global tally;
+        # the field name was renamed from ``n_sentinel_clamped_per_fidelity``
+        # to ``n_sentinel_per_fidelity`` per 47.6b.3.1.1 because the count
+        # is treatment-agnostic — fallback-filtered rows are tallied too).
+        # Pin both halves of the contract: signature default + extras key
+        # presence.
         assert (
             inspect.signature(run_mfbo)
             .parameters["clamp_sentinel_rows"]
@@ -2719,15 +2723,15 @@ class TestRunMFBO:
             objective=objective,
         )
 
-        assert "n_sentinel_clamped_per_fidelity" in result.extras
+        assert "n_sentinel_per_fidelity" in result.extras
         assert "n_sentinel_filtered" not in result.extras
-        clamped = result.extras["n_sentinel_clamped_per_fidelity"]
+        per_fid = result.extras["n_sentinel_per_fidelity"]
         # Per-fidelity dict; layers in ``report_fields_by_layer`` are keys.
-        assert set(clamped.keys()) == {1, 7}
+        assert set(per_fid.keys()) == {1, 7}
         # The objective returns sentinels at HF, so at least one HF row
-        # must be recorded as clamped.
-        assert clamped[7] >= 1, (
-            f"expected ≥ 1 HF sentinel clamp, got {clamped}"
+        # must be recorded.
+        assert per_fid[7] >= 1, (
+            f"expected ≥ 1 HF sentinel occurrence, got {per_fid}"
         )
 
     def test_clamp_sentinel_rows_false_preserves_filter_contract(self):
@@ -2769,7 +2773,7 @@ class TestRunMFBO:
         )
 
         assert "n_sentinel_filtered" in result.extras
-        assert "n_sentinel_clamped_per_fidelity" not in result.extras
+        assert "n_sentinel_per_fidelity" not in result.extras
         # Sentinel rows existed (HF objective returned sentinel for
         # ``norm(x) > 0.7`` candidates) so the count is positive.
         assert result.extras["n_sentinel_filtered"] >= 1
@@ -2929,7 +2933,7 @@ class TestRunMFBO:
 
         _bo_mod.build_mf_gp = spy_build
         try:
-            run_mfbo(
+            result = run_mfbo(
                 scheme="E2",
                 kernel="classical",
                 report_fields_by_layer=report_fields,
@@ -2957,6 +2961,25 @@ class TestRunMFBO:
         assert not (fid_col == 0).any(), (
             f"cheap rows present despite < 2 finite cheap rows; "
             f"clamp fallback did not filter: fid_col={fid_col.tolist()}"
+        )
+        # 47.6b.3.1.1 Gap 3: ``n_sentinel_per_fidelity`` is treatment-
+        # agnostic — fallback-filtered rows at L1 are tallied under the
+        # same key as clamped rows.  Pin that the count equals the total
+        # L1 rows in eval_history (every cheap eval returned sentinel by
+        # construction); a mutation that excluded fallback-filtered rows
+        # from the tally would break here.
+        assert "n_sentinel_per_fidelity" in result.extras
+        n_l1_in_history = len(
+            [e for e in result.eval_history if e.fidelity == 1]
+        )
+        assert n_l1_in_history >= 1, (
+            "no L1 rows in eval_history; init-design did not seed cheap"
+        )
+        per_fid = result.extras["n_sentinel_per_fidelity"]
+        assert per_fid[1] == n_l1_in_history, (
+            f"L1 sentinel count {per_fid[1]} != L1 row count "
+            f"{n_l1_in_history} in eval_history; fallback-filtered "
+            f"rows should still be tallied"
         )
 
 

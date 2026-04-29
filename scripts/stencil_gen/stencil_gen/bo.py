@@ -201,8 +201,11 @@ class BOResult:
     stop_reason : str
         One of ``"budget"``, ``"variance"``, ``"stagnation"``, ``"error"``.
     extras : dict
-        Free-form additional fields (e.g. ``n_sentinel_filtered``,
-        ``baseline`` :class:`OptimizeResult`, ``cpp_validation`` payload).
+        Free-form additional fields (e.g. ``n_sentinel_per_fidelity`` —
+        per-fidelity sentinel occurrence count, treatment-agnostic, set
+        when ``clamp_sentinel_rows=True``; ``n_sentinel_filtered`` —
+        global tally, set when ``clamp_sentinel_rows=False``;
+        ``baseline`` :class:`OptimizeResult`; ``cpp_validation`` payload).
     """
 
     best_x: np.ndarray
@@ -1550,14 +1553,17 @@ KnowledgeGradient` subclass that adds ``α * mean_q(hf_mask)`` to
         scan then extrapolates into the un-trained sentinel regions and
         lands at a phantom-low-mean corner (final HF re-eval there
         returns sentinel, ``best_objective = 1e12``).  Clamping at
-        ``mean + 3 * std`` is the standard "constrained BO via
+        ``max + 3 * std`` is the standard "constrained BO via
         one-sided log-barrier" pattern in the BoTorch literature: the
         GP's posterior at infeasible regions reports a high mean,
         ``_recommend_incumbent``'s minimum-search avoids them naturally,
         and ``optimize_acqf_mixed`` similarly under-prioritises them.
         Fallback: when a fidelity has fewer than 2 finite rows, that
         fidelity's sentinels are filtered (insufficient data to compute
-        a meaningful clamp).
+        a meaningful clamp).  Both clamped and fallback-filtered rows
+        are tallied in ``BOResult.extras["n_sentinel_per_fidelity"]``
+        (treatment-agnostic occurrence count keyed by external layer
+        index — 47.6b.3.1.1).
     num_fantasies
         Forwarded to :func:`build_acquisition`.  Default 64.
     verbose
@@ -2196,15 +2202,21 @@ KnowledgeGradient` subclass that adds ``α * mean_q(hf_mask)`` to
         if not (np.isfinite(e.value) and e.value < _BO_SENTINEL / 2)
     )
     if clamp_sentinel_rows:
-        # 47.6b.3.1: per-fidelity counts so a downstream analyst can see how
-        # many rows were clamped at each fidelity (vs the global tally that
-        # ``n_sentinel_filtered`` recorded under the pre-47.6b.3.1 contract).
-        clamped_per_fid: dict[int, int] = {f: 0 for f in fidelity_levels}
+        # 47.6b.3.1 / 47.6b.3.1.1: per-fidelity sentinel *occurrence* counts
+        # (treatment-agnostic: rows at a fidelity with ≥ 2 finite siblings
+        # were clamped, rows at a fidelity with < 2 finite siblings fell
+        # back to filter — both are tallied here under the same key).  The
+        # field name is ``n_sentinel_per_fidelity`` rather than
+        # ``...clamped...`` because the count would otherwise overstate
+        # what happened on the fallback path.  The ``clamp_sentinel_rows
+        # =False`` branch keeps the pre-47.6b.3.1 ``n_sentinel_filtered``
+        # global tally for backwards compatibility.
+        sentinel_per_fid: dict[int, int] = {f: 0 for f in fidelity_levels}
         for e in eval_history:
             if not (np.isfinite(e.value) and e.value < _BO_SENTINEL / 2):
-                clamped_per_fid[e.fidelity] += 1
+                sentinel_per_fid[e.fidelity] += 1
         extras_payload = {
-            "n_sentinel_clamped_per_fidelity": clamped_per_fid,
+            "n_sentinel_per_fidelity": sentinel_per_fid,
         }
     else:
         extras_payload = {"n_sentinel_filtered": sentinel_count}
