@@ -1021,6 +1021,22 @@ cd scripts/stencil_gen && SYMPY_CACHE_SIZE=50000 uv run python -m sweeps bo \
 
     **No production-code change.** `tests/test_bo.py + tests/test_sweep_bo.py` suite untouched (47.3k.4 is measurement-only per the plan body). 47.6a remains blocked, now on 47.3k.4e (the routing item).
 
+- [ ] **47.3k.4d.1** Correct the path-C threshold recommendation in 47.3k.4d's Done note before 47.3k.4e consumes it. The current Done note recommends *"path **C** (revise threshold to `< 1.0` since the empirical floor with current machinery is `0.5667`)"*, but that threshold only clears **2/5** seeds (`0.5667` and `0.7362`) — not the ≥ 3/5 bar that the 47.3k tracker body's failure-routing C path carries forward via the "*contingent on whether 47.3k.4's measurement clears 1.0 reliably*" condition. Sorted Stage 2 results: `[0.5667, 0.7362, 3.6966, 5.3756, 7.2996]`; threshold-vs-pass-rate table for the 47.3k.4d Stage 2 data:
+  - `< 0.5`: **0/5** (the original acceptance bar; not met)
+  - `< 1.0`: **2/5** (the Done-note recommendation; *fails* ≥ 3/5)
+  - `< 3.7`: **3/5** (smallest threshold that clears the ≥ 3/5 bar — passes seeds 0, 3, 4; rounds the 5-seed median 3.6966 up)
+  - `< 5.4`: 4/5 (passes seeds 0, 2, 3, 4 — note seed 2 was a regression vs 47.3k-default's 1.2548; including it under a 5.4 threshold means accepting the regression seed as a "pass")
+  - `< 7.3`: 5/5 (rounds the worst 7.2996 up; vacuous — passes everything)
+  - **Why this matters now:** 47.3k.4e is the routing item. If it adopts the Done-note recommendation literally and revises the 47.6a / 47.7a completion criterion to `< 1.0`, the acceptance contract is silently weaker than the failure-routing C path's "empirical floor reliable" condition — the new threshold is met by 2/5 seeds, the same headcount that was implicitly ruled "non-acceptance" under the original `< 0.5` bar. The framing conflates "lowest best_obj observed" (`0.5667`) with "lowest threshold that ≥ 3/5 of seeds clear" (`~3.7`); these are different quantities. The failure-routing block's "*e.g. ~1.0*" example was authored before 47.3k.4d's measurement and should be re-evaluated against the actual data.
+  - **Acceptance:** the 47.3k.4d Done-note "Recommended for 47.3k.4e" sentence is rewritten to either:
+    1. **Propose path C with threshold `< 3.7`** (3/5 pass rate at seeds 0, 3, 4 — meets the contract but acknowledges a 7.4× weakening from `< 0.5`), with explicit mention that this still leaves 2/5 seeds (1, 2) above the bar.
+    2. **Recommend path A as primary** (bump `budget_evals` to 60) since the original `< 0.5` is the contract every downstream item (47.6a's `TestBranin`, 47.7a's benchmark) was scoped against, and a 7.4× threshold relaxation at the routing layer is a substantive de-scoping that deserves an explicit consideration step rather than the lightest-weight option framing.
+    3. **Both** — list path A and path C with threshold `< 3.7` side-by-side and let 47.3k.4e pick on the routing-decision criteria, but flag the de-scoping cost of path C explicitly.
+  - The Stage 1 (3-row) and Stage 2 (5-row) tables, the comparison-vs-47.3k-default table, the "Pass count `< 0.5`: 0/5" line, the "Max wall time" line, and the "Optional Stage 3 deferred" paragraph are preserved verbatim — only the "Recommended for 47.3k.4e" sentence at the end of the Routing-implications block is rewritten.
+  - **Wall-time estimate:** < 5 min (Done-note text edit + commit).
+  - File: `plans/47-mfbo.md` (47.3k.4d Done note only); no production-code change.
+  - Test: visual diff confirms (a) the rewritten "Recommended for 47.3k.4e" sentence cites the threshold-vs-pass-rate table above (or its corrected analogue), (b) the Stage 1 / Stage 2 / comparison tables are untouched, (c) the rest of the Done note (deviation paragraph, comparison commentary) is untouched.
+
 - [ ] **47.3k.4e** Pick the routing decision (R1/R2/R3 from the 47.3k.4 tracker body) + failure routing (A/B/C if the 47.3k.4d recommended composition missed `< 0.5` on ≥ 3/5 seeds), update 47.6a's body to remove the block, and mark 47.3k Done. This is the **routing item**: it consumes the empirical tables from 47.3k.4b/c/d and makes the final decision; no new measurements unless 47.3k.4d's optional Stage 3 was deferred and the routing depends on it.
   - **Inputs:** 47.3k.4b's 47.3j-equivalent table (calibration baseline), 47.3k.4c's 47.3k-default-only table (47.3k.1+47.3k.2 delta), 47.3k.4d's recommended-composition table (47.3k.1+47.3k.2+47.3k.3 combined).
   - **Decision rules:**
