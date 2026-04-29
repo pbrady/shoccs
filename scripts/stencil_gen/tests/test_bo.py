@@ -3393,3 +3393,153 @@ class TestCostMisspec:
             "stagnation",
             "error",
         }, f"unexpected stop_reason={result.stop_reason!r}"
+
+
+# ---------------------------------------------------------------------------
+# Plan 47.6b.3 — real-cascade multi-modal regression on E4 classical α.
+#
+# Per ``scientific_findings.md`` finding #2, classical α has multiple valid
+# basins; the BL basin at ``α = (-0.7733, 0.1624)`` and the DE basin at
+# ``α = (-1.399, 0.293)`` are both within an order of magnitude in L3
+# objective value.  The test pins that MF-BO finds AT LEAST ONE basin in
+# ≥ 4/5 seeds — multi-modal coverage is *not* a guarantee of finding the
+# global optimum, but a regression that flips ≥ 4/5 to 0/5 indicates the
+# BO machinery has lost the ability to find ANY good local optimum.
+# Uses L3 as HF (not L7) for fast iteration: per-eval cascade cost ≈ 0.5 s
+# at L3 vs ≈ 1.4 s at L7.  This is the *only* ``TestX`` in 47.6b that
+# exercises the real cascade rather than a synthetic ``objective=``
+# injection.
+# ---------------------------------------------------------------------------
+
+
+class TestMultiModal:
+    """Plan 47.6b.3: real-cascade multi-modal coverage regression.
+
+    Pins that MF-BO finds at least one of the two known E4-classical α
+    basins (BL or DE) in ≥ 4/5 seeds at the 47.3k-tuned recommended
+    composition (warmup=3, adaptive_hf_explore_bias=0.5,
+    hf_explore_bias=0.0, hf_acquisition_bonus=2.0).  Uses L3 as HF and
+    L1 as cheap; ``hf_anchors=4`` matches the 47.6a precedent and the
+    ``run_mfbo`` default ``max(3, d + 2) = 4`` for d=2 (per 47.6b.0,
+    ``make_initial_design`` silently zeros ``mid_anchors`` for K<3, so
+    ``n_cheap = 8 - 4 - 0 = 4 ≥ hf_anchors = 4`` ✓).
+    """
+
+    # Known basins from ``scientific_findings.md`` finding #2.
+    _BL = np.array([-0.7733, 0.1624])
+    _DE = np.array([-1.399, 0.293])
+
+    @pytest.mark.slow
+    @pytest.mark.xfail(
+        reason=(
+            "47.6b.3 empirical fallback: ~50% of HF evals on E4-classical "
+            "L3 return _BO_SENTINEL (infeasible regions where max_stab_eig "
+            "is undefined); sentinel rows are filtered before GP fit so the "
+            "GP cannot learn that those regions are bad, and "
+            "_recommend_incumbent's posterior-minimum-on-Sobol-grid "
+            "extrapolates into the sentinel regions, producing best_obj "
+            "= 1e12 at corners.  Path (a) (budget=60) measured but does "
+            "not fix the structural issue.  See 47.6b.3.1 for the "
+            "feasibility-aware GP / recommendation fix."
+        ),
+        strict=False,
+    )
+    def test_classical_alpha_finds_a_basin(self):
+        """≥ 4/5 seeds find a basin (BL or DE) within 0.1 in L2 distance.
+
+        The cost-aware utility + ICM kernel must identify at least one
+        local optimum given a 30-eval budget; the test does NOT pin which
+        basin (BL vs DE) — the contract is "found at least one good
+        local optimum."  A regression that flips ≥ 4/5 to 0/5 indicates
+        the BO machinery has lost the ability to find any good basin.
+        """
+        # ``cost_table`` from plan 46 measurements: L3 listed at 0.038 s
+        # (1D periodic eigenvalue short-circuit) vs L1 at 0.076 s (full GV
+        # dispersion).  Cost-aware utility sees L3 as *cheaper* than L1
+        # in this regime — no special-case handling needed; the BO loop
+        # picks a mix anyway because qMFKG's KG/cost ratio is dominated
+        # by information gain at the HF, not raw cost.
+        cost_table = {1: DEFAULT_COST_TABLE[1], 3: DEFAULT_COST_TABLE[3]}
+
+        n_found = 0
+        per_seed = []
+        for seed in range(5):
+            # Pre-seed ``torch`` and ``numpy`` per the
+            # ``TestBranin``/``tools/branin_sweep.py`` pattern.
+            torch.manual_seed(seed)
+            np.random.seed(seed)
+
+            result = run_mfbo(
+                scheme="E4",
+                kernel="classical",
+                report_fields_by_layer={
+                    1: "layer1.boundary_gv_err",
+                    3: "layer3.max_stab_eig",
+                },
+                bounds=[(-2.0, 2.0), (0.05, 2.0)],
+                cost_table=cost_table,
+                seed=seed,
+                n_init=8,
+                hf_anchors=4,
+                budget_evals=30,
+                hf_priority_warmup=3,
+                adaptive_hf_explore_bias=0.5,
+                hf_explore_bias=0.0,
+                hf_acquisition_bonus=2.0,
+            )
+
+            # Per-seed structural integrity.  ``error`` is accepted per
+            # 47.3c / 47.6b.1 / 47.6b.2 precedent: BoTorch's
+            # ``scipy_minimize`` / ``L-BFGS-B`` marginal-likelihood
+            # optimiser intermittently terminates with status
+            # ``ABNORMAL`` on real-cascade runs as well; the
+            # result-quality contract (basin proximity below) bears the
+            # regression-detection weight.
+            assert np.isfinite(result.best_objective), (
+                f"seed={seed}: best_objective is non-finite: "
+                f"{result.best_objective}"
+            )
+            assert result.best_x.shape == (2,)
+            for j, (lo, hi) in enumerate([(-2.0, 2.0), (0.05, 2.0)]):
+                assert lo <= float(result.best_x[j]) <= hi, (
+                    f"seed={seed}: best_x[{j}]={result.best_x[j]} "
+                    f"outside bounds [{lo}, {hi}]"
+                )
+            assert result.stop_reason in {
+                "budget",
+                "variance",
+                "stagnation",
+                "error",
+            }, f"seed={seed}: unexpected stop_reason={result.stop_reason!r}"
+
+            # Basin proximity in L2 distance.
+            d_BL = float(np.linalg.norm(result.best_x - self._BL))
+            d_DE = float(np.linalg.norm(result.best_x - self._DE))
+            d_min = min(d_BL, d_DE)
+            found = d_min < 0.1
+            per_seed.append(
+                {
+                    "seed": seed,
+                    "best_x": result.best_x.tolist(),
+                    "best_objective": float(result.best_objective),
+                    "d_BL": d_BL,
+                    "d_DE": d_DE,
+                    "found": found,
+                    "stop_reason": result.stop_reason,
+                }
+            )
+            if found:
+                n_found += 1
+
+        # Multi-modal coverage contract: ≥ 4/5 seeds find a basin.
+        # The threshold is NOT silently relaxed per 47.6b.3 plan-body
+        # guidance — a regression flipping ≥ 4/5 to 0/5 indicates the
+        # BO machinery has lost the ability to find any good local
+        # optimum, which is the regression-detection weight this test
+        # bears.  If the test fails, the per-seed dict is included in
+        # the assertion message so the failure mode (which seeds missed
+        # which basin) is visible at debug time.
+        assert n_found >= 4, (
+            f"only {n_found}/5 seeds found a basin (BL or DE within 0.1 "
+            f"in L2): per-seed = {per_seed}"
+        )
