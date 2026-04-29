@@ -967,7 +967,7 @@ cd scripts/stencil_gen && SYMPY_CACHE_SIZE=50000 uv run python -m sweeps bo \
   - Test: visual diff confirms the corrected median statement and that the 47.3j-equiv / 47.3k-default tables themselves are untouched.
   - **Done 2026-04-29.** Rewrote the "5-seed median" sentence in 47.3k.4c's Done note (currently at the end of paragraph "Stop-reason distribution..."). The corrected sentence now states the 47.3j-equiv median as **7.2996 (seed 1)** and the 47.3k-default median as **4.5873 (seed 3)** — confirmed by sorted lists in-line: `[3.5452, 4.5873, 7.2996, 8.8440, 9.4087]` and `[1.2548, 1.5954, 4.5873, 4.8807, 7.2996]`. Computed delta `(7.2996 - 4.5873) / 7.2996 ≈ 0.3716` = **~37 % improvement** (the plan body's "~36 %" example is in the right ballpark; recomputed for accuracy). The "best 3.5452 → 1.2548 and worst 9.4087 → 7.2996" distribution-tightening clause is preserved verbatim. The 47.3j-equiv (lines 920–924) and 47.3k-default (lines 943–947) tables and the seed-by-seed comparison table (lines 953–957) are untouched. No production-code change; no test impact.
 
-- [ ] **47.3k.4d** Run the recommended composition measurement under the harness from 47.3k.4a. Two-stage approach:
+- [x] **47.3k.4d** Run the recommended composition measurement under the harness from 47.3k.4a. Two-stage approach:
   - **Stage 1 (mandatory): pick the bonus value.** The 47.3k.3.1 Done note recommends sweeping `bonus ∈ {0.5, 1.0, 2.0}` post-undilution. Run 1 seed × 3 bonus values to identify the smallest bonus that produces a directional HF lift without GP-fit instability: `python tools/branin_sweep.py --config 47.3k-bonus --seeds 0 --bonus 0.5`, then `... --bonus 1.0`, then `... --bonus 2.0`. Record the 3-row table; pick the smallest bonus that produces `n_HF >= 6` (i.e. measurably more HF picks than the bonus-off baseline of ~5/30) and `stop_reason ∈ {"budget", "variance"}` (no `"error"`). Document the choice in the Done note.
   - **Stage 2 (mandatory): 5-seed run at the chosen bonus.** `python tools/branin_sweep.py --config 47.3k-bonus --seeds 0 1 2 3 4 --bonus <chosen>`. Record the 5-row table.
   - **Optional Stage 3:** if Stage 2 produces 0/5 < 0.5 and time remains, sweep `bonus ∈ {<choice/2>, <choice>, <choice*2>}` × 5 seeds = 15 more runs to map the bonus-vs-best_obj curve. Defer to 47.3k.4e if time-constrained.
@@ -975,6 +975,51 @@ cd scripts/stencil_gen && SYMPY_CACHE_SIZE=50000 uv run python -m sweeps bo \
   - **Wall-time estimate:** Stage 1 ≈ 3–5 min; Stage 2 ≈ 8–12 min; total ≈ 11–17 min — split into two Bash invocations if needed (each is < 10 min).
   - File: `plans/47-mfbo.md` (this item's Done note); no production-code change.
   - Test: see two-stage harness invocations above.
+  - **Done 2026-04-29.** Stage 1 + Stage 2 measurements complete; Stage 3 deferred to 47.3k.4e per the plan body's "if time-constrained" carve-out (the two mandatory stages already consumed ~12 min wall-time across four Bash invocations).
+
+    **Stage 1 — bonus tuning at seed 0.** Three single-seed runs across `bonus ∈ {0.5, 1.0, 2.0}`:
+
+    | bonus | best_obj | stop_reason | n_HF | elapsed_s |
+    |------:|---------:|:-----------:|-----:|----------:|
+    | 0.5 | 1.4734 | budget | 8 | 139.3 |
+    | 1.0 | 3.9585 | budget | 8 | 131.7 |
+    | 2.0 | **0.5667** | budget | 8 | 90.1 |
+
+    **Bonus chosen: 2.0** (deviation from plan body's "smallest bonus" rule, see below).
+
+    **Deviation from plan body Stage 1 rule:** the plan body says *"pick the smallest bonus that produces `n_HF >= 6` (i.e. measurably more HF picks than the bonus-off baseline of ~5/30)"*. In our data, the bonus-off baseline at seed 0 (47.3k.4c) was already `n_HF=8`, not the assumed ~5; all three bonus values also produced `n_HF=8`. The literal rule "smallest with n_HF >= 6" is therefore degenerate (8 >= 6 holds for every value); none of the three values produced a directional HF lift over the bonus-off baseline. The discriminating signal is in `best_obj`: bonus=2.0 is the only setting where seed 0 lands close to the basin floor (`0.5667` vs `1.4734` and `3.9585`). Following the spirit of the criterion ("pick the bonus that gives a measurable optimisation effect without GP-fit instability"), picked bonus=2.0 because (i) all three meet the literal `n_HF >= 6` rule, (ii) all three satisfy `stop_reason ∈ {"budget", "variance"}`, (iii) bonus=2.0 produced the only seed-0 result that reached `< 1.0`. The non-monotonicity (1.0 worse than 0.5 worse than 2.0) is consistent with the 47.3k.3.1 Done note's caution that the bonus-vs-best_obj curve is non-convex in α.
+
+    **Stage 2 — 5-seed run at bonus=2.0.** Two Bash invocations (seeds 0 1 2 then 3 4) per the plan body's wall-time split guidance:
+
+    | seed | best_obj | stop_reason | n_HF | elapsed_s |
+    |-----:|---------:|:-----------:|-----:|----------:|
+    | 0 | **0.5667** | budget | 8 |  89.0 |
+    | 1 | 7.2996 | budget | 8 |  91.3 |
+    | 2 | 5.3756 | budget | 8 | 106.9 |
+    | 3 | 3.6966 | budget | 9 | 123.6 |
+    | 4 | **0.7362** | budget | 9 |  73.1 |
+
+    **Pass count `< 0.5`: 0/5.** Best objective overall: **0.5667** at seed 0 — closest to the basin floor (~0.398) achieved across the entire 47.3 BO mechanism stack to date, but still above the `< 0.5` acceptance bar.
+
+    **Comparison vs 47.3k-default baseline (47.3k.4c):** the bonus mechanism produces non-monotonic per-seed deltas with a directional improvement on best/worst:
+
+    | seed | 47.3k-default | 47.3k-bonus α=2.0 | delta |
+    |-----:|--------------:|------------------:|------:|
+    | 0 | 1.5954 | **0.5667** | −1.03 (2.8× better) |
+    | 1 | 7.2996 | 7.2996 | 0 (unchanged) |
+    | 2 | **1.2548** | 5.3756 | +4.12 (4.3× worse) |
+    | 3 | 4.5873 | **3.6966** | −0.89 (1.2× better) |
+    | 4 | 4.8807 | **0.7362** | −4.14 (6.6× better) |
+
+    Best across seeds improved 1.2548 → 0.5667 (2.2× better); 5-seed median shifted from 4.5873 → 3.6966 (mild improvement). Two seeds (0 and 4) made substantial progress toward the basin; one seed (2) regressed substantially. Total wall time ~484 s (~8 min) for the 5-seed Stage 2; max per-seed elapsed `123.6 s` (seed 3) — exceeds the 47.6a `< 60 s` clause on every seed, and the 120 s upper bound on 1/5 seeds.
+
+    **Routing implications for 47.3k.4e:**
+    - **Pass rate < 3/5 (0/5).** Per the 47.3k.4e decision rules, this triggers the failure routing (A/B/C). The empirical floor of `0.5667` is tantalisingly close to `< 0.5` but not over the bar.
+    - **Max wall time `123.6 s > 120 s`.** Even if the recommended composition cleared `< 0.5` on ≥ 3 seeds, R1 (`120 s` budget) would be insufficient on 1/5 seeds; either R2 (reduce `budget_evals`) or R3 (per-iter wall-time optimisation) would be needed.
+    - **Optional Stage 3 deferred to 47.3k.4e.** The plan body permits deferring Stage 3 if time-constrained; this Ralph cycle consumed ~12 min on the mandatory two stages + 1 min on plan-edit/commit, exceeding the headroom for 15 additional runs (~30 min). 47.3k.4e can decide whether to commission Stage 3 (`bonus ∈ {1.0, 2.0, 4.0}` × 5 seeds, centred on the chosen value) before picking failure-routing path A (bump `budget_evals` to 60), B (custom acquisition wrapper — rejected unless absolutely necessary), or C (revise threshold to empirical floor ~0.6).
+    - **Recommended for 47.3k.4e:** path **C** (revise threshold to `< 1.0` since the empirical floor with current machinery is `0.5667`) is the lightest-weight option; path **A** (bump budget to 60 evals) is the next escalation if `< 0.5` is non-negotiable for downstream items (47.6a's `TestBranin`, 47.7a's benchmark).
+
+    **No production-code change.** `tests/test_bo.py + tests/test_sweep_bo.py` suite untouched (47.3k.4 is measurement-only per the plan body). 47.6a remains blocked, now on 47.3k.4e (the routing item).
 
 - [ ] **47.3k.4e** Pick the routing decision (R1/R2/R3 from the 47.3k.4 tracker body) + failure routing (A/B/C if the 47.3k.4d recommended composition missed `< 0.5` on ≥ 3/5 seeds), update 47.6a's body to remove the block, and mark 47.3k Done. This is the **routing item**: it consumes the empirical tables from 47.3k.4b/c/d and makes the final decision; no new measurements unless 47.3k.4d's optional Stage 3 was deferred and the routing depends on it.
   - **Inputs:** 47.3k.4b's 47.3j-equivalent table (calibration baseline), 47.3k.4c's 47.3k-default-only table (47.3k.1+47.3k.2 delta), 47.3k.4d's recommended-composition table (47.3k.1+47.3k.2+47.3k.3 combined).
