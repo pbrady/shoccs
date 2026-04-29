@@ -1517,12 +1517,37 @@ cd scripts/stencil_gen && SYMPY_CACHE_SIZE=50000 uv run python -m sweeps bo \
   - File: `scripts/stencil_gen/stencil_gen/bo.py`, `scripts/stencil_gen/tests/test_bo.py`
   - Test: `cd scripts/stencil_gen && uv run pytest tests/test_bo.py -x -q -k "TestMultiModal" --run-slow`
 
-- [ ] **47.6b.3.2a** Run path (a) measurement: 5-seed sweep at `budget_evals=60` on the same E4-classical real-cascade scaffold from 47.6b.3 (`scheme="E4", kernel="classical", report_fields_by_layer={1: "layer1.boundary_gv_err", 3: "layer3.max_stab_eig"}, bounds=[(-2.0, 2.0), (0.05, 2.0)], cost_table={1: 0.076, 3: 0.038}, n_init=8, hf_anchors=4, hf_priority_warmup=3, adaptive_hf_explore_bias=0.5, hf_explore_bias=0.0, hf_acquisition_bonus=2.0, clamp_sentinel_rows=True (default)`). 47.6b.3.1's empirical-fallback note rejected this path on the unfixed pipeline but the structural fix may unlock it now. **Measurement-only item — no production code or test changes.** The Done note pins the per-seed table; 47.6b.3.2b consumes it for the routing decision.
+- [x] **47.6b.3.2a** Run path (a) measurement: 5-seed sweep at `budget_evals=60` on the same E4-classical real-cascade scaffold from 47.6b.3 (`scheme="E4", kernel="classical", report_fields_by_layer={1: "layer1.boundary_gv_err", 3: "layer3.max_stab_eig"}, bounds=[(-2.0, 2.0), (0.05, 2.0)], cost_table={1: 0.076, 3: 0.038}, n_init=8, hf_anchors=4, hf_priority_warmup=3, adaptive_hf_explore_bias=0.5, hf_explore_bias=0.0, hf_acquisition_bonus=2.0, clamp_sentinel_rows=True (default)`). 47.6b.3.1's empirical-fallback note rejected this path on the unfixed pipeline but the structural fix may unlock it now. **Measurement-only item — no production code or test changes.** The Done note pins the per-seed table; 47.6b.3.2b consumes it for the routing decision.
   - **Mechanism:** invoke `run_mfbo` directly via a `python -c` block (or a one-off `tools/multimodal_sweep.py` if reuse is anticipated by 47.6b.3.2c — pattern: mirror `tools/branin_sweep.py` from 47.3k.4a). Use the same kwargs as `TestMultiModal::test_classical_alpha_finds_a_basin` (`tests/test_bo.py`) except `budget_evals=60`. Per-seed: `torch.manual_seed(seed); np.random.seed(seed); result = run_mfbo(..., seed=seed)`; record `best_x`, `best_objective`, `d_BL = norm(best_x - [-0.7733, 0.1624])`, `d_DE = norm(best_x - [-1.399, 0.293])`, `min(d_BL, d_DE) < 0.1` flag, `stop_reason`, and elapsed time.
   - **Wall-time estimate:** ~12 min total. Per the 47.3k.4d two-batch precedent, split into two Bash invocations: seeds 0/1/2 (~7 min) then seeds 3/4 (~5 min). Each batch fits under the 10-min Bash timeout.
   - **Acceptance:** the 5-row Markdown table is recorded in this item's Done note (mirroring the 47.3k.4b/c/d pattern). The Done note explicitly reports the seed pass count for `min(d_BL, d_DE) < 0.1`. No production-code change; no test change; existing `tests/test_bo.py + tests/test_sweep_bo.py` suite untouched.
   - File: `plans/47-mfbo.md` (this item's Done note); no production-code change.
   - Test: invoke a `python -c` block (or `tools/multimodal_sweep.py`) — measurement script, not a pytest invocation.
+  - **Done 2026-04-29.** Created `tools/multimodal_sweep.py` (mirrors `tools/branin_sweep.py`'s shape from 47.3k.4a) for reusability — 47.6b.3.2c may need to re-run the same sweep with a Voronoi-aware recommendation toggle, and a one-off `python -c` block would have to be reconstructed from scratch each time. The harness hardcodes the 47.6b.3 scaffold (E4-classical, layer1/layer3 fields, `[(-2,2),(0.05,2)]` bounds, the recommended composition) and exposes `--budget-evals` as the only tunable. Per-seed sweep run as two Bash invocations (`--seeds 0 1 2` then `--seeds 3 4`), total wall time ~7.8 min (well under the 12-min plan estimate).
+
+    | seed | best_x | best_obj | d_BL | d_DE | found | stop_reason | n_HF | elapsed_s |
+    |-----:|:-------|---------:|-----:|-----:|:-----:|:-----------:|-----:|----------:|
+    | 0 | (0.460, 0.813)  | 1.00e+12 | 1.395 | 1.931 | False | error  | 10 |  16.3 |
+    | 1 | (-0.865, 0.786) | 6.6123   | 0.631 | 0.727 | False | error  | 14 |  17.8 |
+    | 2 | (-0.680, 0.901) | 8.3914   | 0.744 | 0.942 | False | error  | 25 |  58.5 |
+    | 3 | (0.391, 0.095)  | 1.6428   | 1.167 | 1.801 | False | error  | 39 | 367.0 |
+    | 4 | (-0.433, 0.350) | 2.4914   | 0.388 | 0.968 | False | error  |  8 |   6.8 |
+
+    **Pass count `min(d_BL, d_DE) < 0.1`: 0/5** (vs the required ≥ 4/5). Total wall time **466 s (~7.8 min)** for the 5-seed sweep, well under the 600s budget.
+
+    **Comparison vs the 47.6b.3.1 baseline (`budget_evals=30`):**
+
+    | seed | budget=30 (d_BL, d_DE, best_obj) | budget=60 (d_BL, d_DE, best_obj) | trajectory |
+    |-----:|---|---|---|
+    | 0 | (1.395, 1.931, 1e12)   | (1.395, 1.931, 1e12)   | unchanged (early `error` exit; same x_inc) |
+    | 1 | (0.631, 0.727, 6.6123) | (0.631, 0.727, 6.6123) | unchanged (early `error` exit) |
+    | 2 | (0.744, 0.942, 8.3914) | (0.744, 0.942, 8.3914) | unchanged (early `error` exit) |
+    | 3 | (0.303, 0.419, 0.1536) | (1.167, 1.801, 1.6428) | **REGRESSED** — was closest to BL pre-fix; budget=60 lands far from any basin |
+    | 4 | (0.388, 0.968, 2.4914) | (0.388, 0.968, 2.4914) | unchanged (early `error` exit) |
+
+    **Routing implication for 47.6b.3.2b:** path (a) decisively does NOT close the basin-proximity gap. Four of five seeds (0, 1, 2, 4) are bytewise-identical between budget=30 and budget=60 because BoTorch's `scipy_minimize` / `L-BFGS-B` marginal-likelihood optimiser terminates with status `ABNORMAL` early in the loop (well before the new budget headroom is consumed); the extra budget is unreachable. Seed 3 is the most damning data point: pre-fix it was the closest seed to BL (`d_BL=0.30`, `best_obj=0.15`); under path (a) with the same composition kwargs but doubled budget it lands at `(0.391, 0.095)` with `d_BL=1.17` — a ~4× regression away from any basin. The 39 HF evals at seed 3 means this seed actually consumed substantial budget, so the regression cannot be blamed on early `error` exit — it is a genuine basin-discovery failure under the cost-aware utility once enough HF coverage has been spent.
+
+    **Routing decision (for 47.6b.3.2b to consume):** path (a) misses, so 47.6b.3.2b should open 47.6b.3.2c for path (b) (Voronoi/UCB feasibility-aware recommendation per the parent 47.6b.3.2 mechanism sketch). The 47.6b.3.2.0 plan-text fix should also land before 47.6b.3.2c implementation begins so the UCB sign convention is correct.
 
 - [ ] **47.6b.3.2b** Routing decision based on 47.6b.3.2a's results. If the 5-seed sweep at `budget_evals=60` produces ≥ 4/5 seeds with `min(d_BL, d_DE) < 0.1`, declare 47.6b.3.2 done by (a) updating 47.6b.3's `budget_evals` literal from 30 to 60 (with a one-line note in the test docstring explaining the deviation per 47.6b.3.2's path-(a) "Con" note), (b) removing the `@pytest.mark.xfail(strict=False)` decorator on `TestMultiModal::test_classical_alpha_finds_a_basin`, (c) re-running the test to verify ≥ 4/5 seeds clear the contract at the new budget, and (d) marking 47.6b.3.2 (the tracker) `[x]`. If < 4/5 seeds pass, open 47.6b.3.2c for path (b) (Voronoi/UCB feasibility-aware recommendation) per the recommended escalation order (a → b → c) and update the 47.6b tracker's "Currently blocked on" sentence to point at 47.6b.3.2c.
   - **Acceptance:** if path (a) clears, the xfail is removed AND `TestMultiModal --run-slow` passes (≥ 4/5 seeds find a basin at the chosen budget). If path (a) misses, 47.6b.3.2c is opened with the per-seed table from 47.6b.3.2a as the empirical baseline, and 47.6b's tracker pointer is updated.
