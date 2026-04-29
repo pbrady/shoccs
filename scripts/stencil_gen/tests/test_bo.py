@@ -2982,6 +2982,140 @@ class TestRunMFBO:
             f"rows should still be tallied"
         )
 
+    # -----------------------------------------------------------------
+    # 47.6b.3.2c.1 — recommendation_strategy plumbing
+    # -----------------------------------------------------------------
+
+    @pytest.mark.parametrize("bad", ["foo", "", "MEAN"])
+    def test_recommendation_strategy_validates_choices(self, bad):
+        # 47.6b.3.2c.1: case-sensitive set membership.  Catches mutations
+        # that lower-case the kwarg or accept case-insensitive matches
+        # (``"MEAN"`` would pass under a ``.casefold()`` mutation).
+        objective, _ = self._rough_objective()
+        with pytest.raises(ValueError, match="recommendation_strategy"):
+            run_mfbo(
+                scheme="E2",
+                kernel="classical",
+                report_fields_by_layer=self._hf_canonical_fields(),
+                bounds=[(-1.0, 1.0), (-1.0, 1.0)],
+                budget_evals=15,
+                n_init=8,
+                hf_anchors=3,
+                seed=0,
+                objective=objective,
+                recommendation_strategy=bad,
+            )
+
+    def test_recommendation_strategy_validates_none(self):
+        # 47.6b.3.2c.1: ``None`` is not a valid choice (the kwarg has no
+        # ``None`` short-circuit unlike ``adaptive_hf_floor``); the default
+        # is the literal string ``"mean"``.  Pinning ``None``-rejection
+        # catches a mutation that adds an opportunistic ``if x is None:``
+        # check that masks the validation.
+        objective, _ = self._rough_objective()
+        with pytest.raises(ValueError, match="recommendation_strategy"):
+            run_mfbo(
+                scheme="E2",
+                kernel="classical",
+                report_fields_by_layer=self._hf_canonical_fields(),
+                bounds=[(-1.0, 1.0), (-1.0, 1.0)],
+                budget_evals=15,
+                n_init=8,
+                hf_anchors=3,
+                seed=0,
+                objective=objective,
+                recommendation_strategy=None,
+            )
+
+    def test_recommendation_strategy_default_off_preserves_recommendation_collapse(
+        self,
+    ):
+        # 47.6b.3.2c.1 — collapse-equivalence template (mirrors 47.3j.1 /
+        # 47.3j.2 / 47.3k.3 default-off pattern).  Default
+        # ``recommendation_strategy="mean"`` (resolved from the signature
+        # default) vs explicit ``"mean"`` must produce bytewise-identical
+        # ``best_x``, ``best_objective``, ``stop_reason``, and
+        # ``n_evals_per_fidelity``.  Both branches traverse the new
+        # dispatch logic — the explicit ``"mean"`` path lands at the same
+        # code as the default — so this catches a mutation that changes
+        # the dispatch behaviour from the default path (e.g. ``elif
+        # strategy == "mean":`` flipped to ``elif strategy ==
+        # "mean_alt":``).
+        assert (
+            inspect.signature(run_mfbo)
+            .parameters["recommendation_strategy"]
+            .default
+            == "mean"
+        ), "recommendation_strategy default must be the literal 'mean'"
+
+        bounds = [(-1.0, 1.0), (-1.0, 1.0)]
+        objective, _ = self._rough_objective()
+        common = dict(
+            scheme="E2",
+            kernel="classical",
+            report_fields_by_layer=self._hf_canonical_fields(),
+            bounds=bounds,
+            budget_evals=15,
+            n_init=8,
+            hf_anchors=3,
+            seed=0,
+            objective=objective,
+        )
+        r_default = run_mfbo(**common)
+        r_explicit_mean = run_mfbo(recommendation_strategy="mean", **common)
+        np.testing.assert_allclose(
+            r_default.best_x, r_explicit_mean.best_x, atol=1e-9
+        )
+        assert r_default.best_objective == r_explicit_mean.best_objective
+        assert r_default.stop_reason == r_explicit_mean.stop_reason
+        assert (
+            r_default.n_evals_per_fidelity
+            == r_explicit_mean.n_evals_per_fidelity
+        )
+
+    def test_recommendation_strategy_voronoi_raises_not_implemented(self):
+        # 47.6b.3.2c.1: pin the ``"voronoi"`` stub.  When 47.6b.3.2c.2
+        # lands and the stub is replaced by the real mechanism, this test
+        # is deleted (and the deletion is the natural point at which
+        # 47.6b.3.2c.2's voronoi-mechanism tests are added).  The match
+        # pattern pins the plan-item reference in the error message so a
+        # mutation that swaps the message between the two stubs would be
+        # caught.
+        objective, _ = self._rough_objective()
+        with pytest.raises(NotImplementedError, match="47.6b.3.2c.2"):
+            run_mfbo(
+                scheme="E2",
+                kernel="classical",
+                report_fields_by_layer=self._hf_canonical_fields(),
+                bounds=[(-1.0, 1.0), (-1.0, 1.0)],
+                budget_evals=15,
+                n_init=8,
+                hf_anchors=3,
+                seed=0,
+                objective=objective,
+                recommendation_strategy="voronoi",
+            )
+
+    def test_recommendation_strategy_ucb_raises_not_implemented(self):
+        # 47.6b.3.2c.1: pin the ``"ucb"`` stub.  Deleted when 47.6b.3.2c.3
+        # lands.  Same shape as the voronoi counterpart; the match pattern
+        # pins the plan-item reference so a mutation that swaps the two
+        # stub messages would be caught.
+        objective, _ = self._rough_objective()
+        with pytest.raises(NotImplementedError, match="47.6b.3.2c.3"):
+            run_mfbo(
+                scheme="E2",
+                kernel="classical",
+                report_fields_by_layer=self._hf_canonical_fields(),
+                bounds=[(-1.0, 1.0), (-1.0, 1.0)],
+                budget_evals=15,
+                n_init=8,
+                hf_anchors=3,
+                seed=0,
+                objective=objective,
+                recommendation_strategy="ucb",
+            )
+
 
 # ---------------------------------------------------------------------------
 # 47.3c: TestAcquisition — qMFKG construction + mixed-optimiser smoke tests

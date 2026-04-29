@@ -1180,14 +1180,34 @@ def _recommend_incumbent(
     seed: int,
     *,
     n_grid: int = 1024,
+    strategy: str = "mean",
 ) -> np.ndarray:
-    """Return ``argmin_x μ_n(x, m=target)`` on a Sobol' grid of *n_grid* points.
+    """Return the recommended incumbent on a Sobol' grid of *n_grid* points.
 
-    Posterior mean (not best observed) — standard for noisy or multi-fidelity
+    The default ``strategy="mean"`` picks ``argmin_x μ_n(x, m=target)`` —
+    posterior mean (not best observed), standard for noisy or multi-fidelity
     GPs where the cheap-fidelity surrogate may be biased relative to HF.  The
     Sobol' engine is scrambled with the supplied *seed* so the recommendation
     is reproducible across runs.
+
+    Other strategies (``"voronoi"``, ``"ucb"``) are reserved for downstream
+    plan items 47.6b.3.2c.2 / 47.6b.3.2c.3 and currently raise
+    :class:`NotImplementedError` so the dispatch surface can be exercised
+    independently of the strategy implementations (47.6b.3.2c.1).
     """
+    if strategy == "voronoi":
+        raise NotImplementedError(
+            "recommendation_strategy='voronoi' lands in 47.6b.3.2c.2"
+        )
+    if strategy == "ucb":
+        raise NotImplementedError(
+            "recommendation_strategy='ucb' lands in 47.6b.3.2c.3"
+        )
+    if strategy != "mean":
+        raise ValueError(
+            "_recommend_incumbent strategy must be one of "
+            f"{{'mean', 'voronoi', 'ucb'}}, got {strategy!r}"
+        )
     sobol = torch.quasirandom.SobolEngine(d, scramble=True, seed=seed)
     raw = sobol.draw(n_grid).double()
     bounds_arr = torch.tensor(
@@ -1316,6 +1336,7 @@ def run_mfbo(
     variance_guard_relative_threshold: float = 1e-5,
     hf_acquisition_bonus: float | None = None,
     clamp_sentinel_rows: bool = True,
+    recommendation_strategy: str = "mean",
     num_fantasies: int = 64,
     verbose: bool = False,
     objective: Callable[[np.ndarray, int], tuple[float, float, dict]] | None = None,
@@ -1564,6 +1585,17 @@ KnowledgeGradient` subclass that adds ``α * mean_q(hf_mask)`` to
         are tallied in ``BOResult.extras["n_sentinel_per_fidelity"]``
         (treatment-agnostic occurrence count keyed by external layer
         index — 47.6b.3.1.1).
+    recommendation_strategy
+        How to pick the incumbent ``x_inc`` from the GP posterior at HF
+        (47.6b.3.2c.1 plumbing).  Must be one of ``{"mean", "voronoi",
+        "ucb"}``; the comparison is case-sensitive.  Default ``"mean"`` is
+        bytewise-identical to the pre-47.6b.3.2c behaviour: on a 1024-pt
+        Sobol' grid at HF, pick ``argmin_x μ_n(x, m=hf)``.  ``"voronoi"``
+        and ``"ucb"`` are reserved for plan items 47.6b.3.2c.2 /
+        47.6b.3.2c.3 and currently raise :class:`NotImplementedError`
+        from :func:`_recommend_incumbent` (the dispatch surface is
+        exercised here so the kwarg validation and threading are
+        verifiable independently of the strategy implementations).
     num_fantasies
         Forwarded to :func:`build_acquisition`.  Default 64.
     verbose
@@ -1671,6 +1703,32 @@ KnowledgeGradient` subclass that adds ``α * mean_q(hf_mask)`` to
                 "hf_acquisition_bonus must be None or a non-negative finite "
                 f"float, got {hf_acquisition_bonus}"
             )
+    # 47.6b.3.2c.1: case-sensitive set membership.  ``"mean"`` is the
+    # default and is bytewise-equivalent to the pre-47.6b.3.2c code path;
+    # ``"voronoi"`` / ``"ucb"`` are reserved for plan items 47.6b.3.2c.2 /
+    # 47.6b.3.2c.3.  Case-insensitive matches (``"MEAN"``) are rejected so
+    # a mutation that lower-cases the kwarg is caught loudly.  We surface
+    # the NotImplementedError eagerly here (before the BO loop runs) so
+    # the contract failure is visible to callers — the in-loop variance
+    # guard wraps :func:`_recommend_incumbent` in ``except Exception:`` to
+    # tolerate GP/posterior runtime failures, which would otherwise
+    # silently swallow the strategy stub's :class:`NotImplementedError`.
+    # The dispatch inside :func:`_recommend_incumbent` stays so the helper
+    # is unit-testable directly; 47.6b.3.2c.2 / 47.6b.3.2c.3 will remove
+    # the eager raises here as they land their respective mechanisms.
+    if recommendation_strategy not in {"mean", "voronoi", "ucb"}:
+        raise ValueError(
+            "recommendation_strategy must be one of "
+            f"{{'mean', 'voronoi', 'ucb'}}, got {recommendation_strategy!r}"
+        )
+    if recommendation_strategy == "voronoi":
+        raise NotImplementedError(
+            "recommendation_strategy='voronoi' lands in 47.6b.3.2c.2"
+        )
+    if recommendation_strategy == "ucb":
+        raise NotImplementedError(
+            "recommendation_strategy='ucb' lands in 47.6b.3.2c.3"
+        )
 
     torch.manual_seed(seed)
     np.random.seed(seed)
@@ -1948,7 +2006,12 @@ KnowledgeGradient` subclass that adds ``α * mean_q(hf_mask)`` to
             if Y_hf.size < 2:
                 raise _SkipGuard
             x_inc_loop = _recommend_incumbent(
-                model, bounds_t, target_fid_idx, d, seed
+                model,
+                bounds_t,
+                target_fid_idx,
+                d,
+                seed,
+                strategy=recommendation_strategy,
             )
             X_inc_full = torch.cat(
                 [
@@ -2154,7 +2217,12 @@ KnowledgeGradient` subclass that adds ``α * mean_q(hf_mask)`` to
     if final_model is not None:
         try:
             x_inc = _recommend_incumbent(
-                final_model, bounds_t, target_fid_idx, d, seed
+                final_model,
+                bounds_t,
+                target_fid_idx,
+                d,
+                seed,
+                strategy=recommendation_strategy,
             )
         except Exception:
             x_inc = X_init[0].copy() if len(X_init) else np.zeros(d)
