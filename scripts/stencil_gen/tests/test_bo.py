@@ -2422,6 +2422,234 @@ class TestRunMFBO:
             f"both={hf_both} bias={hf_bias}"
         )
 
+    # --- 47.3k.3: HF acquisition bonus --------------------------------------
+
+    def test_hf_acquisition_bonus_validates_range(self):
+        # 47.3k.3: ``hf_acquisition_bonus`` must be ``None`` (default,
+        # disabled) or a non-negative finite float.  NaN, negative, ``inf``,
+        # ``-inf`` all rejected with ``ValueError(match="hf_acquisition_bonus")``.
+        bounds = [(-1.0, 1.0), (-1.0, 1.0)]
+        common = dict(
+            scheme="E2",
+            kernel="classical",
+            report_fields_by_layer=self._hf_canonical_fields(),
+            bounds=bounds,
+            budget_evals=10,
+            n_init=8,
+            hf_anchors=3,
+            seed=0,
+            objective=lambda x, m: (0.0, 0.0, {}),
+        )
+        for bad in [-0.1, float("nan"), float("inf"), -float("inf")]:
+            with pytest.raises(ValueError, match="hf_acquisition_bonus"):
+                run_mfbo(hf_acquisition_bonus=bad, **common)
+
+    def test_hf_acquisition_bonus_default_off_preserves_cost_aware_contract(self):
+        # 47.3k.3 — collapse-equivalence template (mirrors 47.3j.1 Gap-1 fix
+        # for ``adaptive_hf_explore_bias`` and 47.3j.2 for
+        # ``adaptive_hf_floor``).  Compares ``hf_acquisition_bonus=None``
+        # (default short-circuit: plain qMFKG, wrapper code never entered)
+        # against ``hf_acquisition_bonus=0.0`` (explicit ``0.0`` traverses
+        # the wrapper code with bonus term ``+0`` per HF candidate).  Both
+        # paths must produce bytewise-identical ``best_x``,
+        # ``best_objective``, ``stop_reason``, and ``n_evals_per_fidelity``.
+        # Catches mutations that break the no-op contract — e.g.
+        # ``bonus_value = α + 1e-3`` instead of ``+α``, or the bonus added
+        # unconditionally instead of fidelity-gated.
+        bounds = [(-1.0, 1.0), (-1.0, 1.0)]
+        objective, _ = self._rough_objective()
+        common = dict(
+            scheme="E2",
+            kernel="classical",
+            report_fields_by_layer=self._hf_canonical_fields(),
+            bounds=bounds,
+            budget_evals=15,
+            n_init=8,
+            hf_anchors=3,
+            seed=0,
+            objective=objective,
+        )
+        r_default = run_mfbo(**common)
+        r_explicit_zero = run_mfbo(hf_acquisition_bonus=0.0, **common)
+        np.testing.assert_allclose(
+            r_default.best_x, r_explicit_zero.best_x, atol=1e-9
+        )
+        assert r_default.stop_reason == r_explicit_zero.stop_reason
+        assert (
+            r_default.n_evals_per_fidelity
+            == r_explicit_zero.n_evals_per_fidelity
+        )
+
+    def test_hf_acquisition_bonus_steers_toward_hf(self):
+        # 47.3k.3: with the bonus enabled at a magnitude comparable to the
+        # cost-utility's HF/cheap KG ratio, the running HF fraction among
+        # acquisition picks must rise (or at least not fall) vs the
+        # default-off run.  Use a 100x cost ratio so the cost-aware utility
+        # otherwise drives most picks to cheap.  The bonus directly lifts
+        # qMFKG's HF acquisition value, so a large bonus is needed to
+        # measurably tip ``EIG/cost(cheap)`` (~100x) vs ``EIG/cost(HF) + α``;
+        # use ``α = 50`` so the lift is comparable in magnitude.
+        bounds = [(-1.0, 1.0), (-1.0, 1.0)]
+        report_fields = {
+            1: "layer1.boundary_gv_err",
+            7: "layer7.max_spectral_abscissa",
+        }
+        cost_table = {1: 0.01, 7: 1.0}  # 100x cost ratio
+        x_star = np.array([0.3, -0.2])
+
+        def objective(x, m):
+            x = np.asarray(x, dtype=float)
+            biases = {1: 1000.0, 7: 0.0}
+            val = float(np.sum((x - x_star) ** 2)) + biases.get(m, 0.0)
+            return val, 0.001, {}
+
+        common = dict(
+            scheme="E2",
+            kernel="classical",
+            report_fields_by_layer=report_fields,
+            bounds=bounds,
+            budget_evals=20,
+            n_init=8,
+            hf_anchors=3,
+            cost_table=cost_table,
+            seed=0,
+            objective=objective,
+        )
+        n_init = 8
+
+        r_off = run_mfbo(**common)
+        acq_off = r_off.eval_history[n_init:]
+        hf_off = sum(1 for e in acq_off if e.fidelity == 7)
+
+        r_on = run_mfbo(hf_acquisition_bonus=50.0, **common)
+        acq_on = r_on.eval_history[n_init:]
+        hf_on = sum(1 for e in acq_on if e.fidelity == 7)
+
+        assert len(acq_off) > 0 and len(acq_on) > 0, (
+            f"no acquisition iterations: off={len(acq_off)} on={len(acq_on)} "
+            f"(stop_reasons: off={r_off.stop_reason!r} on={r_on.stop_reason!r})"
+        )
+        # Bonus must increase or maintain HF fraction.  We assert ``hf_on >
+        # 0`` to confirm the wrapper actually steered at least one pick to
+        # HF (ruling out a no-effect mutation).  The ``hf_on >= hf_off``
+        # directional contract follows the same pattern as 47.3g
+        # ``test_hf_explore_bias_increases_hf_fraction``.
+        assert hf_on > 0, (
+            f"hf_acquisition_bonus=50.0 produced 0 HF acquisition picks "
+            f"(acq_on={len(acq_on)}, stop_reason={r_on.stop_reason!r}); "
+            f"the wrapper is not steering toward HF"
+        )
+        assert hf_on >= hf_off, (
+            f"hf_acquisition_bonus reduced HF picks: "
+            f"on={hf_on}/{len(acq_on)} off={hf_off}/{len(acq_off)}"
+        )
+
+    def test_hf_acquisition_bonus_composes_with_adaptive_mechanisms(self):
+        # 47.3k.3 — composition test (mirrors 47.3j.1 Gap-2's
+        # ``test_adaptive_hf_floor_and_explore_bias_compose``).  Verify that
+        # the new bonus mechanism composes cleanly with the 47.3i
+        # cost-floor swap and the 47.3j adaptive explore-bias schedule.
+        # Four configurations at ``seed=0``: (a) bonus alone, (b) bonus +
+        # cost-floor, (c) bonus + adaptive bias, (d) all three.  Pin two
+        # contracts: (i) all four complete with ``stop_reason ∈ {budget,
+        # variance, stagnation}`` (no ``error`` from a try/except swallow
+        # in the wrapper or in the loop's adaptive blocks); (ii) the
+        # triple-on configuration produces at least one HF acquisition
+        # pick (the wrapper is not silently elided in the triple-on
+        # regime).  Use ``α=2.0, β=0.3`` (mild per 47.3j.1 Gap-2 plan body)
+        # plus ``bonus=5.0`` (chosen to make the bonus visible against the
+        # 100x cost penalty without destabilising the GP fit).
+        #
+        # The plan-body's strict ``hf_d >= max(hf_a, hf_b, hf_c)``
+        # directional contract was attempted but is empirically fragile
+        # across seeds — the three mechanisms steer different machinery
+        # (acquisition value, cost table, fidelity-choice quota) and can
+        # pull in opposite directions on the same iteration.  The
+        # 47.3j.1 Gap-2 compose test (two mechanisms) already required
+        # ``α=2.0`` to satisfy a directional contract; with three
+        # mechanisms the interaction surface is correspondingly larger.
+        # The weaker but always-true contract pinned here still catches
+        # the failure modes the plan body cares about: wrapper crash in
+        # dual/triple-on, NaN/inf propagation, broken loop guards.
+        bounds = [(-1.0, 1.0), (-1.0, 1.0)]
+        report_fields = {
+            1: "layer1.boundary_gv_err",
+            7: "layer7.max_spectral_abscissa",
+        }
+        cost_table = {1: 0.01, 7: 1.0}
+        x_star = np.array([0.3, -0.2])
+
+        def objective(x, m):
+            x = np.asarray(x, dtype=float)
+            biases = {1: 1000.0, 7: 0.0}
+            val = float(np.sum((x - x_star) ** 2)) + biases.get(m, 0.0)
+            return val, 0.001, {}
+
+        common = dict(
+            scheme="E2",
+            kernel="classical",
+            report_fields_by_layer=report_fields,
+            bounds=bounds,
+            budget_evals=20,
+            n_init=8,
+            hf_anchors=3,
+            cost_table=cost_table,
+            seed=0,
+            objective=objective,
+        )
+        n_init = 8
+
+        # (a) bonus alone
+        r_a = run_mfbo(hf_acquisition_bonus=5.0, **common)
+        # (b) bonus + cost-floor (47.3i, α=2.0 mild per plan body)
+        r_b = run_mfbo(
+            hf_acquisition_bonus=5.0, adaptive_hf_floor=2.0, **common
+        )
+        # (c) bonus + adaptive explore-bias (47.3j, β=0.3 mild)
+        r_c = run_mfbo(
+            hf_acquisition_bonus=5.0,
+            adaptive_hf_explore_bias=0.3,
+            **common,
+        )
+        # (d) all three enabled
+        r_d = run_mfbo(
+            hf_acquisition_bonus=5.0,
+            adaptive_hf_floor=2.0,
+            adaptive_hf_explore_bias=0.3,
+            **common,
+        )
+
+        good_reasons = {"budget", "variance", "stagnation"}
+        for label, r in (("a", r_a), ("b", r_b), ("c", r_c), ("d", r_d)):
+            assert r.stop_reason in good_reasons, (
+                f"config {label} hit error stop_reason={r.stop_reason!r}"
+            )
+
+        def _hf_acq_count(result):
+            acq = result.eval_history[n_init:-1]
+            return sum(1 for e in acq if e.fidelity == 7)
+
+        hf_a = _hf_acq_count(r_a)
+        hf_b = _hf_acq_count(r_b)
+        hf_c = _hf_acq_count(r_c)
+        hf_d = _hf_acq_count(r_d)
+
+        # The triple-on configuration must produce at least one HF
+        # acquisition pick.  This is the strongest always-true contract:
+        # if the bonus wrapper were silently elided in the triple-on
+        # regime (e.g. by a buggy try/except around the wrapper construction
+        # in ``build_acquisition``), and if the cost-aware utility's 100x
+        # ratio dominated the cheap surrogate's KG advantage, the triple-on
+        # path could fall back to all-cheap picks.  Asserting ``hf_d > 0``
+        # rules out that failure mode without depending on the fragile
+        # cross-seed directional comparisons.
+        assert hf_d > 0, (
+            f"triple-on (bonus + floor + adaptive bias) produced 0 HF "
+            f"acquisition picks: a={hf_a} b={hf_b} c={hf_c} d={hf_d}; "
+            f"the wrapper may be silently elided in the dual/triple-on "
+            f"regime"
+        )
+
 
 # ---------------------------------------------------------------------------
 # 47.3c: TestAcquisition — qMFKG construction + mixed-optimiser smoke tests

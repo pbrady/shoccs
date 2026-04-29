@@ -777,6 +777,61 @@ def build_initial_design(
 # --- acquisition + mixed optimiser -------------------------------------------
 
 
+class _HFBonusAcquisition(qMultiFidelityKnowledgeGradient):
+    """qMFKG with a constant additive HF acquisition bonus (47.3k.3).
+
+    Wraps :class:`qMultiFidelityKnowledgeGradient` with an additive bonus on
+    candidates whose fidelity column equals the target HF index — composes
+    orthogonally with :paramref:`run_mfbo.hf_explore_bias` (a binary on/off
+    quota) and :paramref:`run_mfbo.adaptive_hf_explore_bias` (a continuous
+    schedule on the same quota).  The bonus is ``+α`` per HF candidate in
+    each candidate's q-batch, averaged across q (here ``q == 1`` per
+    :func:`build_acquisition`).  Motivation: under high cost ratios the
+    cost-aware utility ``EIG / cost`` can deprioritise HF acquisition picks
+    even when the basin is genuinely under-resolved; a small constant lift on
+    the HF acquisition value tips the cost/benefit toward HF without
+    requiring the cost table itself to be modified (which destabilises the
+    GP fit when the cheap surrogate is row-starved — see 47.3i empirical
+    sweep).
+
+    Explicit ``bonus = 0.0`` is the no-op contract: the wrapper code is
+    traversed (mask computation, multiplication by zero, addition to base)
+    but the result is bytewise-identical to the un-wrapped qMFKG output.
+    Adding floating-point ``+0.0`` is exact for non-NaN finite values, so
+    ``base + 0.0 * mask`` returns ``base`` unchanged.
+    """
+
+    def __init__(
+        self,
+        *,
+        hf_acquisition_bonus: float,
+        fidelity_dim: int,
+        target_fidelity_index: int,
+        **kwargs,
+    ):
+        super().__init__(**kwargs)
+        # Use object.__setattr__ for the auxiliary fields because nn.Module's
+        # ``__setattr__`` registers tensor / submodule attributes; plain
+        # Python ints/floats are fine but we keep explicit assignment.
+        self._hf_bonus = float(hf_acquisition_bonus)
+        self._hf_bonus_fidelity_dim = int(fidelity_dim)
+        self._hf_bonus_target = int(target_fidelity_index)
+
+    def forward(self, X: torch.Tensor) -> torch.Tensor:
+        base = super().forward(X)
+        # X has shape (..., q, d_total); the fidelity column lives at
+        # ``self._hf_bonus_fidelity_dim``.  ``base`` collapses the q and
+        # d_total dims.  Round defends against floating-point drift in the
+        # fidelity column produced by ``optimize_acqf_mixed``'s candidate
+        # generation.
+        hf_mask = (
+            X[..., self._hf_bonus_fidelity_dim].round() == self._hf_bonus_target
+        ).to(base.dtype)
+        # Mean over the q dimension so bonus shape matches base shape.
+        bonus = self._hf_bonus * hf_mask.mean(dim=-1)
+        return base + bonus
+
+
 def build_acquisition(
     model: MultiTaskGP,
     cost_utility: InverseCostWeightedUtility,
@@ -784,6 +839,7 @@ def build_acquisition(
     *,
     num_fantasies: int = 64,
     candidate_set_size: int = 512,
+    hf_acquisition_bonus: float | None = None,
 ) -> tuple[qMultiFidelityKnowledgeGradient, Callable[..., tuple[np.ndarray, int, float]]]:
     """Build a cost-aware multi-fidelity KG acquisition + mixed optimiser.
 
@@ -816,6 +872,18 @@ def build_acquisition(
     candidate_set_size
         Default ``raw_samples`` for :func:`optimize_acqf_mixed` (passable per-
         call via the returned closure's ``raw_samples`` kwarg).
+    hf_acquisition_bonus
+        Optional constant additive bonus ``+α`` applied to qMFKG's acquisition
+        value when the candidate's fidelity column equals
+        *target_fidelity_index* (47.3k.3).  When ``None`` (default), the
+        plain :class:`qMultiFidelityKnowledgeGradient` is constructed and the
+        wrapper code is bypassed.  When a finite ``α >= 0``, the returned
+        acquisition is a :class:`_HFBonusAcquisition` instance (a subclass of
+        qMFKG that adds ``α * mean_q(hf_mask)`` to ``forward()``'s output).
+        Explicit ``α = 0.0`` traverses the wrapper code with bonus term ``+0``
+        per HF candidate (no-op contract: ``base + 0.0 == base`` bytewise for
+        finite floats).  Validation lives in :func:`run_mfbo`; this function
+        passes the value through unchanged.
 
     Returns
     -------
@@ -891,13 +959,28 @@ def build_acquisition(
     with torch.no_grad():
         current_value = model.posterior(project(model.train_inputs[0])).mean.max()
 
-    acquisition = qMultiFidelityKnowledgeGradient(
-        model=model,
-        num_fantasies=num_fantasies,
-        current_value=current_value,
-        cost_aware_utility=cost_utility,
-        project=project,
-    )
+    if hf_acquisition_bonus is None:
+        acquisition = qMultiFidelityKnowledgeGradient(
+            model=model,
+            num_fantasies=num_fantasies,
+            current_value=current_value,
+            cost_aware_utility=cost_utility,
+            project=project,
+        )
+    else:
+        # 47.3k.3: subclass that adds a constant bonus on HF candidates.
+        # Construction kwargs match the plain qMFKG path; the wrapper only
+        # adds three auxiliary fields (bonus, fidelity_dim, target).
+        acquisition = _HFBonusAcquisition(
+            hf_acquisition_bonus=hf_acquisition_bonus,
+            fidelity_dim=fidelity_dim,
+            target_fidelity_index=target_fidelity_index,
+            model=model,
+            num_fantasies=num_fantasies,
+            current_value=current_value,
+            cost_aware_utility=cost_utility,
+            project=project,
+        )
 
     def optimize(
         bounds: Sequence[tuple[float, float]],
@@ -1227,6 +1310,7 @@ def run_mfbo(
     adaptive_hf_floor: float | None = None,
     adaptive_hf_explore_bias: float | None = None,
     variance_guard_relative_threshold: float = 1e-5,
+    hf_acquisition_bonus: float | None = None,
     num_fantasies: int = 64,
     verbose: bool = False,
     objective: Callable[[np.ndarray, int], tuple[float, float, dict]] | None = None,
@@ -1419,6 +1503,31 @@ def run_mfbo(
         Composes orthogonally with :paramref:`min_acquisition_iterations`
         (which delays *when* the guard can fire) and the static absolute
         threshold (which is unchanged at ``1e-6 * spread_hf**2``).
+    hf_acquisition_bonus
+        Constant additive bonus ``+α`` applied to qMFKG's acquisition value
+        on HF candidates (47.3k.3).  When ``None`` (default), the plain
+        qMFKG is constructed and the wrapper code is bypassed entirely
+        (short-circuit: pre-47.3k.3 behaviour preserved bytewise).  When a
+        finite ``α >= 0``, the acquisition is wrapped in
+        :class:`_HFBonusAcquisition` (a thin :class:`qMultiFidelity\
+KnowledgeGradient` subclass that adds ``α * mean_q(hf_mask)`` to
+        ``forward()``'s output, where ``hf_mask`` is the boolean indicator
+        ``X[..., fidelity_dim].round() == target_fidelity_index``).
+        Composes orthogonally with :paramref:`hf_explore_bias` (binary
+        on/off quota), :paramref:`adaptive_hf_explore_bias` (continuous
+        schedule), and :paramref:`adaptive_hf_floor` (cost-table swap).
+        The bonus is a continuous additive lift on the acquisition value
+        directly — qMFKG's ``EIG / cost`` cost-aware utility is unaffected
+        in its denominator, so the GP fit's cheap-vs-HF row balance is not
+        disturbed (unlike the cost-floor mechanism, which destabilised the
+        marginal-likelihood optimiser at high lifts in the 47.3i sweep).
+        Motivation: under high cost ratios (e.g. ``c(HF) / c(cheap) = 100``)
+        the cost-aware utility deprioritises HF picks even when the basin
+        is genuinely under-resolved; a small bonus tips ``EIG / cost + α``
+        toward HF when the basin needs more coverage.  Must be ``>= 0`` and
+        finite; reject negative and NaN with ``ValueError``.  Explicit
+        ``0.0`` traverses the wrapper code with bonus term ``+0`` per HF
+        candidate (no-op contract: bytewise-identical to ``None``).
     num_fantasies
         Forwarded to :func:`build_acquisition`.  Default 64.
     verbose
@@ -1510,6 +1619,22 @@ def run_mfbo(
             "variance_guard_relative_threshold must be a strictly positive "
             f"finite float, got {variance_guard_relative_threshold}"
         )
+    # 47.3k.3: NaN check via self-comparison + non-negative + finite.  ``0.0``
+    # is accepted (no-op contract: traverses the wrapper but adds ``+0`` per
+    # HF candidate, bytewise-identical to ``None`` short-circuit).  Negative
+    # bonuses would push the acquisition AWAY from HF — the opposite of the
+    # mechanism's intent — so we reject them explicitly rather than silently
+    # accepting an inverted contract.
+    if hf_acquisition_bonus is not None:
+        if (
+            hf_acquisition_bonus != hf_acquisition_bonus
+            or hf_acquisition_bonus < 0.0
+            or not np.isfinite(hf_acquisition_bonus)
+        ):
+            raise ValueError(
+                "hf_acquisition_bonus must be None or a non-negative finite "
+                f"float, got {hf_acquisition_bonus}"
+            )
 
     torch.manual_seed(seed)
     np.random.seed(seed)
@@ -1848,6 +1973,7 @@ def run_mfbo(
                 cost_util,
                 target_fid_idx,
                 num_fantasies=num_fantasies,
+                hf_acquisition_bonus=hf_acquisition_bonus,
             )
             # 47.3h: HF priority warmup runs first.  When
             # ``hf_priority_warmup > 0``, force the first that-many
