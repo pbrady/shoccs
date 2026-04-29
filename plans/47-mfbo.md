@@ -931,11 +931,34 @@ cd scripts/stencil_gen && SYMPY_CACHE_SIZE=50000 uv run python -m sweeps bo \
     - **Pass rate `< 0.5`: 0/5** (best 3.5452 at seed 0, far from the basin floor `~0.398`). Confirms the 47.3j empirical floor on the post-47.3k.3.1 `run_mfbo` signature — the explicit `min_acquisition_iterations=5, variance_guard_relative_threshold=1e-3, hf_acquisition_bonus=None` overrides correctly pin the loop's behaviour to the pre-47.3k shape.
     - Calibration baseline successful — no debug needed; proceed to 47.3k.4c.
 
-- [ ] **47.3k.4c** Run the post-47.3k default-only baseline measurement under the harness from 47.3k.4a. 5 seeds × 1 config: `--config 47.3k-default --seeds 0 1 2 3 4`. Measures the isolated effect of 47.3k.1's `min_acquisition_iterations=max(15, K)` and 47.3k.2's `variance_guard_relative_threshold=1e-5` defaults (bonus still off). Expected to land between 47.3j's `3.55` and the variance-guard-defeated `1.25` from 47.3j's empirical-fallback table; documents the "what 47.3k.1+47.3k.2 buy on their own" delta.
+- [x] **47.3k.4c** Run the post-47.3k default-only baseline measurement under the harness from 47.3k.4a. 5 seeds × 1 config: `--config 47.3k-default --seeds 0 1 2 3 4`. Measures the isolated effect of 47.3k.1's `min_acquisition_iterations=max(15, K)` and 47.3k.2's `variance_guard_relative_threshold=1e-5` defaults (bonus still off). Expected to land between 47.3j's `3.55` and the variance-guard-defeated `1.25` from 47.3j's empirical-fallback table; documents the "what 47.3k.1+47.3k.2 buy on their own" delta.
   - **Acceptance:** the 5-row Markdown table is recorded in this item's Done note. The Done note explicitly compares the 47.3k.4c best (or 5-seed median) against 47.3k.4b's best to quantify the 47.3k.1+47.3k.2 delta.
   - **Wall-time estimate:** ~8–12 min for 5 seeds (variance guard delayed by 47.3k.1's default → most seeds run to budget at ~2-3 s/iter ≈ 60-90 s/run). The 12-min upper bound exceeds a single Ralph cycle's 10-min Bash timeout — split into two Bash invocations if the first three seeds exceed ~6 min wall-time: `--seeds 0 1 2` then `--seeds 3 4` (the harness from 47.3k.4a accepts any seed subset; concatenate the two Markdown tables in this item's Done note).
   - File: `plans/47-mfbo.md` (this item's Done note); no production-code change.
   - Test: `cd scripts/stencil_gen && uv run python tools/branin_sweep.py --config 47.3k-default --seeds 0 1 2 3 4` (or split into `--seeds 0 1 2` + `--seeds 3 4` per the wall-time estimate above).
+  - **Done 2026-04-29.** Sweep run as two Bash invocations per the plan-body split guidance (3-seed first batch ≈ 6 min, 2-seed second batch ≈ 4 min; total ~9.6 min wall-time across both, in line with the 8–12 min estimate). All five seeds completed without `error` stop reasons; no GP-fit instability surfaced (only the routine `gen_candidates_scipy ABNORMAL` warnings that BoTorch retries automatically — these are routine for high-cost-ratio MF-KG and not a regression).
+
+    | seed | best_obj | stop_reason | n_HF | elapsed_s |
+    |------|---------:|:-----------:|-----:|----------:|
+    | 0 | 1.5954 | budget | 8 | 108.0 |
+    | 1 | 7.2996 | budget | 9 | 149.8 |
+    | 2 | 1.2548 | budget | 8 |  99.1 |
+    | 3 | 4.5873 | budget | 8 | 140.3 |
+    | 4 | 4.8807 | budget | 9 |  81.3 |
+
+    **Comparison vs 47.3k.4b (47.3j-equivalent baseline):** the 47.3k.1+47.3k.2 default changes (`min_acquisition_iterations=max(15, K)=15`, `variance_guard_relative_threshold=1e-5`) buy a measurable improvement over 47.3j-equiv on 3 of 5 seeds and zero regressions:
+
+    | seed | 47.3j-equiv | 47.3k-default | delta | stop_reason transition |
+    |-----:|------------:|--------------:|------:|:----------------------|
+    | 0 | 3.5452 | **1.5954** | −1.95 (2.2× better) | variance → budget |
+    | 1 | 7.2996 | 7.2996 | 0 (unchanged) | budget → budget |
+    | 2 | 9.4087 | **1.2548** | −8.15 (7.5× better) | variance → budget |
+    | 3 | 4.5873 | 4.5873 | 0 (unchanged) | budget → budget |
+    | 4 | 8.8440 | **4.8807** | −3.96 (1.8× better) | variance → budget |
+
+    **Best objective overall:** 3.5452 → **1.2548** (2.8× improvement, seed 2). **Pass rate `< 0.5`:** 0/5 → 0/5 (unchanged — no seed cleared the basin floor). **Stop-reason distribution:** 47.3j-equiv had 3 variance / 2 budget / 0 error; 47.3k-default has 0 variance / 5 budget / 0 error. This is the expected outcome of 47.3k.1: with `min_acquisition_iterations=15`, the variance guard cannot fire on `budget_evals=30` (only 22 acq slots after init+final, max `len(eval_history) - n_init = 21 < 15+5`), so all runs naturally exhaust the budget. The 5-seed median is 4.5873 (seed 3) — the median is unchanged because the same seed (3) was already the median in 47.3j-equiv, but the *distribution* tightened: best 3.5452 → 1.2548 and worst 9.4087 → 7.2996.
+
+    **Routing implication for 47.3k.4d:** the 47.3k.1+47.3k.2 deltas alone do not clear `< 0.5`, but the path is qualitatively consistent with the diagnostic experiments in 47.3j's empirical-fallback note (`min_acq=20` alone got best `1.25` over 3 seeds; `min_acq=15` over 5 seeds got best `1.25` here — same regime). 47.3k.4d's HF-acquisition-bonus mechanism is the next lever: with the variance guard now reliably defeated, the bonus targets the residual cost-utility under-sampling (8/30 to 9/30 HF picks across the 5 seeds — the basin under-resolution hypothesised in the 47.3k tracker body). Two seeds (1 and 3) are unchanged from 47.3j-equiv, suggesting the GP's posterior over those seeds' Sobol' DOEs is structurally similar across both threshold regimes — bonus may help these specifically by forcing more HF coverage in the basin region.
 
 - [ ] **47.3k.4d** Run the recommended composition measurement under the harness from 47.3k.4a. Two-stage approach:
   - **Stage 1 (mandatory): pick the bonus value.** The 47.3k.3.1 Done note recommends sweeping `bonus ∈ {0.5, 1.0, 2.0}` post-undilution. Run 1 seed × 3 bonus values to identify the smallest bonus that produces a directional HF lift without GP-fit instability: `python tools/branin_sweep.py --config 47.3k-bonus --seeds 0 --bonus 0.5`, then `... --bonus 1.0`, then `... --bonus 2.0`. Record the 3-row table; pick the smallest bonus that produces `n_HF >= 6` (i.e. measurably more HF picks than the bonus-off baseline of ~5/30) and `stop_reason ∈ {"budget", "variance"}` (no `"error"`). Document the choice in the Done note.
