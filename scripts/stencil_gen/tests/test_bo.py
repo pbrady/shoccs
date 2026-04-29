@@ -3073,16 +3073,116 @@ class TestRunMFBO:
             == r_explicit_mean.n_evals_per_fidelity
         )
 
-    def test_recommendation_strategy_voronoi_raises_not_implemented(self):
-        # 47.6b.3.2c.1: pin the ``"voronoi"`` stub.  When 47.6b.3.2c.2
-        # lands and the stub is replaced by the real mechanism, this test
-        # is deleted (and the deletion is the natural point at which
-        # 47.6b.3.2c.2's voronoi-mechanism tests are added).  The match
-        # pattern pins the plan-item reference in the error message so a
-        # mutation that swaps the message between the two stubs would be
-        # caught.
+    # -----------------------------------------------------------------
+    # 47.6b.3.2c.2 — voronoi recommendation mechanism
+    # -----------------------------------------------------------------
+
+    def test_voronoi_recommendation_filters_sentinel_neighbours(self):
+        # 47.6b.3.2c.2: the voronoi mask must exclude grid points within
+        # ``voronoi_radius`` of any recorded sentinel ``x``.  Synthetic
+        # closure injects sentinels for every candidate inside a disk of
+        # radius 0.3 around the origin; the underlying objective
+        # (``norm(x)``) is monotonically increasing outside the disk, so
+        # the unmasked argmin would land at the boundary ``||x||≈0.3``.
+        # With ``voronoi_radius=0.45`` (large enough to cover the disk +
+        # a margin), the masked argmin must shift to ``||x|| >= 0.45``.
+        # Catches a mutation that returns the unmasked argmin even in
+        # ``"voronoi"`` mode (e.g. drops the masking branch).
+
+        def objective(x, m):
+            x = np.asarray(x, dtype=float)
+            if float(np.linalg.norm(x)) < 0.3:
+                return _BO_SENTINEL, 0.001, {"error": "sentinel-disk"}
+            # Smooth function whose unmasked minimum sits at the disk
+            # boundary; with masking, the minimum shifts outward.
+            return float(np.linalg.norm(x)), 0.001, {}
+
+        torch.manual_seed(0)
+        np.random.seed(0)
+        result = run_mfbo(
+            scheme="E2",
+            kernel="classical",
+            report_fields_by_layer={1: "a.lf", 7: "a.hf"},
+            bounds=[(-1.0, 1.0), (-1.0, 1.0)],
+            budget_evals=15,
+            n_init=8,
+            hf_anchors=3,
+            cost_table={1: 0.01, 7: 1.0},
+            seed=0,
+            min_acquisition_iterations=1,
+            objective=objective,
+            recommendation_strategy="voronoi",
+            voronoi_radius=0.45,
+        )
+        # Pin: recommendation lies outside the masked region.  The disk
+        # extends to ``norm < 0.3``; with ``voronoi_radius=0.45``, every
+        # grid point within 0.45 of any sentinel x is excluded — the
+        # closest feasible point can be no closer than ``radius - 0.3``
+        # from the origin in the worst case (sentinel at origin), so
+        # ``norm(best_x) >= radius - max_sentinel_norm = 0.45 - 0.3 =
+        # 0.15``.  Pin the stronger bound ``>= radius - 0.3`` so the
+        # mask's effect is unambiguous.
+        assert float(np.linalg.norm(result.best_x)) >= 0.45 - 0.3, (
+            f"voronoi mask did not shift recommendation outside the "
+            f"sentinel disk: best_x={result.best_x}, "
+            f"norm={np.linalg.norm(result.best_x):.4f}"
+        )
+
+    def test_voronoi_recommendation_default_off_preserves_recommendation(
+        self,
+    ):
+        # 47.6b.3.2c.2: collapse-equivalence template.  When no sentinel
+        # rows exist, the voronoi masking branch is a no-op and the
+        # recommendation is bytewise-identical to the ``"mean"``
+        # strategy.  Mirrors the 47.3j.1 / 47.3j.2 / 47.3k.3 default-off
+        # equivalence pattern.  Catches a mutation that changes the
+        # ``"mean"``-or-empty path of the voronoi branch.
         objective, _ = self._rough_objective()
-        with pytest.raises(NotImplementedError, match="47.6b.3.2c.2"):
+        common = dict(
+            scheme="E2",
+            kernel="classical",
+            report_fields_by_layer=self._hf_canonical_fields(),
+            bounds=[(-1.0, 1.0), (-1.0, 1.0)],
+            budget_evals=15,
+            n_init=8,
+            hf_anchors=3,
+            seed=0,
+            objective=objective,
+        )
+        r_mean = run_mfbo(recommendation_strategy="mean", **common)
+        r_voronoi = run_mfbo(
+            recommendation_strategy="voronoi",
+            voronoi_radius=1e-30,
+            **common,
+        )
+        np.testing.assert_allclose(
+            r_mean.best_x, r_voronoi.best_x, atol=1e-9
+        )
+        assert r_mean.best_objective == r_voronoi.best_objective
+        assert r_mean.stop_reason == r_voronoi.stop_reason
+        assert (
+            r_mean.n_evals_per_fidelity == r_voronoi.n_evals_per_fidelity
+        )
+        # The fallback flag is absent in both runs: ``"mean"`` never sets
+        # it; ``"voronoi"`` only sets it when ALL grid points are masked,
+        # which cannot happen here (no sentinels OR ``radius=1e-30`` so
+        # nothing is within radius of anything except itself).
+        assert "voronoi_fallback" not in r_mean.extras
+        assert "voronoi_fallback" not in r_voronoi.extras
+
+    @pytest.mark.parametrize(
+        "bad",
+        [0.0, -0.1, float("nan"), float("inf"), float("-inf")],
+    )
+    def test_voronoi_radius_validates_range(self, bad):
+        # 47.6b.3.2c.2: strict ``> 0`` and finite.  ``0.0`` would mask
+        # nothing (defeats the mechanism); negatives are nonsensical;
+        # NaN/inf would make the comparison ill-defined.  Validation is
+        # unconditional so the kwarg surface is sound regardless of
+        # which strategy is selected — catches mutations that defer the
+        # check to the strategy branch.
+        objective, _ = self._rough_objective()
+        with pytest.raises(ValueError, match="voronoi_radius"):
             run_mfbo(
                 scheme="E2",
                 kernel="classical",
@@ -3094,7 +3194,62 @@ class TestRunMFBO:
                 seed=0,
                 objective=objective,
                 recommendation_strategy="voronoi",
+                voronoi_radius=bad,
             )
+
+    def test_voronoi_fallback_when_all_grid_points_masked(self):
+        # 47.6b.3.2c.2: when every Sobol' grid point lies within
+        # ``voronoi_radius`` of some sentinel (degenerate cluster covers
+        # the bounded region), the helper falls back to the unmasked
+        # argmin and signals the fallback via
+        # ``BOResult.extras["voronoi_fallback"] = True``.  Construction:
+        # large ``voronoi_radius=10`` (much larger than the box's
+        # diagonal ``2*sqrt(2)≈2.83``), with at least one sentinel from
+        # the synthetic objective.  The fallback must fire AND the
+        # recommendation must remain finite.
+        x_star = np.array([0.3, -0.2])
+
+        def objective(x, m):
+            x = np.asarray(x, dtype=float)
+            # Inject sentinels at HF for candidates near the bounds so
+            # ``_collect_sentinel_x`` finds non-empty rows.
+            if m == 7 and float(np.linalg.norm(x)) > 0.7:
+                return _BO_SENTINEL, 0.001, {"error": "sentinel-edge"}
+            return (
+                float(np.sum((x - x_star) ** 2))
+                + (100.0 if m == 1 else 0.0),
+                0.001,
+                {},
+            )
+
+        torch.manual_seed(0)
+        np.random.seed(0)
+        result = run_mfbo(
+            scheme="E2",
+            kernel="classical",
+            report_fields_by_layer={1: "a.lf", 7: "a.hf"},
+            bounds=[(-1.0, 1.0), (-1.0, 1.0)],
+            budget_evals=15,
+            n_init=8,
+            hf_anchors=3,
+            cost_table={1: 0.01, 7: 1.0},
+            seed=0,
+            min_acquisition_iterations=1,
+            objective=objective,
+            recommendation_strategy="voronoi",
+            voronoi_radius=10.0,
+        )
+        assert result.extras.get("voronoi_fallback") is True, (
+            "expected voronoi_fallback=True when radius covers entire "
+            f"box, got extras={result.extras}"
+        )
+        assert np.all(np.isfinite(result.best_x)), (
+            f"recommendation must remain finite under fallback, got "
+            f"best_x={result.best_x}"
+        )
+        # Recommendation must still lie within bounds.
+        assert np.all(result.best_x >= -1.0)
+        assert np.all(result.best_x <= 1.0)
 
     def test_recommendation_strategy_ucb_raises_not_implemented(self):
         # 47.6b.3.2c.1: pin the ``"ucb"`` stub.  Deleted when 47.6b.3.2c.3

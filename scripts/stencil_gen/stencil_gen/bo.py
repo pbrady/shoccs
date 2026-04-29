@@ -1172,6 +1172,28 @@ def _variance_guard_relative_fired(
     return var_inc < threshold * max(max_var_grid, 1e-30)
 
 
+def _collect_sentinel_x(eval_history: Sequence["BOEval"]) -> np.ndarray | None:
+    """Return the design-vector array of sentinel rows, or ``None`` if empty.
+
+    Filters *eval_history* by the inverse of the 47.3b finite-mask
+    convention (``np.isfinite(e.value) and e.value < _BO_SENTINEL / 2``);
+    rows that fail this predicate are sentinel candidates the
+    ``"voronoi"`` recommendation strategy (47.6b.3.2c.2) excludes from the
+    Sobol' search grid.  Returns a fresh ``(n_sentinel, d)`` numpy array
+    for the helper to consume, or ``None`` when no sentinels exist (the
+    helper's masking branch is then a no-op and the recommendation is
+    bytewise-identical to the ``"mean"`` strategy).
+    """
+    sentinel_xs = [
+        np.asarray(e.x, dtype=float)
+        for e in eval_history
+        if not (np.isfinite(e.value) and e.value < _BO_SENTINEL / 2)
+    ]
+    if not sentinel_xs:
+        return None
+    return np.stack(sentinel_xs)
+
+
 def _recommend_incumbent(
     model: MultiTaskGP,
     bounds: Sequence[tuple[float, float]],
@@ -1181,6 +1203,9 @@ def _recommend_incumbent(
     *,
     n_grid: int = 1024,
     strategy: str = "mean",
+    sentinel_x: np.ndarray | None = None,
+    voronoi_radius: float = 0.1,
+    info_out: dict | None = None,
 ) -> np.ndarray:
     """Return the recommended incumbent on a Sobol' grid of *n_grid* points.
 
@@ -1190,20 +1215,47 @@ def _recommend_incumbent(
     Sobol' engine is scrambled with the supplied *seed* so the recommendation
     is reproducible across runs.
 
-    Other strategies (``"voronoi"``, ``"ucb"``) are reserved for downstream
-    plan items 47.6b.3.2c.2 / 47.6b.3.2c.3 and currently raise
-    :class:`NotImplementedError` so the dispatch surface can be exercised
-    independently of the strategy implementations (47.6b.3.2c.1).
+    The ``"voronoi"`` strategy (47.6b.3.2c.2) takes the same Sobol' grid +
+    posterior mean ranking but masks out grid points within *voronoi_radius*
+    (L2) of any sentinel ``x`` recorded by the caller in *sentinel_x*.  The
+    masked argmin then avoids the residual extrapolation hazard at infeasible
+    boundaries that 47.6b.3.1's clamp does not fully eliminate (the clamp lifts
+    the GP posterior at sentinel rows, but the GP can still extrapolate over
+    nearby Sobol' grid points).  When *sentinel_x* is ``None`` or empty, the
+    masking step is a no-op and the result is bytewise-identical to the
+    ``"mean"`` strategy.  When all grid points fall inside the union of
+    Voronoi cells (degenerate sentinel cluster covers the bounded region),
+    the helper falls back to the unmasked argmin and signals the fallback
+    via ``info_out["voronoi_fallback"] = True`` if *info_out* was supplied.
+
+    The ``"ucb"`` strategy is reserved for plan item 47.6b.3.2c.3 and
+    currently raises :class:`NotImplementedError`.
+
+    Parameters
+    ----------
+    sentinel_x
+        Optional ``(n_sentinel, d)`` array of design vectors that returned
+        sentinel values during the BO loop.  Consumed by the ``"voronoi"``
+        strategy only.  Caller is expected to apply the existing 47.3b
+        finite-mask convention (``np.isfinite(value) and value < _BO_SENTINEL
+        / 2``) so the rows correspond to genuinely infeasible candidates.
+    voronoi_radius
+        L2 mask radius for the ``"voronoi"`` strategy.  Grid points within
+        this distance of any sentinel are excluded from the argmin.  Must be
+        ``> 0`` and finite when used; the caller (``run_mfbo``) validates this
+        on its kwarg surface so callers of this helper directly are responsible
+        for passing a sensible value.
+    info_out
+        Optional mutable dict.  When supplied and the ``"voronoi"`` fallback
+        fires (all grid points masked → unmasked argmin), the helper sets
+        ``info_out["voronoi_fallback"] = True`` so the caller can record the
+        flag in :attr:`BOResult.extras`.
     """
-    if strategy == "voronoi":
-        raise NotImplementedError(
-            "recommendation_strategy='voronoi' lands in 47.6b.3.2c.2"
-        )
     if strategy == "ucb":
         raise NotImplementedError(
             "recommendation_strategy='ucb' lands in 47.6b.3.2c.3"
         )
-    if strategy != "mean":
+    if strategy not in ("mean", "voronoi"):
         raise ValueError(
             "_recommend_incumbent strategy must be one of "
             f"{{'mean', 'voronoi', 'ucb'}}, got {strategy!r}"
@@ -1223,7 +1275,36 @@ def _recommend_incumbent(
     model.eval()
     with torch.no_grad():
         mean = model.posterior(X_full).mean.squeeze(-1)
-    idx = int(torch.argmin(mean).item())
+
+    # 47.6b.3.2c.2: voronoi mask gates grid points by minimum L2 distance to
+    # any recorded sentinel x.  When no sentinels exist (or strategy="mean"),
+    # the masking branch is skipped entirely and behaviour is bytewise-
+    # identical to the pre-47.6b.3.2c "mean" path.
+    if (
+        strategy == "voronoi"
+        and sentinel_x is not None
+        and len(sentinel_x) > 0
+    ):
+        sentinel_t = torch.as_tensor(
+            np.asarray(sentinel_x), dtype=torch.float64
+        )
+        # cdist returns (n_grid, n_sentinel) pairwise L2 distances.
+        dist = torch.cdist(X, sentinel_t)
+        min_dist = dist.min(dim=-1).values
+        feasible_mask = min_dist >= voronoi_radius
+        if int(feasible_mask.sum().item()) > 0:
+            inf_t = torch.tensor(float("inf"), dtype=mean.dtype)
+            masked_mean = torch.where(feasible_mask, mean, inf_t)
+            idx = int(torch.argmin(masked_mean).item())
+        else:
+            # Degenerate: every grid point is within voronoi_radius of some
+            # sentinel.  Fall back to the unmasked argmin and signal the
+            # fallback so the caller can record it in BOResult.extras.
+            idx = int(torch.argmin(mean).item())
+            if info_out is not None:
+                info_out["voronoi_fallback"] = True
+    else:
+        idx = int(torch.argmin(mean).item())
     return X[idx].detach().cpu().numpy()
 
 
@@ -1337,6 +1418,7 @@ def run_mfbo(
     hf_acquisition_bonus: float | None = None,
     clamp_sentinel_rows: bool = True,
     recommendation_strategy: str = "mean",
+    voronoi_radius: float = 0.1,
     num_fantasies: int = 64,
     verbose: bool = False,
     objective: Callable[[np.ndarray, int], tuple[float, float, dict]] | None = None,
@@ -1586,16 +1668,29 @@ KnowledgeGradient` subclass that adds ``α * mean_q(hf_mask)`` to
         (treatment-agnostic occurrence count keyed by external layer
         index — 47.6b.3.1.1).
     recommendation_strategy
-        How to pick the incumbent ``x_inc`` from the GP posterior at HF
-        (47.6b.3.2c.1 plumbing).  Must be one of ``{"mean", "voronoi",
-        "ucb"}``; the comparison is case-sensitive.  Default ``"mean"`` is
-        bytewise-identical to the pre-47.6b.3.2c behaviour: on a 1024-pt
-        Sobol' grid at HF, pick ``argmin_x μ_n(x, m=hf)``.  ``"voronoi"``
-        and ``"ucb"`` are reserved for plan items 47.6b.3.2c.2 /
-        47.6b.3.2c.3 and currently raise :class:`NotImplementedError`
-        from :func:`_recommend_incumbent` (the dispatch surface is
-        exercised here so the kwarg validation and threading are
-        verifiable independently of the strategy implementations).
+        How to pick the incumbent ``x_inc`` from the GP posterior at HF.
+        Must be one of ``{"mean", "voronoi", "ucb"}``; the comparison is
+        case-sensitive.  Default ``"mean"`` is bytewise-identical to the
+        pre-47.6b.3.2c behaviour: on a 1024-pt Sobol' grid at HF, pick
+        ``argmin_x μ_n(x, m=hf)``.  ``"voronoi"`` (47.6b.3.2c.2) takes the
+        same Sobol' grid + posterior mean ranking but masks out grid points
+        within :paramref:`run_mfbo.voronoi_radius` of any recorded sentinel
+        ``x`` (rows in :attr:`eval_history` that fail the existing 47.3b
+        finite-mask convention) — addresses the residual extrapolation
+        hazard at infeasible boundaries that 47.6b.3.1's clamp does not
+        fully eliminate.  When all grid points fall inside the union of
+        Voronoi cells, the helper falls back to the unmasked argmin and
+        sets :attr:`BOResult.extras["voronoi_fallback"] = True`.  ``"ucb"``
+        is reserved for plan item 47.6b.3.2c.3 and still raises
+        :class:`NotImplementedError`.
+    voronoi_radius
+        L2 mask radius for the ``"voronoi"`` strategy (47.6b.3.2c.2).  Must
+        be a strictly positive finite float.  Validated unconditionally on
+        the kwarg surface so the value is always sound regardless of which
+        strategy the caller picks; the ``"mean"`` and ``"ucb"`` branches
+        ignore it.  Default ``0.1`` is sized for designs scaled to
+        ``[-1, 1]^d`` or ``[0, 1]^d``; callers using larger bounds should
+        pass a proportionally larger radius.
     num_fantasies
         Forwarded to :func:`build_acquisition`.  Default 64.
     verbose
@@ -1705,29 +1800,36 @@ KnowledgeGradient` subclass that adds ``α * mean_q(hf_mask)`` to
             )
     # 47.6b.3.2c.1: case-sensitive set membership.  ``"mean"`` is the
     # default and is bytewise-equivalent to the pre-47.6b.3.2c code path;
-    # ``"voronoi"`` / ``"ucb"`` are reserved for plan items 47.6b.3.2c.2 /
-    # 47.6b.3.2c.3.  Case-insensitive matches (``"MEAN"``) are rejected so
-    # a mutation that lower-cases the kwarg is caught loudly.  We surface
-    # the NotImplementedError eagerly here (before the BO loop runs) so
-    # the contract failure is visible to callers — the in-loop variance
-    # guard wraps :func:`_recommend_incumbent` in ``except Exception:`` to
-    # tolerate GP/posterior runtime failures, which would otherwise
-    # silently swallow the strategy stub's :class:`NotImplementedError`.
-    # The dispatch inside :func:`_recommend_incumbent` stays so the helper
-    # is unit-testable directly; 47.6b.3.2c.2 / 47.6b.3.2c.3 will remove
-    # the eager raises here as they land their respective mechanisms.
+    # ``"voronoi"`` (47.6b.3.2c.2) masks the recommendation grid by L2
+    # distance to recorded sentinel ``x``; ``"ucb"`` is reserved for plan
+    # item 47.6b.3.2c.3 and is still surfaced eagerly because the in-loop
+    # variance guard wraps :func:`_recommend_incumbent` in ``except
+    # Exception:`` and would otherwise silently swallow the stub's
+    # :class:`NotImplementedError`.  Case-insensitive matches (``"MEAN"``)
+    # are rejected so a mutation that lower-cases the kwarg is caught
+    # loudly.
     if recommendation_strategy not in {"mean", "voronoi", "ucb"}:
         raise ValueError(
             "recommendation_strategy must be one of "
             f"{{'mean', 'voronoi', 'ucb'}}, got {recommendation_strategy!r}"
         )
-    if recommendation_strategy == "voronoi":
-        raise NotImplementedError(
-            "recommendation_strategy='voronoi' lands in 47.6b.3.2c.2"
-        )
     if recommendation_strategy == "ucb":
         raise NotImplementedError(
             "recommendation_strategy='ucb' lands in 47.6b.3.2c.3"
+        )
+    # 47.6b.3.2c.2: ``voronoi_radius`` validation.  Strict ``> 0`` (a zero
+    # radius would mask nothing — defeats the mechanism).  NaN check via
+    # self-comparison; finiteness rejects ``inf``/``-inf``.  Validated
+    # unconditionally so the kwarg surface is sound regardless of strategy
+    # (catches mutations that rely on validation-when-used).
+    if (
+        voronoi_radius != voronoi_radius
+        or voronoi_radius <= 0.0
+        or not np.isfinite(voronoi_radius)
+    ):
+        raise ValueError(
+            "voronoi_radius must be a strictly positive finite float, "
+            f"got {voronoi_radius}"
         )
 
     torch.manual_seed(seed)
@@ -2005,6 +2107,13 @@ KnowledgeGradient` subclass that adds ``α * mean_q(hf_mask)`` to
             Y_hf = Y_train[X_train[:, d] == target_fid_idx]
             if Y_hf.size < 2:
                 raise _SkipGuard
+            # 47.6b.3.2c.2: thread sentinel x's into the helper for the
+            # ``"voronoi"`` strategy.  ``_collect_sentinel_x`` filters
+            # ``eval_history`` by the existing 47.3b finite-mask convention
+            # (``np.isfinite(value) and value < _BO_SENTINEL/2``); the
+            # helper internally no-ops when the strategy is ``"mean"`` or
+            # the array is empty.
+            sentinel_x_loop = _collect_sentinel_x(eval_history)
             x_inc_loop = _recommend_incumbent(
                 model,
                 bounds_t,
@@ -2012,6 +2121,8 @@ KnowledgeGradient` subclass that adds ``α * mean_q(hf_mask)`` to
                 d,
                 seed,
                 strategy=recommendation_strategy,
+                sentinel_x=sentinel_x_loop,
+                voronoi_radius=voronoi_radius,
             )
             X_inc_full = torch.cat(
                 [
@@ -2214,8 +2325,12 @@ KnowledgeGradient` subclass that adds ``α * mean_q(hf_mask)`` to
         evaluate(x_next, fid_next)
 
     # Final recommendation: posterior mean over a 1024-pt Sobol' grid at HF.
+    # 47.6b.3.2c.2: ``info_out`` collects the optional ``voronoi_fallback``
+    # flag from the helper and we propagate it to ``BOResult.extras`` below.
+    final_recommend_info: dict = {}
     if final_model is not None:
         try:
+            sentinel_x_final = _collect_sentinel_x(eval_history)
             x_inc = _recommend_incumbent(
                 final_model,
                 bounds_t,
@@ -2223,6 +2338,9 @@ KnowledgeGradient` subclass that adds ``α * mean_q(hf_mask)`` to
                 d,
                 seed,
                 strategy=recommendation_strategy,
+                sentinel_x=sentinel_x_final,
+                voronoi_radius=voronoi_radius,
+                info_out=final_recommend_info,
             )
         except Exception:
             x_inc = X_init[0].copy() if len(X_init) else np.zeros(d)
@@ -2288,6 +2406,14 @@ KnowledgeGradient` subclass that adds ``α * mean_q(hf_mask)`` to
         }
     else:
         extras_payload = {"n_sentinel_filtered": sentinel_count}
+
+    # 47.6b.3.2c.2: when the ``"voronoi"`` recommendation fell back to
+    # unmasked argmin (every Sobol' grid point was within ``voronoi_radius``
+    # of some sentinel), surface the flag in extras so the caller can
+    # detect the degenerate case.  Absent under any other strategy or when
+    # the masking step found feasible candidates.
+    if final_recommend_info.get("voronoi_fallback"):
+        extras_payload["voronoi_fallback"] = True
 
     return BOResult(
         best_x=np.asarray(x_inc, dtype=float).copy(),
