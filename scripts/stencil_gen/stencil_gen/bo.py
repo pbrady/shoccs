@@ -967,6 +967,46 @@ def build_acquisition(
 # --- end-to-end BO driver ----------------------------------------------------
 
 
+def _resolve_min_acq_iters(
+    min_acquisition_iterations: int | None, K: int
+) -> int:
+    """Resolve :func:`run_mfbo`'s ``min_acquisition_iterations`` default.
+
+    Returns ``min_acquisition_iterations`` verbatim when not ``None``;
+    otherwise returns ``max(_MIN_ACQ_ITERATIONS_FLOOR, K)`` — the documented
+    default that ensures every fidelity gets a chance to be picked under
+    cost-aware acquisition (``>= K``) and that the GP's posterior at the
+    incumbent has time to become non-uniform after the DOE
+    (``>= _MIN_ACQ_ITERATIONS_FLOOR``).
+
+    Extracted from :func:`run_mfbo` in 47.3k.1.1 so the default-resolution
+    contract is testable in isolation: the prior conditional-assertion
+    integration tests could not distinguish a ``"variance"``-fires-late
+    path (correct) from a ``"variance"``-cannot-fire path (mutation
+    silently uses the floor instead of the kwarg).  Mirrors the
+    :func:`_stagnation_triggered` extraction pattern from 47.3e.
+
+    Validation of the kwarg's type/range lives in :func:`run_mfbo`, not
+    here — the helper inherits whatever production code passes through.
+
+    Parameters
+    ----------
+    min_acquisition_iterations
+        The user-supplied kwarg value, or ``None`` to request the default.
+    K
+        Number of fidelity levels (``len(fidelity_levels)`` in
+        :func:`run_mfbo`).  Used as the lower bound on the resolved floor.
+
+    Returns
+    -------
+    int
+        Resolved minimum acquisition-iteration count.
+    """
+    if min_acquisition_iterations is not None:
+        return min_acquisition_iterations
+    return max(_MIN_ACQ_ITERATIONS_FLOOR, K)
+
+
 def _stagnation_triggered(
     hf_evals: Sequence[BOEval], window: int = 10
 ) -> bool:
@@ -1456,10 +1496,8 @@ def run_mfbo(
     # budget-exit) — the GP-uniform-collapse failure mode the 47.3d
     # combined absolute+relative criterion only partially defends against
     # needs more acquisition headroom on smooth synthetic objectives.
-    min_acq_iters = (
-        min_acquisition_iterations
-        if min_acquisition_iterations is not None
-        else max(_MIN_ACQ_ITERATIONS_FLOOR, K)
+    min_acq_iters = _resolve_min_acq_iters(
+        min_acquisition_iterations, K
     )
 
     # Resolve n_init to the same default that build_initial_design uses

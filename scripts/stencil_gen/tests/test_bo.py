@@ -15,6 +15,7 @@ from botorch.acquisition.cost_aware import InverseCostWeightedUtility
 from stencil_gen.bo import (
     _BO_SENTINEL,
     _MIN_ACQ_ITERATIONS_FLOOR,
+    _resolve_min_acq_iters,
     _stagnation_triggered,
     BOEval,
     BOResult,
@@ -2544,3 +2545,61 @@ class TestStagnationGuard:
         evals = [_hf_eval(v) for v in values]
         # best_idx = 0, threshold = 11 - 11 = 0 ⇒ 0 <= 0 ⇒ trigger.
         assert _stagnation_triggered(evals) is True
+
+
+class TestResolveMinAcqIters:
+    """Plan 47.3k.1.1: pure-helper coverage for ``_resolve_min_acq_iters``.
+
+    The pre-extraction integration tests (``test_variance_guard_min_acq_*``)
+    used a conditional ``if result.stop_reason == "variance":`` assertion that
+    silently skipped when variance did not fire — neither test could
+    distinguish a "kwarg honoured but variance happened not to fire" path
+    from a "kwarg silently ignored" mutation.  Extracting the resolution into
+    a tiny pure helper makes the contract bytewise-verifiable.
+    """
+
+    def test_resolve_default_floor_K_below_floor(self):
+        # K=2 is below the floor (15); resolved value is the floor.
+        assert _resolve_min_acq_iters(None, K=2) == _MIN_ACQ_ITERATIONS_FLOOR
+
+    def test_resolve_default_floor_K_at_floor(self):
+        # K equal to floor: max collapses to either; assertion is on value.
+        assert (
+            _resolve_min_acq_iters(None, K=_MIN_ACQ_ITERATIONS_FLOOR)
+            == _MIN_ACQ_ITERATIONS_FLOOR
+        )
+
+    def test_resolve_default_floor_K_above_floor(self):
+        # K above the floor: K wins (per ``max(_FLOOR, K)``).  Catches a
+        # mutation that swaps ``max`` for ``min``.
+        K_high = _MIN_ACQ_ITERATIONS_FLOOR + 5
+        assert _resolve_min_acq_iters(None, K=K_high) == K_high
+
+    def test_resolve_explicit_kwarg_passthrough_typical(self):
+        # Explicit value below the default floor: honoured verbatim.  This
+        # is the case the integration test ``test_variance_guard_min_acq_
+        # kwarg_explicit_overrides_new_default`` advertised but could not
+        # actually pin.
+        assert _resolve_min_acq_iters(5, K=2) == 5
+
+    def test_resolve_explicit_kwarg_passthrough_zero(self):
+        # ``0`` is a legal explicit value (the kwarg honour applies even
+        # when the explicit value is below ``K`` — production validation
+        # of the kwarg's value lives in :func:`run_mfbo`, not here).
+        assert _resolve_min_acq_iters(0, K=5) == 0
+
+    def test_resolve_explicit_kwarg_passthrough_large(self):
+        # Explicit value far above the default floor: honoured.
+        assert _resolve_min_acq_iters(100, K=2) == 100
+
+    def test_resolve_explicit_kwarg_does_not_apply_floor(self):
+        # The ``max(_FLOOR, K)`` floor only applies when the kwarg is None;
+        # explicit values bypass the floor entirely.  Catches a mutation
+        # that always returns ``max(min_acquisition_iterations or 0,
+        # _FLOOR, K)`` (i.e. always applies the floor).
+        explicit = 3
+        assert _resolve_min_acq_iters(explicit, K=10) == explicit
+        assert (
+            _resolve_min_acq_iters(explicit, K=2)
+            != max(_MIN_ACQ_ITERATIONS_FLOOR, 2)
+        )
