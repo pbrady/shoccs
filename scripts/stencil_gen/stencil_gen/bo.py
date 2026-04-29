@@ -1045,6 +1045,46 @@ def _stagnation_triggered(
     return best_idx <= len(hf_evals) - (window + 1)
 
 
+def _variance_guard_relative_fired(
+    var_inc: float, max_var_grid: float, threshold: float
+) -> bool:
+    """Return True when the variance guard's relative criterion fires.
+
+    The relative criterion is
+    ``var_inc < threshold * max(max_var_grid, 1e-30)``.  The
+    ``max(..., 1e-30)`` floor protects against ``max_var_grid == 0`` (a
+    degenerate posterior on the Sobol' grid) — without the floor, a
+    zero-grid-variance would force ``relative_fired = True`` regardless of
+    *var_inc*, giving a spurious early exit.
+
+    Extracted from :func:`run_mfbo` in 47.3k.2.1 so the relative-threshold
+    contract is testable in isolation.  The prior integration test
+    (``test_variance_guard_relative_threshold_kwarg``) admitted a vacuous
+    no-effect-observed path that could not distinguish a "kwarg honoured"
+    correct case from a "kwarg silently ignored, hardcoded constant"
+    mutation.  Mirrors :func:`_stagnation_triggered` and
+    :func:`_resolve_min_acq_iters`.
+
+    Parameters
+    ----------
+    var_inc : float
+        Posterior variance at the incumbent (target fidelity).
+    max_var_grid : float
+        Maximum posterior variance over the variance-guard's Sobol' grid.
+    threshold : float
+        Relative-threshold multiplier (``run_mfbo``'s
+        ``variance_guard_relative_threshold`` kwarg).  Validation lives in
+        :func:`run_mfbo`; this helper inherits whatever production code
+        passes through.
+
+    Returns
+    -------
+    bool
+        True when the relative criterion fires (variance guard exit allowed).
+    """
+    return var_inc < threshold * max(max_var_grid, 1e-30)
+
+
 def _recommend_incumbent(
     model: MultiTaskGP,
     bounds: Sequence[tuple[float, float]],
@@ -1724,8 +1764,8 @@ def run_mfbo(
                 float(np.max(Y_hf)) - float(np.min(Y_hf)), 1e-12
             )
             absolute_fired = var_inc < 1e-6 * spread_hf ** 2
-            relative_fired = var_inc < (
-                variance_guard_relative_threshold * max(max_var, 1e-30)
+            relative_fired = _variance_guard_relative_fired(
+                var_inc, max_var, variance_guard_relative_threshold
             )
             if absolute_fired and relative_fired:
                 stop_reason = "variance"

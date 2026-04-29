@@ -18,6 +18,7 @@ from stencil_gen.bo import (
     _MIN_ACQ_ITERATIONS_FLOOR,
     _resolve_min_acq_iters,
     _stagnation_triggered,
+    _variance_guard_relative_fired,
     BOEval,
     BOResult,
     DEFAULT_COST_TABLE,
@@ -2693,3 +2694,71 @@ class TestResolveMinAcqIters:
             _resolve_min_acq_iters(explicit, K=2)
             != max(_MIN_ACQ_ITERATIONS_FLOOR, 2)
         )
+
+
+class TestVarianceGuardRelative:
+    """Plan 47.3k.2.1: pure-helper coverage for ``_variance_guard_relative_fired``.
+
+    The pre-extraction integration test
+    (``test_variance_guard_relative_threshold_kwarg`` Part 2) admitted a
+    vacuous "neither threshold fires variance" path where both runs
+    reached budget with ``stop_reason="budget"`` — neither the kwarg
+    contract nor the directional ``n_tight >= n_loose`` assertion could
+    distinguish a "kwarg honoured but variance happened not to fire"
+    correct case from a "kwarg silently ignored, hardcoded constant"
+    mutation.  Extracting the criterion into a tiny pure helper makes the
+    contract bytewise-verifiable.  Mirrors :class:`TestResolveMinAcqIters`
+    (47.3k.1.1) and :class:`TestStagnationGuard` (47.3e).
+    """
+
+    def test_relative_fires_below_threshold(self):
+        # var_inc 1e3x below threshold * max_var_grid: relative criterion
+        # fires (variance guard exit allowed).
+        assert _variance_guard_relative_fired(
+            var_inc=1e-6, max_var_grid=1.0, threshold=1e-3
+        ) is True
+
+    def test_relative_does_not_fire_above_threshold(self):
+        # var_inc above threshold * max_var_grid: criterion does not fire.
+        assert _variance_guard_relative_fired(
+            var_inc=0.5, max_var_grid=1.0, threshold=1e-3
+        ) is False
+
+    def test_relative_max_var_floor_protects_zero_grid(self):
+        # ``max_var_grid == 0.0`` (a degenerate posterior) is floored at
+        # 1e-30 so the comparison becomes ``var_inc < threshold * 1e-30``;
+        # for a non-trivial threshold and var_inc above 1e-30 this is
+        # False — the floor blocks the spurious "always fire" case.
+        # Catches a mutation that drops ``max(max_var_grid, 1e-30)``: under
+        # the broken version, ``threshold * 0.0 == 0.0`` and any non-zero
+        # var_inc would yield ``var_inc < 0.0`` ⇒ False, but a zero
+        # var_inc would yield ``0.0 < 0.0`` ⇒ False either way; the
+        # observable difference is at very-small-but-positive var_inc
+        # values where the floor admits a defensible False.
+        assert _variance_guard_relative_fired(
+            var_inc=1e-30, max_var_grid=0.0, threshold=1e-5
+        ) is False
+
+    def test_relative_threshold_kwarg_passthrough_directional(self):
+        # Same (var_inc, max_var_grid); two different thresholds yield
+        # different verdicts.  Catches mutations that ignore the
+        # threshold and hardcode any constant.
+        assert _variance_guard_relative_fired(
+            var_inc=1e-2, max_var_grid=1.0, threshold=1e-1
+        ) is True
+        assert _variance_guard_relative_fired(
+            var_inc=1e-2, max_var_grid=1.0, threshold=1e-3
+        ) is False
+
+    def test_relative_strict_less_than_at_boundary(self):
+        # The comparison is strict ``<``, not ``<=``: at exact equality
+        # the criterion does NOT fire.  ``var_inc == threshold *
+        # max_var_grid`` ⇒ False.  Catches a mutation that swaps ``<``
+        # for ``<=``.
+        assert _variance_guard_relative_fired(
+            var_inc=1e-3, max_var_grid=1.0, threshold=1e-3
+        ) is False
+        # And a hair below the boundary fires:
+        assert _variance_guard_relative_fired(
+            var_inc=1e-3 - 1e-12, max_var_grid=1.0, threshold=1e-3
+        ) is True
