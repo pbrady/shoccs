@@ -908,11 +908,28 @@ cd scripts/stencil_gen && SYMPY_CACHE_SIZE=50000 uv run python -m sweeps bo \
       - **Per-seed try/except with `traceback.print_exc(file=sys.stderr)` plus a Markdown error row.** A single seed crash (e.g., `RuntimeError` from `optimize_acqf_mixed`'s scipy backend at extreme cost ratios) prints the traceback to stderr but appends `| <seed> | error | <Type>: <msg> | - | - |` to stdout, so the table row count always matches the seed count. Allows 47.3k.4c's "split into two Bash invocations" workflow to recover gracefully if mid-sweep failures happen.
       - **Determinism:** harness sets `torch.manual_seed(seed)` and `np.random.seed(seed)` *before each* `run_mfbo` invocation in addition to the `seed=` kwarg; defends against any out-of-band torch RNG draws inside BoTorch internals between seeds. Confirmed reproducible: re-running `--config 47.3j-equiv --seeds 0` yielded identical `best_obj=3.5452` (one decimal of clarity).
 
-- [ ] **47.3k.4b** Run the 47.3j-equivalent baseline measurement under the harness from 47.3k.4a. 5 seeds × 1 config: `--config 47.3j-equiv --seeds 0 1 2 3 4`. The 47.3j Done note table (line 580–586) reported best `3.55` at seed 0 (variance), 0/5 pass `< 0.5`. The 47.3k.4b run must reproduce this within seed-level noise — if the new `run_mfbo` signature changed any default behaviour invisibly between 47.3j and 47.3k.3.1, the explicit `min_acquisition_iterations=5, variance_guard_relative_threshold=1e-3` overrides should still pin the loop's behaviour to the 47.3j shape.
+- [x] **47.3k.4b** Run the 47.3j-equivalent baseline measurement under the harness from 47.3k.4a. 5 seeds × 1 config: `--config 47.3j-equiv --seeds 0 1 2 3 4`. The 47.3j Done note table (line 580–586) reported best `3.55` at seed 0 (variance), 0/5 pass `< 0.5`. The 47.3k.4b run must reproduce this within seed-level noise — if the new `run_mfbo` signature changed any default behaviour invisibly between 47.3j and 47.3k.3.1, the explicit `min_acquisition_iterations=5, variance_guard_relative_threshold=1e-3` overrides should still pin the loop's behaviour to the 47.3j shape.
   - **Acceptance:** the 5-row Markdown table is recorded in this item's Done note. Best objective, stop_reason distribution, and elapsed times are all consistent with the 47.3j Done-note table. **Critical: this is the calibration baseline — if the numbers diverge wildly (e.g. all seeds suddenly converge), debug `run_mfbo`'s default-resolution path before proceeding to 47.3k.4c.**
   - **Wall-time estimate:** ~5–8 min for 5 seeds (variance-guard early exits make this faster than the budget-exhaust runs in 47.3k.4c/d).
   - File: `plans/47-mfbo.md` (this item's Done note); no production-code change.
   - Test: `cd scripts/stencil_gen && uv run python tools/branin_sweep.py --config 47.3j-equiv --seeds 0 1 2 3 4`.
+  - **Done 2026-04-29.** Calibration baseline reproduced bytewise from the 47.3j Done-note table. Wall-time was 351 s (5.85 min) for the full 5-seed sweep, in line with the plan body's 5–8 min estimate.
+
+    | seed | best_obj | stop_reason | n_HF | elapsed_s |
+    |------|---------:|:-----------:|-----:|----------:|
+    | 0 | 3.5452 | variance | 8 | 34.0 |
+    | 1 | 7.2996 | budget   | 9 | 147.9 |
+    | 2 | 9.4087 | variance | 8 | 19.3 |
+    | 3 | 4.5873 | budget   | 8 | 140.4 |
+    | 4 | 8.8440 | variance | 8 | 9.7 |
+
+    Comparison vs the 47.3j Done-note table at lines 580–586:
+    - `best_obj` — bytewise-identical for all 5 seeds (3.5452 / 7.2996 / 9.4087 / 4.5873 / 8.8440).
+    - `stop_reason` — bytewise-identical (variance / budget / variance / budget / variance).
+    - `n_HF` — bytewise-identical (8 / 9 / 8 / 8 / 8).
+    - `elapsed_s` — within ±1.5 s of the 47.3j table (35.5/147.9 vs 34.0/147.9 etc.) — host-load-driven jitter as expected.
+    - **Pass rate `< 0.5`: 0/5** (best 3.5452 at seed 0, far from the basin floor `~0.398`). Confirms the 47.3j empirical floor on the post-47.3k.3.1 `run_mfbo` signature — the explicit `min_acquisition_iterations=5, variance_guard_relative_threshold=1e-3, hf_acquisition_bonus=None` overrides correctly pin the loop's behaviour to the pre-47.3k shape.
+    - Calibration baseline successful — no debug needed; proceed to 47.3k.4c.
 
 - [ ] **47.3k.4c** Run the post-47.3k default-only baseline measurement under the harness from 47.3k.4a. 5 seeds × 1 config: `--config 47.3k-default --seeds 0 1 2 3 4`. Measures the isolated effect of 47.3k.1's `min_acquisition_iterations=max(15, K)` and 47.3k.2's `variance_guard_relative_threshold=1e-5` defaults (bonus still off). Expected to land between 47.3j's `3.55` and the variance-guard-defeated `1.25` from 47.3j's empirical-fallback table; documents the "what 47.3k.1+47.3k.2 buy on their own" delta.
   - **Acceptance:** the 5-row Markdown table is recorded in this item's Done note. The Done note explicitly compares the 47.3k.4c best (or 5-seed median) against 47.3k.4b's best to quantify the 47.3k.1+47.3k.2 delta.
