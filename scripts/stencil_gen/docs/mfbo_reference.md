@@ -127,7 +127,7 @@ fields:
 | `seed` | `int` | RNG seed (forwarded to torch + numpy + Sobol') |
 | `converged` | `bool` | True iff variance / stagnation guard fired |
 | `stop_reason` | `str` | `"budget" \| "variance" \| "stagnation" \| "error"` |
-| `extras` | `dict` | Driver diagnostics: `n_sentinel_filtered`, `baseline`, `cpp_validation` |
+| `extras` | `dict` | Driver diagnostics: `n_sentinel_per_fidelity`, `n_sentinel_filtered`, `voronoi_fallback`, `baseline`, `cpp_validation`. `n_sentinel_per_fidelity` is set when `clamp_sentinel_rows=True` (the default; mutually exclusive with `n_sentinel_filtered`, which is set when `clamp_sentinel_rows=False`). `voronoi_fallback` is set to `True` only when `recommendation_strategy="voronoi"` and the helper falls back to an unmasked argmin because every grid point fell inside the union of Voronoi cells around recorded sentinel `x` rows. `baseline` and `cpp_validation` are populated by the corresponding CLI flags. |
 
 ### 3.3 `make_multi_fidelity_objective`
 
@@ -184,6 +184,10 @@ def run_mfbo(
     variance_guard_relative_threshold: float = 1e-5,
     hf_priority_warmup: int = 0,
     hf_acquisition_bonus: float | None = None,
+    clamp_sentinel_rows: bool = True,
+    recommendation_strategy: str = "mean",
+    voronoi_radius: float = 0.1,
+    ucb_beta: float = 2.0,
     verbose: bool = False,
     objective: Callable[[np.ndarray, int], tuple[float, float, dict]] | None = None,
 ) -> BOResult
@@ -204,11 +208,42 @@ then loops:
 5. Check stopping criteria (budget / variance / stagnation).
 6. Append to training data.
 
-After loop exit, `_recommend_incumbent` picks `x_inc = argmin_x μ_n(x,
-m=hf)` over a 1024-point Sobol' grid (posterior mean, not best-observed
-— standard for noisy / multi-fidelity GPs), then a final HF evaluation at
-`x_inc` populates `best_objective` and `best_report` from real cascade
-data rather than GP posterior.
+After loop exit, `_recommend_incumbent` picks `x_inc` over a 1024-point
+Sobol' grid at HF.  The ranking depends on `recommendation_strategy`
+(`"mean"` is the default — the historical posterior-mean argmin):
+
+- **`"mean"`** (default; pre-47.6b.3.2c behaviour) — `x_inc = argmin_x
+  μ_n(x, m=hf)`.  Posterior mean, not best-observed — standard for noisy
+  / multi-fidelity GPs.
+- **`"voronoi"`** (47.6b.3.2c.2) — same posterior-mean ranking as
+  `"mean"`, but grid points within `voronoi_radius` (L2) of any sentinel
+  `x` row in `eval_history` are masked out; the lowest-mean candidate
+  among the survivors wins.  When every grid point falls inside the
+  union of Voronoi cells (e.g. sentinels cover the whole bounded box),
+  the helper falls back to the unmasked argmin and sets
+  `extras["voronoi_fallback"] = True`.
+- **`"ucb"`** (47.6b.3.2c.3) — `x_inc = argmin_x (μ_n(x) + ucb_beta *
+  σ_n(x))`.  Upper-confidence bound on the *minimisation* target — the
+  pessimistic estimate; lower mean wins, lower variance wins, so
+  high-variance regions (sentinel boundaries on the clamped GP) are
+  penalised.  `ucb_beta=0.0` collapses to `"mean"` exactly (no-op
+  default-off contract).  Default `ucb_beta=2.0` follows the Auer et
+  al. 2002 bandit-maximisation convention with the sign adjusted for
+  minimisation.
+
+`clamp_sentinel_rows=True` (the default; 47.6b.3.1) keeps sentinel rows
+inside the GP fit by replacing the sentinel value with `max(Y_finite) +
+3 * std(Y_finite)` per fidelity, so the GP learns "infeasible regions
+return very high objective" and the recommendation argmin avoids them
+naturally.  When fewer than 2 finite rows exist for a fidelity, that
+fidelity's sentinel rows fall back to filtering instead.  Setting
+`clamp_sentinel_rows=False` reverts to the pre-47.6b.3.1
+filter-only contract; `extras["n_sentinel_per_fidelity"]` is replaced
+by `extras["n_sentinel_filtered"]` in that case.
+
+After the strategy picks `x_inc`, a final HF evaluation populates
+`best_objective` and `best_report` from real cascade data rather than
+GP posterior.
 
 `budget_evals` and `budget_seconds` are mutually exclusive; one must be
 set.  `cost_table` defaults to `DEFAULT_COST_TABLE`.
