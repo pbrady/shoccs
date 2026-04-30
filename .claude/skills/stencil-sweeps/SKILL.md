@@ -54,6 +54,9 @@ uv run python -m sweeps optimize --scheme E4 --kernel tension --objective layer_
 # NSGA-II multi-objective Pareto front over 2-3 stability metrics (plan 45); persists to sweeps/pareto_fronts/
 uv run python -m sweeps pareto --scheme E4 --kernel classical --objectives layer1.boundary_gv_err layer_bl42.max_spectral_abscissa --bounds -2 2 0.05 2 --pop-size 40 --n-gen 30 --seed 1 --persist
 
+# Multi-fidelity Bayesian optimization over the cascade (plan 47, BoTorch qMFKG); persists to sweeps/bo_runs/
+uv run python -m sweeps bo --scheme E4 --kernel classical --objective layer7.max_spectral_abscissa --cheap-fidelities 1 3 5 6 --bounds -2 2 0.05 2 --budget-evals 60 --seed 1 --persist
+
 # Run all sweeps (quick mode for smoke testing)
 uv run python -m sweeps all --quick
 
@@ -90,6 +93,8 @@ uv run python -m sweeps epsilon --scheme E2 --update-known-values
 | `sweeps/comparison.py` | Multi-method comparison tables |
 | `sweeps/alpha_extraction.py` | Extract stencil alphas from RBF weights |
 | `sweeps/brady2d_sweep.py` | Brady-Livescu §4.3 2D sweep; `--validate-with-cpp` re-runs top-3 survivors through the compiled C++ solver (L8) |
+| `sweeps/bo.py` | Multi-fidelity Bayesian optimization driver (plan 47); BoTorch qMFKG over the cascade with cost-aware acquisition and ICM kernel |
+| `sweeps/_bo_io.py` | JSON serialization for `BOResult` → `sweeps/bo_runs/<scheme>_<kernel>_<mangled>_<seed>.json` |
 
 ## When to Use
 
@@ -99,9 +104,11 @@ uv run python -m sweeps epsilon --scheme E2 --update-known-values
 - Diagnosing why a scheme is unstable at certain parameters
 - Optimizing boundary-closure parameters against a `StabilityReport` field (single-objective + feasibility cliff; staged cheap-inner + expensive-validator pipeline); persists to `known_values.json["brady2d_optima"]`. See `scripts/stencil_gen/docs/optimization_reference.md`.
 - Multi-objective Pareto exploration when two metrics genuinely conflict (e.g., `layer1.boundary_gv_err` vs `layer_bl42.max_spectral_abscissa`); use `sweeps pareto` (NSGA-II via pymoo). See `scripts/stencil_gen/docs/pareto_reference.md`.
+- Multi-fidelity Bayesian optimization when expensive-validator wall-time dominates and you want a principled cost-aware HF/cheap split (instead of `optimize --method staged`'s hand-coded top-K threshold); use `sweeps bo` (BoTorch qMFKG with discrete-fidelity ICM kernel). See `scripts/stencil_gen/docs/mfbo_reference.md`.
 
 ## Detailed Reference
 
 For complete CLI documentation, JSON schema, and adding new sweeps, see:
 - `scripts/stencil_gen/docs/sweeps_reference.md`
 - `scripts/stencil_gen/docs/pareto_reference.md` (plan 45 NSGA-II multi-objective driver)
+- `scripts/stencil_gen/docs/mfbo_reference.md` (plan 47 multi-fidelity Bayesian optimization driver)
