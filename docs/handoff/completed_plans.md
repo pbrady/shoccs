@@ -198,11 +198,14 @@ result = run_staged_optimize("E4", "classical", "layer6.transient_growth_bound",
                              DEFAULT_BOUNDS[("E4", "classical")])
 ```
 
+### Delivered after this snapshot
+
+- Multi-objective Pareto (pymoo NSGA-II) — plan 45, landed 2026-04-24; see `pareto_reference.md`.
+- Multi-fidelity BO — plan 47, landed 2026-04-30; see `mfbo_reference.md`.
+
 ### Deferred
 
-- Multi-objective Pareto (pymoo NSGA-II) — plan 45.
-- Multi-fidelity BO — plan 46.
-- Brady-Livescu 1D Euler reproduction — plan 47.
+- Brady-Livescu 1D Euler reproduction — plan 48 (next).
 - E2 classical-α (4D) optimization — future.
 - `tension-penalty` / `mixed-epsilon` kernels through the layered cascade (`brady2d_stability_score` routes only `classical`, `tension`, `gaussian`, `multiquadric`).
 

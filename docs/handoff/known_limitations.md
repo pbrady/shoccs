@@ -115,11 +115,11 @@ See `operating_conventions.md` for details.
 
 ### No multi-objective optimization (yet)
 
-Deferred to plan 45. Single-objective + feasibility cliff covers ~80% of use cases cleanly.
+Delivered in plan 45 (`python -m sweeps pareto`); see `pareto_reference.md`. Single-objective + feasibility cliff still covers ~80% of use cases cleanly when the trade-offs aren't material.
 
 ### No multi-fidelity Bayesian optimization
 
-Deferred to plan 47. The manual cascade (staged cheap-inner + expensive-validator) is a pragmatic approximation.
+Delivered in plan 47 (`python -m sweeps bo`); see `mfbo_reference.md`. The manual cascade (staged cheap-inner + expensive-validator via `run_staged_optimize`) remains supported as the simpler alternative.
 
 ### No Brady-Livescu 1D Euler objective
 

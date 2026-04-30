@@ -10,11 +10,12 @@ SHOCCS is a C++ Cartesian cut-cell high-order PDE solver (`/workspace/src/`). Th
 - Optimizes boundary closures via scipy (Nelder-Mead, COBYQA, SHGO, differential_evolution, staged multi-fidelity)
 - Validates winners end-to-end by running the compiled C++ `shoccs` solver with the discovered parameters passed through Lua
 
-## Recent state (2026-04-24)
+## Recent state (2026-04-24, refreshed 2026-04-30)
 
-- Plans 40–45 are all substantially complete. Git log from commit `843c974` forward shows the full trail.
-- The devcontainer was rebuilt with `pymoo>=0.6` and `nlopt>=2.7` added to `scripts/stencil_gen/pyproject.toml` (plus `swig` added to the Dockerfile for nlopt's build).
-- Plan 45 (multi-objective Pareto via NSGA-II) landed its implementation tail: `sweeps pareto` CLI wired through `sweeps/__main__.py`, calibration JSONs committed under `sweeps/pareto_fronts/`, `TestRegressionBrady2DPareto` passing under deterministic ARPACK, and `pareto_reference.md` + cross-links live. Items 45.7c–e (meta.md `D-Opt-1` entry and two `.claude/skills/` updates) are the final remaining tail.
+- Plans 40–47 are all `[x]`. Git log from commit `843c974` forward shows the full trail.
+- The devcontainer was rebuilt with `pymoo>=0.6` and `nlopt>=2.7` added to `scripts/stencil_gen/pyproject.toml` (plus `swig` added to the Dockerfile for nlopt's build); plan 47 added `botorch>=0.17,<0.18`, `torch>=2.2,<3`, `gpytorch>=1.15,<2` (CPU-only PyTorch wheels via `extra-index-url`).
+- Plan 45 (multi-objective Pareto via NSGA-II) landed 2026-04-24: `sweeps pareto` CLI wired through `sweeps/__main__.py`, calibration JSONs committed under `sweeps/pareto_fronts/`, `TestRegressionBrady2DPareto` passing under deterministic ARPACK, and `pareto_reference.md` + cross-links live.
+- Plan 47 (multi-fidelity BO via BoTorch qMFKG) landed 2026-04-30: `sweeps bo` CLI wired through `sweeps/__main__.py`, calibration JSON committed under `sweeps/bo_runs/`, `TestRegressionBOBenchmark` + `TestBranin` + `TestBiasMisspec` + `TestCostMisspec` + `TestMultiModal` passing, and `mfbo_reference.md` + cross-links live. Plan 48 (Brady-Livescu 1D Euler) is next.
 
 ## File guide (this folder)
 
@@ -22,11 +23,11 @@ Read in this order if you want the full picture:
 
 1. **[framework_architecture.md](framework_architecture.md)** — what modules live where, their APIs, their dependency graph, and the C++/Lua/JSON integration surface. ~4000 words. The reference an agent needs to navigate the code.
 
-2. **[completed_plans.md](completed_plans.md)** — one-section-per-plan summary of what plans 40–44 delivered (plan 45 landed after this snapshot; see `plans/45-pareto-optimization.md`), public entry points, and inline corrections discovered during execution. ~3500 words. Skip to a specific plan's section when you need to understand what that plan did.
+2. **[completed_plans.md](completed_plans.md)** — one-section-per-plan summary of what plans 40–44 delivered (plans 45/46/47 landed after this snapshot; see `plans/45-pareto-optimization.md`, `plans/46-hardening.md`, `plans/47-mfbo.md`), public entry points, and inline corrections discovered during execution. ~3500 words. Skip to a specific plan's section when you need to understand what that plan did.
 
 3. **[scientific_findings.md](scientific_findings.md)** — 10 non-obvious discoveries from the work that a new agent cannot derive by reading code alone. Examples: tension-spline fails BL42 universally (verified via 898-eval DE); classical-α has multiple feasible basins (BL found 101); L7 operator has physically-correct positive spectral abscissa from `div(c) > 0`; BL §4.2 eigenvalues are `±i(2k-1)π/2` not `±ikπ`. Read this before drawing conclusions from any stability number.
 
-4. **[next_steps.md](next_steps.md)** — plans 46 and 47 queued, plus small follow-ups and backlog. Open decisions flagged per plan. Note: this file still describes plan 45 as queued; plan 45 has since landed (see `plans/45-pareto-optimization.md`). Start here when the user says "continue" or "what's next."
+4. **[next_steps.md](next_steps.md)** — plan 48 (Brady-Livescu 1D Euler) is the next queued plan, plus small follow-ups and backlog. Open decisions flagged per plan. Note: this file's body was drafted during plan-45 scoping and still has stale "queued" framing for plans 45/46/47 in some sections; the snapshot-status disclaimer at the top of the file is the authoritative summary. Start here when the user says "continue" or "what's next."
 
 5. **[operating_conventions.md](operating_conventions.md)** — how to launch ralph_wiggum, plan-file structure, the `.claude/skills/**` permission block, Python env conventions (`uv run`, `SYMPY_CACHE_SIZE`), C++ build commands, git hygiene. Read before touching anything.
 
@@ -62,7 +63,7 @@ result = run_cpp_brady2d("tension_E4u", {"sigma": 3.0}, N=31, t_final=10.0)
 
 ## Key artifacts to cite/reference
 
-- **Plans:** `/workspace/plans/40-*.md` through `45-*.md`. Plans 40–44 are fully `[x]`; plan 45 is in its final docs/skills phase (items 45.7c–e remaining). Plans 46 and 47 are queued per `next_steps.md`.
+- **Plans:** `/workspace/plans/40-*.md` through `47-*.md`. Plans 40–47 are fully `[x]` (verified 2026-04-30). Plan 48 (Brady-Livescu 1D Euler reproduction) is the next queued plan per `next_steps.md`; the plan file itself has not yet been authored.
 - **Reference docs** (in `/workspace/scripts/stencil_gen/docs/`):
   - `brady2d_stability_reference.md` — L1–L8 cascade
   - `bl42_reference.md` — BL §4.2 reflecting-hyperbolic layer (L3r)
@@ -80,9 +81,9 @@ result = run_cpp_brady2d("tension_E4u", {"sigma": 3.0}, N=31, t_final=10.0)
 ## What to do if the user says "continue"
 
 1. Read [MASTER.md](MASTER.md) (you're here), skim [next_steps.md](next_steps.md).
-2. Verify the devcontainer rebuild took: `cd scripts/stencil_gen && uv run python -c "import pymoo; print(pymoo.__version__)"`.
-3. If the user wants plan 45 (multi-objective Pareto): the bulk of it has already landed — only items 45.7c–e remain (a `D-Opt-1` entry in `plans/meta.md` and two `.claude/skills/` updates). Check `plans/45-pareto-optimization.md` for the current checkbox state before starting.
-4. If the user wants something else: [next_steps.md](next_steps.md) lists plans 46, 47, and backlog items. Confirm direction before writing.
+2. Verify the BoTorch stack is in place: `cd scripts/stencil_gen && uv run python -c "import botorch, torch, gpytorch; print(botorch.__version__, torch.__version__, gpytorch.__version__)"`.
+3. If the user wants plan 48 (Brady-Livescu 1D Euler reproduction): scope it in more detail with the user, decide between option (a) Lua bridge for 1D Euler and option (b) Python RK4 solver, get sign-off, then author and execute the plan via ralph_wiggum. See `next_steps.md` "Where the next agent should start" for the walkthrough.
+4. If the user wants something else: [next_steps.md](next_steps.md) lists backlog items beyond plan 48. Confirm direction before writing.
 
 ## What to do if the user asks about a specific topic
 
@@ -99,7 +100,7 @@ Three substantive findings from the session that should shape future work:
 
 1. **The BL §4.2 layer (L3r) is a sharp discriminator.** All spline/RBF families (tension, Gaussian, multiquadric) that pass the traditional 1D advection stability test fail L3r. Only classical-α closures survive. This is both a scientific result and a practical design constraint for downstream consumers.
 
-2. **Multi-objective is the right next move.** Plan 44's results exposed genuine trade-offs between three stability metrics — tension has excellent GV but fails BL42, classical has weaker GV but passes BL42 — which a Pareto front would make concrete. Plan 45 is sized, scoped, and has three open decisions (see [next_steps.md](next_steps.md)).
+2. **Multi-objective is the right next move.** Plan 44's results exposed genuine trade-offs between three stability metrics — tension has excellent GV but fails BL42, classical has weaker GV but passes BL42 — which a Pareto front would make concrete. (landed 2026-04-24; see plan 45 / `pareto_reference.md`.)
 
 3. **The framework does real optimization.** It's no longer a scoring pipeline — it's a full optimizer with local/global/staged/multi-start drivers, CLI, persistence, and C++-validated winners. A multi-seed run on E4 classical-α with DE found `α = [-1.399, 0.293]` (different basin than BL's published `[-0.77, 0.16]`, both feasible), confirming the paper's multi-modality observation experimentally.
 

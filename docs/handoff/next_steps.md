@@ -14,7 +14,7 @@
 > yet available", or to multi-fidelity BO as "deferred" is stale. **The
 > next plan in queue is Plan 48 (Brady-Livescu 1D Euler reproduction).**
 
-Three queued plans (45, 46, 47) and one small follow-up fix. Plan 45 is the most natural next step — the handoff conversation was actively designing it when we ran out of context.
+Plan 48 (Brady-Livescu 1D Euler reproduction) is the most natural next step. Plans 45, 46, 47 — referenced as "queued" in some sections below — have all landed; see the snapshot-status disclaimer above.
 
 ## Immediate small follow-up: gate_layer auto-infer
 
