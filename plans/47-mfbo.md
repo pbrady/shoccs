@@ -2019,7 +2019,7 @@ cd scripts/stencil_gen && SYMPY_CACHE_SIZE=50000 uv run python -m sweeps bo \
 
 ### 47.8 — Documentation
 
-- [ ] **47.8a** Create `scripts/stencil_gen/docs/mfbo_reference.md`. Sections:
+- [x] **47.8a** Create `scripts/stencil_gen/docs/mfbo_reference.md`. Sections:
   - "Problem" — multi-fidelity formulation, math (GP with ICM kernel, cost-aware KG acquisition).
   - "Why BoTorch + qMFKG" — library choice, fallback to MES.
   - "API" — `BOResult`, `BOEval`, `make_multi_fidelity_objective`, `run_mfbo`, `build_mf_gp`, `build_cost_model`, `build_acquisition`.
@@ -2032,6 +2032,12 @@ cd scripts/stencil_gen && SYMPY_CACHE_SIZE=50000 uv run python -m sweeps bo \
   - "Failure modes" — bias misspec, cost misspec, multi-modal coverage; cite the regression tests.
   - File: `scripts/stencil_gen/docs/mfbo_reference.md` (new)
   - Test: `cd scripts/stencil_gen && uv run python -c "from pathlib import Path; p = Path('docs/mfbo_reference.md'); assert p.exists() and p.stat().st_size > 4000, 'mfbo_reference.md missing or too small'"`
+  - **Done 2026-04-30.** New file `scripts/stencil_gen/docs/mfbo_reference.md` (26 KB, 12 sections). Mirrors `pareto_reference.md`'s structure and uses the same dataclass/CLI/persistence-schema/known-limitations/references skeleton so a reader who knows the Pareto layer can navigate the MF-BO layer without hunting. Sections delivered per the plan body's 9 enumerated bullets, plus three additional sections that surfaced from `bo.py`'s implementation reality: (i) "Building blocks" inside §3 documents `build_mf_gp`/`build_cost_model`/`build_initial_design`/`build_acquisition` directly so the API surface is one-stop (the plan body's "API" bullet only enumerates the user-facing API but `run_mfbo`'s docstring forwards heavily to the building blocks; readers tracing a kwarg need that doc); (ii) "Stopping criteria" (§7) explicitly documents the dual variance-guard criterion + `min_acquisition_iterations` floor + stagnation window, citing 47.3d/47.3f/47.3k.1 for the empirical history; (iii) "Cost model calibration" (§6) names the `apply_cost_floor` formula `c'(m) = max(c(m), 0.05 * c(hf))` literally and pins the external-vs-internal indexing convention for `cost_table`/`fidelity_dim` (a recurring source of confusion for callers since plan 47.2b).
+  - **Three deviations from the plan body worth flagging for 47.8b:**
+    - **Section ordering** follows `pareto_reference.md` rather than the plan body's enumeration order (Problem / Why / API / CLI / Persistence / Cost / Stopping / Relationship / When / Failure / Limitations / References). The plan body's bulletpoint order would scatter API material across two non-adjacent sections; the unified §3 keeps `BOEval`/`BOResult`/`make_multi_fidelity_objective`/`run_mfbo`/building-blocks together.
+    - **Failure-mode section names the four regression tests** (`TestBranin`, `TestBiasMisspec`, `TestCostMisspec`, `TestMultiModal`) and pins their threshold semantics (`< 3.7` for Branin per 47.3k.4e; `≤ 2×` degradation for cost misspec; `< 1.6` L2 distance for multi-modal per 47.6b.3.2d). The plan body said "cite the regression tests"; full citation with thresholds was the right depth — these tests are the load-bearing pin against future regressions and a reader debugging a failed assertion needs to know the assertion's empirical lineage.
+    - **`load_bo_run` int-key restoration** is documented inline with the persistence schema (§5) plus a cross-reference to plan item 47.4c.1, since callers piping persisted runs into `make_multi_fidelity_objective` will hit the `TypeError` on string keys without the helper. The plan body did not explicitly call this out.
+  - **Test result:** `uv run python -c "from pathlib import Path; p = Path('docs/mfbo_reference.md'); assert p.exists() and p.stat().st_size > 4000, 'mfbo_reference.md missing or too small'"` (run from `scripts/stencil_gen`) prints `OK: 26197 bytes` — well above the 4 KB floor and ~30% larger than `pareto_reference.md` (385 lines / ~17 KB). No production-code change; no test-suite change. The next item is 47.8b (cross-links from existing docs).
 
 - [ ] **47.8b** Cross-link from existing docs:
   - `scripts/stencil_gen/docs/optimization_reference.md`: add a "Multi-fidelity (plan 47)" section pointing to `mfbo_reference.md`. Three sentences explaining when to use MF-BO vs scalar drivers.
