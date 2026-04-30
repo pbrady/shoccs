@@ -2311,3 +2311,154 @@ class TestRegressionBrady2DPareto:
                         f"{path.name}: front member {i} ({F[i]}) is "
                         f"dominated by member {j} ({F[j]})"
                     )
+
+
+# ---------------------------------------------------------------------------
+# 47.7b: Regression tests for per-run MF-BO benchmarks under
+# sweeps/bo_runs/. Each JSON written by ``python -m sweeps bo --persist``
+# captures a ``BOResult`` (per the schema in ``sweeps/_bo_io.py``); this
+# class rebuilds :func:`stencil_gen.bo.make_multi_fidelity_objective` from
+# the stored ``report_fields_by_layer`` and re-evaluates ``best_x`` at the
+# HF level, asserting the recomputed scalar matches the stored
+# ``best_objective`` to within 1% relative tolerance.  ``_BO_SENTINEL``
+# (``1e12``) is a finite float and round-trips bytewise, so sentinel runs
+# (those that exhausted the budget without finding a feasible region — see
+# 47.7a's Done note for the calibration entry) compare cleanly.
+# ---------------------------------------------------------------------------
+
+_BO_RUNS_DIR = (
+    Path(__file__).resolve().parent.parent / "sweeps" / "bo_runs"
+)
+
+
+def _load_bo_runs() -> list[tuple[Path, dict]]:
+    """Return ``(path, parsed_json)`` for every readable BO run, sorted by name.
+
+    Uses :func:`sweeps._bo_io.load_bo_run` so the four whitelisted
+    int-keyed top-level dicts (``report_fields_by_layer``, ``cost_model``,
+    ``n_evals_per_fidelity``, ``wall_time_per_fidelity``) come back with
+    int keys, per plan item 47.4c.1.  Without this, piping
+    ``report_fields_by_layer`` straight into
+    :func:`stencil_gen.bo.make_multi_fidelity_objective` raises
+    ``TypeError`` at the factory's field-vs-layer validation step.
+    """
+    if not _BO_RUNS_DIR.is_dir():
+        return []
+    from sweeps._bo_io import load_bo_run
+
+    loaded: list[tuple[Path, dict]] = []
+    for path in sorted(_BO_RUNS_DIR.glob("*.json")):
+        try:
+            loaded.append((path, load_bo_run(path)))
+        except (OSError, ValueError):
+            continue
+    return loaded
+
+
+_BO_RUNS = _load_bo_runs()
+
+
+@pytest.mark.slow
+class TestRegressionBOBenchmark:
+    """Regression tests for per-run MF-BO benchmarks.
+
+    For each JSON under ``sweeps/bo_runs/``, rebuild a multi-fidelity
+    objective via :func:`stencil_gen.bo.make_multi_fidelity_objective`
+    from the stored ``report_fields_by_layer``, evaluate at the stored
+    ``best_x`` at the HF layer, and assert the recomputed scalar matches
+    the stored ``best_objective`` within 1% relative tolerance.  Also
+    sanity-checks the ``extras.baseline`` schema when a ``--baseline
+    staged`` run is recorded.
+
+    Skipped entirely when ``sweeps/bo_runs/`` is empty or absent.
+
+    The MF-BO closure returns ``_BO_SENTINEL`` (``1e12``, a finite float)
+    on infeasible / failed evaluations; sentinel runs from 47.7a's
+    calibration benchmark (where the vanilla MF-BO composition exhausted
+    its 60-eval budget without finding a feasible L7 region) compare
+    cleanly under :func:`numpy.isclose` because the sentinel is a stable
+    finite value and the recompute at the same ``best_x`` returns the
+    same sentinel deterministically.
+    """
+
+    @pytest.fixture(autouse=True)
+    def _skip_if_absent(self):
+        if not _BO_RUNS:
+            pytest.skip("sweeps/bo_runs/ empty or absent")
+
+    def test_each_run_best_x_recomputes_within_tolerance(self):
+        """Each stored run's ``best_x`` reproduces its recorded objective."""
+        import numpy as np
+
+        from stencil_gen.bo import make_multi_fidelity_objective
+
+        checked = 0
+        for path, data in _BO_RUNS:
+            scheme = data["scheme"]
+            kernel = data["kernel"]
+            report_fields = data["report_fields_by_layer"]
+            hf_level = int(data["hf_level"])
+            stored = float(data["best_objective"])
+            best_x = np.asarray(data["best_x"], dtype=float)
+
+            f = make_multi_fidelity_objective(scheme, kernel, report_fields)
+            value, _wall, _report = f(best_x, hf_level)
+            recomputed = float(value)
+
+            assert np.isfinite(recomputed), (
+                f"{path.name}: recomputed objective non-finite "
+                f"({recomputed}) at best_x={best_x.tolist()} m={hf_level}"
+            )
+            assert np.isclose(recomputed, stored, rtol=1e-2, atol=1e-8), (
+                f"{path.name}: recomputed {recomputed!r} differs from "
+                f"stored {stored!r} by more than rtol=1e-2"
+            )
+            checked += 1
+        if checked == 0:
+            pytest.skip("no BO run files to check")
+
+    def test_each_run_baseline_present_when_recorded(self):
+        """When ``extras.baseline`` is recorded, sanity-check its schema.
+
+        Per ``sweeps/bo.py::_run_staged_baseline`` the baseline payload is
+        a dict produced by ``sweeps.optimize._result_to_persist_dict`` plus
+        a ``method`` and ``n_evals_at_hf`` key.  On the failure path
+        (47.5b.2's try/except), the dict instead carries an ``error`` key
+        plus ``best_objective=None`` and ``best_x=None``.  This test
+        accepts either shape and rejects only schemas missing both.
+        """
+        checked = 0
+        for path, data in _BO_RUNS:
+            extras = data.get("extras") or {}
+            baseline = extras.get("baseline")
+            if baseline is None:
+                continue
+            assert isinstance(baseline, dict), (
+                f"{path.name}: extras.baseline is not a dict "
+                f"({type(baseline).__name__})"
+            )
+            assert "method" in baseline, (
+                f"{path.name}: extras.baseline missing 'method' key "
+                f"(keys={sorted(baseline.keys())})"
+            )
+            if "error" in baseline:
+                # 47.5b.2 failure-record shape.
+                assert baseline["best_objective"] is None, (
+                    f"{path.name}: error baseline has non-None "
+                    f"best_objective={baseline['best_objective']!r}"
+                )
+                assert baseline["best_x"] is None, (
+                    f"{path.name}: error baseline has non-None best_x"
+                )
+            else:
+                # Success-path shape from
+                # ``sweeps.optimize._result_to_persist_dict`` plus
+                # ``n_evals_at_hf`` (47.5b).
+                for key in ("best_x", "best_objective", "compute_time", "n_evals_at_hf"):
+                    assert key in baseline, (
+                        f"{path.name}: extras.baseline missing required "
+                        f"key {key!r} (keys={sorted(baseline.keys())})"
+                    )
+            checked += 1
+        if checked == 0:
+            pytest.skip("no BO runs with extras.baseline recorded")
