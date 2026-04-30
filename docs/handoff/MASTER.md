@@ -68,6 +68,7 @@ result = run_cpp_brady2d("tension_E4u", {"sigma": 3.0}, N=31, t_final=10.0)
   - `bl42_reference.md` — BL §4.2 reflecting-hyperbolic layer (L3r)
   - `optimization_reference.md` — optimizer framework
   - `pareto_reference.md` — multi-objective NSGA-II Pareto extension (plan 45)
+  - `mfbo_reference.md` — multi-fidelity BoTorch Bayesian-optimization extension (plan 47)
   - `group_velocity_reference.md` — the GV module
   - `pipeline_reference.md` — end-to-end stencil derivation
   - `sweeps_reference.md` — sweep subcommands

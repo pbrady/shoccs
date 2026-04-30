@@ -1,6 +1,18 @@
 # Next Steps
 
-> **Snapshot status (2026-04-15).** This file was drafted during plan-45 scoping and commits its pre-plan-45 state. Plan 45 (multi-objective Pareto via NSGA-II) landed 2026-04-24; see `plans/45-pareto-optimization.md` for the current state. Any reference below to plan 45 as "queued", to `gate_layer` auto-infer as unimplemented, or to multi-objective optimization as "not yet available" is stale.
+> **Snapshot status (2026-04-15, refreshed 2026-04-30).** This file was
+> drafted during plan-45 scoping and commits its pre-plan-45 state.
+> Subsequent plans have landed:
+> - Plan 45 (multi-objective Pareto via NSGA-II) landed 2026-04-24; see
+>   `plans/45-pareto-optimization.md` and `pareto_reference.md`.
+> - Plan 46 (hardening) landed (see `plans/46-hardening.md`).
+> - Plan 47 (multi-fidelity Bayesian optimization via BoTorch) landed
+>   2026-04-30; see `plans/47-mfbo.md` and
+>   `scripts/stencil_gen/docs/mfbo_reference.md`.
+> Any reference below to plans 45–47 as "queued", to `gate_layer`
+> auto-infer as unimplemented, to multi-objective optimization as "not
+> yet available", or to multi-fidelity BO as "deferred" is stale. **The
+> next plan in queue is Plan 48 (Brady-Livescu 1D Euler reproduction).**
 
 Three queued plans (45, 46, 47) and one small follow-up fix. Plan 45 is the most natural next step — the handoff conversation was actively designing it when we ran out of context.
 
@@ -78,24 +90,23 @@ Similar to plan 44: ~250–300 lines, ~20 items across 6–7 phases. Phases will
 
 ---
 
-## Plan 47 — Multi-Fidelity Bayesian Optimization
+## Plan 47 — Multi-Fidelity Bayesian Optimization (DONE 2026-04-30)
 
-**Why:** Our layered cascade (L1–L8) naturally has heterogeneous costs (sub-ms → minutes). A multi-fidelity BO library can spend most of its budget on cheap layers and only invoke expensive ones for the best candidates. Today's "manual cascade" (`run_staged_optimize`) is a hand-crafted approximation.
-
-**Candidate libraries (from earlier session agent survey):**
-- **Emukit** — probably simplest; Kennedy-O'Hagan multi-fidelity GPs out of the box.
-- **BoTorch** — more powerful but requires PyTorch dependency.
-- **Trieste** — steeper API; uses TensorFlow.
-
-**Trade-off to decide:** is the marginal value of a proper BO (20-40 expensive evals vs. our staged approach's 50-100 expensive evals) worth a new dep + learning curve? The manual cascade is working; BO gives you sample efficiency and a principled Gaussian-process surrogate you can query.
-
-**Scope:** 1 candidate library chosen; wrap `make_objective` at multiple fidelity levels; integrate with existing `OptimizeResult` and CLI.
-
-**Size:** medium, ~200 lines of plan; nontrivial because BO libraries have opinions about API.
+**Status:** landed. Plan 47 chose **BoTorch** (clean aarch64 wheels,
+NumPy 2 compat) over Emukit/Trieste. The driver
+(`stencil_gen/bo.py::run_mfbo`) fits a BoTorch ICM-GP surrogate jointly
+over `(x, m)` (no Kennedy-O'Hagan AR1, since L3 ↔ L3r are different
+physics rather than a refinement chain) and picks the next `(x, m)` via
+cost-aware qMFKG.  CLI: `python -m sweeps bo`.  Per-run JSONs persist
+under `sweeps/bo_runs/<scheme>_<kernel>_<mangled>_<seed>.json`.  Full
+details, schema, CLI examples, and the AugmentedBranin synthetic
+acceptance results (47.3k.4) live in
+`scripts/stencil_gen/docs/mfbo_reference.md`.  See `plans/47-mfbo.md`
+for the implementation history.
 
 ---
 
-## Plan 48 — Brady-Livescu 1D Euler Reproduction
+## Plan 48 — Brady-Livescu 1D Euler Reproduction (next)
 
 **Why:** The paper's actual optimization objective is a full 1D nonlinear Euler RK4 simulation — a two-phase score where phase 1 = "did it stay stable to t_c" and phase 2 = "how monotone is the boundary energy" (via total-variation deviation). They cite finding **101 E4 schemes**, **16 E6**, **3 E8**, **1079 T4**, **16 T6**, **25 T8** from random restarts, all passing their linear *and* nonlinear tests. Reproducing this objective lets us:
 - Validate our framework against a published reference.
@@ -131,8 +142,8 @@ Similar to plan 44: ~250–300 lines, ~20 items across 6–7 phases. Phases will
 If the user says "continue" without further direction, the right first action is:
 
 1. Read `MASTER.md` (this folder's entry point) and skim `completed_plans.md`, `framework_architecture.md`, `scientific_findings.md` for context.
-2. Confirm the container rebuild picked up pymoo: `cd scripts/stencil_gen && uv run python -c "import pymoo; print(pymoo.__version__)"`.
-3. Propose plan 45 in more detail — especially the gate_layer auto-infer 45.0 prerequisite — and get the user's sign-off on the three open decisions listed above.
-4. Write and execute plan 45 via ralph_wiggum.
+2. Confirm the BoTorch stack is in place: `cd scripts/stencil_gen && uv run python -c "import botorch, torch, gpytorch; print(botorch.__version__, torch.__version__, gpytorch.__version__)"`.
+3. Plans 45–47 have all landed (see snapshot at the top of this file). The next plan in queue is **Plan 48 — Brady-Livescu 1D Euler reproduction**; scope it in more detail, decide between option (a) (Lua bridge for 1D Euler) and option (b) (Python RK4 solver), and get the user's sign-off before writing the plan.
+4. Write and execute plan 48 via ralph_wiggum.
 
-If plan 45 isn't the right next step for the user's current goal, `next_steps.md` surfaces the alternatives (46, 47, or any backlog item).
+If plan 48 isn't the right next step for the user's current goal, `next_steps.md` surfaces the alternative backlog items.

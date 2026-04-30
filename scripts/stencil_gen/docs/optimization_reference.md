@@ -330,12 +330,15 @@ The plan's "What this plan does NOT do" section is the source of truth.
   pymoo NSGA-II — see the "Multi-objective (plan 45)" section below and
   [`pareto_reference.md`](pareto_reference.md). The scalar drivers in this
   reference remain the per-point building block.
-- **Multi-fidelity Bayesian optimization.** The staged cascade is a
-  manual cheap-inner / expensive-validator pipeline, not BoTorch or
-  Emukit. Deferred to plan 46.
+- **Multi-fidelity Bayesian optimization.** The staged cascade is the
+  manual cheap-inner / expensive-validator pipeline. A principled
+  BoTorch-backed multi-fidelity Bayesian optimizer (`python -m sweeps
+  bo`) ships in plan 47 — see the "Multi-fidelity (plan 47)" section
+  above and [`mfbo_reference.md`](mfbo_reference.md). Both drivers
+  remain supported.
 - **Brady-Livescu 1D Euler reproduction.** Their 2019 objective requires
   a full nonlinear 1D Euler RK4 solver that this repo does not have.
-  Deferred to plan 47.
+  Deferred to plan 48.
 - **Classical-α E2_1** (fourth-dim space). Second-order stability was
   judged inconsequential; skipped in favor of E4_1.
 - **E6 / E8 classical schemes.** No Python derivation pipeline exists.
@@ -362,6 +365,22 @@ to `make_multi_objective`, with `max_layer` taken as the deepest layer
 across the chosen objective fields. Full details, CLI examples, and the
 schema live in [`pareto_reference.md`](pareto_reference.md).
 
+## Multi-fidelity (plan 47)
+
+When the cascade's heterogeneous costs (5+ orders of magnitude between
+L1 and L7) make the staged cheap-inner / expensive-validator heuristic
+above leave wall-time on the table, use `python -m sweeps bo`, which
+fits a BoTorch ICM Gaussian-process surrogate jointly over `(x, m)` and
+picks the next `(x, m)` via cost-aware qMFKG. Prefer MF-BO over the
+scalar drivers when (a) the HF metric is genuinely expensive (L6+ on a
+multi-modal landscape), (b) cheap layers carry usable signal about HF
+behaviour but are not refinements of it (e.g. L3 → L3r tests different
+physics), or (c) you want a principled cost/benefit tradeoff instead of
+a hand-tuned `top_k`. Per-run JSONs persist under
+`sweeps/bo_runs/<scheme>_<kernel>_<mangled>_<seed>.json`. Full details,
+CLI examples, and the schema live in
+[`mfbo_reference.md`](mfbo_reference.md).
+
 ## References
 
 - Plan 41 — Brady-Livescu 2D analytical stability pipeline (L1–L7).
@@ -369,5 +388,7 @@ schema live in [`pareto_reference.md`](pareto_reference.md).
 - Plan 43 — Stability optimization framework (this layer).
 - Plan 45 — Multi-objective Pareto extension
   ([`pareto_reference.md`](pareto_reference.md)).
+- Plan 47 — Multi-fidelity Bayesian optimization
+  ([`mfbo_reference.md`](mfbo_reference.md)).
 - Brady & Livescu 2019 — Table 4 reports 101 E4 schemes discovered from
   random restarts, motivating the multi-seed alpha-basin survey.

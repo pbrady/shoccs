@@ -5,7 +5,12 @@
 > a valid element of `--objective` in `python -m sweeps optimize` and of
 > `--objectives` in `python -m sweeps pareto` (multi-objective NSGA-II;
 > see [`pareto_reference.md`](pareto_reference.md)). Layer depth and gate
-> are auto-inferred from the field's layer prefix.
+> are auto-inferred from the field's layer prefix. The same fields
+> double as the per-fidelity targets of `python -m sweeps bo`
+> (multi-fidelity BoTorch ICM-GP; see
+> [`mfbo_reference.md`](mfbo_reference.md)) — a layer index `m` is
+> mapped to its dotted field via `--objective <field>` plus
+> `--cheap-fidelities <m1> <m2> ...`.
 
 ## Problem statement
 
