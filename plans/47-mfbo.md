@@ -2039,6 +2039,22 @@ cd scripts/stencil_gen && SYMPY_CACHE_SIZE=50000 uv run python -m sweeps bo \
     - **`load_bo_run` int-key restoration** is documented inline with the persistence schema (§5) plus a cross-reference to plan item 47.4c.1, since callers piping persisted runs into `make_multi_fidelity_objective` will hit the `TypeError` on string keys without the helper. The plan body did not explicitly call this out.
   - **Test result:** `uv run python -c "from pathlib import Path; p = Path('docs/mfbo_reference.md'); assert p.exists() and p.stat().st_size > 4000, 'mfbo_reference.md missing or too small'"` (run from `scripts/stencil_gen`) prints `OK: 26197 bytes` — well above the 4 KB floor and ~30% larger than `pareto_reference.md` (385 lines / ~17 KB). No production-code change; no test-suite change. The next item is 47.8b (cross-links from existing docs).
 
+- [ ] **47.8a.0** Plan-text + doc fix (residual from 47.8a's `mfbo_reference.md` review against the actual `stencil_gen/bo.py` API surface): three gaps in 47.8a's Section 3 ("API") leave behaviorally significant kwargs and `extras` keys undocumented. Each gap is a real divergence between the doc and the shipped code, not a stylistic note. Fix in `scripts/stencil_gen/docs/mfbo_reference.md` only — no production code, no tests.
+  - **Gap 1 — `run_mfbo` signature is missing 4 kwargs in §3.4.** The shipped `run_mfbo` (defined at `stencil_gen/bo.py:1423-1449`, exhaustively unit-tested in `tests/test_bo.py`) carries four user-facing kwargs that the doc's signature block does not list:
+    - `clamp_sentinel_rows: bool = True` (47.6b.3.1 — controls whether sentinel rows are clamped into the GP fit at `max(Y_finite_per_fidelity) + 3 * std` or filtered out; default-on; gates the `extras.n_sentinel_per_fidelity` vs `extras.n_sentinel_filtered` choice).
+    - `recommendation_strategy: str = "mean"` (47.6b.3.2c.1 — three strategies: `"mean"` / `"voronoi"` / `"ucb"`).
+    - `voronoi_radius: float = 0.1` (47.6b.3.2c.2 — L2 mask radius for the `"voronoi"` strategy).
+    - `ucb_beta: float = 2.0` (47.6b.3.2c.3 — exploration penalty for the `"ucb"` strategy).
+    Add all four to §3.4's signature code block in their actual declaration order (between `hf_priority_warmup` and `verbose`), then add one short paragraph after the existing post-loop `_recommend_incumbent` description explaining the three strategies (`"mean"` = posterior-mean argmin on a 1024-point Sobol' grid; `"voronoi"` = mean ranking with L2 masking around sentinel `x` rows of radius `voronoi_radius`; `"ucb"` = `mean + ucb_beta * sigma` upper-confidence bound for minimisation, penalising high-variance regions). Cite plan items 47.6b.3.1 / 47.6b.3.2c.2 / 47.6b.3.2c.3 inline so a reader debugging a regression knows where the choice came from.
+  - **Gap 2 — §3.4's `_recommend_incumbent` prose only describes the `"mean"` strategy.** The current text reads "After loop exit, `_recommend_incumbent` picks `x_inc = argmin_x μ_n(x, m=hf)` over a 1024-point Sobol' grid (posterior mean, not best-observed — standard for noisy / multi-fidelity GPs)..." — accurate for the default but silent on voronoi/UCB. Resolved by Gap 1's added paragraph.
+  - **Gap 3 — §3.2's `BOResult.extras` row is incomplete.** Doc currently says "Driver diagnostics: `n_sentinel_filtered`, `baseline`, `cpp_validation`". Per `stencil_gen/bo.py:204-208` and the 47.6b.3.1 / 47.6b.3.2c.2 implementation, two more keys are populated under default settings:
+    - `n_sentinel_per_fidelity` — per-fidelity sentinel occurrence count, set when `clamp_sentinel_rows=True` (the default; mutually exclusive with `n_sentinel_filtered`).
+    - `voronoi_fallback` — boolean set to `True` by `_recommend_incumbent` (`bo.py:1230`) when all grid points fall inside the union of Voronoi cells and the helper falls back to the unmasked argmin; only present when `recommendation_strategy="voronoi"`.
+    Replace the doc's three-key list with the full five-key list and add the conditional-presence rules in one sentence.
+  - **Out of scope for 47.8a.0:** the doc's "Section 6 cost-floor formula" wording (`c'(m) = max(c(m), 0.05 * c(hf))`) is *literally* what the implementation computes in normal use — `apply_cost_floor` (`bo.py:558`) reads `hf_cost = max(cost_table.values())` and the variable is named `hf_cost` precisely because HF is the most expensive layer in every cost table the cascade ships. Leaving the doc's `c(hf)` framing alone because it matches the code's own internal nomenclature and the production `DEFAULT_COST_TABLE`. Similarly leaving §3.2's "method" string note (qMFKG only) alone because §2 already covers the MES fallback as a one-line swap.
+  - **File:** `scripts/stencil_gen/docs/mfbo_reference.md`
+  - **Test:** `cd scripts/stencil_gen && grep -q "clamp_sentinel_rows" docs/mfbo_reference.md && grep -q "recommendation_strategy" docs/mfbo_reference.md && grep -q "voronoi_radius" docs/mfbo_reference.md && grep -q "ucb_beta" docs/mfbo_reference.md && grep -q "n_sentinel_per_fidelity" docs/mfbo_reference.md && grep -q "voronoi_fallback" docs/mfbo_reference.md`
+
 - [ ] **47.8b** Cross-link from existing docs:
   - `scripts/stencil_gen/docs/optimization_reference.md`: add a "Multi-fidelity (plan 47)" section pointing to `mfbo_reference.md`. Three sentences explaining when to use MF-BO vs scalar drivers.
   - `scripts/stencil_gen/docs/brady2d_stability_reference.md`: add a one-line note that any layer-N field can be used as a fidelity in `sweeps bo`.
@@ -2078,7 +2094,7 @@ cd scripts/stencil_gen && SYMPY_CACHE_SIZE=50000 uv run python -m sweeps bo \
   ↓
 47.7a → 47.7a.0 → 47.7b                     # real benchmark + Done-note diagnosis fix + regression test
   ↓
-47.8a → 47.8b → 47.8c → 47.8d               # docs + meta + skills
+47.8a → 47.8a.0 → 47.8b → 47.8c → 47.8d     # docs + post-review doc fix + cross-links + meta + skills
 ```
 
 Strictly sequential. 47.5 (validate + baseline) can run before 47.4d's tests if needed (they're independent). 47.6 and 47.7 are validation-heavy and run after the implementation is complete. 47.7 specifically requires `shoccs` binary to be built (for `--validate-with-cpp` if used inside the benchmark, otherwise no dependency).
