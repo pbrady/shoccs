@@ -12,10 +12,10 @@ SHOCCS is a C++ Cartesian cut-cell high-order PDE solver (`/workspace/src/`). Th
 
 ## Recent state (2026-04-24, refreshed 2026-04-30)
 
-- Plans 40–47 are all `[x]`. Git log from commit `843c974` forward shows the full trail.
+- Plans 40–46 are all `[x]`; plan 47 is in its final docs/skills phase (items 47.8c, 47.8d remaining — D-Opt-2 meta entry + stencil-sweeps SKILL.md update). Git log from commit `843c974` forward shows the full trail.
 - The devcontainer was rebuilt with `pymoo>=0.6` and `nlopt>=2.7` added to `scripts/stencil_gen/pyproject.toml` (plus `swig` added to the Dockerfile for nlopt's build); plan 47 added `botorch>=0.17,<0.18`, `torch>=2.2,<3`, `gpytorch>=1.15,<2` (CPU-only PyTorch wheels via `extra-index-url`).
 - Plan 45 (multi-objective Pareto via NSGA-II) landed 2026-04-24: `sweeps pareto` CLI wired through `sweeps/__main__.py`, calibration JSONs committed under `sweeps/pareto_fronts/`, `TestRegressionBrady2DPareto` passing under deterministic ARPACK, and `pareto_reference.md` + cross-links live.
-- Plan 47 (multi-fidelity BO via BoTorch qMFKG) landed 2026-04-30: `sweeps bo` CLI wired through `sweeps/__main__.py`, calibration JSON committed under `sweeps/bo_runs/`, `TestRegressionBOBenchmark` + `TestBranin` + `TestBiasMisspec` + `TestCostMisspec` + `TestMultiModal` passing, and `mfbo_reference.md` + cross-links live. Plan 48 (Brady-Livescu 1D Euler) is next.
+- Plan 47 (multi-fidelity BO via BoTorch qMFKG) landed 2026-04-30: `sweeps bo` CLI wired through `sweeps/__main__.py`, calibration JSON committed under `sweeps/bo_runs/`, `TestRegressionBOBenchmark` + `TestBranin` + `TestBiasMisspec` + `TestCostMisspec` + `TestMultiModal` passing, and `mfbo_reference.md` + cross-links live; items 47.8c (D-Opt-2 meta entry) and 47.8d (stencil-sweeps SKILL.md update) remain. Plan 48 (Brady-Livescu 1D Euler) is next.
 
 ## File guide (this folder)
 
@@ -63,7 +63,7 @@ result = run_cpp_brady2d("tension_E4u", {"sigma": 3.0}, N=31, t_final=10.0)
 
 ## Key artifacts to cite/reference
 
-- **Plans:** `/workspace/plans/40-*.md` through `47-*.md`. Plans 40–47 are fully `[x]` (verified 2026-04-30). Plan 48 (Brady-Livescu 1D Euler reproduction) is the next queued plan per `next_steps.md`; the plan file itself has not yet been authored.
+- **Plans:** `/workspace/plans/40-*.md` through `47-*.md`. Plans 40–46 are fully `[x]` (verified 2026-04-30); plan 47 has its docs/skills tail open (items 47.8c, 47.8d). Plan 48 (Brady-Livescu 1D Euler reproduction) is the next queued plan per `next_steps.md`; the plan file itself has not yet been authored.
 - **Reference docs** (in `/workspace/scripts/stencil_gen/docs/`):
   - `brady2d_stability_reference.md` — L1–L8 cascade
   - `bl42_reference.md` — BL §4.2 reflecting-hyperbolic layer (L3r)
