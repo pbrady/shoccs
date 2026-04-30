@@ -2132,6 +2132,26 @@ cd scripts/stencil_gen && SYMPY_CACHE_SIZE=50000 uv run python -m sweeps bo \
 - [ ] **47.8d** Update `.claude/skills/stencil-sweeps/SKILL.md`: add `bo` subcommand example + `bo_runs/` Key Files row + "Multi-fidelity Bayesian optimization" entry in "When to Use" + `mfbo_reference.md` cross-link in Detailed Reference. Same harness situation as plan 45.7d/e — try the edit; if blocked, manually complete in interactive session after ralph returns.
   - File: `.claude/skills/stencil-sweeps/SKILL.md`
   - Test: `grep -c "mfbo_reference" .claude/skills/stencil-sweeps/SKILL.md`
+  - **Blocked 2026-04-30 (ralph cycle).** Edit attempt to `.claude/skills/stencil-sweeps/SKILL.md` was rejected with `Claude requested permissions to write to ...SKILL.md, but you haven't granted it yet.` — same harness behaviour as plan 45.7d/e (the `.claude/skills/**` write block applies to the ralph subprocess context, not the main interactive session). Item stays `[ ]` and needs manual completion in an interactive session after ralph exits, mirroring the 45.7d resolution pattern. The four prepared edits to apply manually are recorded below so the interactive-session agent (or human) can paste them verbatim.
+    - **Edit 1 — CLI Quick Reference block** (after the `pareto` example, before the "Run all sweeps" comment, currently around `SKILL.md:55-57`): insert
+      ```
+      # Multi-fidelity Bayesian optimization over the cascade (plan 47, BoTorch qMFKG); persists to sweeps/bo_runs/
+      uv run python -m sweeps bo --scheme E4 --kernel classical --objective layer7.max_spectral_abscissa --cheap-fidelities 1 3 5 6 --bounds -2 2 0.05 2 --budget-evals 60 --seed 1 --persist
+      ```
+    - **Edit 2 — Key Files table** (currently `SKILL.md:77-92`): append two rows after the `sweeps/brady2d_sweep.py` row:
+      ```
+      | `sweeps/bo.py` | Multi-fidelity Bayesian optimization driver (plan 47); BoTorch qMFKG over the cascade with cost-aware acquisition and ICM kernel |
+      | `sweeps/_bo_io.py` | JSON serialization for `BOResult` → `sweeps/bo_runs/<scheme>_<kernel>_<mangled>_<seed>.json` |
+      ```
+    - **Edit 3 — When to Use list** (currently `SKILL.md:94-101`): append after the "Multi-objective Pareto exploration" bullet:
+      ```
+      - Multi-fidelity Bayesian optimization when expensive-validator wall-time dominates and you want a principled cost-aware HF/cheap split (instead of `optimize --method staged`'s hand-coded top-K threshold); use `sweeps bo` (BoTorch qMFKG with discrete-fidelity ICM kernel). See `scripts/stencil_gen/docs/mfbo_reference.md`.
+      ```
+    - **Edit 4 — Detailed Reference list** (currently `SKILL.md:103-107`): append after `pareto_reference.md`:
+      ```
+      - `scripts/stencil_gen/docs/mfbo_reference.md` (plan 47 multi-fidelity Bayesian optimization driver)
+      ```
+    - **Acceptance verification once applied:** `grep -c "mfbo_reference" .claude/skills/stencil-sweeps/SKILL.md` returns `1`; `grep -c "sweeps bo " .claude/skills/stencil-sweeps/SKILL.md` returns `>= 1`; `grep -c "sweeps/bo.py" .claude/skills/stencil-sweeps/SKILL.md` returns `1`; `grep -c "bo_runs" .claude/skills/stencil-sweeps/SKILL.md` returns `>= 2`.
 
 ---
 
