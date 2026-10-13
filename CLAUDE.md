@@ -58,13 +58,13 @@ cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=RelWithDebInfo -DBUILD_TESTING=O
 
 Benchmark executables are in `build/benchmarks/` (bench_stencil, bench_block, bench_derivative, bench_expr, bench_selection, bench_rhs, bench_rhs_cutcell). `bench_rhs_cutcell` runs the shipped cut-cell geometries (heat.lua sphere, scalar_wave.lua spheres) and times the per-stage host work (fill_source, update_boundary, stats) so an RK4 step can be decomposed.
 
-## Agent wrappers for Docker and host GPU runs
+## Docker and host GPU runs (outside the Bash sandbox)
 
-Two things only work outside the Bash sandbox. Use the wrappers in `tools/agents/` for them instead of setting `dangerouslyDisableSandbox` on ad-hoc commands:
+Two things cannot run inside the Bash sandbox and need `dangerouslyDisableSandbox: true` on that one Bash call, which goes through the permission gate:
 
-- The C++ dependency stack exists only in the devcontainer image and the sandbox denies the Docker socket. Build or benchmark the solver with `tools/agents/devcontainer-run.sh -- <command>`; it mounts this checkout at `/workspace` and nothing else. Example: `tools/agents/devcontainer-run.sh -- cmake --build build-linux --target bench_rhs_cutcell`.
-- The macOS sandbox hides Metal (`torch.backends.mps.is_available()` is `False`, MLX cannot open a device). Run GPU, MPS or MLX Python with `tools/agents/host-python.sh [--with mlx] <script.py> [args]`; it accepts only scripts under `scripts/` or `docs/python-dsl-survey/experiments/`.
-- Call each wrapper as the whole command, from the repo root, one per Bash call, so allow rules match. Never disable the sandbox for edits, `ls`, `cd` or anything that is not the Docker or GPU run itself.
+- The C++ dependency stack exists only in the devcontainer image and the sandbox denies the Docker socket. Build or benchmark the solver with `docker run --rm -v "$PWD":/workspace -w /workspace shoccs-devcontainer:latest <command>` from the repo root (the image's `CMAKE_PREFIX_PATH` already points at the Spack view); mount nothing else.
+- The macOS sandbox hides Metal (`torch.backends.mps.is_available()` is `False`, MLX cannot open a device). GPU, MPS or MLX Python runs go through `uv run` from `scripts/stencil_gen` (add `--with mlx` for MLX) with the sandbox disabled on that call only.
+- Keep the unsandboxed flag to the Docker or GPU command itself: never set it for edits, `ls`, `cd`, `sed` or anything the sandbox allows, and keep each such command simple (no `cd &&` chains, one command per Bash call) so the permission decision is about one thing.
 
 ## Continuous Integration
 
