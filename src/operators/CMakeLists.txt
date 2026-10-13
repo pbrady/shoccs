@@ -41,6 +41,11 @@ if (BUILD_TESTING)
   add_test(NAME t-tables COMMAND t-tables)
   set_tests_properties(t-tables PROPERTIES LABELS "operators")
 
+  add_executable(t-tables_kernels tables_kernels.t.cpp)
+  target_link_libraries(t-tables_kernels Catch2::Catch2 shoccs-operators shoccs-stencils shoccs-bcs shoccs-system Kokkos::kokkos)
+  add_test(NAME t-tables_kernels COMMAND t-tables_kernels)
+  set_tests_properties(t-tables_kernels PROPERTIES LABELS "operators")
+
   add_executable(t-eigenvalue_visitor eigenvalue_visitor.t.cpp)
   target_link_libraries(t-eigenvalue_visitor Catch2::Catch2 shoccs-operators shoccs-stencils shoccs-bcs Kokkos::kokkos)
   add_test(NAME t-eigenvalue_visitor COMMAND t-eigenvalue_visitor)
