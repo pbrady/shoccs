@@ -1,0 +1,35 @@
+{
+  "context": {
+    "date": "2026-10-13T15:57:56-05:00",
+    "host_name": "enoch.local",
+    "executable": "/Users/ptb/projects/shoccs/.claude/worktrees/python-dsl-survey/build-host/benchmarks/bench_tables",
+    "num_cpus": 10,
+    "mhz_per_cpu": 24,
+    "cpu_scaling_enabled": false,
+    "caches": [
+    ],
+    "load_avg": [3.13477,3.20117,2.45801],
+    "library_version": "v1.9.5",
+    "library_build_type": "release",
+    "json_schema_version": 1
+  },
+  "benchmarks": [
+    {
+      "name": "BM_stream_triad/16777216/manual_time",
+      "family_index": 0,
+      "per_family_instance_index": 0,
+      "run_name": "BM_stream_triad/16777216/manual_time",
+      "run_type": "iteration",
+      "repetitions": 1,
+      "repetition_index": 0,
+      "threads": 1,
+      "iterations": 99,
+      "real_time": 4.2416910707070716e+00,
+      "cpu_time": 2.3262303030303030e+01,
+      "time_unit": "ms",
+      "GiBps_best": 8.8891080218629398e+01,
+      "GiBps_median": 8.8616250164383146e+01,
+      "doubles": 1.6777216000000000e+07
+    }
+  ]
+}

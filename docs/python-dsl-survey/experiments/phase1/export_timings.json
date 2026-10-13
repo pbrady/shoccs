@@ -1,0 +1,20 @@
+{
+  "heat51": {
+    "exit": 0,
+    "wall_s": 0.039,
+    "files": 98,
+    "identical_to_previous": true
+  },
+  "heat201": {
+    "exit": 0,
+    "wall_s": 0.044,
+    "files": 98,
+    "identical_to_previous": true
+  },
+  "heat3d65": {
+    "exit": 0,
+    "wall_s": 0.169,
+    "files": 106,
+    "identical_to_previous": true
+  }
+}

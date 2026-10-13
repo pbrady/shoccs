@@ -1,0 +1,98 @@
+{
+  "context": {
+    "date": "2026-10-13T15:47:48-05:00",
+    "host_name": "enoch.local",
+    "executable": "/Users/ptb/projects/shoccs/.claude/worktrees/python-dsl-survey/build-host/benchmarks/bench_rhs_cutcell",
+    "num_cpus": 10,
+    "mhz_per_cpu": 24,
+    "cpu_scaling_enabled": false,
+    "caches": [
+    ],
+    "load_avg": [3.71289,2.63232,1.85986],
+    "library_version": "v1.9.5",
+    "library_build_type": "release",
+    "json_schema_version": 1
+  },
+  "benchmarks": [
+    {
+      "name": "BM_heat_cut_rhs/2/51",
+      "family_index": 0,
+      "per_family_instance_index": 0,
+      "run_name": "BM_heat_cut_rhs/2/51",
+      "run_type": "iteration",
+      "repetitions": 1,
+      "repetition_index": 0,
+      "threads": 1,
+      "iterations": 9756,
+      "real_time": 5.1583282098895019e+01,
+      "cpu_time": 5.1198236982369799e+01,
+      "time_unit": "us",
+      "R": 3.2000000000000000e+01,
+      "points": 2.6010000000000000e+03
+    },
+    {
+      "name": "BM_heat_cut_rhs/2/71",
+      "family_index": 0,
+      "per_family_instance_index": 1,
+      "run_name": "BM_heat_cut_rhs/2/71",
+      "run_type": "iteration",
+      "repetitions": 1,
+      "repetition_index": 0,
+      "threads": 1,
+      "iterations": 6582,
+      "real_time": 6.0912178514060621e+01,
+      "cpu_time": 6.0465967790944987e+01,
+      "time_unit": "us",
+      "R": 5.0000000000000000e+01,
+      "points": 5.0410000000000000e+03
+    },
+    {
+      "name": "BM_heat_cut_rhs/2/201",
+      "family_index": 0,
+      "per_family_instance_index": 2,
+      "run_name": "BM_heat_cut_rhs/2/201",
+      "run_type": "iteration",
+      "repetitions": 1,
+      "repetition_index": 0,
+      "threads": 1,
+      "iterations": 1891,
+      "real_time": 2.1998510444325029e+02,
+      "cpu_time": 2.1825542041247988e+02,
+      "time_unit": "us",
+      "R": 1.3800000000000000e+02,
+      "points": 4.0401000000000000e+04
+    },
+    {
+      "name": "BM_heat_cut_rhs/2/401",
+      "family_index": 0,
+      "per_family_instance_index": 3,
+      "run_name": "BM_heat_cut_rhs/2/401",
+      "run_type": "iteration",
+      "repetitions": 1,
+      "repetition_index": 0,
+      "threads": 1,
+      "iterations": 602,
+      "real_time": 8.0950802773781788e+02,
+      "cpu_time": 7.9690199335548141e+02,
+      "time_unit": "us",
+      "R": 2.7600000000000000e+02,
+      "points": 1.6080100000000000e+05
+    },
+    {
+      "name": "BM_heat_cut_rhs/3/65",
+      "family_index": 0,
+      "per_family_instance_index": 4,
+      "run_name": "BM_heat_cut_rhs/3/65",
+      "run_type": "iteration",
+      "repetitions": 1,
+      "repetition_index": 0,
+      "threads": 1,
+      "iterations": 267,
+      "real_time": 1.6469216595093410e+03,
+      "cpu_time": 1.6189962546816471e+03,
+      "time_unit": "us",
+      "R": 5.8600000000000000e+02,
+      "points": 2.7462500000000000e+05
+    }
+  ]
+}

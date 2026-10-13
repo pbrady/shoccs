@@ -1,0 +1,533 @@
+{
+ "export_dir": "/Users/ptb/projects/shoccs/.claude/worktrees/python-dsl-survey/.scratch/export/heat51",
+ "case": "heat51",
+ "extents": [
+  51,
+  51,
+  1
+ ],
+ "n_V": 2633,
+ "n_D": 2601,
+ "structure_counts": {
+  "n_D": 2601,
+  "n_V": 2633,
+  "interior_rows_per_dir": [
+   2231,
+   2231,
+   0
+  ],
+  "fluid": 2545,
+  "dirichlet_faces": 200,
+  "exc_rows": 250,
+  "exc_rows_D": 218,
+  "exc_rows_R": 32,
+  "exc_nnz": 1238,
+  "exc_max_row_nnz": 12,
+  "tap_width": 3
+ },
+ "machine": {
+  "platform": "macOS-26.2-arm64-arm-64bit-Mach-O",
+  "machine": "arm64",
+  "mac_ver": "26.2",
+  "python": "3.14.3",
+  "numpy": "2.5.4",
+  "scipy": "1.18.1",
+  "threads": 4,
+  "thread_env": {
+   "OMP_NUM_THREADS": "4",
+   "OPENBLAS_NUM_THREADS": "4",
+   "KMP_BLOCKTIME": "infinite",
+   "OMP_WAIT_POLICY": "active"
+  },
+  "torch": "2.14.1",
+  "mlx": "0.32.3",
+  "sysctl": {
+   "hw.ncpu": "unavailable",
+   "hw.perflevel0.physicalcpu": "unavailable",
+   "machdep.cpu.brand_string": "unavailable",
+   "hw.memsize": "unavailable"
+  },
+  "loadavg_at_start": [
+   1.46435546875,
+   1.4541015625,
+   1.73486328125
+  ]
+ },
+ "settings": {
+  "reps": 100,
+  "warm": 10,
+  "threads": 4,
+  "steps_check": 10,
+  "run": 1,
+  "runs": 1
+ },
+ "cpp_bar": {
+  "case": "heat51",
+  "rhs_submit_us": {
+   "1t": 21.0,
+   "4t": 309.0,
+   "4t_spin": 54.1
+  },
+  "fill_source_us": {
+   "1t": 59.8,
+   "4t": 45.6,
+   "4t_spin": 47.4
+  },
+  "update_boundary_us": {
+   "1t": 24.4,
+   "4t": 89.7,
+   "4t_spin": 32.7
+  },
+  "stats_us": {
+   "1t": 26.9,
+   "4t": 86.0,
+   "4t_spin": 33.0
+  },
+  "step_ms": {
+   "1t": 0.856,
+   "4t": 2.26,
+   "4t_spin": 0.266
+  },
+  "provenance": "docs/python-dsl-survey/05-measurements.md Part IV E, native macOS build measured 2026-10-13: Apple M4 (4 performance cores), Apple clang 21.0.0, Kokkos 5.1.1 OpenMP via llvm-openmp 20.1.8, Release. Stage figures are bench_rhs_cutcell medians (--benchmark_min_time=0.3s) in microseconds; step_ms is the end-to-end median Wall_ms of the shipped RK4 step. 1t = one thread (--kokkos-num-threads=1 / OMP_NUM_THREADS=1); 4t = four threads with libomp defaults; 4t_spin = four threads with KMP_BLOCKTIME=infinite OMP_WAIT_POLICY=active. Single runs."
+ },
+ "results": {
+  "scipy": {
+   "backend": "scipy",
+   "status": "ok",
+   "timings": {
+    "operator": {
+     "ms_median": 0.004959292709827423,
+     "ms_min": 0.004915986210107803,
+     "ms_p90": 0.005042180418968201,
+     "reps": 100
+    },
+    "rhs": {
+     "ms_median": 0.01595797948539257,
+     "ms_min": 0.012584030628204346,
+     "ms_p90": 0.016208738088607788,
+     "reps": 100
+    },
+    "source": {
+     "ms_median": 0.003541819751262665,
+     "ms_min": 0.0027497299015522003,
+     "ms_p90": 0.0036247074604034424,
+     "reps": 100
+    },
+    "boundary": {
+     "ms_median": 0.0008749775588512421,
+     "ms_min": 0.0008326023817062378,
+     "ms_p90": 0.0009173527359962463,
+     "reps": 100
+    },
+    "stats": {
+     "ms_median": 0.01879129558801651,
+     "ms_min": 0.01750001683831215,
+     "ms_p90": 0.019750092178583145,
+     "reps": 100
+    },
+    "axpy": {
+     "ms_median": 0.007458962500095367,
+     "ms_min": 0.0072908587753772736,
+     "ms_p90": 0.008083879947662354,
+     "reps": 100
+    },
+    "step_nostats": {
+     "ms_median": 0.13360450975596905,
+     "ms_min": 0.13262499123811722,
+     "ms_p90": 0.13516657054424286,
+     "reps": 100
+    },
+    "step": {
+     "ms_median": 0.14850031584501266,
+     "ms_min": 0.1471671275794506,
+     "ms_p90": 0.14912476763129234,
+     "reps": 100
+    },
+    "source_direct": {
+     "ms_median": 0.08241739124059677,
+     "ms_min": 0.07562479004263878,
+     "ms_p90": 0.08324999362230301,
+     "reps": 25
+    },
+    "boundary_direct": {
+     "ms_median": 0.012665987014770508,
+     "ms_min": 0.011541415005922318,
+     "ms_p90": 0.01291697844862938,
+     "reps": 25
+    },
+    "stats_direct": {
+     "ms_median": 0.06091734394431114,
+     "ms_min": 0.05716690793633461,
+     "ms_p90": 0.06283307448029518,
+     "reps": 25
+    },
+    "step_direct": {
+     "ms_median": 0.48733269795775414,
+     "ms_min": 0.4813750274479389,
+     "ms_p90": 0.4882076755166054,
+     "reps": 25
+    }
+   },
+   "split_ms": {
+    "operator_x4": 0.019837170839309692,
+    "source_x4": 0.01416727900505066,
+    "rhs_glue_x4": 0.02982746809720993,
+    "boundary_x4": 0.0034999102354049683,
+    "stats_x1": 0.01879129558801651,
+    "axpy_x1": 0.007458962500095367,
+    "sum_of_parts": 0.09358208626508713,
+    "step": 0.14850031584501266,
+    "remainder": 0.05491822957992554
+   },
+   "rel_err_u1_vs_cpp": 1.11059432251531e-16,
+   "rel_err_u1_vs_numpy": 0.0,
+   "n_steps": 10,
+   "rel_err_un_vs_numpy": 0.0,
+   "abs_err_un_vs_numpy": 0.0,
+   "stats_max_rel_err_vs_cpp": 0.0,
+   "stats_index_match": true,
+   "note": "hoisted MMS: source and boundary values from precomputed spatial factors (the *_direct timings evaluate the gaussian per point every call); step = rk4_step plus stats, step_nostats = rk4_step alone; axpy = the stage arithmetic alone on the same buffers",
+   "ratios_to_cpp": {
+    "1t": {
+     "rhs_over_cpp_rhs_submit": 0.7599037850186938,
+     "operator_over_cpp_rhs_submit": 0.23615679570606776,
+     "step_over_4_cpp_rhs_submits": 1.7678609029168175,
+     "step_over_cpp_step": 0.1734816773890335,
+     "source_over_cpp_fill_source": 0.059227755037837206,
+     "update_boundary_over_cpp": 0.03585973601849353,
+     "stats_over_cpp": 0.6985611742757067
+    },
+    "4t_spin": {
+     "rhs_over_cpp_rhs_submit": 0.2949718943695484,
+     "operator_over_cpp_rhs_submit": 0.09166899648479525,
+     "step_over_4_cpp_rhs_submits": 0.6862306647181731,
+     "step_over_cpp_step": 0.558271864078995,
+     "source_over_cpp_fill_source": 0.07472193568064694,
+     "update_boundary_over_cpp": 0.026757723512270397,
+     "stats_over_cpp": 0.5694331996368639
+    },
+    "4t": {
+     "rhs_over_cpp_rhs_submit": 0.051643946554668516,
+     "operator_over_cpp_rhs_submit": 0.016049490970315286,
+     "step_over_4_cpp_rhs_submits": 0.1201458866059973,
+     "step_over_cpp_step": 0.0657081043562003,
+     "source_over_cpp_fill_source": 0.07767148577330404,
+     "update_boundary_over_cpp": 0.009754487835576834,
+     "stats_over_cpp": 0.21850343706995942
+    }
+   }
+  },
+  "structured": {
+   "backend": "structured",
+   "status": "ok",
+   "timings": {
+    "operator": {
+     "ms_median": 0.016459031030535698,
+     "ms_min": 0.014792196452617645,
+     "ms_p90": 0.016666948795318604,
+     "reps": 100
+    },
+    "rhs": {
+     "ms_median": 0.029291491955518723,
+     "ms_min": 0.0233333557844162,
+     "ms_p90": 0.03137486055493355,
+     "reps": 100
+    },
+    "source": {
+     "ms_median": 0.003541819751262665,
+     "ms_min": 0.0027921050786972046,
+     "ms_p90": 0.003584194928407669,
+     "reps": 100
+    },
+    "boundary": {
+     "ms_median": 0.0008749775588512421,
+     "ms_min": 0.0007920898497104645,
+     "ms_p90": 0.0009173527359962463,
+     "reps": 100
+    },
+    "stats": {
+     "ms_median": 0.018833670765161514,
+     "ms_min": 0.017167069017887115,
+     "ms_p90": 0.019750092178583145,
+     "reps": 100
+    },
+    "axpy": {
+     "ms_median": 0.00820821151137352,
+     "ms_min": 0.007375143468379974,
+     "ms_p90": 0.008292030543088913,
+     "reps": 100
+    },
+    "step_nostats": {
+     "ms_median": 0.13168738223612309,
+     "ms_min": 0.12625008821487427,
+     "ms_p90": 0.13362523168325424,
+     "reps": 100
+    },
+    "step": {
+     "ms_median": 0.1480625942349434,
+     "ms_min": 0.14395778998732567,
+     "ms_p90": 0.15395833179354668,
+     "reps": 100
+    },
+    "source_direct": {
+     "ms_median": 0.08220924064517021,
+     "ms_min": 0.07787486538290977,
+     "ms_p90": 0.08262507617473602,
+     "reps": 25
+    },
+    "boundary_direct": {
+     "ms_median": 0.011458992958068848,
+     "ms_min": 0.011249911040067673,
+     "ms_p90": 0.01270882785320282,
+     "reps": 25
+    },
+    "stats_direct": {
+     "ms_median": 0.06233295425772667,
+     "ms_min": 0.05629193037748337,
+     "ms_p90": 0.0626659020781517,
+     "reps": 25
+    },
+    "step_direct": {
+     "ms_median": 0.5353325977921486,
+     "ms_min": 0.5326666869223118,
+     "ms_p90": 0.5411668680608273,
+     "reps": 25
+    }
+   },
+   "split_ms": {
+    "operator_x4": 0.06583612412214279,
+    "source_x4": 0.01416727900505066,
+    "rhs_glue_x4": 0.03716256469488144,
+    "boundary_x4": 0.0034999102354049683,
+    "stats_x1": 0.018833670765161514,
+    "axpy_x1": 0.00820821151137352,
+    "sum_of_parts": 0.1477077603340149,
+    "step": 0.1480625942349434,
+    "remainder": 0.0003548339009284973
+   },
+   "rel_err_u1_vs_cpp": 1.11059432251531e-16,
+   "rel_err_u1_vs_numpy": 1.11059432251531e-16,
+   "n_steps": 10,
+   "rel_err_un_vs_numpy": 1.1107305317815628e-15,
+   "abs_err_un_vs_numpy": 2.220446049250313e-15,
+   "stats_max_rel_err_vs_cpp": 0.0,
+   "stats_index_match": true,
+   "note": "hoisted MMS: source and boundary values from precomputed spatial factors (the *_direct timings evaluate the gaussian per point every call); step = rk4_step plus stats, step_nostats = rk4_step alone; axpy = the stage arithmetic alone on the same buffers",
+   "ratios_to_cpp": {
+    "1t": {
+     "rhs_over_cpp_rhs_submit": 1.3948329502627963,
+     "operator_over_cpp_rhs_submit": 0.7837633824064618,
+     "step_over_4_cpp_rhs_submits": 1.7626499313683737,
+     "step_over_cpp_step": 0.17297032036792453,
+     "source_over_cpp_fill_source": 0.059227755037837206,
+     "update_boundary_over_cpp": 0.03585973601849353,
+     "stats_over_cpp": 0.7001364596714318
+    },
+    "4t_spin": {
+     "rhs_over_cpp_rhs_submit": 0.541432383650993,
+     "operator_over_cpp_rhs_submit": 0.30423347561064135,
+     "step_over_4_cpp_rhs_submits": 0.6842079216032504,
+     "step_over_cpp_step": 0.5566262941163285,
+     "source_over_cpp_fill_source": 0.07472193568064694,
+     "update_boundary_over_cpp": 0.026757723512270397,
+     "stats_over_cpp": 0.5707172959139852
+    },
+    "4t": {
+     "rhs_over_cpp_rhs_submit": 0.09479447234795703,
+     "operator_over_cpp_rhs_submit": 0.05326547259073042,
+     "step_over_4_cpp_rhs_submits": 0.11979174290853026,
+     "step_over_cpp_step": 0.06551442222785106,
+     "source_over_cpp_fill_source": 0.07767148577330404,
+     "update_boundary_over_cpp": 0.009754487835576834,
+     "stats_over_cpp": 0.2189961716879246
+    }
+   }
+  },
+  "torch-eager": {
+   "backend": "torch-eager",
+   "status": "ok",
+   "timings": {
+    "operator": {
+     "ms_median": 0.032646115869283676,
+     "ms_min": 0.02945913001894951,
+     "ms_p90": 0.03445800393819809,
+     "reps": 100
+    },
+    "rhs": {
+     "ms_median": 0.05720858462154865,
+     "ms_min": 0.044582877308130264,
+     "ms_p90": 0.058582983911037445,
+     "reps": 100
+    },
+    "source": {
+     "ms_median": 0.0063749030232429504,
+     "ms_min": 0.0056657008826732635,
+     "ms_p90": 0.006416812539100647,
+     "reps": 100
+    },
+    "boundary": {
+     "ms_median": 0.003375113010406494,
+     "ms_min": 0.003125052899122238,
+     "ms_p90": 0.003500375896692276,
+     "reps": 100
+    },
+    "stats": {
+     "ms_median": 0.019124476239085197,
+     "ms_min": 0.016458798199892044,
+     "ms_p90": 0.020625069737434387,
+     "reps": 100
+    },
+    "step": {
+     "ms_median": 0.26939529925584793,
+     "ms_min": 0.25579193606972694,
+     "ms_p90": 0.28229085728526115,
+     "reps": 100
+    }
+   },
+   "first_step_s": 0.0006111250258982182,
+   "split_ms": {
+    "operator_x4": 0.1305844634771347,
+    "source_x4": 0.025499612092971802,
+    "rhs_glue_x4": 0.0727502629160881,
+    "boundary_x4": 0.013500452041625977,
+    "stats_x1": 0.019124476239085197,
+    "sum_of_parts": 0.2614592667669058,
+    "step": 0.26939529925584793,
+    "remainder": 0.007936032488942146
+   },
+   "rel_err_u1_vs_cpp": 1.11059432251531e-16,
+   "rel_err_u1_vs_numpy": 1.11059432251531e-16,
+   "n_steps": 10,
+   "rel_err_un_vs_numpy": 1.4439496913160318e-15,
+   "abs_err_un_vs_numpy": 2.886579864025407e-15,
+   "stats_max_rel_err_vs_cpp": 8.866822260207165e-12,
+   "stats_index_match": true,
+   "device": "cpu",
+   "dtype": "float64",
+   "note": "structured form; exception rows as a zero-padded ELL gather-dot (width 12, fill 0.41); functional RK4 step; eager; cpu float64; intra-op threads 4",
+   "ratios_to_cpp": {
+    "1t": {
+     "rhs_over_cpp_rhs_submit": 2.7242183153118407,
+     "operator_over_cpp_rhs_submit": 1.5545769461563654,
+     "step_over_4_cpp_rhs_submits": 3.2070868959029517,
+     "step_over_cpp_step": 0.3147141346446822,
+     "source_over_cpp_fill_source": 0.10660372948566807,
+     "update_boundary_over_cpp": 0.1383243037051842,
+     "stats_over_cpp": 0.7109470720849517
+    },
+    "4t_spin": {
+     "rhs_over_cpp_rhs_submit": 1.0574599745203077,
+     "operator_over_cpp_rhs_submit": 0.603440219395262,
+     "step_over_4_cpp_rhs_submits": 1.2448950982248055,
+     "step_over_cpp_step": 1.0127642829167214,
+     "source_over_cpp_fill_source": 0.13449162496293146,
+     "update_boundary_over_cpp": 0.10321446515004569,
+     "stats_over_cpp": 0.5795295830025817
+    },
+    "4t": {
+     "rhs_over_cpp_rhs_submit": 0.18514105055517363,
+     "operator_over_cpp_rhs_submit": 0.10565086041839378,
+     "step_over_4_cpp_rhs_submits": 0.21795736185748216,
+     "step_over_cpp_step": 0.11920145984772033,
+     "source_over_cpp_fill_source": 0.13980050489567875,
+     "update_boundary_over_cpp": 0.03762667793095311,
+     "stats_over_cpp": 0.22237763068703717
+    }
+   }
+  },
+  "torch-compile": {
+   "backend": "torch-compile",
+   "status": "ok",
+   "timings": {
+    "operator": {
+     "ms_median": 0.01535448245704174,
+     "ms_min": 0.01491699367761612,
+     "ms_p90": 0.01579197123646736,
+     "reps": 100
+    },
+    "rhs": {
+     "ms_median": 0.0200001522898674,
+     "ms_min": 0.019457656890153885,
+     "ms_p90": 0.020666979253292084,
+     "reps": 100
+    },
+    "source": {
+     "ms_median": 0.005958369001746178,
+     "ms_min": 0.0059157609939575195,
+     "ms_p90": 0.006041023880243301,
+     "reps": 100
+    },
+    "boundary": {
+     "ms_median": 0.0034170225262641907,
+     "ms_min": 0.0032498501241207123,
+     "ms_p90": 0.003541819751262665,
+     "reps": 100
+    },
+    "stats": {
+     "ms_median": 0.017999904230237007,
+     "ms_min": 0.017084181308746338,
+     "ms_p90": 0.01941714435815811,
+     "reps": 100
+    },
+    "step": {
+     "ms_median": 0.060666585341095924,
+     "ms_min": 0.059999991208314896,
+     "ms_p90": 0.06291735917329788,
+     "reps": 100
+    }
+   },
+   "first_step_s": 0.5544271660037339,
+   "split_ms": {
+    "operator_x4": 0.06141792982816696,
+    "source_x4": 0.02383347600698471,
+    "rhs_glue_x4": -0.005250796675682068,
+    "boundary_x4": 0.013668090105056763,
+    "stats_x1": 0.017999904230237007,
+    "sum_of_parts": 0.11166860349476337,
+    "step": 0.060666585341095924,
+    "remainder": -0.05100201815366745
+   },
+   "rel_err_u1_vs_cpp": 1.11059432251531e-16,
+   "rel_err_u1_vs_numpy": 1.11059432251531e-16,
+   "n_steps": 10,
+   "rel_err_un_vs_numpy": 1.4439496913160318e-15,
+   "abs_err_un_vs_numpy": 2.886579864025407e-15,
+   "stats_max_rel_err_vs_cpp": 8.866822260207165e-12,
+   "stats_index_match": true,
+   "device": "cpu",
+   "dtype": "float64",
+   "note": "structured form; exception rows as a zero-padded ELL gather-dot (width 12, fill 0.41); functional RK4 step; torch.compile over the whole step, RHS and operator; cpu float64; intra-op threads 4",
+   "ratios_to_cpp": {
+    "1t": {
+     "rhs_over_cpp_rhs_submit": 0.9523882042794001,
+     "operator_over_cpp_rhs_submit": 0.731165831287702,
+     "step_over_4_cpp_rhs_submits": 0.7222212540606657,
+     "step_over_cpp_step": 0.0708721791367943,
+     "source_over_cpp_fill_source": 0.09963827762117354,
+     "update_boundary_over_cpp": 0.1400419068141062,
+     "stats_over_cpp": 0.6691414211984018
+    },
+    "4t_spin": {
+     "rhs_over_cpp_rhs_submit": 0.3696885820677893,
+     "operator_over_cpp_rhs_submit": 0.2838166812761874,
+     "step_over_4_cpp_rhs_submits": 0.2803446642379664,
+     "step_over_cpp_step": 0.22806986970336812,
+     "source_over_cpp_fill_source": 0.12570398737861135,
+     "update_boundary_over_cpp": 0.10449610172061745,
+     "stats_over_cpp": 0.5454516433405153
+    },
+    "4t": {
+     "rhs_over_cpp_rhs_submit": 0.06472541194131845,
+     "operator_over_cpp_rhs_submit": 0.04969088173799916,
+     "step_over_4_cpp_rhs_submits": 0.04908299784878311,
+     "step_over_cpp_step": 0.02684362183234333,
+     "source_over_cpp_fill_source": 0.13066598688039863,
+     "update_boundary_over_cpp": 0.038093896613870575,
+     "stats_over_cpp": 0.20930121197950008
+    }
+   }
+  }
+ },
+ "started": "2026-10-13 16:11:39",
+ "wall_s": 1.7131547080352902
+}
