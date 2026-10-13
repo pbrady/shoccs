@@ -1,0 +1,82 @@
+[
+ {
+  "case": "heat201_t1",
+  "steps": 80,
+  "median_ms": 12.178,
+  "mean_ms": 12.1936,
+  "min_ms": 11.942,
+  "p90_ms": 12.329
+ },
+ {
+  "case": "heat201_t8",
+  "steps": 80,
+  "median_ms": 4.6255,
+  "mean_ms": 4.8563,
+  "min_ms": 4.522,
+  "p90_ms": 4.783
+ },
+ {
+  "case": "heat3d65_t1",
+  "steps": 11,
+  "median_ms": 148.902,
+  "mean_ms": 148.947,
+  "min_ms": 148.765,
+  "p90_ms": 149.196
+ },
+ {
+  "case": "heat3d65_t8",
+  "steps": 11,
+  "median_ms": 37.904,
+  "mean_ms": 37.9861,
+  "min_ms": 37.713,
+  "p90_ms": 38.024
+ },
+ {
+  "case": "heat401_t1",
+  "steps": 64,
+  "median_ms": 47.9875,
+  "mean_ms": 48.0044,
+  "min_ms": 47.797,
+  "p90_ms": 48.12
+ },
+ {
+  "case": "heat401_t8",
+  "steps": 64,
+  "median_ms": 13.689,
+  "mean_ms": 13.7295,
+  "min_ms": 13.386,
+  "p90_ms": 13.861
+ },
+ {
+  "case": "heat51_t1",
+  "steps": 50,
+  "median_ms": 0.9005,
+  "mean_ms": 0.9186,
+  "min_ms": 0.862,
+  "p90_ms": 0.941
+ },
+ {
+  "case": "heat51_t8",
+  "steps": 50,
+  "median_ms": 0.935,
+  "mean_ms": 0.9389,
+  "min_ms": 0.836,
+  "p90_ms": 0.973
+ },
+ {
+  "case": "wave71_t1",
+  "steps": 60,
+  "median_ms": 0.434,
+  "mean_ms": 0.4351,
+  "min_ms": 0.406,
+  "p90_ms": 0.45
+ },
+ {
+  "case": "wave71_t8",
+  "steps": 60,
+  "median_ms": 0.675,
+  "mean_ms": 0.6758,
+  "min_ms": 0.599,
+  "p90_ms": 0.7
+ }
+]

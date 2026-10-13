@@ -1,0 +1,27 @@
+=== bench_expr (1 thread) ===
+BM_assign_fma/1024              0.551 us        0.549 us       661052 BW(GB/s)=55.5499Gi/s points=1.024k
+BM_assign_fma/16384              6.73 us         6.72 us        61577 BW(GB/s)=72.6225Gi/s points=16.384k
+BM_assign_fma/131072             67.9 us         67.9 us         5655 BW(GB/s)=57.5224Gi/s points=131.072k
+BM_assign_fma/1048576             463 us          463 us          851 BW(GB/s)=67.5071Gi/s points=1.04858M
+BM_plus_assign_mul/1024         0.545 us        0.545 us       776975 BW(GB/s)=56.021Gi/s points=1.024k
+BM_plus_assign_mul/16384         5.93 us         5.93 us        71872 BW(GB/s)=82.3514Gi/s points=16.384k
+BM_plus_assign_mul/131072        88.1 us         88.1 us         4736 BW(GB/s)=44.3333Gi/s points=131.072k
+BM_plus_assign_mul/1048576        399 us          399 us         1079 BW(GB/s)=78.3184Gi/s points=1.04858M
+=== bench_selection (1 thread) ===
+BM_assign_selected_contiguous/1024         0.506 us        0.506 us       830018 BW(GB/s)=30.1692Gi/s points=1.024k
+BM_assign_selected_contiguous/16384         4.38 us         4.38 us        96210 BW(GB/s)=55.7266Gi/s points=16.384k
+BM_assign_selected_contiguous/131072        33.0 us         33.0 us        12852 BW(GB/s)=59.1574Gi/s points=131.072k
+BM_assign_selected_contiguous/1048576        265 us          265 us         1583 BW(GB/s)=58.9319Gi/s points=1.04858M
+BM_assign_selected_strided/1024            0.777 us        0.777 us       554798 BW(GB/s)=19.641Gi/s points=1.024k
+BM_assign_selected_strided/16384            9.01 us         9.01 us        46434 BW(GB/s)=27.1111Gi/s points=16.384k
+BM_assign_selected_strided/131072           69.1 us         69.1 us         5370 BW(GB/s)=28.2508Gi/s points=131.044k
+BM_assign_selected_strided/1048576           536 us          536 us          779 BW(GB/s)=29.1598Gi/s points=1.04858M
+BM_assign_selected_gather/1024              29.1 us         29.1 us        14506 BW(GB/s)=536.061Mi/s points=1.024k
+BM_assign_selected_gather/16384              130 us          130 us         3254 BW(GB/s)=1.8794Gi/s points=16.384k
+BM_assign_selected_gather/131072            2905 us         2905 us          145 BW(GB/s)=688.516Mi/s points=131.072k
+BM_assign_selected_gather/1048576            440 us          440 us          953 BW(GB/s)=35.4845Gi/s points=1.04858M
+=== bench_rhs (1 thread) ===
+BM_heat_rhs/16      0.040 ms        0.040 ms        10112 BW(GB/s)=10.7767Gi/s points=4.096k
+BM_heat_rhs/32      0.418 ms        0.418 ms         1042 BW(GB/s)=8.17898Gi/s points=32.768k
+BM_heat_rhs/64       4.51 ms         4.51 ms          102 BW(GB/s)=6.05913Gi/s points=262.144k
+done

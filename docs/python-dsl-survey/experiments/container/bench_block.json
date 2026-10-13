@@ -1,0 +1,70 @@
+{
+  "context": {
+    "date": "2026-10-12T16:59:58-06:00",
+    "host_name": "6d14c1716112",
+    "executable": ".scratch/build-linux/benchmarks/bench_block",
+    "num_cpus": 8,
+    "mhz_per_cpu": 48,
+    "cpu_scaling_enabled": false,
+    "aslr_enabled": true,
+    "caches": [
+    ],
+    "load_avg": [1.79346,0.888184,0.355469],
+    "library_version": "v1.9.5",
+    "library_build_type": "release",
+    "json_schema_version": 1
+  },
+  "benchmarks": [
+    {
+      "name": "BM_block_matvec/16",
+      "family_index": 0,
+      "per_family_instance_index": 0,
+      "run_name": "BM_block_matvec/16",
+      "run_type": "iteration",
+      "repetitions": 1,
+      "repetition_index": 0,
+      "threads": 1,
+      "iterations": 100611,
+      "real_time": 4.3143588573813351e-03,
+      "cpu_time": 4.3081161602608071e-03,
+      "time_unit": "ms",
+      "BW(GB/s)": 4.5636652468557777e+10,
+      "lines": 2.5600000000000000e+02,
+      "points": 4.0960000000000000e+03
+    },
+    {
+      "name": "BM_block_matvec/32",
+      "family_index": 0,
+      "per_family_instance_index": 1,
+      "run_name": "BM_block_matvec/32",
+      "run_type": "iteration",
+      "repetitions": 1,
+      "repetition_index": 0,
+      "threads": 1,
+      "iterations": 4017,
+      "real_time": 1.0899896265870149e-01,
+      "cpu_time": 1.0804788000995770e-01,
+      "time_unit": "ms",
+      "BW(GB/s)": 1.4557101905701851e+10,
+      "lines": 1.0240000000000000e+03,
+      "points": 3.2768000000000000e+04
+    },
+    {
+      "name": "BM_block_matvec/64",
+      "family_index": 0,
+      "per_family_instance_index": 2,
+      "run_name": "BM_block_matvec/64",
+      "run_type": "iteration",
+      "repetitions": 1,
+      "repetition_index": 0,
+      "threads": 1,
+      "iterations": 244,
+      "real_time": 2.3229641393443479e+00,
+      "cpu_time": 1.8797042131147539e+00,
+      "time_unit": "ms",
+      "BW(GB/s)": 6.6940915023803415e+09,
+      "lines": 4.0960000000000000e+03,
+      "points": 2.6214400000000000e+05
+    }
+  ]
+}
