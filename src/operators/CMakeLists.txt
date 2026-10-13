@@ -7,6 +7,7 @@ add_library(shoccs-operators
     gradient.cpp
     laplacian.cpp
     derivative.cpp
+    tables.cpp
     eigenvalue_visitor.cpp)
 
 target_link_libraries(shoccs-operators
@@ -34,6 +35,11 @@ if (BUILD_TESTING)
   target_link_libraries(t-laplacian Catch2::Catch2 shoccs-operators shoccs-stencils shoccs-bcs Kokkos::kokkos)
   add_test(NAME t-laplacian COMMAND t-laplacian)
   set_tests_properties(t-laplacian PROPERTIES LABELS "operators")
+
+  add_executable(t-tables tables.t.cpp)
+  target_link_libraries(t-tables Catch2::Catch2 shoccs-operators shoccs-stencils shoccs-bcs Kokkos::kokkos)
+  add_test(NAME t-tables COMMAND t-tables)
+  set_tests_properties(t-tables PROPERTIES LABELS "operators")
 
   add_executable(t-eigenvalue_visitor eigenvalue_visitor.t.cpp)
   target_link_libraries(t-eigenvalue_visitor Catch2::Catch2 shoccs-operators shoccs-stencils shoccs-bcs Kokkos::kokkos)

@@ -41,6 +41,12 @@ public:
     // Submit the pre-built graph.
     void submit_graph();
 
+    // The assembled second derivative in direction dir (empty when the extent is 1).
+    const derivative& component(int dir) const
+    {
+        return dir == 0 ? dx : dir == 1 ? dy : dz;
+    }
+
     // Add laplacian nodes to an existing graph, chaining from parent.
     // Zeros du, then chains dx → dy → dz (all accumulate with plus_eq).
     // Returns the final node so the caller can chain further.

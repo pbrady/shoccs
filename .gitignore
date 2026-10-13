@@ -7,7 +7,7 @@ papers/
 
 # Local scratch, run output and agent worktrees
 .scratch/
-io/
+/io/
 .claude/worktrees/
 
 # Native macOS build directory (CLAUDE.md, "Native macOS build")

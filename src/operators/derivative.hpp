@@ -55,6 +55,24 @@ public:
         Brx.visit(v);
     }
 
+    // Read-only access to the nine assembled matrices (see
+    // docs/reference/pyshoccs-export.md for the row and column spaces).
+    struct matrices_view {
+        const matrix::block& O;
+        const matrix::csr& B;
+        const matrix::csr& N;
+        const matrix::csr& Bfx;
+        const matrix::csr& Brx;
+        const matrix::csr& Bfy;
+        const matrix::csr& Bry;
+        const matrix::csr& Bfz;
+        const matrix::csr& Brz;
+    };
+
+    matrices_view matrices() const { return {O, B, N, Bfx, Brx, Bfy, Bry, Bfz, Brz}; }
+
+    int direction() const { return dir; }
+
     // operator for when neumann conditions are not needed
     template <typename Op = eq_t>
         requires std::invocable<Op, real&, real>
