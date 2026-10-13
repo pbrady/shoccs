@@ -58,14 +58,6 @@ cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=RelWithDebInfo -DBUILD_TESTING=O
 
 Benchmark executables are in `build/benchmarks/` (bench_stencil, bench_block, bench_derivative, bench_expr, bench_selection, bench_rhs, bench_rhs_cutcell). `bench_rhs_cutcell` runs the shipped cut-cell geometries (heat.lua sphere, scalar_wave.lua spheres) and times the per-stage host work (fill_source, update_boundary, stats) so an RK4 step can be decomposed.
 
-## Docker and host GPU runs (outside the Bash sandbox)
-
-Two things cannot run inside the Bash sandbox and need `dangerouslyDisableSandbox: true` on that one Bash call, which goes through the permission gate:
-
-- The C++ dependency stack exists only in the devcontainer image and the sandbox denies the Docker socket. Build or benchmark the solver with `docker run --rm -v "$PWD":/workspace -w /workspace shoccs-devcontainer:latest <command>` from the repo root (the image's `CMAKE_PREFIX_PATH` already points at the Spack view); mount nothing else.
-- The macOS sandbox hides Metal (`torch.backends.mps.is_available()` is `False`, MLX cannot open a device). GPU, MPS or MLX Python runs go through `uv run` from `scripts/stencil_gen` (add `--with mlx` for MLX) with the sandbox disabled on that call only.
-- Keep the unsandboxed flag to the Docker or GPU command itself: never set it for edits, `ls`, `cd`, `sed` or anything the sandbox allows, and keep each such command simple (no `cd &&` chains, one command per Bash call) so the permission decision is about one thing.
-
 ## Continuous Integration
 
 GitHub Actions workflows in `.github/workflows/`:
