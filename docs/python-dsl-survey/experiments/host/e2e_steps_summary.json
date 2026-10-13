@@ -1,0 +1,122 @@
+[
+ {
+  "case": "heat201_t1",
+  "steps": 80,
+  "median_ms": 6.8165,
+  "mean_ms": 6.8231,
+  "min_ms": 6.503,
+  "p90_ms": 6.896
+ },
+ {
+  "case": "heat201_t4",
+  "steps": 80,
+  "median_ms": 4.0455,
+  "mean_ms": 4.0538,
+  "min_ms": 3.688,
+  "p90_ms": 4.118
+ },
+ {
+  "case": "heat201_t4spin",
+  "steps": 80,
+  "median_ms": 2.169,
+  "mean_ms": 2.1672,
+  "min_ms": 2.142,
+  "p90_ms": 2.18
+ },
+ {
+  "case": "heat3d65_t1",
+  "steps": 11,
+  "median_ms": 58.417,
+  "mean_ms": 58.5913,
+  "min_ms": 57.742,
+  "p90_ms": 59.212
+ },
+ {
+  "case": "heat3d65_t4",
+  "steps": 11,
+  "median_ms": 19.962,
+  "mean_ms": 20.0308,
+  "min_ms": 19.874,
+  "p90_ms": 20.296
+ },
+ {
+  "case": "heat3d65_t4spin",
+  "steps": 11,
+  "median_ms": 17.494,
+  "mean_ms": 17.5099,
+  "min_ms": 17.348,
+  "p90_ms": 17.7
+ },
+ {
+  "case": "heat401_t1",
+  "steps": 64,
+  "median_ms": 26.962,
+  "mean_ms": 26.9241,
+  "min_ms": 26.352,
+  "p90_ms": 27.096
+ },
+ {
+  "case": "heat401_t4",
+  "steps": 64,
+  "median_ms": 10.092,
+  "mean_ms": 10.1259,
+  "min_ms": 9.906,
+  "p90_ms": 10.222
+ },
+ {
+  "case": "heat401_t4spin",
+  "steps": 64,
+  "median_ms": 8.176,
+  "mean_ms": 8.1776,
+  "min_ms": 8.096,
+  "p90_ms": 8.238
+ },
+ {
+  "case": "heat51_t1",
+  "steps": 50,
+  "median_ms": 0.856,
+  "mean_ms": 0.9532,
+  "min_ms": 0.648,
+  "p90_ms": 1.348
+ },
+ {
+  "case": "heat51_t4",
+  "steps": 50,
+  "median_ms": 2.256,
+  "mean_ms": 2.18,
+  "min_ms": 1.698,
+  "p90_ms": 2.362
+ },
+ {
+  "case": "heat51_t4spin",
+  "steps": 50,
+  "median_ms": 0.266,
+  "mean_ms": 0.2742,
+  "min_ms": 0.265,
+  "p90_ms": 0.271
+ },
+ {
+  "case": "wave71_t1",
+  "steps": 60,
+  "median_ms": 0.278,
+  "mean_ms": 0.2803,
+  "min_ms": 0.266,
+  "p90_ms": 0.297
+ },
+ {
+  "case": "wave71_t4",
+  "steps": 60,
+  "median_ms": 1.836,
+  "mean_ms": 1.8272,
+  "min_ms": 1.555,
+  "p90_ms": 2.008
+ },
+ {
+  "case": "wave71_t4spin",
+  "steps": 60,
+  "median_ms": 0.198,
+  "mean_ms": 0.198,
+  "min_ms": 0.19,
+  "p90_ms": 0.201
+ }
+]

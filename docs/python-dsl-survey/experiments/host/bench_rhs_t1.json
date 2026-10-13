@@ -1,0 +1,66 @@
+{
+  "context": {
+    "date": "2026-10-13T10:53:37-05:00",
+    "host_name": "enoch.local",
+    "executable": "./build-host/benchmarks/bench_rhs",
+    "num_cpus": 10,
+    "mhz_per_cpu": 24,
+    "cpu_scaling_enabled": false,
+    "caches": [
+    ],
+    "load_avg": [4.82471,10.667,6.93311],
+    "library_version": "v1.9.5",
+    "library_build_type": "release",
+    "json_schema_version": 1
+  },
+  "benchmarks": [
+    {
+      "name": "BM_heat_rhs/16",
+      "family_index": 0,
+      "per_family_instance_index": 0,
+      "run_name": "BM_heat_rhs/16",
+      "run_type": "iteration",
+      "repetitions": 1,
+      "repetition_index": 0,
+      "threads": 1,
+      "iterations": 17803,
+      "real_time": 3.9040061151325814e-02,
+      "cpu_time": 3.9039319215862504e-02,
+      "time_unit": "ms",
+      "BW(GB/s)": 1.1751024587887775e+10,
+      "points": 4.0960000000000000e+03
+    },
+    {
+      "name": "BM_heat_rhs/32",
+      "family_index": 0,
+      "per_family_instance_index": 1,
+      "run_name": "BM_heat_rhs/32",
+      "run_type": "iteration",
+      "repetitions": 1,
+      "repetition_index": 0,
+      "threads": 1,
+      "iterations": 1979,
+      "real_time": 3.5182267997814826e-01,
+      "cpu_time": 3.5181758463870644e-01,
+      "time_unit": "ms",
+      "BW(GB/s)": 1.0431587732514465e+10,
+      "points": 3.2768000000000000e+04
+    },
+    {
+      "name": "BM_heat_rhs/64",
+      "family_index": 0,
+      "per_family_instance_index": 2,
+      "run_name": "BM_heat_rhs/64",
+      "run_type": "iteration",
+      "repetitions": 1,
+      "repetition_index": 0,
+      "threads": 1,
+      "iterations": 202,
+      "real_time": 3.4886858481360545e+00,
+      "cpu_time": 3.4886138613861384e+00,
+      "time_unit": "ms",
+      "BW(GB/s)": 8.4159867404569330e+09,
+      "points": 2.6214400000000000e+05
+    }
+  ]
+}

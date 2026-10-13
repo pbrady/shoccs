@@ -120,3 +120,52 @@ Source: `docs/python-dsl-survey/experiments/host_primitives_results.md` (write-u
 - For phase 4 of the roadmap this gives a measured floor to amortise: batching N small cases per dispatch must beat N CPU runs given the 167 to 181 us sync floor, which alone is twice the best CPU step at 51x51.
 
 **Caveats.** Synthetic coefficients (E2 interior plus random closure and R-row coefficients; one merged ELL table; no cross-axis interpolation rows; no B/N split). No host MMS evaluation, no update_boundary, no stats beyond one Linf, no I/O; the C++ step includes all of these, so step-to-step ratios favour Python and the fair bar is the four RHS submits. The C++ bar is a container measurement (8 vCPU Linux VM, Kokkos OpenMP), not a native one. A concurrent container job may have used CPU during run 1 (load average 1.36 at its start against 1.13 for run 2); most best cells come from run 2. The functional backends (torch.compile, MLX) allocate new buffers per step; eager numpy and torch use preallocated buffers for the stage updates.
+
+## E. Native macOS build (2026-10-13)
+
+Source: `experiments/host/` (`bench_rhs_cutcell_t1.json`, `_t4.json`, `_t4_spin.json`; `bench_rhs_t1.json`, `_t4.json`, `_t10.json`, `_t4_spin.json`; `bench_expr_t1.json`; `e2e_steps_summary.json` produced by `run_e2e.py` and `summarize_e2e.py`). The build is the one documented in CLAUDE.md ("Native macOS build") and added on branch `host-build` (lanl PR #36): spack environment `tools/spack/macos`, Apple clang 21.0.0, Kokkos 5.1.1 +openmp +serial with llvm-openmp 20.1.8, OpenBLAS 0.3.33 without Fortran, Release, `-march=armv8.4-a` propagated by Kokkos. Same Apple M4 as Section D (4 performance and 6 efficiency cores, 16 GiB), run inside the Bash sandbox (no GPU involved). 47 of 48 tests pass; `t-laplacian` fails as in the container. Thread settings: "1t" is OMP_NUM_THREADS=1 (end-to-end) or `--kokkos-num-threads=1` (micro-benchmarks); "4t" is four threads with libomp defaults; "4t spin" is four threads with `KMP_BLOCKTIME=infinite OMP_WAIT_POLICY=active`. macOS libomp has no thread affinity, so OMP_PROC_BIND is unset; four is the performance-core count, and ten threads was slower in every case tried. Single runs, not the two-run minimum of Section D.
+
+**End-to-end RK4 step (median Wall_ms, the cases and scripts of Section A).**
+
+| case | D points | steps | native 1t | native 4t | native 4t spin | container 1t | container 8t |
+|---|---|---|---|---|---|---|---|
+| heat51 | 2601 | 50 | 0.856 (min 0.648, p90 1.35) | 2.26 | 0.266 (min 0.265, p90 0.271) | 0.900 | 0.935 |
+| wave71 | 5041 | 60 | 0.278 | 1.84 | 0.198 | 0.434 | 0.675 |
+| heat201 | 40401 | 80 | 6.82 | 4.05 | 2.17 | 12.18 | 4.63 |
+| heat401 | 160801 | 64 | 26.96 | 10.09 | 8.18 | 47.99 | 13.69 |
+| heat3d65 | 274625 | 11 | 58.4 | 19.96 | 17.49 | 148.9 | 37.9 |
+
+**Cut-cell stages (the Section C benchmark, --benchmark_min_time=0.3s, microseconds).**
+
+| benchmark | case | native 1t | native 4t | native 4t spin | container 1t | container 8t |
+|---|---|---|---|---|---|---|
+| heat RHS graph submit | 2D 51x51 | 21.0 | 309 | 54.1 | 22.7 | 87.8 |
+| | 2D 71x71 | 33.3 | 318 | 67.6 | 34.5 | 92.0 |
+| | 2D 201x201 | 217 | 358 | 228 | 198 | 152 |
+| | 2D 401x401 | 827 | 575 | 797 | 772 | 422 |
+| | 3D 65^3 | 2065 | 961 | 1810 | 1867 | 798 |
+| heat fill_source | 2D 51x51 | 59.8 | 45.6 | 47.4 | 132 | 60.3 |
+| | 2D 201x201 | 922 | 296 | 682 | 2034 | 588 |
+| | 3D 65^3 | 7985 | 2429 | 5250 | 28011 | 6838 |
+| heat update_boundary | 2D 51x51 | 24.4 | 89.7 | 32.7 | 33.9 | 36.1 |
+| | 2D 201x201 | 351 | 184 | 312 | 462 | 246 |
+| | 3D 65^3 | 2813 | 906 | 2076 | 3917 | 1119 |
+| heat stats | 2D 51x51 | 26.9 | 86.0 | 33.0 | 31.9 | 32.8 |
+| | 2D 201x201 | 377 | 191 | 319 | 438 | 249 |
+| | 3D 65^3 | 2960 | 955 | 2045 | 3769 | 1078 |
+| wave RHS graph submit | 2D 71x71 | 25.2 | 307 | 54.6 | 30.7 | 86.1 |
+| | 2D 201x201 | 157 | 347 | 178 | 177 | 123 |
+| wave update_boundary | 2D 71x71 | 27.8 | 76.8 | 36.1 | 41.1 | 32.4 |
+| wave stats | 2D 71x71 | 31.5 | 89.7 | 42.0 | 46.0 | 37.9 |
+
+**Micro-benchmarks.** bench_rhs BM_heat_rhs (no shapes) at 16^3 / 32^3 / 64^3: 1t 0.041 / 0.354 / 3.48 ms (container 1t 0.040 / 0.418 / 4.51); 4t 0.318 / 0.427 / 1.36 ms; 4t spin 0.063 / 0.313 / 2.25 ms; 10t 1.06 / 1.14 / 1.88 ms (container 8t 0.084 / 0.169 / 1.16). bench_expr at 1t: BM_assign_fma 1024 / 16384 / 131072 / 1048576 = 0.276 / 4.49 / 34.8 / 289 us (container 1t 0.551 / 6.73 / 67.9 / 463 us), so the launch floor is 0.28 us per tiny kernel natively and the 1M streaming rate at one thread is 108 GiB/s (container 67 GiB/s); BM_plus_assign_mul 1M 249 us (container 399 us).
+
+**Readings.**
+
+- One thread: the RHS graph submit is within 10% of the container at every size (faster below 201x201, 5 to 10% slower above; Kokkos builds with `-march=armv8.4-a` here and with gcc's defaults there). The host work is much cheaper natively: fill_source 2.2x at 51x51 and 3.5x at 65^3, update_boundary and stats 1.2 to 1.4x. The one-thread step follows the host work: 0.86 ms at heat51 (noisy, min 0.65 and p90 1.35 ms; a lone busy thread is not pinned to a performance core), 0.28 ms at wave71, 6.8 ms at heat201, 27 ms at heat401 and 58 ms at heat3d65, against 0.90, 0.43, 12.2, 48.0 and 149 ms in the container.
+- Four threads with libomp defaults: every small case is slower than one thread, by more than in the container, because idle libomp threads sleep between parallel regions and every Kokkos node pays a wake-up (heat RHS 51x51: 309 us against 21 us). Large kernels do scale: the 65^3 RHS takes 961 us (2.1x over one thread) and fill_source 2429 us (3.3x).
+- Spin-waiting removes the wake-up cost: heat RHS 51x51 54 us, and the whole shipped heat51 step 0.266 ms with a tight distribution. It is the best end-to-end setting at every size tried (heat3d65 17.5 ms against 20.0 ms by default and 37.9 ms in the container). In the micro-benchmarks, though, spinning slows the large kernels (65^3 RHS 1810 against 961 us; shape-free 64^3 RHS 2.25 against 1.36 ms), so the two settings are not interchangeable: the bar for a replacement runtime is the better of the two per case.
+- Decomposition. At 1t, heat51: 4 x (21.0 + 59.8 + 24.4) + 26.9 = 448 us of stage work against a 0.65 to 0.86 ms step, a remainder of 0.2 to 0.4 ms where the container had 0.11 ms. At 4t spin the stage figures (4 x (54.1 + 47.4 + 32.7) + 33.0 = 570 us) exceed the 0.266 ms step, so under spinning the micro-benchmark overstates the stage costs and the step figure is the one to use. With fill_source 2 to 3.5x cheaper natively, its share of the one-thread heat51 step falls from 59% to roughly 30 to 40%, and the native 4t-spin shipped step, 0.27 ms, already sits in the range of the container-based "fixed-up C++" estimate of Section C (0.15 to 0.26 ms) before any of the four changes. That estimate, and the stop rule built on it, have to be restated from native figures before phase 2.
+- What this changes for the bar. The one-thread discretization bar stands (21 to 23 us at 51x51; 2.0 to 2.1 ms at 65^3). The multi-thread discretization bar on this machine is 54 us at 51x51 (4t spin) and 961 us at 65^3 (4t default). The shipped-step bar is now native: 0.27 ms at heat51 and 17.5 ms at heat3d65 (4t spin). The Python figures of Section D (0.085 ms synthetic CPU step at 51x51, 0.35 ms GPU) are now on the same machine as the C++ figures: the synthetic CPU step is 3x under the native shipped step and about 1.6x over four native RHS submits at 4t spin (4 x 54 = 216 us) or 4x over them at one thread (84 us). Regime C (257^3) remains unmeasured in C++.
+
+**Caveats.** Single runs. The container figures come from a Linux VM with 8 vCPU on the same hardware, so "container 8t" and "native 4t" are different core budgets. Apple clang contracts multiply-adds by default (`-ffp-contract=on`), gcc on the container does not; no result differences were checked beyond the test suite. The one-thread end-to-end medians carry scheduling noise (heat51 p90 1.35 ms against a 0.65 ms minimum); the micro-benchmarks, which average over many iterations, do not show it.
